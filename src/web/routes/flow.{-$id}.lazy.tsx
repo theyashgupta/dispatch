@@ -1,12 +1,6 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { FlowPage } from "@/features/flow";
-import { useAppState } from "@/components/AppState";
+import { FlowView } from "@/modules/flow";
 
 export const Route = createLazyFileRoute("/flow/{-$id}")({
-  component: FlowRoute,
+  component: FlowView,
 });
-
-function FlowRoute() {
-  const props = useAppState().flow;
-  return <FlowPage {...props} />;
-}

@@ -63,7 +63,10 @@ import { resolveIcalCredential } from "../services/orchestration/calendar.js";
 import { resolveGithubToken } from "../services/orchestration/github-token.js";
 import { resolveSentryToken } from "../services/infra/sentry-token.js";
 import { resolveSlackToken } from "../services/infra/slack-token.js";
-import { startMarkerWatcher } from "../adapters/markers/watcher.js";
+import {
+  setPaneSink,
+  startMarkerWatcher,
+} from "../adapters/markers/watcher.js";
 import { reconcileSessions } from "./reconcile.js";
 import { resolveEditors } from "../adapters/editors.js";
 import {
@@ -72,6 +75,13 @@ import {
 } from "../services/orchestration/update.js";
 import { startCleanupScheduler } from "../services/orchestration/cleanup-scheduler.js";
 import { startPendingMoveSweep } from "../services/orchestration/session-account-apply.js";
+import { startLoopProgressReader } from "../services/orchestration/loop-progress-reader.js";
+import {
+  supervisePane,
+  superviseLost,
+} from "../services/orchestration/supervisor-registry.js";
+import { startSupervisorPass } from "../services/orchestration/supervisor-pass.js";
+import { resumeShipFlows } from "../services/orchestration/ship-flow.js";
 import { startAccountChain } from "../services/orchestration/account-chain.js";
 import { healServicePlist } from "../services/orchestration/service.js";
 import type { ActivityEvent } from "../../shared/types.js";
@@ -234,6 +244,8 @@ function handleUpgrade(
 }
 
 const SHUTDOWN_WAIT_MS = 6_000;
+let stopLoopProgressReader: (() => void) | undefined;
+let stopSupervisorPass: (() => void) | undefined;
 
 /**
  * The FIRST `process.on("SIGINT"/"SIGTERM", ...)` handler in this codebase — every other
@@ -250,6 +262,8 @@ const SHUTDOWN_WAIT_MS = 6_000;
  */
 function shutdown(signal: NodeJS.Signals): void {
   console.log(`[shutdown] ${signal} received, tearing down remote access`);
+  stopLoopProgressReader?.();
+  stopSupervisorPass?.();
   disableTunnel();
   stopAskRuns();
   setTimeout(() => process.exit(0), SHUTDOWN_WAIT_MS).unref();
@@ -433,7 +447,19 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   setHooksRuntime({ capable, port, statusChannel });
   startEnabledPollers();
   startGranolaRound();
+  setPaneSink(supervisePane);
   startMarkerWatcher(statusChannel);
+  stopLoopProgressReader = startLoopProgressReader();
+  stopSupervisorPass = startSupervisorPass();
+  resumeShipFlows();
+  store.on("activity", (event: ActivityEvent) => {
+    if (event.type !== "session_lost" || event.cardId == null) return;
+    void superviseLost(event.cardId).catch((err: unknown) => {
+      console.warn(
+        `[supervisor] lost session duty failed: ${(err as Error).message}`,
+      );
+    });
+  });
   store.on("activity", (event: ActivityEvent) => {
     if (event.type !== "status_needs_input" || event.cardId == null) return;
     const card = store.getCard(event.cardId);

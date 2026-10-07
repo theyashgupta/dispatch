@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { MutationObserver, QueryClient } from "@tanstack/react-query";
-import { deleteArchived, listArchive, restoreArchived } from "./archive-api.js";
+import { restoreArchived } from "@/queries/archive-api";
+import { deleteArchived, listArchive } from "./archive-api.js";
 import {
   archiveKeys,
   archiveQueryOptions,

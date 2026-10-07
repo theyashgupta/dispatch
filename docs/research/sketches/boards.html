@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Boards sketch</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="sketch.css" />
+    <script>
+      (function () {
+        var root = document.documentElement;
+        var theme = new URLSearchParams(location.search).get("theme");
+        if (theme === "light") root.setAttribute("data-theme", "light");
+        else if (theme === "dark") root.removeAttribute("data-theme");
+        document.addEventListener("DOMContentLoaded", function () {
+          var button = document.getElementById("theme-toggle");
+          function sync() {
+            button.textContent =
+              root.getAttribute("data-theme") === "light"
+                ? "Dark theme"
+                : "Light theme";
+          }
+          sync();
+          button.addEventListener("click", function () {
+            if (root.getAttribute("data-theme") === "light")
+              root.removeAttribute("data-theme");
+            else root.setAttribute("data-theme", "light");
+            sync();
+          });
+        });
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="sketch-bar">
+      <p>Boards page, populated state</p>
+      <button type="button" id="theme-toggle" class="btn btn-outline">
+        Light theme
+      </button>
+    </div>
+
+    <section class="frame" aria-labelledby="f1">
+      <h2 class="frame-title" id="f1">Frame 1: Boards page</h2>
+      <div class="frame-box">
+        <div class="shell">
+          <aside class="sidebar" aria-label="Sidebar">
+            <div class="sidebar-head">
+              <div class="brand">
+                <span class="brand-glyph" aria-hidden="true">◆</span>
+                <span class="brand-word">DISPATCH</span>
+              </div>
+              <div class="switcher">
+                <button
+                  type="button"
+                  class="switch-trigger"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                  aria-label="Switch board, current board Dispatch"
+                >
+                  <span>Dispatch</span>
+                  <span aria-hidden="true">▾</span>
+                </button>
+              </div>
+            </div>
+            <nav class="nav" aria-label="Main">
+              <div class="nav-label">Home</div>
+              <a class="nav-row" href="#">Today</a>
+              <a class="nav-row" href="#">Inbox</a>
+              <a class="nav-row" href="#">Ask</a>
+              <div class="nav-label">Work</div>
+              <a class="nav-row" href="#">Board</a>
+              <a class="nav-row" href="#">Dashboard</a>
+              <a class="nav-row" href="#">Sessions</a>
+              <a class="nav-row" href="#">Workspace</a>
+              <a class="nav-row" href="#">Activity</a>
+            </nav>
+          </aside>
+
+          <div class="main">
+            <header class="page-header">
+              <div class="page-title">
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-icon menu-btn"
+                  aria-label="Open menu"
+                >
+                  ☰
+                </button>
+                <h1>Boards</h1>
+              </div>
+              <div class="page-actions">
+                <button type="button" class="btn btn-primary">New board</button>
+              </div>
+            </header>
+
+            <main class="content">
+              <div class="page-body">
+                <div class="panel for-wide">
+                  <table class="table">
+                    <thead>
+                      <tr>
+                        <th scope="col">Name</th>
+                        <th scope="col">Key</th>
+                        <th scope="col">Repositories</th>
+                        <th scope="col">Running</th>
+                        <th scope="col">Open groups</th>
+                        <th scope="col">Attention</th>
+                        <th scope="col">
+                          <span class="sr-only">Actions</span>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>
+                          <div class="cell-name">
+                            Dispatch
+                            <span class="badge">Default</span>
+                          </div>
+                        </td>
+                        <td class="mono">LOCAL</td>
+                        <td>
+                          <span class="repo-full">dispatch</span>
+                          <span class="repo-count">1 repository</span>
+                        </td>
+                        <td><span class="badge">3 running</span></td>
+                        <td><span class="badge">2 open groups</span></td>
+                        <td>
+                          <span class="badge">2 need attention</span>
+                        </td>
+                        <td class="cell-end">
+                          <button
+                            type="button"
+                            class="btn btn-ghost btn-icon"
+                            aria-haspopup="menu"
+                            aria-label="Board actions"
+                          >
+                            ⋯
+                          </button>
+                        </td>
+                      </tr>
+                      <tr>
+                        <td><div class="cell-name">Platform</div></td>
+                        <td class="mono">PLAT</td>
+                        <td>
+                          <span class="repo-full">dispatch, vyro-platform</span>
+                          <span class="repo-count">2 repositories</span>
+                        </td>
+                        <td><span class="badge">1 running</span></td>
+                        <td><span class="badge">1 open group</span></td>
+                        <td>0</td>
+                        <td class="cell-end">
+                          <button
+                            type="button"
+                            class="btn btn-ghost btn-icon"
+                            aria-haspopup="menu"
+                            aria-label="Board actions"
+                          >
+                            ⋯
+                          </button>
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <div class="panel for-narrow">
+                  <ul class="item-list">
+                    <li class="item">
+                      <div class="item-main">
+                        <div class="item-line">
+                          <strong>Dispatch</strong>
+                          <span class="mono muted">LOCAL</span>
+                          <span class="badge">Default</span>
+                        </div>
+                        <div class="item-line">
+                          <span class="badge">3 running</span>
+                          <span class="badge">2 open groups</span>
+                          <span class="badge">2 need attention</span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-icon"
+                        aria-haspopup="menu"
+                        aria-label="Board actions"
+                      >
+                        ⋯
+                      </button>
+                    </li>
+                    <li class="item">
+                      <div class="item-main">
+                        <div class="item-line">
+                          <strong>Platform</strong>
+                          <span class="mono muted">PLAT</span>
+                        </div>
+                        <div class="item-line">
+                          <span class="badge">1 running</span>
+                          <span class="badge">1 open group</span>
+                          <span class="muted">0</span>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-icon"
+                        aria-haspopup="menu"
+                        aria-label="Board actions"
+                      >
+                        ⋯
+                      </button>
+                    </li>
+                  </ul>
+                </div>
+
+                <details class="collapsible">
+                  <summary>Archived boards (0)</summary>
+                </details>
+              </div>
+            </main>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="frame" aria-labelledby="f2">
+      <h2 class="frame-title" id="f2">Frame 2: New board dialog</h2>
+      <div class="frame-box">
+        <div class="scrim">
+          <div class="dialog" role="dialog" aria-labelledby="dlg-title">
+            <div class="dialog-head">
+              <h2 id="dlg-title">New board</h2>
+            </div>
+            <div class="dialog-body">
+              <div class="field">
+                <label for="b-key">Key</label>
+                <input
+                  id="b-key"
+                  class="input mono"
+                  value="pl"
+                  aria-invalid="true"
+                  aria-describedby="b-key-help b-key-err"
+                />
+                <p class="help" id="b-key-help">
+                  2 to 6 capital letters or digits. It starts with a letter. You
+                  cannot change it later.
+                </p>
+                <p class="error" id="b-key-err" role="alert">
+                  ⚠ Use 2 to 6 capital letters or digits, starting with a
+                  letter.
+                </p>
+              </div>
+              <div class="field">
+                <label for="b-name">Name</label>
+                <input id="b-name" class="input" value="Platform" />
+              </div>
+              <div class="field">
+                <label for="b-root">Sessions folder</label>
+                <input
+                  id="b-root"
+                  class="input mono"
+                  value="~/dispatch-workspaces/platform"
+                  aria-describedby="b-root-help"
+                />
+                <p class="help" id="b-root-help">
+                  Dispatch makes one folder for each session in this folder.
+                </p>
+              </div>
+              <div class="repo-row">
+                <div class="field">
+                  <label for="r-path">Repository path</label>
+                  <input
+                    id="r-path"
+                    class="input mono"
+                    value="~/vyro-platform"
+                  />
+                </div>
+                <div class="field">
+                  <label for="r-branch">Base branch</label>
+                  <input id="r-branch" class="input mono" value="main" />
+                </div>
+                <div class="field">
+                  <label for="r-check">Check command</label>
+                  <input
+                    id="r-check"
+                    class="input mono"
+                    placeholder="npm run check"
+                  />
+                </div>
+                <button type="button" class="btn btn-outline">Remove</button>
+              </div>
+              <div>
+                <button type="button" class="btn btn-outline">
+                  Add repository
+                </button>
+              </div>
+              <div class="field">
+                <label for="b-teams">Linear team keys</label>
+                <input
+                  id="b-teams"
+                  class="input mono"
+                  aria-describedby="b-teams-help"
+                />
+                <p class="help" id="b-teams-help">
+                  New Linear issues of these teams go to this board. Separate
+                  keys with a comma.
+                </p>
+              </div>
+            </div>
+            <div class="dialog-foot">
+              <button type="button" class="btn btn-ghost">Cancel</button>
+              <button type="button" class="btn btn-primary">
+                Create board
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="frame" aria-labelledby="f3">
+      <h2 class="frame-title" id="f3">
+        Frame 3: Board actions menu open on the LOCAL row
+      </h2>
+      <div class="frame-box">
+        <div class="content">
+          <div class="page-body">
+            <div class="panel for-wide">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th scope="col">Name</th>
+                    <th scope="col">Key</th>
+                    <th scope="col">Repositories</th>
+                    <th scope="col">Running</th>
+                    <th scope="col">Open groups</th>
+                    <th scope="col">Attention</th>
+                    <th scope="col"><span class="sr-only">Actions</span></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>
+                      <div class="cell-name">
+                        Dispatch
+                        <span class="badge">Default</span>
+                      </div>
+                    </td>
+                    <td class="mono">LOCAL</td>
+                    <td>
+                      <span class="repo-full">dispatch</span>
+                      <span class="repo-count">1 repository</span>
+                    </td>
+                    <td><span class="badge">3 running</span></td>
+                    <td><span class="badge">2 open groups</span></td>
+                    <td>
+                      <span class="badge">2 need attention</span>
+                    </td>
+                    <td class="cell-end">
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-icon"
+                        aria-haspopup="menu"
+                        aria-expanded="true"
+                        aria-label="Board actions"
+                      >
+                        ⋯
+                      </button>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="panel for-narrow">
+              <ul class="item-list">
+                <li class="item">
+                  <div class="item-main">
+                    <div class="item-line">
+                      <strong>Dispatch</strong>
+                      <span class="mono muted">LOCAL</span>
+                      <span class="badge">Default</span>
+                    </div>
+                    <div class="item-line">
+                      <span class="badge">3 running</span>
+                      <span class="badge">2 open groups</span>
+                      <span class="badge">2 need attention</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    class="btn btn-ghost btn-icon"
+                    aria-haspopup="menu"
+                    aria-expanded="true"
+                    aria-label="Board actions"
+                  >
+                    ⋯
+                  </button>
+                </li>
+              </ul>
+            </div>
+            <div class="menu menu-end" role="menu" aria-label="Board actions">
+              <a class="menu-item" role="menuitem" href="#">Open board</a>
+              <a class="menu-item" role="menuitem" href="#">Edit</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </body>
+</html>

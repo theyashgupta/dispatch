@@ -51,6 +51,8 @@ import {
 import { newHookTokenValue, registerHookToken } from "./hook-tokens.js";
 import { HOOK_SETTINGS_PATH } from "../infra/paths.js";
 import { worktreePath as buildWorktreePath } from "../domain/workspace-paths.js";
+import { boardWorkspace } from "../domain/board-workspace.js";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 
 /** Linear identifier shape (defense-in-depth; the route also validates before we reach here). */
 const IDENTIFIER_RE = /^[A-Za-z0-9]+-\d+$/;
@@ -189,6 +191,22 @@ function stderrOf(err: unknown): string {
   return e.stderr && e.stderr.length > 0 ? e.stderr : e.message;
 }
 
+/**
+ * The sessions folder of the card's board, or null when the board has none.
+ *
+ * @remarks The default board keeps `Config.workspaceRoot`; any other board uses its own row.
+ */
+export function cardSessionsRoot(card: Card, config: Config): string | null {
+  const key = card.boardKey ?? DEFAULT_BOARD_KEY;
+  const board = store.getBoard(key);
+  if (!board) return null;
+  return boardWorkspace(
+    board,
+    config.workspaceRoot,
+    store.getWorkspaceFolders(key).folders,
+  ).workspaceRoot;
+}
+
 const prepareWorkspace: SagaStep = {
   name: "preparing workspace",
   statusText: "Preparing workspace…",
@@ -200,7 +218,7 @@ const prepareWorkspace: SagaStep = {
         "generic",
       );
     }
-    const workspaceRoot = ctx.config.workspaceRoot;
+    const workspaceRoot = cardSessionsRoot(ctx.card, ctx.config);
     if (!workspaceRoot) {
       throw new StartStepError(
         "preparing workspace",
@@ -213,7 +231,7 @@ const prepareWorkspace: SagaStep = {
     if (!path.resolve(workspacePath).startsWith(resolvedRoot + path.sep)) {
       throw new StartStepError(
         "preparing workspace",
-        `workspace path escapes workspaceRoot: ${workspacePath}`,
+        `workspace path escapes the board folder: ${workspacePath}`,
         "generic",
       );
     }

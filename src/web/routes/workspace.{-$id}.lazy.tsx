@@ -1,12 +1,6 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { OrcaView } from "@/features/orca";
-import { useAppState } from "@/components/AppState";
+import { WorkspaceView } from "@/modules/workspace";
 
 export const Route = createLazyFileRoute("/workspace/{-$id}")({
-  component: WorkspaceRoute,
+  component: WorkspaceView,
 });
-
-function WorkspaceRoute() {
-  const props = useAppState().workspace;
-  return <OrcaView {...props} />;
-}

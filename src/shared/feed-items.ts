@@ -1,3 +1,4 @@
+import { hideDisabledSlack } from "./hide-disabled-slack.js";
 import type { Item } from "./types.js";
 
 /** The items the Inbox and Today show: Sentry items only when the errors preference is on. */
@@ -26,4 +27,13 @@ export function sentryIssueId(itemId: string): string {
 /** Check that a Sentry issue id is digits only, so it cannot change an API path. */
 export function isSentryIssueId(issueId: string): boolean {
   return /^\d+$/.test(issueId);
+}
+
+/** The feed every page lists: the errors preference applied, then Slack hidden while it is off. */
+export function inboxFeed(
+  items: readonly Item[],
+  includeErrors: boolean,
+  enabledSources: readonly string[],
+): Item[] {
+  return hideDisabledSlack(feedItems(items, includeErrors), enabledSources);
 }

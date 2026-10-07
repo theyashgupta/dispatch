@@ -127,7 +127,7 @@
  *     captured bytes were restored, and `git diff --quiet` on `push-send.ts` confirmed a
  *     byte-identical restore.
  *   - `deep-link-param-opens-card` proven able to fail (Plan 06): changing the parameter name the
- *     sole `params.get("card")` call site in `App.tsx`'s cold-open effect reads to a name the
+ *     sole `params.get("card")` call site in `main.tsx`'s cold-open effect reads to a name the
  *     check never sends, rebuilding, and re-running the same check against a real booted sandbox
  *     server and real headless Chrome produced, verbatim:
  *     `deep-link-param-opens-card: detail panel never rendered the target card's identifier
@@ -135,7 +135,7 @@
  *     `deep-link-param-opens-card: window.location.search still contains "card" after the
  *     deep-link effect ran: "?card=panel-110-deep-link-card-b"`
  *     The RESTORE leg re-ran clean (`--break deep-link-param-opens-card RESTORE leg: PASS`) after
- *     the captured bytes were restored, and `git diff --quiet` on `App.tsx` confirmed a
+ *     the captured bytes were restored, and `git diff --quiet` on `main.tsx` confirmed a
  *     byte-identical restore.
  *   - `tag-renotify-replace` proven able to fail (Plan 07): replacing the sole `tag: data.cardId,`
  *     call site in `sw.js`'s push handler with a per-message unique tag, rebuilding, and
@@ -783,7 +783,7 @@ async function pollUntilTruthy(cdp, sessionId, expression, timeoutMs) {
 // (see the plan summary for the observed transcript).
 // ---------------------------------------------------------------------------
 
-/** Registers `/sw.js` from page scope the same way `src/web/lib/push.ts` does, then awaits
+/** Registers `/sw.js` from page scope the same way `src/web/queries/push-api.ts` does, then awaits
  * `navigator.serviceWorker.ready`, returning the registration's scope. Throws a descriptive error
  * if registration never settles inside `READY_TIMEOUT_MS` (surfaced by `evalAsyncValue`'s own
  * timeout, not a bespoke one, so a stalled registration reads as a diagnosable CDP error rather
@@ -1740,7 +1740,7 @@ const PUSH_SEND_TS_PATH = join(
 );
 const PUSH_SEND_BREAK_TARGET = '\n    dsaEncoding: "ieee-p1363",';
 
-const APP_TSX_PATH = join(REPO_ROOT, "src/web/App.tsx");
+const APP_TSX_PATH = join(REPO_ROOT, "src/web/main.tsx");
 
 /** `--break push-envelope-decrypts`: removes the `dsaEncoding: "ieee-p1363"` option from
  * `signVapidJwt`'s `sign()` call, so the VAPID signature reverts to Node's DER default, rebuilds
@@ -2405,7 +2405,7 @@ function deepLinkFixtureCard(id, identifier) {
 
 /** Seeds two fixture cards (so the target card is distinguishable from a default selection),
  * opens headless Chrome directly at the sandbox board URL carrying `?card=<second card's id>`,
- * and asserts the detail panel (`[aria-label="Ticket detail"]`, the same aside App.tsx docks
+ * and asserts the detail panel (`[aria-label="Ticket detail"]`, the same aside main.tsx docks
  * regardless of selection per the PANEL-03 never-remount invariant) ends up showing the target
  * card's identifier and NOT the other fixture card's identifier, that `window.location.search` no
  * longer contains `card` once the effect has run, and that `window.location.pathname` is
@@ -2500,7 +2500,7 @@ const DEEP_LINK_PARAM_BREAK_TARGET = 'params.get("card")';
 const DEEP_LINK_PARAM_BREAK_REPLACEMENT =
   'params.get("panel110-break-never-sent-param")';
 
-/** `--break deep-link-param-opens-card`: changes the parameter name App.tsx's cold-open effect
+/** `--break deep-link-param-opens-card`: changes the parameter name main.tsx's cold-open effect
  * reads from `card` to a name the check never sends (replaces the sole `params.get("card")` call
  * site), rebuilds via `resetBuildCache()`, and requires the SAME check function to report the
  * resulting "detail panel never rendered" violation (trip leg). Restores the captured bytes
@@ -3099,7 +3099,7 @@ async function runBreakNotificationclickFocusOrOpen() {
 // needs-input-delivers (Plan 08's own new capability): the phase's one check
 // judged by a real external push service instead of this repo's own stub or
 // decrypt logic. A real headless-Chrome subscribe (mirroring src/web/lib/
-// push.ts's own register/fetch-key/subscribe/POST sequence, no synthetic
+// push-api.ts's own register/fetch-key/subscribe/POST sequence, no synthetic
 // endpoint) feeds a real NEEDS_INPUT transition's real send.
 // ---------------------------------------------------------------------------
 
@@ -3110,7 +3110,7 @@ const NEEDS_INPUT_DELIVERS_TIER_ONE_TIMEOUT_MS = 45_000;
  * an endpoint than this, so this is also as much of it as this check can match against. */
 const ENDPOINT_LOG_PREFIX_LEN = 40;
 
-/** Runs inside the sandboxed page via `evalAsyncValue`. Mirrors `src/web/lib/push.ts`'s
+/** Runs inside the sandboxed page via `evalAsyncValue`. Mirrors `src/web/queries/push-api.ts`'s
  * `enablePush` exactly: register `/sw.js`, fetch the real VAPID public key, convert it with the
  * same padding and character swap, `pushManager.subscribe()` against the REAL push service (no
  * timeout race and no `unsubscribe()` at the end, unlike `panel-109.mjs`'s `fcm-egress` probe:

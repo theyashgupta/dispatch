@@ -7,6 +7,7 @@ import {
   type ClaudeUsageSnapshot,
 } from "../../../shared/types.js";
 import { SWITCH_NOW_REASON } from "../../../shared/account-chain.js";
+import { ALL_BOARDS } from "../../../shared/board-key.js";
 import { readClaudeIdentity } from "../../adapters/claude-cli.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import {
@@ -530,7 +531,7 @@ async function checkExhausted(): Promise<void> {
     await moveOrOffer("failover", inUse, selection.id, "reset");
     return;
   }
-  for (const { card, session } of store.sessionsWithTmux()) {
+  for (const { card, session } of store.sessionsWithTmux(ALL_BOARDS)) {
     if (accountOf(session) === inUse)
       await continueAtLimit(card.id, session.id);
   }
@@ -586,7 +587,7 @@ export function requestFailover(reason: string): Promise<FailoverResult> {
  */
 async function scanInUseSessions(): Promise<void> {
   const inUse = getActiveAccountId();
-  for (const { card, session } of store.sessionsWithTmux()) {
+  for (const { card, session } of store.sessionsWithTmux(ALL_BOARDS)) {
     if (accountOf(session) !== inUse) continue;
     await liveTurnState(card.id, session.id, session.tmuxSession);
   }

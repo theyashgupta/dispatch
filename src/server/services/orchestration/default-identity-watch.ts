@@ -10,6 +10,7 @@ import {
   writeDefaultIdentity,
   type DefaultIdentity,
 } from "./claude-accounts.js";
+import { ALL_BOARDS } from "../../../shared/board-key.js";
 
 type IdentityVerdict = "store-first" | "same" | "changed" | "ignore";
 
@@ -44,7 +45,7 @@ async function runCheck(): Promise<void> {
     orgId: read.orgId || (stored?.orgId ?? ""),
   });
   if (stored === undefined) return;
-  for (const { card, session } of store.sessionsWithTmux()) {
+  for (const { card, session } of store.sessionsWithTmux(ALL_BOARDS)) {
     if (
       (session.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID) !==
       DEFAULT_CLAUDE_ACCOUNT_ID

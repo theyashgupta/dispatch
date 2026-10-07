@@ -1,5 +1,6 @@
 import { Globe } from "lucide-react";
 import type { PreviewInfo } from "../../../shared/types.js";
+import { isWebUrl } from "../../../shared/web-url.js";
 import { Badge } from "@/components/ui/badge";
 import { previewBadgeTitle } from "./preview-evidence.js";
 
@@ -19,7 +20,8 @@ export function PreviewBadge({ preview }: { preview: PreviewInfo }) {
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation();
-          window.open(preview.url, "_blank", "noopener,noreferrer");
+          if (isWebUrl(preview.url))
+            window.open(preview.url, "_blank", "noopener,noreferrer");
         }}
       >
         <Globe size={12} strokeWidth={2} aria-hidden="true" />

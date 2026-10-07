@@ -14,9 +14,9 @@
  *
  * The other eight files in the eleven-file `v2.9.0..HEAD` census carry NO verdict here, by design —
  * `96-01-SUMMARY.md` read every hunk and found each one either non-rendering (`card-attention.ts`,
- * `lib/api.ts`, `lib/start-request.ts`) or touching no contract-named value (`App.tsx`, `CardView.tsx`,
+ * `detail-api.ts`, `start-request.ts`) or touching no contract-named value (`__root.tsx`, `CardView.tsx`,
  * `StartAnotherSessionButton.tsx` — composes the unchanged `Button` primitive, `TerminalRegion.tsx`,
- * `CleanupModal.tsx`). The exclusion reason for each prints at standup, below, so "not measured" is
+ * `CleanupDialog.tsx`). The exclusion reason for each prints at standup, below, so "not measured" is
  * never silent.
  *
  * SAFETY — copied verbatim from this milestone's own precedent (panel-92/93/94/95.mjs headers).
@@ -157,64 +157,64 @@ const ALL_IDENTIFIERS = [
  */
 const CENSUS_DISPOSITION = [
   {
-    file: "src/web/App.tsx",
+    file: "src/web/routes/__root.tsx",
     measured: false,
     reason:
       "non-visual: 25-line diff is intent/state wiring only, no rendered value introduced",
   },
   {
-    file: "src/web/features/board/CardView.tsx",
+    file: "src/web/modules/board/components/CardView.tsx",
     measured: false,
     reason:
       "text/tooltip content and a startCard() arg only, no styling token touched",
   },
   {
-    file: "src/web/features/board/card-attention.ts",
+    file: "src/shared/card-attention.ts",
     measured: false,
     reason: "non-rendering module (JSDoc-only diff)",
   },
   {
-    file: "src/web/features/detail/DetailPanel.tsx",
+    file: "src/web/modules/detail/components/PanelFrame.tsx",
     measured: true,
     reason:
       "new session row: spacing scale + hairline border on a rendered container",
   },
   {
-    file: "src/web/features/detail/SessionSwitcher.tsx",
+    file: "src/web/modules/detail/components/SessionSwitcher.tsx",
     measured: true,
     reason: "wholly new: radius vocabulary + a new --accent consumer",
   },
   {
-    file: "src/web/features/detail/StartAnotherSessionButton.tsx",
+    file: "src/web/modules/detail/components/StartAnotherSessionButton.tsx",
     measured: false,
     reason:
       "composes the unchanged Button primitive; invents no new visual treatment",
   },
   {
-    file: "src/web/features/detail/TerminalRegion.tsx",
+    file: "src/web/modules/detail/components/TerminalRegion.tsx",
     measured: false,
     reason:
       "4-line diff is a data-source swap (session id/port); iframe style byte-identical",
   },
   {
-    file: "src/web/features/modals/CleanupModal.tsx",
+    file: "src/web/modules/card-actions/components/CleanupDialog.tsx",
     measured: false,
     reason:
       "copy/iteration-logic diff only; reuses existing color token unchanged",
   },
   {
-    file: "src/web/features/modals/StartModal.tsx",
+    file: "src/web/modules/card-actions/components/StartDialog.tsx",
     measured: true,
     reason:
-      "new InheritToggleSection: type scale, --line-body, checkbox accentColor, focusRing()",
+      "new InheritToggleSection: type scale, --line-body, checkbox accentColor, outline focus",
   },
   {
-    file: "src/web/lib/api.ts",
+    file: "src/web/modules/detail/queries/detail-api.ts",
     measured: false,
     reason: "non-rendering module (fetch/network code, no JSX or style object)",
   },
   {
-    file: "src/web/lib/start-request.ts",
+    file: "src/shared/start-request.ts",
     measured: false,
     reason: "non-rendering module (type-only diff)",
   },
@@ -1029,7 +1029,7 @@ async function measureDetailPanelRow(cdp, sessionId, violations, verdicts) {
 
   const added = violations.slice(before);
   verdicts.push({
-    surface: "src/web/features/detail/DetailPanel.tsx — session row",
+    surface: "src/web/modules/detail/components/PanelFrame.tsx - session row",
     pass: added.length === 0,
     violations: added,
   });
@@ -1204,7 +1204,7 @@ async function measureSessionSwitcher(cdp, sessionId, violations, verdicts) {
 
   const added = violations.slice(before);
   verdicts.push({
-    surface: "src/web/features/detail/SessionSwitcher.tsx",
+    surface: "src/web/modules/detail/components/SessionSwitcher.tsx",
     pass: added.length === 0,
     violations: added,
     accentToken,
@@ -1213,7 +1213,7 @@ async function measureSessionSwitcher(cdp, sessionId, violations, verdicts) {
 }
 
 // ---------------------------------------------------------------------------
-// Surface 3 — StartModal's InheritToggleSection (type scale + --line-body + accentColor + focusRing)
+// Surface 3: StartModal's InheritToggleSection (type scale + --line-body + accentColor + outline focus)
 // ---------------------------------------------------------------------------
 
 async function measureStartModal(cdp, sessionId, violations, verdicts) {
@@ -1425,7 +1425,8 @@ async function measureStartModal(cdp, sessionId, violations, verdicts) {
 
   const added = violations.slice(before);
   verdicts.push({
-    surface: "src/web/features/modals/StartModal.tsx — InheritToggleSection",
+    surface:
+      "src/web/modules/card-actions/components/StartDialog.tsx - InheritToggleSection",
     pass: added.length === 0,
     violations: added,
   });
@@ -1879,7 +1880,8 @@ async function measureSessionSwitcherA11y(
 
   const added = violations.slice(before);
   verdicts.push({
-    surface: "src/web/features/detail/SessionSwitcher.tsx — a11y (KEEP-06)",
+    surface:
+      "src/web/modules/detail/components/SessionSwitcher.tsx - a11y (KEEP-06)",
     pass: added.length === 0,
     violations: added,
   });
@@ -2259,7 +2261,7 @@ async function measureCleanupModalA11y(cdp, sessionId, violations, verdicts) {
   const added = violations.slice(before);
   verdicts.push({
     surface:
-      "src/web/features/modals/CleanupModal.tsx — a11y (KEEP-06, measured from zero)",
+      "src/web/modules/card-actions/components/CleanupDialog.tsx - a11y (KEEP-06, measured from zero)",
     pass: added.length === 0,
     violations: added,
   });
@@ -2324,7 +2326,7 @@ async function closeAssumptionA2(cdp, sessionId, violations, verdicts) {
   const added = violations.slice(before);
   verdicts.push({
     surface:
-      "src/web/features/modals/StartModal.tsx — inherit toggle accessible name (research assumption A2)",
+      "src/web/modules/card-actions/components/StartDialog.tsx - inherit toggle accessible name (research assumption A2)",
     pass: added.length === 0,
     violations: added,
   });

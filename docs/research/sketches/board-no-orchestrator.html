@@ -1,0 +1,290 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Board with no orchestrator sketch</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="sketch.css" />
+    <script>
+      (function () {
+        var root = document.documentElement;
+        var theme = new URLSearchParams(location.search).get("theme");
+        if (theme === "light") root.setAttribute("data-theme", "light");
+        else if (theme === "dark") root.removeAttribute("data-theme");
+        document.addEventListener("DOMContentLoaded", function () {
+          var button = document.getElementById("theme-toggle");
+          function sync() {
+            button.textContent =
+              root.getAttribute("data-theme") === "light"
+                ? "Dark theme"
+                : "Light theme";
+          }
+          sync();
+          button.addEventListener("click", function () {
+            if (root.getAttribute("data-theme") === "light")
+              root.removeAttribute("data-theme");
+            else root.setAttribute("data-theme", "light");
+            sync();
+          });
+        });
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="sketch-bar">
+      <p>Board with no orchestrator, populated state</p>
+      <button type="button" id="theme-toggle" class="btn btn-outline">
+        Light theme
+      </button>
+    </div>
+
+    <section class="frame" aria-labelledby="f1">
+      <h2 class="frame-title" id="f1">
+        Frame 1: Board of today with one board and no orchestrator
+      </h2>
+      <div class="frame-box">
+        <div class="shell">
+          <aside class="sidebar" aria-label="Sidebar">
+            <div class="sidebar-head">
+              <div class="brand">
+                <span class="brand-glyph" aria-hidden="true">◆</span>
+                <span class="brand-word">DISPATCH</span>
+              </div>
+            </div>
+            <nav class="nav" aria-label="Main">
+              <div class="nav-label">Home</div>
+              <a class="nav-row" href="#">Today</a>
+              <a class="nav-row" href="#">Inbox</a>
+              <a class="nav-row" href="#">Ask</a>
+              <div class="nav-label">Work</div>
+              <a class="nav-row" href="#" aria-current="page">Board</a>
+
+              <a class="nav-row" href="#">Sessions</a>
+              <a class="nav-row" href="#">Workspace</a>
+              <a class="nav-row" href="#">Activity</a>
+            </nav>
+          </aside>
+
+          <div class="main">
+            <header class="page-header">
+              <div class="page-title">
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-icon menu-btn"
+                  aria-label="Open menu"
+                >
+                  ☰
+                </button>
+                <h1>Board</h1>
+                <span class="muted" aria-label="9 cards">9</span>
+              </div>
+              <div class="page-actions">
+                <button
+                  type="button"
+                  class="btn btn-outline"
+                  aria-label="Add orchestrator"
+                  title="Add an orchestrator to plan tickets and run loops on this board."
+                >
+                  <span aria-hidden="true">+</span>
+                  <span class="for-wide">Add orchestrator</span>
+                  <span class="for-narrow">Orchestrator</span>
+                </button>
+              </div>
+            </header>
+            <div class="toolbar">
+              <input
+                class="input"
+                placeholder="Search tickets…"
+                aria-label="Search tickets"
+              />
+            </div>
+            <div class="pills" role="group" aria-label="Jump to board column">
+              <button type="button" class="pill" aria-pressed="false">
+                To Do <span class="mono">2</span>
+              </button>
+              <button type="button" class="pill" aria-pressed="true">
+                In Progress <span class="mono">2</span>
+              </button>
+              <button type="button" class="pill" aria-pressed="false">
+                Needs Input <span class="mono">1</span>
+              </button>
+              <button type="button" class="pill" aria-pressed="false">
+                Agent Done <span class="mono">1</span>
+              </button>
+              <button type="button" class="pill" aria-pressed="false">
+                In Review <span class="mono">1</span>
+              </button>
+              <button type="button" class="pill" aria-pressed="false">
+                Parked <span class="mono">0</span>
+              </button>
+              <button type="button" class="pill" aria-pressed="false">
+                Done <span class="mono">2</span>
+              </button>
+            </div>
+            <div class="board-scroll">
+              <div class="board-cols">
+                <section class="col col-off" aria-label="To Do">
+                  <div class="col-head">
+                    <span class="col-label"><span>To Do</span></span
+                    ><span class="badge">2</span>
+                  </div>
+                  <article class="tcard">
+                    <div class="tcard-top">
+                      <span
+                        class="prio prio-medium"
+                        title="Medium priority"
+                      ></span>
+                      <span class="sr-only">Medium priority</span>
+                      <span class="mono muted">LOCAL-76</span>
+                    </div>
+                    <span class="tcard-title"
+                      >Detail panel, Sessions and Workspace modules with the
+                      terminal invariant</span
+                    >
+                  </article>
+                  <article class="tcard">
+                    <div class="tcard-top">
+                      <span class="prio prio-low" title="Low priority"></span>
+                      <span class="sr-only">Low priority</span>
+                      <span class="mono muted">LOCAL-77</span>
+                    </div>
+                    <span class="tcard-title"
+                      >Cutover, legacy deletion, global lint scope and
+                      screenshot suite</span
+                    >
+                  </article>
+                </section>
+                <section class="col" aria-label="In Progress">
+                  <div class="col-head col-progress">
+                    <span class="col-label"><span>In Progress</span></span
+                    ><span class="badge">2</span>
+                  </div>
+                  <article class="tcard">
+                    <div class="tcard-top">
+                      <span class="prio prio-high" title="High priority"></span>
+                      <span class="sr-only">High priority</span>
+                      <span class="mono muted">LOCAL-75</span>
+                    </div>
+                    <span class="tcard-title"
+                      >Board module on dnd-kit with shadcn Card and Badge</span
+                    >
+                    <span class="badge chip-live">● Live</span>
+                  </article>
+                  <article class="tcard">
+                    <div class="tcard-top">
+                      <span class="prio prio-high" title="High priority"></span>
+                      <span class="sr-only">High priority</span>
+                      <span class="mono muted">LOCAL-74</span>
+                    </div>
+                    <span class="tcard-title"
+                      >Inbox, Today, Ask, Activity, Flow and card action dialogs
+                      modules</span
+                    >
+                    <span class="badge chip-live">● Live</span>
+                  </article>
+                </section>
+                <section class="col col-off" aria-label="Needs Input">
+                  <div class="col-head col-input">
+                    <span class="col-label"><span>Needs Input</span></span
+                    ><span class="badge">1</span>
+                  </div>
+                  <article class="tcard">
+                    <div class="tcard-top">
+                      <span
+                        class="prio prio-urgent"
+                        title="Urgent priority"
+                      ></span>
+                      <span class="sr-only">Urgent priority</span>
+                      <span class="mono muted">LOCAL-73</span>
+                    </div>
+                    <span class="tcard-title"
+                      >Tickets, Pull Requests, Errors, Slack, Meetings and
+                      Calendar modules</span
+                    >
+                  </article>
+                </section>
+                <section class="col col-off" aria-label="Agent Done">
+                  <div class="col-head col-agent-done">
+                    <span class="col-label"
+                      ><span>Agent Done</span
+                      ><span class="col-note">Automatic only</span></span
+                    ><span class="badge">1</span>
+                  </div>
+                  <article class="tcard">
+                    <div class="tcard-top">
+                      <span
+                        class="prio prio-medium"
+                        title="Medium priority"
+                      ></span>
+                      <span class="sr-only">Medium priority</span>
+                      <span class="mono muted">LOCAL-72</span>
+                    </div>
+                    <span class="tcard-title"
+                      >Playbooks, Vault, Archive, Accounts and Workspaces
+                      modules</span
+                    >
+                  </article>
+                </section>
+                <section class="col col-off" aria-label="In Review">
+                  <div class="col-head col-in-review">
+                    <span class="col-label"><span>In Review</span></span
+                    ><span class="badge">1</span>
+                  </div>
+                  <article class="tcard">
+                    <div class="tcard-top">
+                      <span
+                        class="prio prio-medium"
+                        title="Medium priority"
+                      ></span>
+                      <span class="sr-only">Medium priority</span>
+                      <span class="mono muted">LOCAL-71</span>
+                    </div>
+                    <span class="tcard-title"
+                      >Settings, Connections and Setup modules</span
+                    >
+                  </article>
+                </section>
+                <section class="col col-off" aria-label="Parked">
+                  <div class="col-head col-parked">
+                    <span class="col-label"><span>Parked</span></span
+                    ><span class="badge">0</span>
+                  </div>
+                  <p class="col-empty">Nothing set aside.</p>
+                </section>
+                <section class="col col-off" aria-label="Done">
+                  <div class="col-head col-done">
+                    <span class="col-label"><span>Done</span></span
+                    ><span class="badge">2</span>
+                  </div>
+                  <article class="tcard">
+                    <div class="tcard-top">
+                      <span class="prio prio-low" title="Low priority"></span>
+                      <span class="sr-only">Low priority</span>
+                      <span class="mono muted">LOCAL-70</span>
+                    </div>
+                    <span class="tcard-title"
+                      >Shell on shadcn Sidebar, Command, Dialog, Sheet, Sonner,
+                      Alert</span
+                    >
+                  </article>
+                  <article class="tcard">
+                    <div class="tcard-top">
+                      <span class="prio prio-low" title="Low priority"></span>
+                      <span class="sr-only">Low priority</span>
+                      <span class="mono muted">LOCAL-69</span>
+                    </div>
+                    <span class="tcard-title"
+                      >TanStack Router on hash history, detail panel in root
+                      layout</span
+                    >
+                  </article>
+                </section>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </body>
+</html>

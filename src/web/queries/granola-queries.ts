@@ -1,7 +1,6 @@
 import {
   queryOptions,
   useMutation,
-  useQuery,
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
@@ -22,10 +21,6 @@ export function granolaQueryOptions() {
     queryKey: granolaKeys.status,
     queryFn: getGranola,
   });
-}
-
-export function useGranolaQuery() {
-  return useQuery(granolaQueryOptions());
 }
 
 /**

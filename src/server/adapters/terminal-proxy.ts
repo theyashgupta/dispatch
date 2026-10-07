@@ -6,6 +6,7 @@ import type { Request, Response } from "express";
 import { store } from "../store/board.store.js";
 import { armFlickTelemetry, telemetryOn } from "./terminal-telemetry.js";
 import { getLiveTtydPort } from "./ttyd.js";
+import { ALL_BOARDS } from "../../shared/board-key.js";
 
 /**
  * Bound for a live-but-wedged upstream (TCP accepted, ttyd never actually responds): matches the
@@ -41,7 +42,9 @@ function rejectUpgrade(socket: Duplex, status: string): void {
  */
 function resolveLiveTtydPort(id: string): number | null {
   if (id.trim().length === 0) return null;
-  const pair = store.sessionsWithTmux().find((p) => p.session.id === id);
+  const pair = store
+    .sessionsWithTmux(ALL_BOARDS)
+    .find((p) => p.session.id === id);
   if (!pair) return null;
   return getLiveTtydPort(pair.session.tmuxSession);
 }

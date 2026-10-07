@@ -1,0 +1,14 @@
+
+· Mulling… (1m 20s · ↓ 7.5k tokens · thought for 2s)                                
+  ⎿  Tip: Use /btw to ask a quick side question without interrupting Claude's current work
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Opus 5.5 · high  │  ██░░░░░░░░   21%  208k/1.0M
+  GROUP-18  │  thinking  │  Attention-kind  │  5h 35%  │  7d 60%  │  26m  │  +963/-1  │  $8.77
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents
+
+  ⏺ main
+  ◯ phase-qa-runner (+1)  Inspecting sandbox board.db cards                                                                                                                       33s · ↓ 39.4k tokens
+

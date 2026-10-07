@@ -8,6 +8,7 @@ import {
   waitFor,
   writeFakeRepl,
 } from "../../test-support/fixtures.js";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 
 const env = await isolateTmuxEnv();
 const { killTtyd } = await import("../../adapters/ttyd.js");
@@ -23,7 +24,11 @@ void test(
     const argvFile = path.join(env.root, "claude-argv.txt");
     writeFakeRepl(env, argvFile);
     await store.load();
-    const card = await store.createLocalCard("resume nodes", "");
+    const card = await store.createLocalCard(
+      DEFAULT_BOARD_KEY,
+      "resume nodes",
+      "",
+    );
     const branch = `resumetest-${process.pid}`;
     const tmuxSession = `dsp-${branch}`;
     const cwd = path.join(env.root, "worktree");
@@ -90,7 +95,11 @@ void test(
     const argvFile = path.join(env.root, "claude-argv-continue.txt");
     writeFakeRepl(env, argvFile, { refuseContinue: true });
     await store.load();
-    const card = await store.createLocalCard("resume continue", "");
+    const card = await store.createLocalCard(
+      DEFAULT_BOARD_KEY,
+      "resume continue",
+      "",
+    );
     const branch = `continuetest-${process.pid}`;
     const tmuxSession = `dsp-${branch}`;
     const cwd = path.join(env.root, "worktree-continue");

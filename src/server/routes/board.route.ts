@@ -50,6 +50,13 @@ import {
 } from "./board-schemas.js";
 import { httpErrorHandler } from "./error-handler.js";
 import { parseOrThrow } from "./parse-input.js";
+import {
+  assertNotLastRepository,
+  isBoardRepository,
+  resolveBoard,
+  resolveBoardForCreate,
+} from "../services/orchestration/boards.js";
+import { parseBoardParam } from "./boards-schemas.js";
 
 export const boardRouter = Router();
 
@@ -64,7 +71,8 @@ function getBoard(req: Request, res: Response): void {
     boardQuerySchema,
     req.query,
   );
-  res.status(200).json(store.snapshot({ doneLimit }));
+  const { key } = resolveBoard(parseBoardParam(req.query));
+  res.status(200).json(store.snapshot(key, { doneLimit }));
 }
 
 boardRouter.get("/board", getBoard);
@@ -80,35 +88,42 @@ boardRouter.get("/board", getBoard);
  */
 function getSearch(req: Request, res: Response): void {
   const { q } = parseOrThrow(searchQuerySchema, req.query);
-  res.status(200).json(store.searchCards(q, SEARCH_RESULT_LIMIT));
+  const { key } = resolveBoard(parseBoardParam(req.query));
+  res.status(200).json(store.searchCards(key, q, SEARCH_RESULT_LIMIT));
 }
 
 boardRouter.get("/search", getSearch);
 
-boardRouter.get("/workspace-folders", (_req, res) => {
-  const { folders, lastUsed } = store.getWorkspaceFolders();
+boardRouter.get("/workspace-folders", (req, res) => {
+  const { key } = resolveBoard(parseBoardParam(req.query));
+  const { folders, lastUsed } = store.getWorkspaceFolders(key);
   res.status(200).json({ folders, lastUsed });
 });
 
 boardRouter.post("/workspace-folders", async (req, res) => {
   const { path: rawPath } = parseOrThrow(workspacePathSchema, req.body);
+  const { key } = resolveBoardForCreate(parseBoardParam(req.query));
 
   const abs = expandPath(rawPath);
   const status = await validateFolder(abs);
   if (status === "missing") throw new ValidationError("Folder doesn't exist");
   if (status === "not-a-folder") throw new ValidationError("Not a folder");
+  if (!(await isBoardRepository(key, abs))) {
+    throw new ValidationError("Not a git repository");
+  }
 
   const repos = await discoverRepos(abs);
   if (repos.length === 0) {
     throw new ValidationError("No git repositories found in this folder");
   }
 
-  await store.addWorkspaceFolder(abs);
+  await store.addWorkspaceFolder(key, abs);
   res.status(200).json({ repos });
 });
 
 boardRouter.get("/workspace-folders/discover", async (req, res) => {
   const { path: rawPath } = parseOrThrow(workspacePathSchema, req.query);
+  resolveBoard(parseBoardParam(req.query));
 
   const repos = await discoverRepos(expandPath(rawPath));
   res.status(200).json({ repos });
@@ -123,8 +138,11 @@ boardRouter.get("/fs/dirs", async (req, res) => {
 
 boardRouter.delete("/workspace-folders", async (req, res) => {
   const { path: rawPath } = parseOrThrow(workspacePathSchema, req.body);
+  const { key } = resolveBoard(parseBoardParam(req.query));
 
-  await store.removeWorkspaceFolder(expandPath(rawPath));
+  const abs = expandPath(rawPath);
+  assertNotLastRepository(key, abs);
+  await store.removeWorkspaceFolder(key, abs);
   res.status(200).json({ ok: true });
 });
 

@@ -4,6 +4,15 @@ import fs from "node:fs";
 import path from "node:path";
 import { DISPATCH_DATA_DIR } from "./data-dir.js";
 import {
+  ALL_BOARDS,
+  DEFAULT_BOARD_KEY,
+  DEFAULT_CHECK_COMMAND,
+  defaultBoardPolicy,
+  identifierPrefix,
+  isReservedBoardKey,
+  parseBoardKey,
+} from "../../shared/board-key.js";
+import {
   applyItemUpserts,
   buildPromotedCard,
   redactItem,
@@ -14,8 +23,17 @@ import type {
   AccountActivityEvent,
   AccountEventType,
   ActivityEvent,
+  ArchiveBoardResult,
+  Board,
+  BoardPolicy,
+  BoardKey,
+  BoardPatch,
+  BoardScope,
   BoardSnapshot,
   Card,
+  CreateBoardResult,
+  DecisionItem,
+  NewBoard,
   Column,
   ColumnChange,
   EventType,
@@ -24,10 +42,17 @@ import type {
   ProbeUnknown,
   Session,
   SessionFields,
+  SessionMeters,
+  SupervisorState,
+  SupervisorStateReason,
   SourceIssue,
   SourceKind,
   TrackedRefresh,
   Item,
+  LinearComment,
+  LoopProgress,
+  ShipFlow,
+  OrchestrationEvent,
   SettableItemState,
   StartError,
   TerminalError,
@@ -40,10 +65,12 @@ import type {
 import { DEFAULT_CLEANUP_DELAY_DAYS } from "../../shared/types.js";
 import type { CardSearchResult } from "../../shared/search.js";
 import {
-  BOARD_DB_PATH,
   type BoardDb,
   type BoardMeta,
+  type OrchestratorTokenRow,
   type PushSubscriptionRow,
+  STORE_SCHEMA_VERSION,
+  assertSchemaOpenable,
   openBoardDb,
 } from "./board-db.js";
 import {
@@ -193,10 +220,23 @@ export function redactCard(card: Card): Card {
     wireCard.lastCommentId = card.comments.at(-1)?.id;
   }
   delete wireCard.comments;
-  const activeAccount = card.sessions?.find(
+  const activeSession = card.sessions?.find(
     (s) => s.id === card.activeSessionId,
-  )?.claudeAccountId;
+  );
+  const activeAccount = activeSession?.claudeAccountId;
   if (activeAccount !== undefined) wireCard.claudeAccountId = activeAccount;
+  if (activeSession?.contextPercent !== undefined)
+    wireCard.contextPercent = activeSession.contextPercent;
+  if (activeSession?.model !== undefined) wireCard.model = activeSession.model;
+  if (activeSession?.cost !== undefined) wireCard.cost = activeSession.cost;
+  if (activeSession?.usage !== undefined) wireCard.usage = activeSession.usage;
+  if (activeSession?.state !== undefined) wireCard.state = activeSession.state;
+  if (activeSession?.stateReason !== undefined)
+    wireCard.stateReason = activeSession.stateReason;
+  if (activeSession?.stateSince !== undefined)
+    wireCard.stateSince = activeSession.stateSince;
+  if (activeSession?.transcriptPath !== undefined)
+    wireCard.transcriptPath = activeSession.transcriptPath;
   const hasMultipleSessions = (card.sessions?.length ?? 0) >= 2;
   wireCard.sessionCount = hasMultipleSessions
     ? card.sessions!.length
@@ -230,6 +270,14 @@ export function redactCard(card: Card): Card {
       prsUnknown: s.prsUnknown,
       previews: s.previews,
       previewsUnknown: s.previewsUnknown,
+      contextPercent: s.contextPercent,
+      model: s.model,
+      cost: s.cost,
+      usage: s.usage,
+      state: s.state,
+      stateReason: s.stateReason,
+      stateSince: s.stateSince,
+      transcriptPath: s.transcriptPath,
       ...(resolvedParentOrdinal != null
         ? { parentOrdinal: resolvedParentOrdinal }
         : {}),
@@ -257,20 +305,6 @@ function syncedFieldsChanged(prev: Card, next: Card): boolean {
 }
 
 /**
- * The version `load()`'s boot migration pass writes into the meta row's `schemaVersion` field
- * (SESS-04). Bump this ONLY when a new migration pass genuinely needs to run again.
- * @remarks It is the version LEDGER, not the migration's gate. `needsSessionEntityMigration()`
- * gates the pass, because a counter an older build's persist can drop is not something a data-
- * integrity check may depend on (`SESS-05`); what makes a second boot reproduce the same session
- * count and the same session ids is the pass being per-card idempotent, not this number (`NEW-21`).
- * It IS the gate for the opposite direction: {@link assertSchemaOpenable} refuses to open any board
- * persisted above this version, since a value above it can only have been written by a build that
- * knows a migration this one does not.
- * @see docs/ARCHITECTURE.md#downgrade-safety
- */
-const SESSION_SCHEMA_VERSION = 2;
-
-/**
  * The six flat session fields that mirror the card's active session record, as a value the
  * downgrade-drift pass can iterate. The authoritative statement of the same six lives in
  * {@link BoardStore.setActiveSession}; this list exists so the drift comparison cannot check a
@@ -285,45 +319,6 @@ const PROJECTED_SESSION_FIELDS = [
   "workspacePath",
   "workspace",
 ] as const;
-
-/**
- * Refuse to open a board whose persisted schema is NEWER than this build understands (`SESS-05`).
- *
- * The migration gate below is `persisted < SESSION_SCHEMA_VERSION`, which leaves `>` — a build
- * opening a database an already-updated sibling wrote — with no defined behaviour at all. This
- * build cannot know what that later migration moved, so every option other than refusing is a
- * guess about someone else's data: continuing would let this build's writers overwrite a shape it
- * never learned to read, and repairing would reconcile toward a projection that may no longer be
- * the newer schema's truth. Refusal is also the option that fails LOUDLY — the alternative silently
- * produces a board that looks correct and diverges underneath.
- * @remarks Nothing on disk is touched: no snapshot, no rotation, no quarantine, no write. Throwing
- * before the migration pass and before `hydrateFromParsed` means the refusing boot leaves the
- * database byte-identical to how it found it, so updating and restarting is a complete recovery
- * and the message can honestly promise that.
- * @remarks A plain `Error`, not a `StartupError`, because a store -> bootstrap import is
- * DAG-illegal; `connect()`'s non-corruption open failure in `board-db.ts` sets the precedent, and
- * bootstrap's `main().catch` already prints a thrown error loudly.
- * @remarks This guard can only ever live in the build doing the opening, so it protects FORWARD:
- * it stops a v3.0 build from opening a v3.1 board. It cannot stop the already-published v2.9 build
- * from opening a v3.0 board, because v2.9 ships without it and cannot be changed. That direction is
- * covered instead — after the fact, not preventively — by
- * {@link BoardStore.repairDowngradeDrift}.
- * @see docs/ARCHITECTURE.md#downgrade-safety
- */
-function assertSchemaOpenable(persistedSchemaVersion: number): void {
-  if (persistedSchemaVersion <= SESSION_SCHEMA_VERSION) return;
-  throw new Error(
-    `[store] ${BOARD_DB_PATH} was written by a NEWER version of dispatch than this one ` +
-      `(board schema version ${persistedSchemaVersion}, this build understands ${SESSION_SCHEMA_VERSION}). ` +
-      `Opening it with this build would let it write a shape it cannot read back, silently ` +
-      `desyncing your sessions, so it refused. Nothing was changed. board.db and every backup ` +
-      `were left exactly as they were. Fix it by updating dispatch: run ` +
-      `\`npx @theyashgupta/dispatch@latest\` (or restart the machine's dispatch service after ` +
-      `updating) and start again. If you instead mean to stay on this older build, restore the ` +
-      `pre-upgrade copy at ${BOARD_DB_PATH}.pre-v3 over ${BOARD_DB_PATH} first. That file is ` +
-      `your board as of before the newer version migrated it.`,
-  );
-}
 
 /**
  * Do a card's flat projection and its active session record disagree on one field?
@@ -493,6 +488,31 @@ function seedIdentifierCounters(
   return counters;
 }
 
+function boardOf(card: Card): BoardKey {
+  return card.boardKey ?? DEFAULT_BOARD_KEY;
+}
+
+function inScope(card: Card, scope: BoardScope): boolean {
+  return scope === ALL_BOARDS || boardOf(card) === scope;
+}
+
+/**
+ * The id prefix of a new group on a board (D-2).
+ *
+ * @remarks A ticket always mints from the board key. The default board keeps `GROUP-n` for groups;
+ * a new board mints groups from its own key, so one counter serves its tickets and its groups.
+ */
+function groupPrefix(board: BoardKey): string {
+  return board === DEFAULT_BOARD_KEY ? "GROUP" : board;
+}
+
+/** A create named a board that does not exist or is archived. */
+export class BoardUnavailableError extends Error {
+  constructor(readonly board: BoardKey) {
+    super(`board ${board} does not exist or is archived`);
+  }
+}
+
 class BoardStore extends EventEmitter {
   /** The sole mutable truth. */
   private readonly cards = new Map<string, Card>();
@@ -544,6 +564,7 @@ class BoardStore extends EventEmitter {
   private identifierCounters: Record<string, number> = {};
   private sourceCursors: Record<string, SourceCursor> = {};
   private readonly items = new Map<string, Item>();
+  private readonly boards = new Map<string, Board>();
   private pendingItemUpserts: Item[] = [];
   /**
    * The persisted `meta.schemaVersion` counter (SESS-04), read back in {@link load} and re-emitted
@@ -873,7 +894,7 @@ class BoardStore extends EventEmitter {
     if (!card.memberIds || card.memberIds.length === 0) return;
     for (const id of card.memberIds) {
       const member = this.cards.get(id);
-      if (member) member.column = column;
+      if (member && boardOf(member) === boardOf(card)) member.column = column;
     }
   }
 
@@ -901,7 +922,7 @@ class BoardStore extends EventEmitter {
    * pre-built snapshot can no longer serve them all; leaving one attached to the event would be a
    * loaded gun; a broadcast listener could accidentally reuse it and silently prune every
    * connection back to the default window (the "load-more amnesia" bug). Every listener must call
-   * `store.snapshot({ doneLimit })` itself, once per distinct window.
+   * `store.snapshot(board, { doneLimit })` itself, once per distinct window.
    * @see docs/ARCHITECTURE.md#single-writer-store
    */
   private enqueue(
@@ -920,6 +941,7 @@ class BoardStore extends EventEmitter {
             this.buildMeta(),
             events,
             itemUpserts.length > 0 ? { upserts: itemUpserts } : undefined,
+            [...this.boards.values()],
           );
           if (ids.length === events.length) {
             broadcast = events.map(
@@ -962,6 +984,12 @@ class BoardStore extends EventEmitter {
       toCol: partial.toCol ?? null,
       reason: partial.reason ?? null,
       source: partial.source ?? null,
+      boardKey:
+        partial.boardKey ??
+        (partial.cardId != null
+          ? this.cards.get(partial.cardId)?.boardKey
+          : undefined) ??
+        DEFAULT_BOARD_KEY,
     };
   }
 
@@ -969,10 +997,20 @@ class BoardStore extends EventEmitter {
    * Mint the next `<prefix>-<n>` identifier for a card.
    *
    * @remarks Must run inside an enqueue mutator; the queue serializes the increment and the same
-   * mutation persists the counter, so a crash can never hand out one number twice.
+   * mutation persists the counter, so a crash can never hand out one number twice. A taken id is
+   * skipped, because a pre-guard build drops the counters of a non-default board.
    */
+  private identifierTaken(id: string): boolean {
+    if (this.cards.has(id) || this.db.getArchive(id)) return true;
+    for (const card of this.cards.values()) {
+      if (card.identifier === id) return true;
+    }
+    return false;
+  }
+
   private nextIdentifier(prefix: string): string {
-    const next = (this.identifierCounters[prefix] ?? 0) + 1;
+    let next = (this.identifierCounters[prefix] ?? 0) + 1;
+    while (this.identifierTaken(`${prefix}-${next}`)) next += 1;
     this.identifierCounters[prefix] = next;
     return `${prefix}-${next}`;
   }
@@ -1057,14 +1095,13 @@ class BoardStore extends EventEmitter {
     const persistedSchemaVersion =
       typeof meta.schemaVersion === "number" ? meta.schemaVersion : 0;
     assertSchemaOpenable(persistedSchemaVersion);
-    const migrationDue = persistedSchemaVersion < SESSION_SCHEMA_VERSION;
     let migratedCount = 0;
     if (needsSessionEntityMigration(cards)) {
       this.db.snapshotPreV3();
       await this.db.backupTick(true);
       migratedCount = migrateCardsToSessionEntity(cards);
     }
-    this.schemaVersion = SESSION_SCHEMA_VERSION;
+    this.schemaVersion = STORE_SCHEMA_VERSION;
     const repaired = this.repairDowngradeDrift(cards);
     const nodesMigrated = migrateClaudeSessionNodes(cards);
     this.hydrateFromParsed({
@@ -1077,8 +1114,10 @@ class BoardStore extends EventEmitter {
     this.sourceCursors = { ...(meta.sourceCursors ?? {}) };
     this.items.clear();
     for (const item of this.db.readAllItems()) this.items.set(item.id, item);
+    this.boards.clear();
+    for (const board of this.db.readBoards()) this.boards.set(board.key, board);
     console.log(`[store] loaded ${this.cards.size} card(s) from board.db.`);
-    if (migrationDue) {
+    if (migratedCount > 0) {
       console.log(
         `[store] session-entity migration: migrated ${migratedCount} card(s), schema version now ${this.schemaVersion}.`,
       );
@@ -1095,7 +1134,12 @@ class BoardStore extends EventEmitter {
         `[store] conversation-node migration: ${nodesMigrated} session record(s) gained a claudeSessions node.`,
       );
     }
-    if (migrationDue || repaired.length > 0 || nodesMigrated > 0)
+    if (
+      migratedCount > 0 ||
+      persistedSchemaVersion < STORE_SCHEMA_VERSION ||
+      repaired.length > 0 ||
+      nodesMigrated > 0
+    )
       await this.enqueue(() => []);
   }
 
@@ -1127,6 +1171,7 @@ class BoardStore extends EventEmitter {
     this.cards.clear();
     for (const card of loaded) {
       if (card && typeof card.id === "string") {
+        card.boardKey ??= DEFAULT_BOARD_KEY;
         const legacy = card as unknown as Record<string, unknown>;
         if (legacy.column === "in_planning") {
           card.column = card.tmuxSession ? "in_progress" : "todo";
@@ -1192,7 +1237,7 @@ class BoardStore extends EventEmitter {
    * for ordering, redaction, AND windowing (`BOARD-08`). The To Do cards are sorted with
    * compareTodoOrder on this read path; other columns carry no Phase-1 ordering decision (the
    * frontend re-partitions by `column`, so cross-column concat order is irrelevant). A bare call
-   * (`opts` omitted) returns the FULL, un-windowed set — internal readers (e.g.
+   * (`opts` omitted) returns the FULL, un-windowed set of the board, so internal readers (e.g.
    * `adapters/terminal-proxy.ts`, `adapters/ttyd.ts`) keep working unchanged; only
    * `opts.doneLimit` windows the Done column, and only the two wire endpoints
    * (`GET /api/board`, `GET /api/stream`) opt in.
@@ -1209,8 +1254,15 @@ class BoardStore extends EventEmitter {
    * considered and deliberately rides the wire — a non-secret timestamp).
    * @see docs/ARCHITECTURE.md#sse-transport
    */
-  snapshot(opts?: { doneLimit?: number }): BoardSnapshot {
-    const snap = this.persistSnapshot();
+  snapshot(board: BoardKey, opts?: { doneLimit?: number }): BoardSnapshot {
+    const all = this.persistSnapshot();
+    const { folders, lastUsed } = this.getWorkspaceFolders(board);
+    const snap = {
+      ...all,
+      cards: all.cards.filter((c) => boardOf(c) === board),
+      workspaceFolders: folders,
+      lastUsed,
+    };
     const doneTop = snap.cards.filter(
       (c) => c.column === "done" && c.groupId == null,
     );
@@ -1237,6 +1289,7 @@ class BoardStore extends EventEmitter {
     }
     return {
       ...snap,
+      boardKey: board,
       cards: kept.map((c) =>
         this.inFlightCleanups.has(c.id)
           ? { ...redactCard(c), cleaningUp: true }
@@ -1375,6 +1428,7 @@ class BoardStore extends EventEmitter {
    * cap drops old Done cards first; a gone card stays eligible so a found issue clears its flag.
    */
   trackedIssueIds(
+    scope: BoardScope,
     sourceId: string,
     returnedIds: ReadonlySet<string>,
     limit = 1000,
@@ -1385,6 +1439,7 @@ class BoardStore extends EventEmitter {
     return [...this.cards.values()]
       .filter(
         (c) =>
+          inScope(c, scope) &&
           (c.source ?? "linear") === sourceId &&
           (isPastTodo(c) || isAdopted(c) || hasFreshPending(c, now)) &&
           !returnedIds.has(c.issueId),
@@ -1419,8 +1474,18 @@ class BoardStore extends EventEmitter {
    * `GET /workspace-folders` (mirrors getCard — a cheap field read that has no need to build a
    * full, redacted, potentially windowed `BoardSnapshot`).
    */
-  getWorkspaceFolders(): { folders: string[]; lastUsed: string | null } {
-    return { folders: this.workspaceFolders, lastUsed: this.lastUsedFolder };
+  getWorkspaceFolders(board: BoardKey): {
+    folders: string[];
+    lastUsed: string | null;
+  } {
+    if (board === DEFAULT_BOARD_KEY) {
+      return { folders: this.workspaceFolders, lastUsed: this.lastUsedFolder };
+    }
+    const row = this.boards.get(board);
+    return {
+      folders: row?.repositories.map((r) => r.path) ?? [],
+      lastUsed: row?.lastUsedFolder ?? null,
+    };
   }
 
   /**
@@ -1438,12 +1503,14 @@ class BoardStore extends EventEmitter {
    * user open one directly.
    */
   searchCards(
+    board: BoardKey,
     query: string,
     limit: number,
   ): { results: CardSearchResult[]; total: number } {
     const q = query.toLowerCase();
     const matches = [...this.cards.values()].filter(
       (c) =>
+        boardOf(c) === board &&
         c.groupId == null &&
         (c.identifier.toLowerCase().includes(q) ||
           c.title.toLowerCase().includes(q)),
@@ -1464,8 +1531,132 @@ class BoardStore extends EventEmitter {
    * board, a string scopes to one card). A pure synchronous read delegated to the BoardDb surface
    * (hasCard/getCard precedent) so the route never imports better-sqlite3; not enqueued.
    */
-  listEvents(cardId: string | null, limit: number): ActivityEvent[] {
-    return this.db.listEvents(cardId, limit);
+  listEvents(
+    board: BoardKey,
+    cardId: string | null,
+    limit: number,
+  ): ActivityEvent[] {
+    return this.db.listEvents(board, cardId, limit);
+  }
+
+  /** Activity events of one board with `id > sinceId`, oldest first, at most `limit`. */
+  listEventsSince(
+    board: BoardKey,
+    cardId: string | null,
+    sinceId: number,
+    limit: number,
+  ): ActivityEvent[] {
+    return this.db.listEventsSince(board, cardId, sinceId, limit);
+  }
+
+  /**
+   * Store a group card's loop progress, writing only when it differs from the stored value.
+   *
+   * @remarks The compare runs before the queue because every `enqueue` persists all cards and emits
+   * `change`, so a poll that re-reads identical progress must not enter it. An unknown card id is a
+   * no-op.
+   */
+  setLoopProgress(cardId: string, progress: LoopProgress): Promise<void> {
+    const card = this.cards.get(cardId);
+    if (card === undefined) return Promise.resolve();
+    const stable = (p: LoopProgress | undefined) =>
+      JSON.stringify(p === undefined ? null : { ...p, readAt: "" });
+    if (stable(card.loopProgress) === stable(progress))
+      return Promise.resolve();
+    return this.enqueue(() => {
+      const current = this.cards.get(cardId);
+      if (current) current.loopProgress = progress;
+      return [];
+    });
+  }
+
+  /**
+   * Append one orchestration event and broadcast it on the `orchestration` channel.
+   *
+   * @remarks The write is synchronous and bypasses the queue because the log is append-only and
+   * touches no card.
+   */
+  appendOrchestrationEvent(
+    e: Omit<OrchestrationEvent, "id">,
+  ): OrchestrationEvent {
+    let id: number;
+    try {
+      id = this.db.appendOrchestrationEvent(e);
+    } catch (err) {
+      console.error("[store] orchestration event append failed:", err);
+      throw err;
+    }
+    const event: OrchestrationEvent = { ...e, id };
+    this.emit("orchestration", event);
+    return event;
+  }
+
+  /** Orchestration events of one board after `sinceId`, oldest first. */
+  listOrchestrationEvents(
+    board: BoardKey,
+    sinceId: number,
+    limit: number,
+  ): OrchestrationEvent[] {
+    return this.db.listOrchestrationEvents(board, sinceId, limit);
+  }
+
+  /** Store a token hash as the only live token of one orchestrator, revoking any earlier one. */
+  replaceOrchestratorToken(
+    tokenHash: string,
+    boardKey: BoardKey,
+    orchestratorId: string,
+  ): void {
+    this.db.replaceOrchestratorToken({
+      tokenHash,
+      boardKey,
+      orchestratorId,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
+  /** Revoke every live token of one orchestrator and return how many were revoked. */
+  revokeOrchestratorTokens(boardKey: BoardKey, orchestratorId: string): number {
+    return this.db.revokeOrchestratorTokens(
+      boardKey,
+      orchestratorId,
+      new Date().toISOString(),
+    );
+  }
+
+  /** The token row stored under one SHA-256 hash, live or revoked, or undefined. */
+  findOrchestratorToken(tokenHash: string): OrchestratorTokenRow | undefined {
+    return this.db.findOrchestratorToken(tokenHash);
+  }
+
+  /** Store one new decision item. */
+  insertDecisionItem(item: DecisionItem): void {
+    this.db.insertDecisionItem(item);
+  }
+
+  /** One decision item by id, or undefined. */
+  getDecisionItem(id: string): DecisionItem | undefined {
+    return this.db.getDecisionItem(id);
+  }
+
+  /** Decision items of one board, oldest first, only those in `state` when given. */
+  listDecisionItems(
+    boardKey: BoardKey,
+    state?: DecisionItem["state"],
+  ): DecisionItem[] {
+    return this.db.listDecisionItems(boardKey, state);
+  }
+
+  /** Answer one open decision item and return it; null when it is unknown or already answered. */
+  answerDecisionItem(
+    id: string,
+    answer: NonNullable<DecisionItem["answer"]>,
+  ): DecisionItem | null {
+    return this.db.answerDecisionItem(id, answer, new Date().toISOString());
+  }
+
+  /** Mark one answered decision item used; false when it is unknown, open or already used. */
+  consumeDecisionItem(id: string): boolean {
+    return this.db.consumeDecisionItem(id, new Date().toISOString());
   }
 
   /**
@@ -1620,10 +1811,21 @@ class BoardStore extends EventEmitter {
    * registered folder is a no-op: the modal treats "add an existing folder" as merely selecting it,
    * so a duplicate must not grow the list or emit a spurious change.
    */
-  addWorkspaceFolder(path: string): Promise<void> {
+  addWorkspaceFolder(board: BoardKey, path: string): Promise<void> {
     return this.enqueue(() => {
-      if (!this.workspaceFolders.includes(path)) {
-        this.workspaceFolders.push(path);
+      if (board === DEFAULT_BOARD_KEY) {
+        if (!this.workspaceFolders.includes(path)) {
+          this.workspaceFolders.push(path);
+        }
+        return [];
+      }
+      const row = this.boards.get(board);
+      if (row && !row.repositories.some((r) => r.path === path)) {
+        row.repositories.push({
+          path,
+          baseBranch: null,
+          checkCommand: DEFAULT_CHECK_COMMAND,
+        });
       }
       return [];
     });
@@ -1633,11 +1835,20 @@ class BoardStore extends EventEmitter {
    * Unregister a workspace folder. If it was the last-used folder, retarget lastUsed to the first
    * remaining folder (or null) so the modal never preselects a folder that no longer exists.
    */
-  removeWorkspaceFolder(path: string): Promise<void> {
+  removeWorkspaceFolder(board: BoardKey, path: string): Promise<void> {
     return this.enqueue(() => {
-      this.workspaceFolders = this.workspaceFolders.filter((f) => f !== path);
-      if (this.lastUsedFolder === path) {
-        this.lastUsedFolder = this.workspaceFolders[0] ?? null;
+      if (board === DEFAULT_BOARD_KEY) {
+        this.workspaceFolders = this.workspaceFolders.filter((f) => f !== path);
+        if (this.lastUsedFolder === path) {
+          this.lastUsedFolder = this.workspaceFolders[0] ?? null;
+        }
+        return [];
+      }
+      const row = this.boards.get(board);
+      if (!row) return [];
+      row.repositories = row.repositories.filter((r) => r.path !== path);
+      if (row.lastUsedFolder === path) {
+        row.lastUsedFolder = row.repositories[0]?.path ?? null;
       }
       return [];
     });
@@ -1647,9 +1858,14 @@ class BoardStore extends EventEmitter {
    * Remember the folder of a SUCCESSFUL start so the modal preselects it next time. Called only on
    * a completed start, not on mere selection, so an abandoned modal never changes the default.
    */
-  setLastUsedFolder(path: string): Promise<void> {
+  setLastUsedFolder(board: BoardKey, path: string): Promise<void> {
     return this.enqueue(() => {
-      this.lastUsedFolder = path;
+      if (board === DEFAULT_BOARD_KEY) {
+        this.lastUsedFolder = path;
+        return [];
+      }
+      const row = this.boards.get(board);
+      if (row) row.lastUsedFolder = path;
       return [];
     });
   }
@@ -1987,6 +2203,78 @@ class BoardStore extends EventEmitter {
       } else if (card.tmuxSession === session) {
         card.prs = value;
       }
+      return [];
+    });
+  }
+
+  /**
+   * Write the status-line meters onto the session record that owns `tmuxSession`.
+   *
+   * @remarks An unknown card or a session the card does not own resolves false before the queue, because every enqueue saves all cards and emits `change`. The same guard repeats inside the queue like `setPrsIfSession`.
+   */
+  setSessionMetersIfSession(
+    id: string,
+    tmuxSession: string,
+    meters: SessionMeters,
+  ): Promise<boolean> {
+    const owns = () =>
+      this.cards.get(id)?.sessions?.find((s) => s.tmuxSession === tmuxSession);
+    if (!owns()) return Promise.resolve(false);
+    let written = false;
+    return this.enqueue(() => {
+      const target = owns();
+      if (!target) return [];
+      target.contextPercent = meters.contextPercent;
+      target.model = meters.model;
+      target.cost = meters.cost;
+      target.usage = meters.usage;
+      target.metersAt = new Date().toISOString();
+      written = true;
+      return [];
+    }).then(() => written);
+  }
+
+  /**
+   * Write the supervisor state onto one session record and stamp `stateSince`.
+   *
+   * @remarks Resolves false for an unknown card or session before the queue, like `setSessionMetersIfSession`. The reason is cleared when none is given, so an old reason never outlives its state.
+   */
+  setSessionStateIfSession(
+    id: string,
+    sessionId: string,
+    state: SupervisorState,
+    reason?: SupervisorStateReason,
+  ): Promise<boolean> {
+    const owns = () =>
+      this.cards.get(id)?.sessions?.find((s) => s.id === sessionId);
+    if (!owns()) return Promise.resolve(false);
+    let written = false;
+    return this.enqueue(() => {
+      const target = owns();
+      if (!target) return [];
+      target.state = state;
+      target.stateSince = new Date().toISOString();
+      if (reason === undefined) delete target.stateReason;
+      else target.stateReason = reason;
+      written = true;
+      return [];
+    }).then(() => written);
+  }
+
+  /** Store the transcript file of one session; a same value skips the queue. */
+  setTranscriptPath(
+    id: string,
+    sessionId: string,
+    transcriptPath: string,
+  ): Promise<void> {
+    const find = () =>
+      this.cards.get(id)?.sessions?.find((s) => s.id === sessionId);
+    const peek = find();
+    if (!peek || peek.transcriptPath === transcriptPath)
+      return Promise.resolve();
+    return this.enqueue(() => {
+      const target = find();
+      if (target) target.transcriptPath = transcriptPath;
       return [];
     });
   }
@@ -2426,6 +2714,7 @@ class BoardStore extends EventEmitter {
         destination,
         card: structuredClone(card),
         members: members.map((m) => ({ id: m.id, identifier: m.identifier })),
+        boardKey: boardOf(card),
       };
       this.db.upsertArchive(row);
       this.cards.delete(card.id);
@@ -2439,6 +2728,7 @@ class BoardStore extends EventEmitter {
       return [
         this.event("group_unwound", {
           cardId: card.id,
+          boardKey: boardOf(card),
           fromCol: card.column,
           toCol: destination,
           reason: `${members.length} tickets`,
@@ -2488,6 +2778,7 @@ class BoardStore extends EventEmitter {
         return [];
       }
       const card = structuredClone(row.card);
+      card.boardKey ??= row.boardKey ?? DEFAULT_BOARD_KEY;
       card.updatedAt = new Date().toISOString();
       this.cards.set(card.id, card);
       for (const m of row.members) {
@@ -2516,9 +2807,10 @@ class BoardStore extends EventEmitter {
   deleteArchived(archiveId: string): Promise<boolean> {
     let removed = false;
     return this.enqueue(() => {
+      const boardKey = this.db.getArchive(archiveId)?.boardKey;
       removed = this.db.deleteArchive(archiveId);
       return removed
-        ? [this.event("archive_deleted", { cardId: archiveId })]
+        ? [this.event("archive_deleted", { cardId: archiveId, boardKey })]
         : [];
     }).then(() => removed);
   }
@@ -2554,8 +2846,8 @@ class BoardStore extends EventEmitter {
   }
 
   /** Synchronous archive read, newest first (the `listEvents` precedent: not enqueued). */
-  listArchive(): ArchivedGroup[] {
-    return this.db.listArchive();
+  listArchive(board: BoardKey): ArchivedGroup[] {
+    return this.db.listArchive().filter((r) => r.boardKey === board);
   }
 
   /** One archived group by id, or undefined. */
@@ -2568,13 +2860,18 @@ class BoardStore extends EventEmitter {
    * @remarks `retentionDays` of 0 means never, so it yields nothing. A row whose group id is live
    * again is never due: its worktrees belong to a card on the board.
    */
-  archiveDueForDelete(now: number, retentionDays: number): ArchivedGroup[] {
+  archiveDueForDelete(
+    scope: BoardScope,
+    now: number,
+    retentionDays: number,
+  ): ArchivedGroup[] {
     if (!(retentionDays > 0)) return [];
     const windowMs = retentionDays * MS_PER_DAY;
     return this.db
       .listArchive()
       .filter(
         (r) =>
+          (scope === ALL_BOARDS || r.boardKey === scope) &&
           r.deleteBlocked == null &&
           !this.cards.has(r.id) &&
           Date.parse(r.archivedAt) + windowMs <= now,
@@ -2962,8 +3259,10 @@ class BoardStore extends EventEmitter {
    * Mirrors getCard: returns live Map entries — callers must NOT mutate them; all mutations flow
    * through the enqueue-wrapped methods.
    */
-  cardsWithSession(): Card[] {
-    return [...this.cards.values()].filter((c) => c.tmuxSession != null);
+  cardsWithSession(scope: BoardScope): Card[] {
+    return [...this.cards.values()].filter(
+      (c) => inScope(c, scope) && c.tmuxSession != null,
+    );
   }
 
   /**
@@ -2972,8 +3271,8 @@ class BoardStore extends EventEmitter {
    * @remarks Returns live Map entries like getCard; callers must not mutate them and must redact
    * before anything leaves the process.
    */
-  listCards(): Card[] {
-    return [...this.cards.values()];
+  listCards(scope: BoardScope): Card[] {
+    return [...this.cards.values()].filter((c) => inScope(c, scope));
   }
 
   /**
@@ -3012,13 +3311,14 @@ class BoardStore extends EventEmitter {
    * @returns Pairs whose `session.tmuxSession` is carried in the TYPE, so consumers narrow without
    * a runtime guard the iteration source has already made unreachable (`IN-01`).
    */
-  sessionsWithTmux(): {
+  sessionsWithTmux(scope: BoardScope): {
     card: Card;
     session: Session & { tmuxSession: string };
   }[] {
     const out: { card: Card; session: Session & { tmuxSession: string } }[] =
       [];
     for (const card of this.cards.values()) {
+      if (!inScope(card, scope)) continue;
       let yielded = false;
       for (const session of card.sessions ?? []) {
         if (session.tmuxSession != null) {
@@ -3082,11 +3382,13 @@ class BoardStore extends EventEmitter {
    * than silently dropped, mirroring `sessionsWithTmux`'s own once-per-card logging.
    */
   sessionsDueForCleanup(
+    scope: BoardScope,
     now: number,
   ): { card: Card; sessionId: string | undefined; dueAt: number }[] {
     const out: { card: Card; sessionId: string | undefined; dueAt: number }[] =
       [];
     for (const card of this.cards.values()) {
+      if (!inScope(card, scope)) continue;
       if (card.column !== "done" || this.isStarting(card.id)) continue;
       let yielded = false;
       for (const session of card.sessions ?? []) {
@@ -3949,6 +4251,228 @@ class BoardStore extends EventEmitter {
     });
   }
 
+  /** Every board, archived ones included, oldest first. */
+  listBoards(): Board[] {
+    return [...this.boards.values()];
+  }
+
+  getBoard(key: BoardKey): Board | undefined {
+    return this.boards.get(key);
+  }
+
+  /**
+   * The board a new card of `source` lands on (R-15).
+   *
+   * @remarks A Linear card goes to the first board whose `linearTeamKeys` holds the team key, which
+   * is the identifier prefix; every other case goes to the default board. An archived board still
+   * receives its team's cards, so a restore shows them.
+   */
+  private boardForNewCard(source: string, identifier: string): BoardKey {
+    if (source !== "linear") return DEFAULT_BOARD_KEY;
+    const teamKey = identifierPrefix(identifier);
+    const board = [...this.boards.values()].find((b) =>
+      b.linearTeamKeys.includes(teamKey),
+    );
+    return board?.key ?? DEFAULT_BOARD_KEY;
+  }
+
+  private isOpenBoard(key: BoardKey): boolean {
+    const board = this.boards.get(key);
+    return board != null && !board.archived;
+  }
+
+  /**
+   * Create a board after the key checks of D-2 that the store can answer.
+   *
+   * @remarks The checks run inside the write queue, so two creates of one key cannot both pass. A
+   * key that prefixes a card id, a card identifier or an archive id is in use, because the new
+   * board would mint ids that collide with it (this covers the Linear team keys the store knows).
+   */
+  createBoard(input: NewBoard): Promise<CreateBoardResult> {
+    let result!: CreateBoardResult;
+    return this.enqueue(() => {
+      const refusal = this.newBoardKeyRefusal(input.key);
+      if (refusal) {
+        result = refusal;
+        return [];
+      }
+      const board: Board = {
+        ...input,
+        repositories: input.repositories.map((r) => ({ ...r })),
+        linearTeamKeys: [...input.linearTeamKeys],
+        lastUsedFolder: null,
+        policy: defaultBoardPolicy(input.key),
+        createdAt: new Date().toISOString(),
+        archived: false,
+      };
+      this.boards.set(board.key, board);
+      result = { ok: true, board };
+      return [];
+    }).then(() => result);
+  }
+
+  private newBoardKeyRefusal(
+    key: string,
+  ): Exclude<CreateBoardResult, { ok: true }> | null {
+    if (parseBoardKey(key) === null)
+      return { ok: false, reason: "invalid-key" };
+    if (isReservedBoardKey(key)) return { ok: false, reason: "reserved-key" };
+    const existing = this.boards.get(key);
+    if (existing) {
+      return { ok: false, reason: "duplicate-key", boardName: existing.name };
+    }
+    for (const card of this.cards.values()) {
+      if (
+        identifierPrefix(card.id) === key ||
+        identifierPrefix(card.identifier) === key
+      ) {
+        return {
+          ok: false,
+          reason: "key-in-use",
+          source: card.source ?? "linear",
+        };
+      }
+    }
+    if (this.db.listArchive().some((row) => identifierPrefix(row.id) === key)) {
+      return { ok: false, reason: "key-in-use", source: "archive" };
+    }
+    return null;
+  }
+
+  /**
+   * Change the name, folders or Linear team keys of a board; the key never changes.
+   *
+   * @remarks Only those four fields are copied, and only when set, so a patch can never change the
+   * key, the archive flag or the policy, nor store a null that would fail every later save. The
+   * default board keeps its sessions folder in `Config` and its repositories in the
+   * global workspace folders (D-1 amendment), so a patch of those two fields on `LOCAL` is dropped
+   * here and the caller writes them where they live.
+   */
+  updateBoard(key: BoardKey, patch: BoardPatch): Promise<Board | undefined> {
+    let updated: Board | undefined;
+    return this.enqueue(() => {
+      const board = this.boards.get(key);
+      if (!board) return [];
+      if (patch.name != null) board.name = patch.name;
+      if (patch.linearTeamKeys != null) {
+        board.linearTeamKeys = patch.linearTeamKeys;
+      }
+      if (key !== DEFAULT_BOARD_KEY) {
+        if (patch.workspaceRoot != null) {
+          board.workspaceRoot = patch.workspaceRoot;
+        }
+        if (patch.repositories != null) board.repositories = patch.repositories;
+      }
+      updated = board;
+      return [];
+    }).then(() => updated);
+  }
+
+  /** Replace the policy of one board; resolves undefined for an unknown board. */
+  setBoardPolicy(
+    key: BoardKey,
+    policy: BoardPolicy,
+  ): Promise<Board | undefined> {
+    let updated: Board | undefined;
+    return this.enqueue(() => {
+      const board = this.boards.get(key);
+      if (board) {
+        board.policy = { ...policy };
+        updated = board;
+      }
+      return [];
+    }).then(() => updated);
+  }
+
+  /** Set the start hold of a group card and, when given, the groups it waits on. */
+  setGroupQueue(
+    id: string,
+    queue: { startQueued: boolean; dependsOn?: string[] },
+  ): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      card.startQueued = queue.startQueued;
+      if (queue.dependsOn !== undefined) card.dependsOn = [...queue.dependsOn];
+      return [];
+    });
+  }
+
+  /** Store the orchestrator that created a card and the launch values of a held group start. */
+  setOrchestratorFields(
+    id: string,
+    fields: Pick<Card, "createdByOrchestrator" | "launch">,
+  ): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      if (fields.createdByOrchestrator !== undefined) {
+        card.createdByOrchestrator = fields.createdByOrchestrator;
+      }
+      if (fields.launch !== undefined) card.launch = { ...fields.launch };
+      return [];
+    });
+  }
+
+  /** Store the ship flow of a group card; an unknown card is a no-op. */
+  setShipFlow(id: string, flow: ShipFlow): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      card.shipFlow = structuredClone(flow);
+      return [];
+    });
+  }
+
+  /** Change the title or description of a local card; false for an unknown or non-local card. */
+  updateLocalCardText(
+    id: string,
+    patch: { title?: string; description?: string },
+  ): Promise<boolean> {
+    let updated = false;
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card?.source !== "local") return [];
+      if (patch.title !== undefined) card.title = patch.title;
+      if (patch.description !== undefined) card.description = patch.description;
+      card.updatedAt = new Date().toISOString();
+      updated = true;
+      return [];
+    }).then(() => updated);
+  }
+
+  /** Append a comment entry to a local card; false for an unknown or non-local card. */
+  addLocalComment(id: string, comment: LinearComment): Promise<boolean> {
+    let added = false;
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card?.source !== "local") return [];
+      card.comments = [...(card.comments ?? []), { ...comment }];
+      added = true;
+      return [];
+    }).then(() => added);
+  }
+
+  /** Archive or restore a board; the default board cannot be archived. */
+  setBoardArchived(
+    key: BoardKey,
+    archived: boolean,
+  ): Promise<ArchiveBoardResult> {
+    let result!: ArchiveBoardResult;
+    return this.enqueue(() => {
+      const board = this.boards.get(key);
+      if (!board) {
+        result = { ok: false, reason: "unknown-board" };
+      } else if (archived && key === DEFAULT_BOARD_KEY) {
+        result = { ok: false, reason: "default-board" };
+      } else {
+        board.archived = archived;
+        result = { ok: true, board };
+      }
+      return [];
+    }).then(() => result);
+  }
+
   /**
    * Mint a new `source: "local"` card (Phase 61, TICKET-02/04): a first-class ordinary `Card` with
    * no upstream issue, landing straight in To Do. The identifier is minted AT ACCEPT TIME —
@@ -3967,10 +4491,15 @@ class BoardStore extends EventEmitter {
    * of the enqueue-wrapped mutation (every other mutator here returns `Promise<void>`), since the
    * route layer needs the minted `Card` — including its real identifier — to respond to the client.
    */
-  createLocalCard(title: string, description: string): Promise<Card> {
-    let created!: Card;
+  createLocalCard(
+    board: BoardKey,
+    title: string,
+    description: string,
+  ): Promise<Card> {
+    let created: Card | undefined;
     return this.enqueue(() => {
-      const identifier = this.nextIdentifier("LOCAL");
+      if (!this.isOpenBoard(board)) return [];
+      const identifier = this.nextIdentifier(board);
       const now = new Date().toISOString();
       created = {
         id: identifier,
@@ -3983,6 +4512,7 @@ class BoardStore extends EventEmitter {
         updatedAt: now,
         promotedAt: now,
         source: "local",
+        boardKey: board,
       };
       this.cards.set(created.id, created);
       return [
@@ -3992,7 +4522,10 @@ class BoardStore extends EventEmitter {
           source: "local",
         }),
       ];
-    }).then(() => created);
+    }).then(() => {
+      if (!created) throw new BoardUnavailableError(board);
+      return created;
+    });
   }
 
   /**
@@ -4013,6 +4546,7 @@ class BoardStore extends EventEmitter {
    * ratified ALL-OR-NOTHING posture and the two-sided `memberIds`/`groupId` invariant.
    */
   createGroupCard(
+    board: BoardKey,
     title: string,
     memberIds: string[],
   ): Promise<
@@ -4020,11 +4554,17 @@ class BoardStore extends EventEmitter {
   > {
     let result!:
       { ok: true; card: Card } | { ok: false; ineligibleIds: string[] };
+    let refused = false;
     return this.enqueue(() => {
+      if (!this.isOpenBoard(board)) {
+        refused = true;
+        return [];
+      }
       const ineligibleIds = memberIds.filter((id) => {
         const member = this.cards.get(id);
         return (
           member == null ||
+          boardOf(member) !== board ||
           member.column !== "todo" ||
           member.groupId != null ||
           member.source === "group"
@@ -4034,7 +4574,7 @@ class BoardStore extends EventEmitter {
         result = { ok: false, ineligibleIds };
         return [];
       }
-      const identifier = this.nextIdentifier("GROUP");
+      const identifier = this.nextIdentifier(groupPrefix(board));
       const now = new Date().toISOString();
       const created: Card = {
         id: identifier,
@@ -4048,6 +4588,7 @@ class BoardStore extends EventEmitter {
         promotedAt: now,
         source: "group",
         memberIds: [...memberIds],
+        boardKey: board,
       };
       this.cards.set(created.id, created);
       for (const id of memberIds) {
@@ -4062,7 +4603,10 @@ class BoardStore extends EventEmitter {
           source: "group",
         }),
       ];
-    }).then(() => result);
+    }).then(() => {
+      if (refused) throw new BoardUnavailableError(board);
+      return result;
+    });
   }
 
   /**
@@ -4318,13 +4862,19 @@ class BoardStore extends EventEmitter {
    * longer exists (for example removed by a later sync) the item is promoted again into a new card.
    */
   promoteItem(
+    board: BoardKey,
     id: string,
     context?: string,
   ): Promise<{ card: Card; created: boolean } | undefined> {
     let result: { card: Card; created: boolean } | undefined;
+    let refused = false;
     return this.enqueue(() => {
       const current = this.items.get(id);
       if (!current) return [];
+      if (!this.isOpenBoard(board)) {
+        refused = true;
+        return [];
+      }
       if (current.cardId !== undefined) {
         const existing = this.cards.get(current.cardId);
         if (existing) {
@@ -4335,10 +4885,11 @@ class BoardStore extends EventEmitter {
       const now = new Date().toISOString();
       const card = buildPromotedCard(
         current,
-        this.nextIdentifier("LOCAL"),
+        this.nextIdentifier(board),
         now,
         context,
       );
+      card.boardKey = board;
       this.cards.set(card.id, card);
       this.stageItem({ ...withState(current, "done"), cardId: card.id });
       result = { card, created: true };
@@ -4350,7 +4901,10 @@ class BoardStore extends EventEmitter {
           reason: `promoted from ${current.source}: ${current.title}`,
         }),
       ];
-    }).then(() => result);
+    }).then(() => {
+      if (refused) throw new BoardUnavailableError(board);
+      return result;
+    });
   }
 
   listItems(): Item[] {
@@ -4378,7 +4932,12 @@ class BoardStore extends EventEmitter {
    * The cards Map stays keyed by raw upstream id, so the per-source reconcile filter
    * alone cannot stop a cross-source id collision: an upsert whose id already belongs
    * to a DIFFERENT source's card is skipped with a warning rather than clobbering that
-   * card (which could carry a live session's tmux/workspace state).
+   * card (which could carry a live session's tmux/workspace state). An upsert whose identifier is
+   * the id of another source's card is skipped the same way, because both would share one tmux name.
+   *
+   * @remarks A new Linear card goes to the board that lists its team key (R-15). A pull covers every
+   * team, so `current` spans all boards of the syncing source and a vanished card is removed on its
+   * own board; a card of another source is never in `current`, so no removal reaches it.
    */
   applyIssues(
     issues: SourceIssue[],
@@ -4416,6 +4975,19 @@ class BoardStore extends EventEmitter {
           );
           continue;
         }
+        const sameIdentifier = this.cards.get(card.identifier);
+        if (
+          sameIdentifier &&
+          sameIdentifier.id !== card.id &&
+          (sameIdentifier.source ?? "linear") !== src
+        ) {
+          console.warn(
+            `[store] skipped upsert of ${card.id} from source ${src}, identifier ${card.identifier} is the id of a ${sameIdentifier.source ?? "linear"} card.`,
+          );
+          continue;
+        }
+        card.boardKey =
+          existing?.boardKey ?? this.boardForNewCard(src, card.identifier);
         const displayOnly =
           existing != null && existing.groupId == null && isPastTodo(existing);
         if (

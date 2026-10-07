@@ -1,0 +1,12 @@
+▝▜██████▀  Opus 5.5 with high effort · Claude Max
+ ▝▝   ▝▝   ~/dispatch-workspaces/GROUP-5/dispatch
+  Get to finished work sooner with Opus 5.5. Switch anytime with /model.
+❯ /clear
+❯ Resume the g8-intelligence roadmap loop (roadmap-loop skill). Read /Users/yash/dispatch-workspaces/GROUP-5/dispatch/.roadmap/g8-intelligence/resume.md and follow it. Fi
+  session id is the basename of the newest .jsonl in ~/.claude/projects/-Users-yash-dispatch-workspaces-GROUP-5/; write it into the session_id line of
+  /Users/yash/dispatch-workspaces/GROUP-5/.claude/ralph-loop.local.md (it says handoff-pending) and verify. Then continue unattended. Rules: take the recommended grill an
+  you stop for a human, end with its own line 'DISPATCH_STATUS: NEEDS_INPUT - <reason>'; when the loop is done, end with 'DISPATCH_STATUS: DONE - <summary>'; close the br
+  each UI check; never push; no em dashes or double hyphens.
+  Opus 5.5 · high  │  ░░░░░░░░░░  warming up
+  GROUP-5  │  thinking  │  Attention-kind  │  5h 22%  │  7d 96%  │  7s
+  ⏵⏵ bypass permissions on (shift+tab to cycle)

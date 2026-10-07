@@ -19,6 +19,8 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
 - [Module Map](#module-map)
 - Cross-Module Invariants
   - [Single Writer Store](#single-writer-store)
+  - [Boards](#boards)
+  - [Board API](#board-api)
   - [Session Projection Chokepoint](#session-projection-chokepoint)
   - [Marker Protocol](#marker-protocol)
   - [Column Transition Specification](#column-transition-specification)
@@ -56,6 +58,10 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
 - [Security Threat Model](#security-threat-model)
 - [Known Residuals](#known-residuals)
 - [Verification Gates](#verification-gates)
+- [Orchestration Initiative](#orchestration-initiative)
+  - [Loop Progress](#loop-progress)
+  - [Session Supervisor](#session-supervisor)
+  - [Orchestrator Control Surface](#orchestrator-control-surface)
 
 ## System Overview
 
@@ -101,7 +107,10 @@ and roles only, it does not restate the layering policy.
 | Markers             | `adapters/markers/parse.ts`, `adapters/markers/scan-decision.ts`, `adapters/markers/pane-view.ts`, `adapters/markers/watcher.ts`                                                                                                                                                                                                                | Pure marker parser, the pure per-tick decision core, the pane-view helpers, and the I/O-shell pane watcher applying one card decision per tick.                                                                                                                                                                      |
 | Adapters            | `adapters/exec.ts`, `adapters/git.ts`, `adapters/tmux.ts`, `adapters/ttyd.ts`, `adapters/claude-trust.ts`, `adapters/editors.ts`, `adapters/resolve-binary.ts`                                                                                                                                                                                  | The argv-only subprocess chokepoint, the git / tmux / ttyd / claude-trust adapters over it, editor launch, and binary-path resolution.                                                                                                                                                                               |
 | Shared              | `shared/types.ts`                                                                                                                                                                                                                                                                                                                               | Pure cross-half contracts; `BoardSnapshot` is both the SSE payload and the on-disk board file.                                                                                                                                                                                                                       |
-| Frontend            | `web/App.tsx`, `web/features/board/Board.tsx`, `web/features/board/Card.tsx`, `web/features/detail/DetailPanel.tsx`, plus hooks, dialogs, and the sidebar (`web/modules/shell/components/AppSidebar.tsx`)                                                                                                                                       | React board: optimistic drag-and-drop, the detail slide-over with the terminal iframe, SSE hooks.                                                                                                                                                                                                                    |
+| Frontend entry      | `web/main.tsx`, `web/lib/app-store.ts`, `web/lib/query-client.ts`, `web/lib/http.ts`                                                                                                                                                                                                                                                            | The provider stack (QueryClientProvider, ThemeProvider, RouterProvider and the splash), the app store for cross-module UI state, the query client, and the HTTP client that returns 4xx and 5xx responses as typed data.                                                                                             |
+| Frontend routes     | `web/routes/__root.tsx`, `web/routes/board.{-$id}.lazy.tsx`, `web/modules/shell/containers/ShellContainer.tsx`                                                                                                                                                                                                                                  | Hash routes own the URL and its params. The router context gives the query client and the app store to every container. The root route renders the shell view with module views in its slots: the page, the detail panel and the card action dialogs.                                                                |
+| Frontend modules    | `web/modules/board/views/BoardView.tsx`, `web/modules/board/containers/BoardContainer.tsx`, `web/modules/detail/containers/DetailPanelContainer.tsx`, `web/modules/shell/components/AppSidebar.tsx`                                                                                                                                             | One folder per feature under `web/modules/`, with the layers views, containers, components, hooks, domain and queries. A module never imports a sibling module. [frontend-architecture.md](standards/frontend-architecture.md) has the layer rules.                                                                  |
+| Frontend shared     | `web/components/ui/button.tsx`, `web/components/ui/hooks/use-app-store.ts`, `web/components/ThemeProvider.tsx`, `web/queries/board-snapshot-queries.ts`                                                                                                                                                                                         | The shadcn primitives and app-wide hooks, the shared components, the queries that two or more modules read (the board snapshot and its SSE stream), and the design tokens in `web/styles/tokens.css`.                                                                                                                |
 
 ## Cross-Module Invariants
 
@@ -160,6 +169,117 @@ own tracked and in-flight sessions when reconciling (`WR-02`), so a ttyd spawn r
 `adapters/ttyd.ts` + `adapters/markers/watcher.ts` and referenced here only so the single-writer
 picture is complete. Finally, the store is content-free in its logging: a failed persist or a
 failed mutation logs only the error, never card fields, marker reasons, or pane text.
+
+### Boards
+
+A board groups cards under one key. The default board has the key `LOCAL`. The boards migration
+puts each existing card, event and archive row on `LOCAL`.
+
+**Tables.** The `boards` table holds one row for each board: `key` (the primary key), `name`,
+`workspace_root`, `repositories`, `linear_team_keys`, `last_used_folder`, `policy`, `created_at` and
+`archived`. The `cards`, `events` and `archive` tables each have a `board_key` column with the
+default `LOCAL` and an index. The JSON blobs of cards and archive rows also hold `boardKey`. The
+`items` table has no board key. Items stay global and each snapshot holds all items, because an
+inbox item has no board until the user promotes it.
+
+**The `LOCAL` row.** The `LOCAL` row keeps `workspace_root` null and `repositories` empty. The
+sessions folder of `LOCAL` stays in `Config.workspaceRoot`, and its folders stay in
+`meta.workspaceFolders` and `meta.lastUsed`. `services/domain/board-workspace.ts` gives the sessions
+folder and the repositories that a session of a board uses.
+
+**Scoped reads and creates.** These store methods take a `BoardKey` as the first parameter:
+`snapshot`, `searchCards`, `listEvents`, `listArchive`, `getWorkspaceFolders`, `addWorkspaceFolder`,
+`removeWorkspaceFolder`, `setLastUsedFolder`, `createLocalCard`, `createGroupCard` and
+`promoteItem`. Each method reads or writes only the cards, events, archive rows and folders of that board. Items stay global. `snapshot(board)` sets
+`BoardSnapshot.boardKey`. Each route passes `DEFAULT_BOARD_KEY`, so each route returns the same body
+as before, plus the `boardKey` fields.
+
+**Sweeps.** These store methods take a `BoardScope`: `listCards`, `sessionsWithTmux`,
+`sessionsDueForCleanup`, `archiveDueForDelete` and `trackedIssueIds`. The marker watcher, the
+poller, the cleanup scheduler, the archive retention sweep and the boot reconcile pass `ALL_BOARDS`,
+so each sweep sees each card of each board. Do not give a sweep one board key.
+
+**Board catalog.** `listBoards`, `getBoard`, `createBoard`, `updateBoard` and `setBoardArchived` read
+and write the `boards` table. The three writes run inside the write queue. The store does not archive
+`LOCAL`.
+
+**Refused creates.** A create on an unknown or archived board throws `BoardUnavailableError`. The
+check runs inside the write queue, and the store mints no id. The store refuses a group with a
+member of another board, with the existing refusal shape. `mirrorMemberColumn` moves only the
+members on the board of the group.
+
+**Ids.** A ticket gets its id from the board key: `LOCAL-n` on `LOCAL`, `ACME-n` on `ACME`. A group
+gets `GROUP-n` on `LOCAL` and the board key on each other board, so the tickets and the groups of a
+new board use one counter. The counters stay in `identifierCounters`, one counter for each prefix.
+
+**Events and archive.** An event gets the `boardKey` of its card. An event with no card gets
+`LOCAL`. `unwindGroup` writes the board key of the group to the archive row. `restoreGroup` puts the
+group back on the stored board, also when that board is archived.
+
+### Board API
+
+The board routes live in `routes/boards.route.ts`, with the checks in
+`services/orchestration/boards.ts`. The router is case sensitive, so a board with the key `COUNTS`
+does not clash with `/api/boards/counts`.
+
+**Board routes.** `GET /api/boards` returns `{ boards, knownLinearTeamKeys }`.
+`knownLinearTeamKeys` holds the identifier prefixes of the Linear cards in the store, plus the
+Linear team keys when Linear is on. The server logs a failed Linear read once and does not read again for 60
+seconds. `POST /api/boards` creates a board and returns `201` with
+`{ board }`. `GET /api/boards/:key` and `PATCH /api/boards/:key` return `{ board }`. A patch accepts
+only `name`, `workspaceRoot`, `repositories` and `linearTeamKeys`, and the key never changes. A
+patch of `LOCAL` writes `workspaceRoot` to `config.json` and the repository paths to the workspace
+folders. `POST /api/boards/:key/archive` and `POST /api/boards/:key/restore` set and clear the
+archive flag. Archive refuses a board that has a live or a starting session.
+
+**Repository folders.** One rule applies on every write path: board create, `PATCH /api/boards/:key`
+and `POST /api/workspace-folders?board=`. A `LOCAL` folder must exist. It can be a parent folder of
+repositories. A folder of any other board must hold a `.git` entry. A patch of `LOCAL` does not check
+a `workspaceRoot` that equals the current one. `DELETE /api/workspace-folders?board=` refuses to
+remove the last repository of a board other than `LOCAL`.
+
+**Counts route.** `GET /api/boards/counts` returns
+`{ counts: [{ key, running, openGroups, attention }], at }` for each board, archived boards
+included. `running` counts the cards that show the Live session chip. `openGroups` counts the group
+cards that are not in Done. `attention` counts the cards in Needs input.
+
+**List routes.** `GET /api/cards?board=&column=&source=&hasSession=` returns `{ cards, total }`
+with the snapshot redaction. `GET /api/sessions?board=&live=` returns `{ sessions }`, and each
+session holds its card id.
+
+**The `board` parameter.** Each collection route takes an optional `board` query parameter. No
+`board` means `LOCAL`, so each request of today returns the same body. A malformed key returns `400`
+`invalid-board`. An unknown key returns `404` `unknown-board`. An archived board serves reads, and a
+create on it returns `409` `board-archived`. A card route (`/api/cards/:id/...`) reads the board
+that is stored on the card and ignores `board`. The stream never rejects: a malformed, unknown or
+archived board gets the `LOCAL` stream. Each stream client gets the snapshot of its board, and an
+activity frame goes only to the clients of the board of the event.
+
+**Typed errors.** A board error body is `{ error, code }`. The `error` string is the UI copy:
+
+- `400` `invalid-key`: "Use 2 to 6 capital letters or digits, starting with a letter."
+- `400` `reserved-key`: "LOCAL and GROUP are reserved."
+- `400` `duplicate-key`: "Board <name> uses this key."
+- `400` `linear-team-key`: "Linear team <KEY> uses this key."
+- `400` `team-key-taken`: "Board <name> lists Linear team <KEY>." Create and patch return it when
+  another board lists the same team key. `LOCAL` and `GROUP` as a team key return `reserved-key`.
+- `400` `missing-name`: "Enter a name."
+- `400` `folder-missing`: "This folder does not exist."
+- `400` `no-repositories`: "Add at least one repository."
+- `409` `sessions-running`: "Stop the <n> running sessions first."
+- `409` `default-board`, `409` `board-archived`, `404` `unknown-board`, `400` `invalid-board`: the
+  `error` string is the code.
+
+`sessions-running` also holds `running`. A repository `folder-missing` from the existence check also holds
+`field` and `path`. A sessions folder `folder-missing` holds only `field`. A path that the schema
+refuses returns `folder-missing` without them. A
+body that fails its schema (an unknown patch field, a bad base branch, check command, repository or
+team key) returns `400` with only `error`, as the other routes do.
+
+**Sessions per board.** A session starts in the sessions folder of the board of its card
+(`cardSessionsRoot` in `services/orchestration/steps.ts`). A `LOCAL` card keeps
+`Config.workspaceRoot`. The escape check compares the session path with the board folder. The
+viewer allows the folder of each board and the path of each live session.
 
 ### Items
 
@@ -239,7 +359,7 @@ selected item, the sibling action items from the same meeting with the current o
 "Open in Granola" link when the item has a web url, a "Load transcript" button when the item has a
 stored transcript, and four actions: promote to ticket, run agent (which promotes the item, moves
 the card to To Do, then opens the existing start flow), and mark done and snooze, which run the
-same `lib/actions.ts` helpers as the Inbox and offer the same Undo.
+same `src/shared/item-actions.ts` helpers as the Inbox and offer the same Undo.
 
 ### Granola round
 
@@ -341,7 +461,7 @@ Overrides and masters are indexed by UID once, so a large feed parses in linear 
 to now plus 48 hours. The URL is a secret: `CalendarReadError` carries only the code, and the URL
 never appears in a log, a status, a response or an error body.
 
-The Inbox excludes calendar events: `App.tsx` feeds the Inbox and its count with items whose
+The Inbox excludes calendar events: `ShellContainer.tsx` feeds the Inbox and its count with items whose
 source is not `calendar`, and passes the calendar items to the Calendar page. The page
 (`src/web/modules/calendar/views/CalendarView.tsx`) is the "Calendar" row of the "Sources" nav group.
 `src/web/modules/calendar/domain/calendar-agenda.ts#agendaDays` keeps the `calendar` `event` items that overlap the window,
@@ -470,14 +590,12 @@ never be counted as a Card read against this list.
 
 The census above is server-side only. The **client-side** readers are enumerated separately here,
 because a phase that changes a projection must consult both halves, and a list presented as complete
-while omitting half the readers is worse than no list at all. Eight `src/web` files hold read
-expressions against the six flat fields on the wire `Card`: `src/web/App.tsx`,
-`src/web/features/board/CardView.tsx`, `src/web/features/board/Column.tsx`,
-`src/web/features/detail/DetailPanel.tsx`, `src/web/features/detail/PanelHeader.tsx`,
-`src/web/features/detail/SessionLostSection.tsx`, `src/web/features/detail/TerminalRegion.tsx`, and
-`src/web/lib/card-badges.ts`. One file is deliberately excluded and named so the exclusion is a
-decision rather than an omission: `src/web/lib/api.ts` mentions two of the field names in JSDoc
-prose with no read expression at all.
+while omitting half the readers is worse than no list at all. Nine files under `src/web` and `src/shared` hold read
+expressions against the six flat fields on the wire `Card`: `src/web/modules/shell/containers/ShellContainer.tsx`,
+`src/web/modules/board/components/CardView.tsx`, `src/web/modules/board/domain/board-keys.ts`, `src/web/modules/board/containers/BoardContainer.tsx`,
+`src/web/modules/detail/containers/DetailPanelContainer.tsx`, `src/web/modules/detail/components/PanelHeader.tsx`,
+`src/web/modules/detail/components/SessionLostSection.tsx`, `src/web/modules/detail/components/TerminalRegion.tsx`, and
+`src/shared/card-badges.ts`.
 
 A card is never observable with `sessions` set and no `activeSessionId`, nor with an
 `activeSessionId` naming a session absent from `sessions`: `setActiveSession` mints a session
@@ -488,10 +606,10 @@ single-writer queue, so no interleaving can ever expose a half-state.
 phase, `TerminalRegion.tsx` rendered the terminal `<iframe>` on a deliberately separate, nested
 per-session wire projection, a Phase 90 canary designed so a wire-shape regression showed up on
 screen (a permanent "Connecting to terminal…") instead of hiding in the store, while
-`DetailPanel.tsx`'s "a terminal already exists, do not spawn" gate read the SAME nested projection
+`DetailPanelContainer.tsx`'s "a terminal already exists, do not spawn" gate read the SAME nested projection
 rather than the flat `card.ttydPort` it sits beside — two independently-writable wire
 representations of the same fact, which could disagree. Phase 102 deleted that separate projection outright:
-`TerminalRegion.tsx` and `DetailPanel.tsx` both now read `card.ttydPort` directly, the identical flat
+`TerminalRegion.tsx` and `DetailPanelContainer.tsx` both now read `card.ttydPort` directly, the identical flat
 field, so the two gates can no longer disagree with each other, there is only one value to read. The
 board-payload weight that separate projection cost (`F-96-F`, `96-11`'s partial fix, this phase's
 full removal) is recorded in `docs/BASELINES.md`. This does not change store-side downgrade safety:
@@ -559,14 +677,14 @@ provenance fact stays true and only its rendering degrades. Erasing history to s
 the same class of error as flatten-to-root.
 
 **The two frontend surfaces, recorded here because `src/web/**/*.tsx` forbids all comments,
-including JSDoc.** `StartModal`'s inherit toggle and `SessionSwitcher`'s parentage caption are both
+including JSDoc.** The Start dialog's inherit toggle (`InheritToggleSection`) and `SessionSwitcher`'s parentage caption are both
 built entirely from tokens and idioms this panel and modal already ship; this is their only home
 for rationale.
 
 **Why the toggle is a checkbox and not a switch.** This codebase has no toggle-switch primitive and
-this phase does not invent one; the control is `RepoRow`'s already-shipped native `<input
-type="checkbox">` treatment reused verbatim, which is also what supplies the keyboard path and the
-`:focus-visible` ring without authoring a new focus mechanism.
+this phase does not invent one; the control is the shadcn `Checkbox` that `RepoRow` already ships,
+reused as is, which is also what supplies the keyboard path and the focus outline without authoring a
+new focus mechanism.
 
 **Why it is default OFF.** Inheriting silently changes which commits the child starts from — a real
 behavioural difference a person should opt into rather than discover.
@@ -614,11 +732,26 @@ one `~/.dispatch/board.db`. The store therefore guards BOTH directions of a vers
 
 **Newer board, older build → refuse.** `assertSchemaOpenable` throws before anything is read,
 migrated, or written when the persisted `meta.schemaVersion` exceeds the build's own
-`SESSION_SCHEMA_VERSION`. A build cannot know what a later migration moved, so continuing would let
+`STORE_SCHEMA_VERSION`. A build cannot know what a later migration moved, so continuing would let
 it write a shape it never learned to read and repairing would reconcile toward a projection that may
 no longer be the newer schema's truth. The refusal is total and damage-free — no snapshot, no
 rotation, no quarantine — which is what lets its message promise the board is untouched and name the
-one-command remedy (update, or restore `board.db.pre-v3` to stay behind deliberately).
+one-command remedy (update, or restore `board.db.pre-boards` to stay behind deliberately).
+
+**Boards migration, schema version 3.** The boards migration sets `meta.schemaVersion` to 3.
+`STORE_SCHEMA_VERSION` in `board-db.ts` is the version of the persisted counter and of
+`assertSchemaOpenable`. Before the migration changes the file, it copies the board to
+`board.db.pre-boards` with `VACUUM INTO`. The migration writes a new copy over an old one, except when the `boards` table and an old copy both exist: then an older build ran the migration again, and the old copy is the true board before the migration. A data folder with no cards, events or archive rows
+gets no copy. If the copy or the migration transaction fails, the server does not start, and the
+error names the copy path. A 4.2 build refuses a version 3 board through its own guard. To go back
+to a 4.2 build:
+
+1. Stop Dispatch.
+2. Delete `~/.dispatch/board.db-wal` and `~/.dispatch/board.db-shm` if they exist.
+3. Copy `~/.dispatch/board.db.pre-boards` over `~/.dispatch/board.db`.
+4. Start the 4.2 build.
+
+The copy does not hold the changes made after the migration. The refusal message of the 4.2 build names `board.db.pre-v3`. Each time the migration writes a new copy, it also writes it to `board.db.pre-v3` and moves an older `board.db.pre-v3` to `board.db.pre-v3.before-boards`, so both names restore the same board. A failure of that second write is logged and does not stop the migration.
 
 **Older build already wrote, newer build opens → repair.** `BoardStore#repairDowngradeDrift` runs on
 every boot, before `hydrateFromParsed`, and reconciles any card whose flat projection disagrees with
@@ -966,15 +1099,15 @@ observation SEEDS only (never fires) so a backend boot doesn't light a dot on ev
 later divergence re-baselines forward and stamps the card's `outputChangedAt`. It fires on the FIRST
 divergence with NO debounce (the flip-back's 2-tick debounce exists only because a false flip-back is
 destructive; a false dot is cosmetic). The dot works in ANY column (including Done) because it is
-orthogonal to the marker/flip-back decision. The `.tsx` consumer sites (`Card.tsx`,
-`DetailPanel.tsx`, `useUnseenActivity.ts`) are homed by this section, not by JSDoc; the panel-side
+orthogonal to the marker/flip-back decision. The `.tsx` consumer sites (`DraggableCard.tsx`, `BoardDragOverlay.tsx`,
+`DetailPanelContainer.tsx`, `use-last-opened.ts`) are homed by this section, not by JSDoc; the panel-side
 `lastOpened` stamping discipline (open/close stamps plus the deferred re-stamp that absorbs the ttyd
 detach reflow) is homed in [Panel Iframe Identity](#panel-iframe-identity).
 
 ### Attention Routing
 
 Genuine column transitions INTO an attention column (`needs_input` / `agent_done`) fire exactly
-ONE OS desktop notification per card (`web/hooks/useTransitionNotifications.ts`, `ATTN-01`). The hook
+ONE OS desktop notification per card (`web/modules/shell/hooks/use-transition-notifications.ts`, `ATTN-01`). The hook
 compares each card's column against a per-card previous-column ref taken from the previous SSE
 snapshot; a notification fires only when the column CHANGED into `needs_input` or `agent_done`.
 **Seed-on-reconnect is the load-bearing discipline:** the FIRST snapshot after connect/reconnect
@@ -990,10 +1123,10 @@ disallowed on some webviews) — a cosmetic notification must never crash the bo
 notification focuses the window and opens that card's DetailPanel; the title uses the
 human-readable column label and the card identifier, never the raw column key.
 
-The same transition batch also drives the gentle chime (`web/lib/chime.ts#playChime`, synthesized
-via Web Audio oscillators — no bundled audio asset): gated independently of the Notification
-permission by `soundEnabled` (Settings ▸ Notifications, a per-browser `localStorage` preference —
-`dsp.sound` — lifted into `App.tsx` state and threaded into the hook as a parameter, never into
+The same transition batch also drives the gentle chime (`web/components/ui/hooks/chime.ts#playChime`, synthesized
+via Web Audio oscillators, no bundled audio asset): gated independently of the Notification
+permission by `soundEnabled` (Settings ▸ Notifications, a per-browser `localStorage` preference,
+`dsp.sound`, held in the app store (`web/lib/app-store.ts`) and threaded into the hook as a parameter by `ShellContainer.tsx`, never into
 `~/.dispatch/config.json`, since it is a per-device preference, not shared server config). It plays
 at most ONCE per effect run regardless of how many cards transition in that snapshot, so a burst of
 simultaneous arrivals stays one ding rather than an overlapping barrage; each transitioned card
@@ -1530,10 +1663,10 @@ exact.
 
 ### Panel Iframe Identity
 
-The `DetailPanel` (`web/features/detail/DetailPanel.tsx`) embeds the live terminal as a ttyd `<iframe>` whose
+The `DetailPanelContainer` (`web/modules/detail/containers/DetailPanelContainer.tsx`) embeds the live terminal as a ttyd `<iframe>` whose
 identity across every panel interaction is load-bearing: any remount of that iframe drops its ttyd
 WebSocket and detaches the tmux client, killing the visible terminal mid-session. The whole panel is
-engineered around never remounting that one element. `DetailPanel.tsx` is one of the four
+engineered around never remounting that one element. `DetailPanelContainer.tsx` is one of the four
 invariant-dense files; its rules live here so a Phase 12/13 restructure — and the docked-mode
 re-derivation below — can preserve them without reading the original body comments.
 
@@ -1549,10 +1682,11 @@ identity-stable across four separate mutations:
   region stays a byte-identical sibling at the SAME index regardless, so toggling Details never
   reorders the tree and never remounts the iframe. Any refactor that moves the iframe's position
   (or wraps it conditionally) reintroduces the remount.
-- **Fullscreen is a STYLE-ONLY change, never a remount.** Fullscreen toggles ONLY the enclosing
-  `<aside>`'s `width` (`480px`↔`100vw`) and `borderLeft`; `top`/`right`/`height`/`transform` and the
-  `transition` list (which names transform ONLY) stay constant, so the width/border change snaps
-  instantly and the iframe reflows exactly ONCE with no unmount and no WebSocket reconnect. Fullscreen
+- **Fullscreen is a STYLE-ONLY change, never a remount.** Fullscreen swaps ONLY the width and left
+  border classes of the enclosing `<aside>` in `PanelFrame.tsx` (`w-screen`, or the
+  `--panel-live-width` width with `border-l`); `top`, `right`, `height`, the `translate-x-*` class and
+  the `transition-[translate]` list (which names translate ONLY) stay constant, so the width and border
+  change snaps instantly and the iframe reflows exactly ONCE with no unmount and no WebSocket reconnect. Fullscreen
   is per-open React state, never persisted.
 - **The iframe is NEVER keyed, and reset-on-open is done in render, not by remount.** A `key=` on
   the panel or a remount to reset per-open state (Details collapsed, fullscreen off) is deliberately
@@ -1582,9 +1716,9 @@ identity-stable across four separate mutations:
   live, 5/5-reproduced defect (headless and headed Chrome) showed `pointerup` never reaching
   `window` at all when the release happened to land over the iframe's rendered area — the drag
   would silently abandon mid-resize, leaving `document.body.style.cursor` stuck and the orphaned
-  listeners hijacking the next unrelated click with stale coordinates. `handleResizePointerDown`
-  now appends a transparent, full-viewport `position: fixed` div at `document.body` (max `zIndex`,
-  `cursor: col-resize`) for the drag's duration only — mounted imperatively on `pointerdown`,
+  listeners hijacking the next unrelated click with stale coordinates. `onPointerDown` in
+  `use-panel-resize.ts` now appends a transparent, full-viewport `fixed` div at `document.body` (max
+  `z-index`, `col-resize` cursor) for the drag's duration only, mounted imperatively on `pointerdown`,
   always removed by a single idempotent `teardown()` shared across `pointerup`, `pointercancel`,
   mid-drag Escape (which cancels the drag and restores the pre-drag width instead of closing the
   panel underneath an active drag), and unmount — so the pointer's hit-test target never leaves
@@ -1593,10 +1727,10 @@ identity-stable across four separate mutations:
   inside the `<aside>` or the iframe subtree, and never persists once the drag ends (PANEL-03
   untouched: no key/re-parent/position change on the panel itself). Because the overlay is only
   ever removed by a delivered end event, the drag must NEVER start for a non-primary button
-  (`e.button !== 0` guard, first statement): a secondary click opens the native context menu,
+  (`startsResizeDrag` guard from `panel-width.ts`, first statement): a secondary click opens the native context menu,
   Chrome then delivers neither `pointerup` nor `pointercancel` for that pointer, and the max-z
   overlay would strand permanently — shielding every element in the app until a full reload. The
-  handle itself is not rendered in fullscreen (mirroring the board's `resizeDisabled` guard): a
+  handle itself is not rendered in fullscreen (`DetailPanelContainer` renders it only under `!docked && !effectiveFullscreen`): a
   fullscreen drag would visibly shrink the `100vw` panel then snap back while persisting an
   invisible width, and its absence means a drag can never span a fullscreen transition — the
   pointerup width write is always the plain `clamp()` form.
@@ -1614,7 +1748,7 @@ identity-stable across four separate mutations:
   `touch-action`, which was the actual bug: with the default `auto`, the browser is free to decide
   mid-gesture that a finger's perpendicular jitter on an 8px target is an attempted page pan, take
   the gesture over, and fire `pointercancel` on the handle — which `handlePointerCancel` correctly
-  treats as an abort and restores `preDragStyleWidth`, producing a silent snap-back that reads as
+  treats as an abort and restores `preDragWidth`, producing a silent snap-back that reads as
   "touch just does not work here." The fix is `touch-action: none` on the handle — that is the
   load-bearing declaration, because the browser resolves a pointer's effective touch-action once,
   at contact, from the hit-tested element's ancestor chain; the overlay does not exist yet at that
@@ -1622,8 +1756,8 @@ identity-stable across four separate mutations:
   any case, so its own `touch-action: none` cannot affect the in-flight drag — that pointer's
   events stay addressed to the handle via `setPointerCapture` regardless of where the finger
   travels. The overlay's `touch-action: none` is defence for a SECOND pointer landing on it
-  mid-drag; `handleResizePointerDown`'s re-entrancy guard (`cleanupDragRef.current != null`, first
-  statement) now rejects that second pointer outright, so this is belt-and-braces, not
+  mid-drag; the re-entrancy guard in `onPointerDown` (`cleanupDragRef.current != null`, right after
+  the button guard) now rejects that second pointer outright, so this is belt-and-braces, not
   load-bearing. It is deliberately NOT `touchstart`/`touchmove` plus `preventDefault()`, which
   would run a second event pipeline competing with the existing Pointer Events one for the same
   physical gesture. Once `touch-action: none` is declared, `pointercancel` reverts to meaning a
@@ -1643,8 +1777,8 @@ identity-stable across four separate mutations:
   The TAP-THRESHOLD branch does NOT use `(pointer: coarse)` — unlike the styling above, an
   8px-vs-3px threshold that fires on the wrong pointer type is not harmless (it would silently
   raise the threshold for a mouse drag on the same hybrid hardware), so
-  `handleResizePointerDown` reads `e.pointerType` once at `pointerdown` and captures it as
-  `coarseGesture` for that drag's closures. This is per-drag capture, not the per-`pointermove`
+  `onPointerDown` in `use-panel-resize.ts` reads `e.pointerType` once at `pointerdown` and captures it as
+  `pointerType` for that drag's closures (`isTapGesture` in `panel-width.ts` takes it). This is per-drag capture, not the per-`pointermove`
   `pointerType` sniffing this section warns against elsewhere — the value is fixed for the whole
   gesture, exactly like `isCoarsePointer` is fixed for the whole render.
 
@@ -1687,16 +1821,16 @@ forces the panel to `100vw`, so there is no width left to trade — a deliberate
 to close.
 
 **Docked (Orca) mode is a SECOND style-only derivation of the same `<aside>`, re-deriving `PANEL-03`
-for a second surface.** `position` stays `fixed` in BOTH modes — only `top`/`left`/`width`/`height`/
-`borderLeft`/`transform`/`transition` branch on the `docked` prop, the exact same category of change
+for a second surface.** `position` stays `fixed` in BOTH modes; only the `top`, `left`, `width`, `height`,
+`border-l`, `translate` and `transition` classes branch on the `docked` prop, the exact same category of change
 the fullscreen precedent above already proved remount-free; a `position` mode switch was deliberately
 rejected as a larger reflow than adjusting `top`/`left`/`width` in place. The backdrop `<div>`, the
 close `X`, and the fullscreen toggle are conditionally UNMOUNTED when docked — safe because all three
 are stateless, decorative siblings outside the iframe subtree, never the terminal itself; the
 docked-and-empty-selection state (centered "Select a ticket" copy) renders only when
 `docked && card == null`, so the card-present subtree — and the terminal's position in it — is
-identical in both modes. The Orca side nav (`web/features/orca/`) never renders a terminal: it holds
-zero imports of `TerminalRegion` or `<iframe>` (grep-enforced), is pure navigation chrome, and drives
+identical in both modes. The Orca side nav (`web/modules/workspace/`) never renders a terminal: it holds
+zero imports of `TerminalRegion` or `<iframe>`, is pure navigation chrome, and drives
 the SAME `selectedCardId` the board/inbox views already write to. The ensure-terminal spawn guard
 below stays a single ref BY CONSTRUCTION: one `selectedCardId`, one hoisted panel, means "the same
 card open in both views at once" is structurally impossible, so no per-card guard `Map` is needed — a
@@ -1765,12 +1899,12 @@ not touch.
 
 ### Terminal Toolbar
 
-`TerminalRegion` (`web/features/detail/TerminalRegion.tsx`) renders one toolbar row above the
+`TerminalRegion` (`web/modules/detail/components/TerminalRegion.tsx`) renders one toolbar row above the
 terminal iframe with a single secondary button, "Run Claude" (`SHELL-01`). `src/web/**/*.tsx`
 forbids all comments, so this section is the component's only home for its rationale.
 
 **Why a server call, not typed keys.** The terminal is a ttyd iframe on its own origin; the React
-app cannot type into it. The button calls `POST /api/cards/:id/run-claude` (`web/lib/api.ts#runClaude`,
+app cannot type into it. The button calls `POST /api/cards/:id/run-claude` (`web/modules/detail/queries/detail-api.ts#runClaude`,
 fire-and-forget like `ensureTerminal`), and the server types the same fully quoted launch line a
 first start uses, so the person gets the resume flags and the hooks settings layer without
 remembering them. The pane itself is the feedback: no spinner, per the standing "no spinner on
@@ -1786,7 +1920,7 @@ only the pane's foreground process changes.
 
 ### Second Session Affordance
 
-`StartAnotherSessionButton` (`web/features/detail/StartAnotherSessionButton.tsx`) renders "Start
+`StartAnotherSessionButton` (`web/modules/detail/components/StartAnotherSessionButton.tsx`) renders "Start
 another session" inside the panel's session row, alongside `SessionSwitcher`. `src/web/**/*.tsx`
 forbids all comments, including JSDoc, so this section is the component's only home for the
 rationale behind its five deliberate choices.
@@ -1977,6 +2111,19 @@ phase's own plan summaries mis-generalized as "never use `=` for `send-keys`/`ca
   longer-named live sibling — same result confirmed for `send-keys`. `markers/watcher.ts`'s
   `capturePane(`=${tmuxName}:`, ...)` is the one call site in this codebase already shipping the
   correct colon-qualified form.
+
+**The supervisor sends text through one function (`SHELL-01`, LOCAL-89).** Every text that
+the supervisor types into a running Claude session goes through
+`services/orchestration/supervisor-send.ts#sendConfirmed`. The one exception is the fixed
+`/clear` of the handoff, which writes no transcript entry to confirm; it is typed only after the
+same ready check. The ready check (`supervisor-state.ts#paneReady`) waits up to 60 s for the input
+box with no `warming up` row and no dialog or menu open under it, because a key typed into a
+dialog would pick a row, and with the prompt line as the input box row, so a box left in bash
+mode does not run the line. The send replaces control characters in the line with spaces, sends
+`C-u`, the line with `sendLiteral` and a separate `Enter` after 1.5 s, and then reads the
+transcript for the line. Text over 500 characters goes to a file under
+`<session root>/.dispatch-input/`, and the typed line is a pointer to that file. The targets use
+the `=<name>:` form of contract 5. Do not add a second typed surface for the supervisor.
 
 **Closed (Phase 96 plan 11, R2): `steps.ts`'s own kickoff-sending calls now use the colon-qualified
 form too.** `capturePane`/`sendKeys`/`pasteBuffer` inside `awaitReplReady`/`sendKickoff` (`steps.ts`)
@@ -2785,18 +2932,18 @@ never cached.
 In the Inbox, an expanded Slack item with `meta.threadTs` shows `modules/slack/views/SlackThreadView`: a
 collapsed "Thread" section whose "Load thread" button fetches the route through
 `useLoadSlackThread` (never on a timer, and never from a `#/slack/<id>` deep link) and lists the messages as plain text. Every
-expanded Slack item, and the Slack page detail below, also offers "Draft reply" (`lib/actions.ts`, no key): it loads the thread when
+expanded Slack item, and the Slack page detail below, also offers "Draft reply" (`src/shared/item-actions.ts`, no key): it loads the thread when
 there is one, builds the kickoff with `shared/slack-prompt.ts#draftReplyPrompt` (the message and the
-thread fenced by `fenceUntrusted`, the channel named, posting forbidden) and calls App's
-`startAgent`, which promotes the item, moves the card to To Do and opens StartModal prefilled. The
+thread fenced by `fenceUntrusted`, the channel named, posting forbidden) and calls `startAgent`
+(`web/queries/action-services.ts`), which promotes the item, moves the card to To Do and opens the start dialog prefilled. The
 reply is printed in the session; Dispatch still calls no Slack write method.
 
 The Slack page (`#/slack` and `#/slack/<id>`, LOCAL-47) lists the same Slack items.
-`modules/slack/domain/slack-rows.ts` builds its rows (`slackRows`: Slack items not done, newest first, as Inbox row
+`shared/slack-rows.ts` builds its rows (`slackRows`: Slack items not done, newest first, as Inbox row
 models), pills (`slackPills`: From, DM or Mention, Thread) and conversation groups
-(`groupSlackRows`); it sits in `lib/` so App counts the rows for the nav chip and the page title
-without loading the page chunk. App lazy-loads the page through the slack barrel's
-`loadSlackPage()`, because the Inbox imports `SlackThread` from the same barrel eagerly. At 1024 px
+(`groupSlackRows`); it sits in `shared/` so the shell container counts the rows for the nav chip and the page title
+without loading the page chunk. The slack route (`web/routes/slack.{-$id}.lazy.tsx`) lazy-loads the page,
+while the Inbox imports `SlackThread` from the same barrel eagerly. At 1024 px
 and wider the list and the detail sit side by side; below that the detail replaces the list and
 offers Back. Selecting a row marks it read. The detail runs `INBOX_ACTIONS` by id (Draft reply,
 Promote to ticket, Snooze, Done, Copy link), wraps promote to show "Created <identifier>", and
@@ -2841,7 +2988,7 @@ KEEPALIVE↔HEARTBEAT lockstep is do-not-change contract #2 — `@see`
 crash the process; dead clients are pruned from the `Map` on both the broadcast path and the
 per-connection `close`/`error` handlers.
 
-**Client lifecycle and the snapshot cache.** `connectBoardStream` (`src/web/queries/board-snapshot-queries.ts`) owns the one `EventSource`, its reconnect backoff and the `HEARTBEAT_MS` watchdog; `useBoardLiveUpdates`, mounted by `App` in `web/App.tsx`, is a thin effect wrapper around it. The board snapshot lives in the query cache under `["board-snapshot", doneLimit]`, and every stream frame is written there. The first frame after each connect is the fresh snapshot, so it replaces the reconnect invalidation (changed U1-11): the server writes a full snapshot on every connect, and an invalidation refetch that landed after a newer frame would roll the board back. For the same reason a GET result that loses to a newer stream frame is dropped (`boardSnapshotQueryOptions`).
+**Client lifecycle and the snapshot cache.** `connectBoardStream` (`src/web/queries/board-snapshot-queries.ts`) owns the one `EventSource`, its reconnect backoff and the `HEARTBEAT_MS` watchdog; `useBoardLiveUpdates`, mounted by `ShellContainer` in `web/modules/shell/containers/ShellContainer.tsx`, is a thin effect wrapper around it. The board snapshot lives in the query cache under `["board-snapshot", doneLimit]`, and every stream frame is written there. The first frame after each connect is the fresh snapshot, so it replaces the reconnect invalidation (changed U1-11): the server writes a full snapshot on every connect, and an invalidation refetch that landed after a newer frame would roll the board back. For the same reason a GET result that loses to a newer stream frame is dropped (`boardSnapshotQueryOptions`).
 
 **Windowed wire snapshot (`BOARD-08`).** `store.snapshot(opts?: { doneLimit })` is the single
 read-path chokepoint for ordering, redaction, AND windowing — Plan 82-02 added the third
@@ -2882,15 +3029,16 @@ shared `store.snapshot({ doneLimit: DONE_PAGE_SIZE })` frame for every client re
 prune (a 150-card window collapsing to 50) on the same exercise, confirming the exercise can
 actually detect the bug it rules out, not just fail to trigger it.
 
-**Client optimistic-move layer (`BOARD-02`).** `web/features/board/Board.tsx` layers a local `cards` state over
+**Client optimistic-move layer (`BOARD-02`).** `web/modules/board/containers/BoardContainer.tsx` layers its optimistic moves (`web/modules/board/queries/board-queries.ts`) over
 the SSE snapshot and replaces it WHOLESALE whenever a new snapshot arrives — this is the client
 contract of the SSE transport, which is why it homes here rather than as a standalone frontend
 concern. Only a To-Do→In-Progress drop kicks off async orchestration: that card is NOT moved
 optimistically; the server promotes it via the next SSE snapshot only after a successful start
-saga (a Start modal opens instead). EVERY OTHER move is a synchronous local state change — local
-state updates IMMEDIATELY on drop (no spinner, no pending flag) and `moveCard` fires
-fire-and-forget; the next full-snapshot broadcast reconciles the authoritative state. Because the
-board is single-user, the optimistic move converges with the snapshot and never visibly reverts.
+saga (a Start modal opens instead). EVERY OTHER move is a TanStack optimistic write: the
+mutation's `onMutate` writes the new column into the board snapshot cache synchronously on drop
+(no spinner, no pending flag) and the mutation sends `moveCard`; the next full-snapshot broadcast
+reconciles the authoritative state. A failed single move rolls the card back to its old column,
+and a failed group move restores every moved card and sends the moved ones back (compensation).
 The board iterates `COLUMNS` in fixed order and MUST NOT re-sort To Do (it arrives pre-ordered from
 `store.snapshot()`). The `.tsx` site is homed here, not in JSDoc. Since `BOARD-08`, a Done card
 "not present in `board.cards`" no longer means "does not exist" — it may simply sit outside the
@@ -2898,9 +3046,9 @@ current `doneLimit` window; `doneCounts` (not `cards.length`) is the truthful co
 Done column, and growing the window (Plan 82-03) is done by reconnect, never a client-side merge,
 so this wholesale-replace contract needs no change to stay correct under windowing. The client-side
 half of this consequence — the open detail panel, not just `doneCounts` — is handled in
-`web/App.tsx`: every selection path (`selectCard`, `selectSearchResult`, the notification-click
-handler) pins the currently-live card into `pinned` (`features/board/pinned-card.ts`'s
-`PinnedCard`), and the `onBoardUpdate` callback of `useBoardLiveUpdates` (mounted in `web/App.tsx`) re-pins it on every subsequent
+`web/lib/app-store.ts`: every selection path (`selectCard`, `openSearchResult`, the notification-click
+handler) pins the currently-live card into `pinned` (`shared/pinned-card.ts`'s
+`PinnedCard`), and the `onBoardUpdate` callback of `useBoardLiveUpdates` (mounted in `web/modules/shell/containers/ShellContainer.tsx`) re-pins it on every subsequent
 snapshot for as long as it stays live, so a card that later pages out of the window keeps showing
 its last-known data instead of the panel silently closing.
 
@@ -2912,7 +3060,7 @@ the window, paired with `hydrating: true`) immediately for instant open, then re
 pin `"hydrated"`, since both source from a live snapshot. DISPLAY (`selectedCard`,
 `selectedCardMembers`) reads through either kind unconditionally — a stub is exactly what
 `hydrating: true` exists to gate in the UI. ACTIONS do not: `startCard` and `cleanupCard` fall back
-to the pinned card via `features/board/pinned-card.ts`'s `actionablePinnedCard`, which returns it
+to the pinned card via `shared/pinned-card.ts`'s `actionablePinnedCard`, which returns it
 ONLY when `kind === "hydrated"`. Before this fix both derivations fell back to a bare
 `board?.cards.find(...) ?? null` with no pinned-card fallback at all, so "Clean up now" on an
 awaiting-cleanup card found only via search (outside the `doneLimit` window — plausible once the
@@ -2931,7 +3079,7 @@ Preflight is INFORMATIVE, never a gate (`BOARD-05`, `PRE-01`/`PRE-02`/`PRE-03`).
 the single source of truth for prerequisite / Node-version / storage-health status and per-platform
 install commands, and it is consumed identically by three surfaces: `dispatch doctor` and ordinary
 boot (`bootstrap/cli.ts`, `bootstrap/index.ts`) and the Welcome step of the web setup wizard
-(`routes/setup.route.ts` → `web/lib/api.ts` → `modules/setup/components/PrerequisiteChecklist.tsx`). `probePreflight()`
+(`routes/setup.route.ts` → `web/queries/setup-api.ts` → `modules/setup/components/PrerequisiteChecklist.tsx`). `probePreflight()`
 probes EVERY required binary — `tmux`, `ttyd`, `claude`, `git` — with no short-circuit, and returns
 each one's presence plus its exact platform-appropriate install command, alongside the running Node
 version compared against the `engines.node` floor and a read-only storage-health line.
@@ -2944,7 +3092,7 @@ missing/incomplete config, which throws `StartupError` (the class still homed in
 `bootstrap/binary-check.ts`, now its sole remaining export, raised from `bootstrap/config.ts`).
 
 The setup wizard (`modules/setup/containers/SetupWizardContainer.tsx`) opens over the running app, never in place of
-it. `App.tsx` opens it on its own only when `shared/setup-wizard.ts` sees `needsKey` and not
+it. `SetupWizardContainer.tsx` opens it on its own only when `shared/setup-wizard.ts` sees `needsKey` and not
 `onboardingDone` in `GET /api/setup`; every way of closing it calls `POST /api/setup/onboarding-done`,
 which writes the flat `onboardingDone` config flag (204, idempotent), so it never opens on its own
 again. A failed status read renders the app with no wizard. Settings, Connections, Run setup guide
@@ -3008,7 +3156,7 @@ section: linear in file count, seconds for a worktree carrying `node_modules`) a
 reliably fast. While the fan-out runs, `snapshot()` projects a wire-only `cleaningUp: true` onto the
 card from the store's card-scoped in-flight guard (`beginCleanup`/`endCleanup` each emit a plain
 `change`, no persist, so every tab sees the flag flip and it survives a reload); the card and the
-panel header render a "Cleaning up" state from it instead of the Clean up button. The App keeps the
+panel header render a "Cleaning up" state from it instead of the Clean up button. `CleanupContainer.tsx` keeps the
 `cleanupAttempt` counter it saw at click time and, once that counter moved AND `cleaningUp` dropped,
 raises a toast for a blocked or warned outcome (`cleanup-feedback.ts`); a rejected or unreachable
 POST raises its own toast. The outcome reaches the UI ONLY over SSE, per session: a clean run calls
@@ -3683,7 +3831,7 @@ The web UI has a dark and a light theme. The html element always carries `data-t
 
 **Before first paint.** `src/web/index.html` and `src/web/viewer.html` hold the same inline classic script as the first script of the head. It reads the stored value inside a try block, resolves `system` through `matchMedia("(prefers-color-scheme: light)")`, falls back to `dark`, and sets `data-theme` and the content of the `color-scheme` meta. It holds no comment and no colour literal. `src/shared/theme.test.ts` runs the script text of both shells in a sandbox for every stored value and both system values, and asserts that it paints what `resolveTheme` resolves and that the two texts are identical.
 
-**After load.** `useTheme` in `src/web/hooks/useTheme.ts` is called once in `App.tsx` and once in `viewer-main.tsx`. It keeps the attribute, the `color-scheme` meta and the `theme-color` meta current after a manual choice, a change of the system scheme, and a change of the stored value in another tab (the `storage` event, read through the same parser). The `theme-color` meta takes the computed value of `--bg`, so no html shell holds a colour.
+**After load.** `useTheme` in `src/web/components/ui/hooks/use-theme.ts` is called once in `ThemeProvider.tsx` and once in `viewer-main.tsx`. It keeps the attribute, the `color-scheme` meta and the `theme-color` meta current after a manual choice, a change of the system scheme, and a change of the stored value in another tab (the `storage` event, read through the same parser). The `theme-color` meta takes the computed value of `--bg`, so no html shell holds a colour.
 
 **A switch is instant.** While the attribute changes, the hook sets `data-theme-switching` on the html element for two animation frames, and one rule in `tokens.css` turns transitions off under that attribute.
 
@@ -3712,51 +3860,19 @@ Each mark names an integration and nothing else, with one case to know: the Gran
 
 ### Design System Invariants
 
-**Keyboard focus is an outline, never a box-shadow (`NEW-15`).** The rule, authored in `docs/standards/frontend-design-system.md`: "a keyboard focus ring must never look identical to selection."
-`focusRing()` in `src/web/primitives/focus-ring.ts` is the single definition every call site
-consumes. Where an `overflow: hidden` ancestor clips the ring's offset, the locked resolution is
-to drop the offset to 0 at that call site — never to fall back to a box-shadow expression, which
-is structurally identical to the selection ring and is exactly the defect this invariant exists
-to prevent.
+**Retired for lint rules (2026-10-07, LOCAL-77).** Four design system checks left `scripts/check-invariants.mjs` on 2026-10-07, and `FROZEN_COUNT` moved from 149 to 145 in the same commit. Each rule below still holds. A lint rule in `eslint.config.ts` now enforces it, and `npm run lint` fails on a violation.
 
-**One shadow token for the whole app (`NEW-16`).** `--shadow-float`, defined once in
-`src/web/styles/tokens.css`, is the system's only shadow. The invariant is the single definition,
-not a consumer cap: `RETIRED_PATTERNS`'s literal scan over `src/**/*.{ts,tsx}` catches the retired
-`0 6px 16px rgba(0,0,0,0.45)` value reappearing anywhere outside `tokens.css`, which is what makes
-"one definition" mechanical. Measured today it is consumed at seven call sites — the card drag
-overlay (`CardView.tsx:171`), the floating selection bar (`FloatBar.tsx`), the search results
-listbox (`SearchBox.tsx:321`), the carousel search overlay (`SearchBox.tsx:400`), the move-to
-picker (`MoveToPicker.tsx:97`), the multi-select dropdown (`MultiSelect.tsx:248`), and the modal
-(`Modal.tsx:110`). Cards and columns carry no shadow at rest; a second, independently-defined
-shadow value is the regression the gate catches, not an additional consumer of the one token.
+- **Keyboard focus is an outline, never a box-shadow.** The outline focus classes of `components/ui` are the single definition, and `src/web/components/ui/focus-outline.test.ts` enforces them. If an `overflow: hidden` ancestor clips the outline offset, set the offset to 0 at that call site. Do not use a box-shadow, because it looks the same as the selection ring. Lint: `retiredLiteralBan` fails the accent focus shadow value in all of `src`; `designLiteralBan` fails an arbitrary shadow class outside `components/ui`; the style ban fails a `style` prop outside `components/ui`, `modules/*/components/dnd/` and the viewer.
+- **One float shadow token.** `--shadow-float` in `src/web/styles/tokens.css` is the only float shadow. The light block declares it again with a lighter value (decision U1-07). Lint: `retiredLiteralBan` fails the float shadow value in all of `src`; `designLiteralBan` fails an arbitrary shadow class (`shadow-[`) outside `components/ui`. Use `shadow-md`, `shadow-lg` or `shadow-(--shadow-float)`.
+- **One wordmark definition.** `src/web/components/Wordmark.tsx` is the only place that writes the type treatment of the DISPATCH wordmark. Lint: `retiredLiteralBan` fails a `fontWeight` property of 800 in all of `src`; `designLiteralBan` fails `font-extrabold` and `font-[800]` outside `components/ui`.
+- **The looser reading rhythm never enters a board surface.** The `.reading-surface` class lifts `--line-body` from its global value to 1.6 (`src/web/styles/tokens.css`). A board card keeps the global value, so card density does not change. A board file may read `var(--line-body)`, because the card title uses it. Lint: `boardZoneBan`, on `src/web/modules/board/**` only, fails the `reading-surface` class name and a `--line-body` declaration (a `--line-body:` class string or a `"--line-body"` object key). Other modules may use `.reading-surface` (`ModalBody.tsx`, `PanelFrame.tsx`, `BulkConfirmModal.tsx`).
 
-Since 2026-09-29 (G9 Unit 1) the light block of `tokens.css` declares `--shadow-float` a second time, with a lighter value for the light theme (decision U1-07). The invariant does not change: the token keeps one name and one definition for each theme, and no file outside `tokens.css` holds a shadow literal.
-
-**One wordmark definition (`NEW-17`).** `wordmarkStyle` in `src/web/components/icons/Glyph.tsx` is the
-only place the DISPATCH wordmark's type treatment (size, weight, letter-spacing) is written down.
-Every site that renders the wordmark imports it rather than repeating the values inline.
-`src/web/**/*.tsx` carries zero comments by this repo's comment standard (`docs/standards/comments.md`
-rule 2's tsx carve-out), so this section — not a JSDoc pointer on `wordmarkStyle` itself — is the
-durable home the invariant-audit gate reads for `NEW-17`.
-
-**The contract's looser reading rhythm never enters a board surface (`NEW-19`).** The contract's
-`.reading-surface` class lifts `--line-body` from its global 1.5 to a roomier 1.6
-(`src/web/styles/tokens.css`); Phase 86's criterion 2 forbids that looser rhythm from
-`src/web/features/board/` by name, so it can cost card density. The two carriers of the
-forbidden rhythm are the `.reading-surface` class name and a local `--line-body` redefinition —
-a custom-property declaration, never a `var(--line-body)` _read_. `var(--line-body)` consumption
-at the global 1.5 is expressly permitted: the contract itself specifies `--line-body` as the card
-title's own line height, so barring consumption would force a card-height change, which criterion
-2 forbids outright. The check is directory-scoped to `src/web/features/board/` rather than global
-because `.reading-surface` is legitimately used elsewhere (`Modal.tsx`, `DetailPanel.tsx`).
-`src/web/**/*.tsx` carries zero comments by this repo's comment standard, so this section — not a
-JSDoc pointer on any board component — is the durable home the invariant-audit gate reads for
-`NEW-19`.
+The lint rules read code, not comments. The old line scan also matched a comment. The invariant gate fails on a retired ID string in this doc (EXTRA), so this record names each check by its description.
 
 **The embedded terminal client is fenced out of Phase 87's diff (`NEW-20`).** The two paths
 `src/web/terminal-main.ts` and `src/web/terminal.html` are the entire embedded terminal client —
 there is no terminal-client directory on disk, so the fence names these two paths directly rather
-than a glob. `src/web/features/detail/TerminalRegion.tsx`, which renders the panel's `<iframe>`
+than a glob. `src/web/modules/detail/components/TerminalRegion.tsx`, which renders the panel's `<iframe>`
 around that client, is a DIFFERENT file and is NOT fenced: the panel container may change this
 phase, the terminal client itself may not. **Enforcement is SPLIT into two halves, and neither
 half alone is the whole guarantee.** The mechanical half — `checkTerminalFence` in
@@ -3785,12 +3901,12 @@ exemptions: `tokens.css` itself, the palette's single legitimate home, and the `
 properties in `src/web/viewer/viewer.css`, whose values carry syntax-highlight meaning rather
 than status meaning (`--hl-attr`'s `#ef8e3b` matches `--status-stale`/`--prio-high` by
 coincidental hue reuse, not by status semantics). A global `src/**` scan would be the wrong shape here, the same reasoning
-the retired strip cascade check and `NEW-19` already record above: this check's subject is `src/web` specifically. The
+the retired strip cascade check and the retired board reading rhythm check record above: this check's subject is `src/web` specifically. The
 literal half alone is not the whole guarantee, so the check also fences the MECHANISM: the single
 definition of "which colour a column renders" is `COLUMN_ACCENT` in
-`src/web/features/board/column-meta.ts` (consumed by `Column.tsx`, `SearchBox.tsx` and
+`src/shared/column-accent.ts` (re-exported by `src/web/components/badges/column-accent.ts`; consumed by `ColumnHeader.tsx`, `SearchField.tsx` and
 `StatusPillSwitcher.tsx`), and the single definition of "which colour a priority renders" is
-`PRIORITY_DOT` in `src/web/features/board/CardView.tsx`, and the single definition of "which colour
+`PRIORITY_DOT` in `src/web/components/badges/priority-dot.ts`, and the single definition of "which colour
 a source renders" is `SOURCE_ACCENT` in `src/web/components/badges/source-accent.ts` (consumed by
 `SourceBadge.tsx`, `SourceIcon.tsx`, the sidebar, the Flow page and the setup map through
 `sourceAccent()`; `local` and `group` map to the neutral `--text-muted`; every `--src-*` entry must
@@ -3809,14 +3925,7 @@ the mechanism half.
 
 Since 2026-09-29 (G9 Unit 1) `tokens.css` holds a light block that names the same tokens again. The count above does not change: the check reads the twenty declarations whose value is a bare hex, all in the `:root` block, and it skips a declaration whose value starts with `color-mix`, which is the only form the light block uses for these names. `--col-parked` is a twenty-first signal token that the check does not fence; the light block treats it the same way. See [Theme Engine](#theme-engine).
 
-`scripts/check-invariants.mjs` mechanically covered all six through four separate checks, one of which has since retired: a
-global retired-pattern scan over `src/**/*.{ts,tsx}` catches the retired box-shadow focus
-expression, the retired float-shadow literal, and a hardcoded wordmark weight reappearing
-anywhere in source; a second, file-scoped check (`checkStripCascades`, the retired strip cascade invariant) covered a fourth
-retired literal inside the sync strip until the strip retired with it (see
-[App Shell Zones](#app-shell-zones)); a third, directory-scoped check (`checkBoardReadingRhythm`, `NEW-19`, above) covers
-the fifth; and a fourth, file-scoped check (`checkTerminalFence`, `NEW-20`, above) covers the
-sixth — proving only the fenced subject set, never the fenced contents, as stated above.
+`scripts/check-invariants.mjs` once covered all six through four checks, and three have retired. The global literal scan (the focus shadow, the float shadow and the wordmark weight) and the board reading rhythm check moved to the lint rules in the record above on 2026-10-07. The strip cascade check retired with the strip (see [App Shell Zones](#app-shell-zones)). The fourth, file-scoped check (`checkTerminalFence`, `NEW-20`, above) still covers the terminal client. It proves only the fenced subject set, never the fenced contents, as stated above.
 
 **Connection card (LOCAL-32).** Every source connection renders through two presentational
 primitives: `modules/connections/components/ConnectionCard.tsx` (source icon, name, status chip, credential line, and a
@@ -3870,17 +3979,17 @@ seven `--src-*` source colors and the "active sidebar row" accent job are ratifi
 
 **Router cutover invariants.** These hold since the hash router took over page selection (R-12, R-15):
 
-- `App` (the root component) reads the page and id from the router's committed leaf match, not from the location. The page error boundary key, the header, the docked panel and the R-12 panel reset therefore flip in the same commit as the `Outlet`.
+- `ShellContainer.tsx` (the page error boundary key and the header) and `DetailPanelContainer.tsx` (the docked panel and the R-12 panel reset) read the page and id from the router's committed leaf match, not from the location. All four therefore flip in the same commit as the `Outlet`.
 - The entry (`src/web/main.tsx`) restores and canonicalises the hash with `initialHash` before the router starts. A `//` path redirects to `/` first.
 - Routes are case-sensitive. The not-found redirect (`RootNotFound` in `__root.tsx`) computes its target once per mount with `notFoundTarget`, so `#/WORKSPACE` ends at `#/board`.
 - The root `beforeLoad` starts the board snapshot GET before it waits for setup, and only when no board snapshot query has data, is fetching or has failed. It never refetches a failed setup: an error state short-circuits to `setup: null`.
-- A transitional `AppState` context (`src/web/components/AppState.tsx`) carries one prop object per page to the route files (R-15). Ticket 16 removes it.
+- The app store (`src/web/lib/app-store.ts`) holds the cross-module UI state, and the root route context hands it to every container.
 
 **Two custom properties carry the shell's geometry to the detail panel.** `components/ShellFrame.tsx`
 sets `--nav-current` (the live sidebar width: `var(--nav-width)`, `var(--nav-width-collapsed)`, or `0px`
 when the sidebar becomes a phone sheet) with classes on its root element. The hook
 `hooks/use-chrome-top.ts` sets `--chrome-top` (the measured height of the top bar, banner and
-page header) on the same element with `style.setProperty`. The docked (Orca) `DetailPanel.tsx` reads
+page header) on the same element with `style.setProperty`. The docked (Orca) `PanelFrame.tsx` reads
 both: `top: var(--chrome-top)`, `left: calc(var(--nav-current, 0px) + var(--orca-nav-width))` and
 `width: calc(100% - var(--nav-current, 0px) - var(--orca-nav-width))`, so collapsing the sidebar
 shifts the docked panel by style values alone and never remounts the terminal iframe. Measured at
@@ -3895,9 +4004,9 @@ through the outline of the primitive only, and expose `aria-current="page"`. Gro
 Sources holds one row, Meetings, and stays present because the paste flow needs no connection.
 
 **A nav row tied to a source shows only while that source is enabled.** `NavItem` has an optional
-`source`; `visibleNavItems(NAV_ITEMS, board.enabledSources)` in `modules/shell/domain/nav-items.ts` drops a row whose
+`source`; `visibleNavItems(NAV_ITEMS, board.enabledSources)` in `src/shared/nav-items.ts` drops a row whose
 source is not enabled and keeps every row without one. `AppSidebar` derives its groups from that
-list, and `App.tsx` passes the same list to `buildCommands`, so the palette's "Go to" command
+list, and `ShellContainer.tsx` passes the same list to `buildCommands`, so the palette's "Go to" command
 follows the same rule. Only the Slack row (last in Sources, with the unread non-done Slack count)
 carries a source today; every other row is always present.
 
@@ -3935,9 +4044,9 @@ wordmark removal and the view-switch rendering (Candidate C and its retune) are 
 in `docs/standards/design-contract.md`'s Deferred decisions rows 2 and 5.
 
 **Keyboard.** Every key binding goes through one hook, `useShortcuts(bindings, { menuOpen,
-scopeId })` in `src/web/hooks/useShortcuts.ts`, over the pure `resolveShortcut` and the binding
+scopeId })` in `src/web/components/ui/hooks/use-shortcuts.ts`, over the pure `resolveShortcut` and the binding
 tables in `src/shared/shortcuts.ts`: `GLOBAL_SHORTCUTS` (Cmd or Ctrl+K opens the command
-palette, n opens New ticket, ? opens the cheat sheet), mounted once in App; `BOARD_SHORTCUTS`
+palette, n opens New ticket, ? opens the cheat sheet), mounted once in `ShellContainer.tsx`; `BOARD_SHORTCUTS`
 (j, k, h, l move the focused card, 1 to 7 move it to a column through the board's own move path;
 Enter stays with the focused card, a role button that opens itself, as the resolver leaves Enter
 to activatable targets);
@@ -3949,18 +4058,18 @@ keys are inert while the undocked detail panel is open. Closing the palette, the
 New ticket returns focus to the element that had it, unless a palette command ran.
 The palette (`modules/shell/components/CommandPalette.tsx`) is a shadcn `Dialog` over `cmdk`, so its
 Escape and focus trap come from Radix; its commands come from `buildCommands` in
-`src/web/modules/shell/domain/commands.ts`, which calls the handlers that `App.tsx` passes in. The cheat sheet renders the four tables, so a binding
+`src/web/modules/shell/domain/commands.ts`, which calls the handlers that `ShellContainer.tsx` passes in. The cheat sheet renders the four tables, so a binding
 cannot ship without its row. The sidebar sits above the detail panel scrim, and a change to any
 page other than Workspace closes the undocked panel, so one sidebar click navigates.
 
-**Flow page.** `features/flow/FlowPage.tsx` draws the work pipeline on the client only, from the
+**Flow page.** `modules/flow/containers/FlowContainer.tsx` draws the work pipeline on the client only, from the
 board stream (`items`, `cards`, `enabledSources`, `syncedAt`, `pollIntervalMs`,
 `syncUnreachable`); no server route
-backs it, and Sync now reuses `POST /api/sources/:id/poll` through `pollSource` in `lib/api.ts`.
+backs it, and Sync now reuses `POST /api/sources/:id/poll` through `pollSource` in `src/web/queries/source-poll-api.ts`.
 A ref guards Sync now while its requests are in flight, because a second click can land before
 the `disabled` re-render and would send a duplicate POST.
-The pure decisions live in `features/flow/flow-model.ts` (rows, trays, lit sources, arrivals, the
-poller tone) and `lib/flow-geometry.ts` (anchor sides, cubic edge paths, the 40 token cap). The
+The pure decisions live in `modules/flow/domain/flow-model.ts` (rows, trays, lit sources, arrivals, the
+poller tone) and `src/shared/flow-geometry.ts` (anchor sides, cubic edge paths, the 40 token cap). The
 diagram and the detail panel's `SessionFlowRow` both render on the `FlowStage` primitive: a fixed
 coordinate stage scaled to its container, one SVG of edges, HTML nodes on top, and tokens that
 travel an edge with CSS `offset-path` and the `flow-travel` keyframe. While
@@ -3971,7 +4080,9 @@ stage.
 
 ### Modal Focus Containment
 
-`Modal.tsx` traps `Tab`/`Shift+Tab` inside the TOPMOST dialog only, mirroring the discipline its
+The legacy `Modal` primitive was deleted in LOCAL-76. The Radix Dialog and AlertDialog primitives now own focus containment, and the shortcut gate matches their `data-slot` attributes. The text below records the legacy design.
+
+The legacy `Modal` traps `Tab`/`Shift+Tab` inside the TOPMOST dialog only, mirroring the discipline its
 own pre-existing `Escape` handler already used: a module-level `modalStack` records mount order,
 and the keydown handler no-ops unless the dialog it belongs to is the last entry — so a modal
 opened from inside another modal (`SettingsModal` → `PlaybookEditorModal`/`PlaybookDeleteConfirm`,
@@ -3988,13 +4099,13 @@ below), the handler treats that the same as a boundary hit and sends focus to th
 focusable element rather than doing nothing, so containment self-recovers on the very next
 keystroke instead of requiring a correctly-landed starting point.
 
-This closes `KEEP-06`'s `F-96-D` finding: `Modal.tsx` shipped with no `Tab` containment at all
+This closes `KEEP-06`'s `F-96-D` finding: `Modal` shipped with no `Tab` containment at all
 since it was introduced, byte-identical from `v2.9.0` through Phase 96's own audit (96-11 confirmed
-via `git show v2.9.0:src/web/primitives/Modal.tsx`) — pre-existing debt paid down here, not a v3.0
+against the `v2.9.0` tag). This was pre-existing debt paid down here, not a v3.0
 regression. `scripts/panel-96.mjs`'s `CleanupModal` a11y leg is the instrument that caught it and
 is what now asserts containment on every run.
 
-**Residual, not closed by this fix:** `Modal.tsx` has no focus-RESTORATION on close (nothing
+**Residual, not closed by this fix:** `Modal` has no focus-RESTORATION on close (nothing
 returns focus to whatever triggered the modal, or to a parent modal once a nested one unmounts) and
 `SettingsModal`'s `initialFocusRef` targets a button that only mounts once its async Linear-filters
 fetch resolves — the mount-time-only focus effect (`useEffect(() => { initialFocusRef?.current?.
@@ -4016,7 +4127,16 @@ is a behavior change, not a refactor.
    `cards` slice bounded by `doneLimit`; only the persisted file is complete). This break is
    deliberate and UNVERSIONED — single user, localhost, client and server ship in one package, so
    there are no external consumers to keep compatible; a future reader must not "fix" a missing
-   version field. Keep the file location and every field name.
+   version field. Keep the file location and every field name. `Card.boardKey` and
+   `BoardSnapshot.boardKey` name the board of the card and of the snapshot.
+   A group card stores `Card.loopProgress` (LOCAL-88, see [Loop Progress](#loop-progress)). A
+   `Session` record stores the status line meters `contextPercent`, `model`, `cost`, `usage` and
+   `metersAt`. The card fields `contextPercent`, `model`, `cost` and `usage` are wire-only:
+   `redactCard` copies them from the active session, and `board.json` never stores them on the card.
+   A `Session` record also stores the supervisor fields `state`, `stateReason`, `stateSince` and
+   `transcriptPath` (LOCAL-89, see [Session Supervisor](#session-supervisor)); `redactCard`
+   copies them from the active session onto the wire card. A group card stores `dependsOn` and
+   `startQueued`.
 2. **SSE frame format.** `data: ${JSON.stringify(BoardSnapshot)}\n\n`; named heartbeat
    `event: ping\ndata: 1\n\n`; headers incl. `X-Accel-Buffering: no`; **server `KEEPALIVE_MS` (15s)
    must stay in lockstep with client `HEARTBEAT_MS`** (watchdog trips at 3×). No compression on
@@ -4038,7 +4158,35 @@ is a behavior change, not a refactor.
    group members, `members` always an array (`[]` for a non-group card) — and, like every other
    handler in `cards.route.ts` — **`400`, not `404`**, for an unknown id (`T-82-03`); `sync-linear`'s
    `404` stays the sole documented deviation. See `## GET /api/cards/:id answers a group parent's
-real membership directly, independent of windowing` below for the full envelope contract.
+real membership directly, independent of windowing` below for the full envelope contract. Each
+   collection route takes the optional `board` query parameter, and the board routes live under
+   `/api/boards` (see Board API).
+   `POST /api/loops/report` (LOCAL-88) answers `202`, `401` for a missing or unknown
+   `x-dispatch-token`, and `400` for a token of a card that is not a group or for a body outside
+   the schema.
+   `PUT /api/boards/:key/policy` (LOCAL-89) answers `200` with `{ board }`, `400` for an invalid
+   board key or a body outside the strict policy schema (an unknown field, `usageLimit` other than
+   `wait` or `stop`, a value out of range, `handoffHardPercent` below `handoffPercent`) and `404`
+   for an unknown board.
+   The orchestrator routes (LOCAL-90, see
+   [Orchestrator Control Surface](#orchestrator-control-surface)) all sit under `/api/orchestrator/`
+   and answer `401` for a missing or bad token, `403` for a card of another board or a policy
+   refusal (`policy-refused`, `done-not-own-card`), `400`, `404` or `409` for a refusal, and `502`
+   when Linear refuses an `add_comment`. Their success codes: `200` for `GET /cards`, `GET /cards/:id`,
+   `GET /sessions`, `GET /groups/:id/progress`, `GET /sessions/:cardId/pane`, `GET /events`,
+   `GET /policy`, `PATCH /tickets/:id`, `POST /tickets/:id/move`, `POST /sessions/:cardId/input`,
+   `POST /sessions/:cardId/resume`, `POST /sessions/:cardId/stop`,
+   `POST /groups/:cardId/approve-roadmap`, `POST /events/wait` and `GET /groups/:cardId/ship`;
+   `201` for `POST /tickets`, `POST /tickets/:id/comments`, `POST /base-branches`,
+   `POST /groups` and `POST /decisions`; `202` for `POST /groups/:id/start`,
+   `POST /sessions/:cardId/handoff` and `POST /groups/:cardId/ship`.
+   `GET /api/decisions` answers `200` with `{ items }`, and the optional `?state=` is `open` or
+   `answered`. `POST /api/decisions/:id/answer` takes `{ optionId, note? }` and answers `200` with
+   `{ item }`, `400` for an unknown option or a bad body, `404` for an unknown item and `409`
+   `already-answered`.
+   `GET /api/events` takes `?since=<event id>` (digits only). With it the route answers the rows
+   after that id, oldest first, in the same `{ events }` envelope, and a value that is not a
+   safe integer answers `400`.
 4. **Persistence format + location.** `~/.dispatch/{board.json,config.json}`; `board.json` ===
    `BoardSnapshot` JSON; atomic writes via `write-file-atomic`; config at mode `0600`; the `"//"`-keyed
    config template. Pasted ticket images live under `~/.dispatch/attachments/<cardId>/<sha256-16>.<ext>`
@@ -4099,11 +4247,11 @@ table records the security invariants that ride on it, not the rule itself.
 | T-ID     | STRIDE                                            | Component / site                                                                                                                                                                                                 | Mitigation (concrete control)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | -------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | T-01-03  | Information Disclosure                            | `adapters/poller.ts`                                                                                                                                                                                             | `config.linearApiKey` is sent only as the raw `Authorization` header value (T-01-03a) — it is never logged, never echoed into any error body, and never reaches the routes layer.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| T-01-04  | Tampering (XSS) / DoS                             | `web/features/board/Card.tsx`, `web/queries/board-snapshot-queries.ts`                                                                                                                                           | Linear title/identifier are rendered as plain React children (React auto-escapes), never injected as raw inner HTML (XSS mitigation T-01-04a); and the SSE stream core disposes EVERYTHING (EventSource, pending reconnect, watchdog) on unmount so a StrictMode double-mount never leaves two live connections or an orphan timer (DoS mitigation T-01-04c).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| T-01-05  | Tampering (XSS) / Elevation                       | `web/features/detail/DetailPanel.tsx`                                                                                                                                                                            | The Linear-sourced description renders as plain React children (auto-escaped), never as raw inner HTML (T-01-05a); the panel is a PLAIN element with NO focus trap so keystrokes pass through to the live `claude` session — EoP accepted on a single-user loopback-only host with no adversarial keystroke concern (T-01-05c).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| T-01-04  | Tampering (XSS) / DoS                             | `web/modules/board/components/CardView.tsx`, `web/queries/board-snapshot-queries.ts`                                                                                                                             | Linear title/identifier are rendered as plain React children (React auto-escapes), never injected as raw inner HTML (XSS mitigation T-01-04a); and the SSE stream core disposes EVERYTHING (EventSource, pending reconnect, watchdog) on unmount so a StrictMode double-mount never leaves two live connections or an orphan timer (DoS mitigation T-01-04c).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| T-01-05  | Tampering (XSS) / Elevation                       | `web/modules/detail/containers/DetailPanelContainer.tsx`                                                                                                                                                         | The Linear-sourced description renders as plain React children (auto-escaped), never as raw inner HTML (T-01-05a); the panel is a PLAIN element with NO focus trap so keystrokes pass through to the live `claude` session; EoP accepted on a single-user loopback-only host with no adversarial keystroke concern (T-01-05c).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | T-02-04  | Tampering                                         | `adapters/claude-trust.ts`                                                                                                                                                                                       | `~/.claude.json` is concurrently rewritten by every live Claude session; all `preSeedTrust` calls serialize through a single in-process async lock, keep the re-read→merge-one-entry→write span tight (no awaits between), and parse in try/catch — never writing a file that could not be parsed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | T-02-05  | Tampering                                         | `adapters/claude-trust.ts`                                                                                                                                                                                       | Same lost-update defense as T-02-04: `write-file-atomic` prevents torn files but not a stale snapshot clobbering a concurrent writer's live auth state, so the in-process lock + tight RMW span + parse-guard is the mitigation an in-process actor can offer.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
-| T-02-12  | Tampering (XSS)                                   | `web/features/modals/StartModal.tsx`                                                                                                                                                                             | The Linear-sourced identifier renders as a plain React child (auto-escaped) — never injected as raw inner HTML.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| T-02-12  | Tampering (XSS)                                   | `web/modules/card-actions/components/StartDialog.tsx`                                                                                                                                                            | The Linear-sourced identifier renders as a plain React child (auto-escaped), never injected as raw inner HTML.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | T-02-15  | Spoofing / Elevation                              | `routes/cards.route.ts` (`/start`)                                                                                                                                                                               | The start route lives on `apiRouter`, so it inherits the router-wide Origin/Host loopback gate — it is NOT mounted anywhere else, so there is no ungated path to the saga.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | T-02-16  | Tampering / Elevation                             | `routes/cards.route.ts` (`/start`)                                                                                                                                                                               | Defense-in-depth identifier gate: the Linear-sourced identifier is re-validated against `^[A-Za-z0-9]+-\d+$` at the route before it enters filesystem paths, branch names, and tmux session names in the saga (the saga re-checks too).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | T-02-17  | Information Disclosure                            | `bootstrap/config.ts`, `services/infra/config-holder.ts`                                                                                                                                                         | Config validation happens at boot: `loadConfig` throws `StartupError` naming the offending field or config-file path and NEVER echoes the Linear API key; routes read config only through the holder and return a value-free 400 when it is unset, so configured values never reach a response body.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -4119,7 +4267,7 @@ table records the security invariants that ride on it, not the rule itself.
 | T-06-03  | Information Disclosure                            | `adapters/editors.ts`, `routes/cards.route.ts` (`/open-editor`)                                                                                                                                                  | Absolute editor paths never leave the `editors` module (only availability booleans + the spawn side-effect escape); no 400 body ever echoes a path — messages name the editor id / "workspace".                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | T-06-04  | Denial of Service                                 | `adapters/editors.ts`, `routes/cards.route.ts` (`/open-editor`)                                                                                                                                                  | A final launch failure (after one re-resolve-and-retry) is logged server-side, never thrown into the request or the process — it reaches the caller's fire-and-forget `.catch`, which logs it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | T-06-05  | Spoofing                                          | `routes/cards.route.ts` (`/open-editor`)                                                                                                                                                                         | `/open-editor` lives on `apiRouter`, so it inherits the router-wide Origin/Host loopback gate — no new mount, no second gate.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| T-08     | Spoofing / Elevation / Info. Disclosure           | `web/hooks/useTransitionNotifications.ts`, `web/hooks/useUnseenActivity.ts`, `routes/cards.route.ts` (`/cleanup`), `services/orchestration/cleanup.ts`                                                           | Notification/localStorage + cleanup safety: the first snapshot after connect/reconnect only SEEDS the previous-column ref (never notifies), so a reboot/reconnect can't spam notifications (T-08a-02); all localStorage access is try/catch-wrapped, degrading cosmetically and self-healing on next open (T-08a-03); cleanup derives every path/session from `card.*` + configured `repoPaths`, never the request body (T-08b-01 EoP), inherits the loopback gate (T-08b-03), and NEVER deletes a branch — branches always survive (T-08b-05).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| T-08     | Spoofing / Elevation / Info. Disclosure           | `web/modules/shell/hooks/use-transition-notifications.ts`, `web/components/ui/hooks/use-last-opened.ts`, `routes/cards.route.ts` (`/cleanup`), `services/orchestration/cleanup.ts`                               | Notification/localStorage + cleanup safety: the first snapshot after connect/reconnect only SEEDS the previous-column ref (never notifies), so a reboot/reconnect can't spam notifications (T-08a-02); all localStorage access is try/catch-wrapped, degrading cosmetically and self-healing on next open (T-08a-03); cleanup derives every path/session from `card.*` + configured `repoPaths`, never the request body (T-08b-01 EoP), inherits the loopback gate (T-08b-03), and NEVER deletes a branch, branches always survive (T-08b-05).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | T-73-01  | Elevation of Privilege                            | `bootstrap/index.ts` (first `app.use`), `services/infra/remote-auth.ts`                                                                                                                                          | The hoisted `remoteAuthRouter` is the FIRST `app.use()`, ahead of `/api`, `/sessions`, and the static/SPA fallback, so one gate covers all of them; `hasValidSession` returns false the instant `currentToken == null`, with no `if (enabled)` branch anywhere — "feature never minted" and "wrong cookie" are the same fail-closed path.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | T-73-02  | Elevation of Privilege                            | `bootstrap/index.ts` (`handleUpgrade`)                                                                                                                                                                           | The raw WS upgrade bypasses Express entirely, so `isRequestAllowed` — the SAME predicate the app-level gate uses — is called as the first statement of `handleUpgrade`, ahead of the `/sessions/` path check; a rejected upgrade is `rejectUpgrade`d (non-101, socket closed) and never reaches `terminalProxyUpgrade`/ttyd.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | T-73-03  | Information Disclosure                            | `services/infra/remote-auth.ts`                                                                                                                                                                                  | `hasValidSession` and `verifyCode` both compare via `crypto.timingSafeEqual` on length-checked, equal-size buffers — never `===`/`includes`/`Buffer.compare` — so a submitted code or presented cookie can't be brute-forced by measuring per-byte compare timing.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -4144,7 +4292,7 @@ table records the security invariants that ride on it, not the rule itself.
 | T-103-02 | Tampering                                         | `services/infra/vault.ts#writeStore`                                                                                                                                                                             | Every write is `write-file-atomic` at mode `0o600` followed by an unconditional `chmodSync`, and the containing directory is `chmodSync`ed to `0o700` on every mutating call, since `mkdir`'s `mode` option is create-only and a no-op on an existing directory. Observed (103-03): the directory-level re-assert is load-bearing (a hand-loosened `0755` directory is never re-tightened without it); the per-file `values.env` re-assert was observed NOT load-bearing on this machine, since `write-file-atomic`'s rename-over-target already discards a hand-loosened inode, and is kept as defence-in-depth. Delete matches a value line by a `NAME=` prefix (not a bare name), so deleting `FOO` never touches `FOOBAR`; every value is POSIX single-quote-escaped so it stays safe for a later `. values.env` source.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | T-103-03 | Information Disclosure                            | `bootstrap/index.ts` (the `/api` JSON parse-error handler)                                                                                                                                                       | Express 5's default parse-error response renders V8's `JSON.parse` message, which quotes the submitted bytes back for a body that is valid UTF-8 but not JSON, so a client POSTing a bare secret to any `/api` route had it reflected in the 400 body and dumped to stderr. A scoped `entity.parse.failed`/`entity.too.large` handler answers a fixed `malformed-body` instead, inserted between `express.json` and `apiRouter` so it wins before any route runs; scoped to the whole `/api` mount because every route shares one parser. Proven able to fail by removing the handler.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | T-103-04 | Information Disclosure                            | `routes/vault.route.ts`, `services/infra/vault.ts`                                                                                                                                                               | Neither module contains a `console` call at all, and every catch binds nothing, so no error message, stack frame or filesystem path reaches a client or a log. The `vault-log-scan` check drives a nine-request cycle and scans the whole stdout plus stderr capture and every `.log` file under the sandbox HOME, proven able to fail on both streams.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| T-104-01 | Information Disclosure                            | `web/lib/api.ts#setVaultValue`, `web/lib/api.ts#addVaultKey`                                                                                                                                                     | A submitted value is interpolated only into a `JSON.stringify` body; the request path is built from the key name alone through `encodeURIComponent`, and no vault wrapper constructs a query string. `scripts/panel-104.mjs --check no-query-param` captures every request the page issues across a save and a rotate at the wire (CDP `Network.requestWillBeSent`, not a page-side interception the code under test could alter) and asserts zero sentinel occurrences in any URL, raw or percent-decoded. Observed (104-06): `--break query-param` patched `setVaultValue`'s URL to append `?value=...` against a real build, and the check failed by name (`no-query-param: expected zero VALUE_SENTINEL occurrences in the url of PUT .../value?value=...`, measured raw=1 decoded=1); the captured-original restore returned the tree byte-identically (`git diff --stat` reporting zero changes).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| T-104-01 | Information Disclosure                            | `web/modules/vault/queries/vault-api.ts#setVaultValue`, `web/modules/vault/queries/vault-api.ts#addVaultKey`                                                                                                     | A submitted value is interpolated only into a `JSON.stringify` body; the request path is built from the key name alone through `encodeURIComponent`, and no vault wrapper constructs a query string. `scripts/panel-104.mjs --check no-query-param` captures every request the page issues across a save and a rotate at the wire (CDP `Network.requestWillBeSent`, not a page-side interception the code under test could alter) and asserts zero sentinel occurrences in any URL, raw or percent-decoded. Observed (104-06): `--break query-param` patched `setVaultValue`'s URL to append `?value=...` against a real build, and the check failed by name (`no-query-param: expected zero VALUE_SENTINEL occurrences in the url of PUT .../value?value=...`, measured raw=1 decoded=1); the captured-original restore returned the tree byte-identically (`git diff --stat` reporting zero changes).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | T-104-02 | Information Disclosure                            | `web/modules/vault/components/VaultValueEditor.tsx#VaultValueEditor`                                                                                                                                             | The value input is `type="text"`, never `type="password"`, since a password-typed input is what triggers the browser save-password prompt; it carries `autocomplete="new-password"`, `data-1p-ignore`, `data-lpignore="true"` and `data-bwignore="true"` on the live element. `--check autofill-defusal` asserts all five properties on the rendered element in a real headless Chrome, plus a document-wide assertion that no password-typed input exists anywhere in settings. Observed (104-05): proven able to fail by removing `data-lpignore` from the live element (`autofill-defusal: expected data-lpignore="true", measured null`) and restoring the captured original, re-passing clean. Residual named honestly: the absence of a save-password PROMPT is not observable from headless CDP and is carried as a human UAT observation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | T-104-03 | Information Disclosure                            | `web/modules/vault/components/VaultKeyRow.tsx#VaultKeyRow`, `shared/types.ts#VaultKeySummary`                                                                                                                    | The row renders `name`, `purpose` and the booleans `filled` and `hasPrevious` only; the wire type carries no value and no length-proportional field, so no list render path can leak a value or hint at its size, and the badge branches on the boolean rather than on any length. The previous value (`#VaultPreviousValue`) is fetched only on an explicit eye click, rendered as a fixed-length mask until then, and dropped from state on mask or on the next rotate, so a reload never renders it. The current value is fetched only while the rotate editor (`#VaultValueEditor`) is open for a filled key, labeled "Current value" beside the empty new-value input, and unmounts with the editor on save or cancel. Cross-references `T-103-01`, which holds the same closed shape on the server side. `--check sentinel-capture` scans `outerHTML`, every live input value, `localStorage` and `sessionStorage` after a save and again after a full reload, and asserts the reopened value editor is empty rather than pre-filled. Observed (104-06): this same assertion tripped incidentally during the `query-param` break's trip leg (`sentinel-capture: expected the sentinel to occur exactly once across the whole capture, measured 2`), confirming the check is live rather than vacuous.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | T-104-04 | Information Disclosure                            | `routes/remote-auth-gate.ts#remoteAuthMiddleware` (as it applies to `routes/vault.route.ts`)                                                                                                                     | The vault page and its routes add no auth code at all, deliberately; `remoteAuthRouter` is mounted first in `bootstrap/index.ts`, ahead of `/api`, so a non-loopback request without a valid session cookie receives the shared code-entry page. `node scripts/session-liveness-v3.mjs --check vault-remote-gate` asserts this with a real `node:http` request carrying a spoofed non-loopback `Host` (`fetch` silently drops the header and would pass vacuously), asserts the response is `200 text/html` carrying the `/__remote/verify` marker rather than a 401 the gate never emits, asserts the key list does not appear in the refusal body, and asserts a refused write never reached `values.env` on disk. Observed (104-04): three hand-run breaks each proved a real FAIL naming its own violation (the Host-spoof substrate, the leak assertion, the on-disk write-refusal check), each restored to a byte-identical file and re-passed. See Known Residuals, Phase 73 CR-01 (the pre-existing Host-classifier residual, closed in Phase 74) rather than restated here.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -4300,7 +4448,7 @@ backend fails fast and EXITS on a missing binary or missing/incomplete config �
 degraded state — so there is no backend signal for a mirrored error screen; a total connection
 failure surfaces as the sidebar footer `SyncStatus` "Disconnected" state instead. The component file and its
 knip-ignore entry are both gone. The `board === null` / disconnected pre-board state now renders a
-PRESENTATIONAL Dispatch brand lockup in `App.tsx` (a routing `Glyph`, the `DISPATCH` wordmark, and
+PRESENTATIONAL Dispatch brand lockup in `src/web/components/BootScreen.tsx` (a routing `Glyph`, the `DISPATCH` wordmark, and
 the current connection-status text) — this is purely cosmetic startup chrome, not a revived error
 screen: there is still no backend degraded-serving signal and nothing mirrors a preflight failure
 back to the browser.
@@ -4353,11 +4501,11 @@ produces today, never a wrong or misleading one.
 
 ### `GET /api/cards/:id` answers a group parent's real membership directly, independent of windowing
 
-`App.tsx`'s `selectedCardMembers` derivation branches on whether the selected card is genuinely
+`DetailPanelContainer.tsx`'s members derivation branches on whether the selected card is genuinely
 in-window (`board.cards.some(...)`, the same test the members-precedence rule and the
 actionability derivation below both reuse, rather than each writing an independent copy). An
 IN-WINDOW group card still derives members from the live SSE snapshot via
-`membersOf(selectedCard, board?.cards ?? [])` — `group-members.ts`'s `groupId` filter over
+`membersOf(selectedCard, board?.cards ?? [])`: `src/shared/group-members.ts`'s `groupId` filter over
 `board.cards`, unchanged, so members keep updating live wherever the snapshot actually has the
 answer. An OUT-OF-WINDOW group card (reachable only via search, since windowing only ever excludes
 `done` cards past the page size) falls back to `pinned.members`, populated by
@@ -4372,7 +4520,7 @@ Map (`board.store.ts`'s `membersOf(groupId)`), never the windowed wire `snapshot
 point of a single-card fetch (per its own JSDoc) is answering for cards the windowed snapshot
 excludes, so routing the members lookup through `snapshot()` would just re-import the same
 windowing gap it exists to route around. This server-side filter is a distinct implementation from
-the client's own `group-members.ts#membersOf`, which filters an ALREADY-fetched `Card[]` array —
+the client's own `src/shared/group-members.ts#membersOf`, which filters an ALREADY-fetched `Card[]` array;
 the two are kept as exactly two legitimate copies of the same `groupId` predicate, one server-side
 over the live Map, one client-side over an array, rather than a third independently-derived
 condition appearing anywhere.
@@ -4380,7 +4528,7 @@ condition appearing anywhere.
 Actionability stays a separate, explicit question from "are the members known at all." A hydrated
 out-of-window group parent's member rows are actionable in exactly the same way an in-window
 card's are: `MemberRow`'s `actionable: boolean` prop is REQUIRED (no default), derived at exactly
-one site — `actionablePinnedMembers` in `pinned-card.ts`, the sibling to `actionablePinnedCard`
+one site: `actionablePinnedMembers` in `src/shared/pinned-card.ts`, the sibling to `actionablePinnedCard`
 with the identical three-part stub-vs-hydrated guard — so a stub can never present an actionable
 member row, and a future call site cannot silently inherit an answer nobody chose. A stub card
 (`stubToCard`'s filler placeholder, every non-identity field meaningless) renders NO Members block
@@ -4454,17 +4602,17 @@ question; none of them read prose for truth.
   it covers and the two (`Object.assign` with an opaque source, and `delete`) it deliberately
   does not. Another leg is `checkAttentionSingleSource`, reported as
   `ATTENTION SINGLE SOURCE (NEW-22)`: it fences the attention PREDICATE, not the helper's name.
-  Two halves — no `src/web` file outside `card-attention.ts` may export a rival
+  Two halves: no `src/web` file outside `src/shared/card-attention.ts` may export a rival
   `needsAttention`/`attentionTitle`, and none may OR two or more of
   `startError`/`sessionLost`/`cleanupBlocked` together into its own attention claim (a parse, so
   the claim is found wherever it is written and whatever it is called). Consumers that IMPORT the
-  single source are unrestricted. It fails, rather than passing vacuously, if `card-attention.ts`
+  single source are unrestricted. It fails, rather than passing vacuously, if `src/shared/card-attention.ts`
   no longer declares both `needsAttention` and `attentionTitle`. The predecessor censused files
   whose text merely CONTAINED those identifiers against a closed four-file list, which inverted
   both directions: an independent computation does not reference the helper, so it was invisible,
   while a correct new consumer turned the build red — the same wrong-subject shape as `NEW-21`
-  before it. Conjunctions that narrow ONE attention field with unrelated state (`card-badges.ts`'s
-  activity dot, `DetailPanel.tsx`'s liveness, `App.tsx`'s start-eligibility) are different claims
+  before it. Conjunctions that narrow ONE attention field with unrelated state (`src/shared/card-badges.ts`'s
+  activity dot, `DetailPanelContainer.tsx`'s liveness, `StartContainer.tsx`'s start-eligibility) are different claims
   and are deliberately not fenced; a ternary-chain or table-driven duplication is a recorded
   residue the parse cannot see. A third leg is `checkCleanupMirrorChokepoint`, reported as
   `CLEANUP MIRROR CHOKEPOINT (NEW-23)`: the same two-tier shape as `NEW-21`, fencing the three
@@ -4671,7 +4819,7 @@ a console.error mentioning "stranded" and card id panel100-a, none captured`; th
   assertions became load-bearing only once `checkAtomicRollback` grew `leg 3 (compensation
 permanently fails)`, which runs the same scenario in the configuration where both must PASS;
   before that leg they ran only in this break's trip, where they are expected to fail, and deleting
-  `Board.tsx`'s whole stranded-suppression path left every run green).
+  the legacy board's whole stranded-suppression path left every run green).
   `density-91.mjs --compare` against `panel-100.mjs`'s own Phase 100 BEFORE snapshot reports zero
   deltas: nothing about a resting card's geometry changed.
 - **`node scripts/mobile-term-101.mjs`** (`npm run mobile-term-101`, Phase 101, `TERM-04`/`TERM-05`,
@@ -4748,3 +4896,249 @@ permanently fails)`, which runs the same scenario in the configuration where bot
 - **`phase-smoke-tester`** - the only BEHAVIORAL verification this project runs: an agent derives
   and executes smoke cases against the running app after each phase's implementation lands. This
   is the one gate above that cannot be reduced to a grep.
+
+## Orchestration Initiative
+
+The orchestration initiative (LOCAL-83 to LOCAL-93) adds one board per project, an optional orchestrator per board and a dashboard. LOCAL-83 wrote two documents, and their records govern LOCAL-84 to LOCAL-93:
+
+- `docs/research/orchestration-research.md`: Dispatch today, the manual orchestration run of 2026-09-25 to 2026-10-05, and a survey of 17 products.
+- `docs/standards/orchestration-design.md`: the glossary and the decision records D-1 to D-9 (board model, card identifiers, supervisor and orchestrator duties, control surface, progress protocol, policy, more than one orchestrator, ship flow, never list), with the scope change for each later ticket.
+
+Term rule: "orchestrator" is a Claude session that belongs to one board, and "supervisor" is the server code that watches sessions. The [Orchestration Saga](#orchestration-saga) is the session start saga and keeps its name.
+
+### Loop Progress
+
+LOCAL-88 makes the server the one reader of roadmap loop progress (decision record D-5).
+
+**Sources.** For each tracked group card, `loop-progress-reader.ts` reads files under the session
+root (`card.workspacePath`): the one `.roadmap/<slug>/progress.md`, the roadmap file at the root
+that `progress.md` line 1 names (else the only `ROADMAP*.md`), the loop engine file
+`.claude/ralph-loop.local.md` (else its `.done` copy), and for each unit its PRD and the
+`state.md` and `attempts.md` files of `<repo>/.planning/<slug>-unit-<n>/`. The pure parsers are in
+`loop-progress.ts`. The result is `Card.loopProgress`. A tracked card is a group card that is not
+in Done and has a `workspacePath`.
+
+**Refresh.** The reader reads a tracked card when a watched folder changes (300 ms debounce per
+card) and every 60 s. The watched folders are the session root, `.claude/`, `.roadmap/<slug>/`
+and the phase folder of the current unit. The reader updates the watches after each read of a
+card, and the 60 s read also removes the watches of cards that left. The store
+writes the card only when the model, without `readAt`, changes.
+
+**Tolerance.** A path from file text must stay inside the session root, also after the reader
+follows symlinks. Else the reader skips it with the warning `<path>: outside the session root`.
+The reader reads at most 1 MiB per file (`<path>: larger than 1 MiB`). A missing or damaged file
+adds a warning to `loopProgress.warnings`, and the rest of the model still fills. A root with no
+loop files gives no model, and the card keeps its last stored model. The reader never writes a
+loop file, and no reader error stops the server.
+
+**Report call.** A loop can report a gate result, so that the board shows it at once. A session
+has the variables `DISPATCH_HOOK_PORT` and `DISPATCH_HOOK_TOKEN`. Run this command after each gate
+line (pass or RED attempt) and after each unit boundary commit (`"kind":"unit"`, no `phase`):
+
+```bash
+[ -n "$DISPATCH_HOOK_PORT" ] && [ -n "$DISPATCH_HOOK_TOKEN" ] && curl -s -m 5 -o /dev/null -X POST -H "content-type: application/json" -H "x-dispatch-token: $DISPATCH_HOOK_TOKEN" -d '{"kind":"phase","unit":2,"phase":5,"result":"pass"}' "http://127.0.0.1:${DISPATCH_HOOK_PORT}/api/loops/report" || true
+```
+
+The body is strict: `kind` (`phase` or `unit`), `unit` (1 to 99), `phase` (1 to 99, required for
+`phase`), `result` (`pass` or `fail`) and an optional `note` (at most 500 characters). The server
+takes the card and the session from the token, records one `loop_gate` row in the
+`orchestration_events` table, and starts a read of that card. The row append does not go through
+the store queue, because the table is append-only and changes no card (the push subscription
+write is the precedent). It answers `202`. The report never
+writes progress: the loop files stay the only source. `loops.route.ts` holds the route and
+`loop-report.ts` the service.
+
+**Session meters.** On each pane capture, on every status channel, the marker watcher parses the
+two status line rows that `~/.claude/statusline.sh` draws (`status-line.ts`). When the meters of a
+session change, `setSessionMetersIfSession` writes `contextPercent`, `model`, `cost`, `usage` and
+`metersAt` (the time of the last change) on that session record. `redactCard` copies the active session meters onto the wire
+card and into `sessionSummaries`. A status line of another format gives no meters.
+
+**Vocabulary check.** `check-doc-drift.mjs` skips its `ROADMAP`, `.planning/` and
+`Phase <number>` patterns for the loop file modules only, because those words are their input
+format.
+
+### Session Supervisor
+
+LOCAL-89 adds the supervisor: server code that watches each Claude session of a board and does
+the fixed duties of decision record D-3. The session root is the session `workspacePath` (else
+the card one), where claude runs and the loop files live; it is never `workspace.folder`, the
+parent folder of the source repositories. It runs only on a board whose policy has
+`supervisor: on`. With `off`, it reads no state, writes no event, sends no key and holds no
+power child; the status line meters still run.
+
+**Transcript.** The supervisor reads the transcript path that the hooks report; else the file
+named by the Claude session id, else the newest `.jsonl`, in the project folder
+`<config dir>/projects/<session root with each character that is not a letter or a digit
+replaced by ->`.
+
+**Feed.** The marker watcher calls the pane sink (`setPaneSink`) after each pane capture. The
+supervisor uses that capture and adds no second capture loop. The registry
+(`supervisor-registry.ts`) keeps one watcher per tmux session name.
+
+**States.** `supervisor-state.ts` (pure) reads the pane, the transcript tail and the loop
+progress and gives one of 12 states: `working`, `idle`, `needs_input`, `permission_prompt`,
+`handoff_ready`, `roadmap_complete`, `usage_limit_dialog`, `usage_limit_wait`, `api_error`,
+`stale`, `lost` and `shell_prompt`. A dialog state needs two captures that agree, and `idle`
+needs three equal samples 60 s apart. Each change is one `supervisor_state` row in
+`orchestration_events` and sets `state`, `stateReason` and `stateSince` on the session. A
+`needs_input` state moves the card to the Needs input column.
+
+**Duties.** `supervisor-plan.ts` (pure) plans the actions for one state change, and
+`supervisor-actions.ts` runs them. An action that sends a key or changes the state writes a
+`supervisor_action` row; an unconfirmed send and a move to `needs_input` add their own rows. An
+action that finds nothing to do, such as an `Escape` already sent, writes no row.
+
+- Restart: an idle group loop with an active engine file gets one continue prompt per unit and
+  phase. The next stop in the same phase sets `needs_input` with `supervisor_gave_up`.
+- API error and sleep cut: one continue prompt per phase. These two share one budget; the
+  restart has its own.
+- Prompts: the dangerous delete prompt and the held peer message are declined. Any other
+  permission prompt gets no key.
+- Loop close: at `roadmap_complete` the engine file is renamed to its `.done` copy.
+- Lost session and shell prompt: a pane whose shell owns the foreground is relaunched with
+  `runClaude`; any other case runs the resume saga. The resume prompt is typed only after claude
+  takes the foreground, within 60 s. A failed relaunch, a lost session that stays gone, or claude
+  that does not start sets `resume_failed`; an unconfirmed resume prompt is recorded as
+  unconfirmed.
+- Handoff (`supervisor-handoff.ts`): at `handoffPercent` the session gets the handoff request
+  once per crossing, and once more at `handoffHardPercent`; the hard request tells the loop to
+  hand off now. At `handoff_ready` the supervisor waits until the pane is ready and not busy (a
+  "Waiting for N background" line counts as busy), types `/clear`, checks the pane again before
+  its `Enter`, sends the resume prompt, and waits up to 80 s for the engine file to name the new
+  transcript. The session keeps its old transcript path until the engine names the new one.
+- Usage limit (`supervisor-limit.ts`): both policies select the stop and wait row, else the wait
+  here row, and never a credits row. Before each `Enter` the supervisor reads the menu again and
+  never presses `Enter` on a credits row. Then policy `stop` sets `needs_input` with
+  `usage_stop`. Policy `wait` continues after the reset time plus 2 minutes; when the engine file
+  says `handoff-pending`, it sends `Escape` at the auto continue notice and starts a fresh session
+  after the reset instead. The timer re-checks at that time that the session is live, has no stop
+  reason, and that its board still has `supervisor: on` and `usageLimit: wait`. A timer delay is
+  capped at the Node timer maximum (2^31 - 1 ms).
+- The 60 s pass (`supervisor-pass.ts`): it holds the keep awake child, records a
+  `machine_wake` row when its timer fires more than 30 s late, records a `pr_state` row for each
+  change of the PR list of a group, starts a queued group when each group in `dependsOn` is done
+  and the board is under `concurrencyCap`, and sets `needs_input` with `budget` at the next gate
+  change after the cost of a group reaches `budgetPerGroup`. The cost of a session is a running
+  total: when its status line meter drops (a claude relaunch starts it at 0), the pass adds the
+  last value. The total lives in server memory.
+
+**Hold.** A `needs_input` that the supervisor set with a `stateReason` stays until a busy sign,
+a permission prompt, a lost session or a shell prompt shows. Quiet samples do not plan again.
+Two reasons hold longer. A `budget` stop sends no key, so only a lost session or a shell prompt
+releases it; the 60 s pass clears its reason when a raised or removed budget allows the cost. A
+`resume_failed` hold releases only on a busy sign, so a failed resume is not planned again on
+every sample.
+
+**Keep awake.** `adapters/power.ts` holds one `caffeinate -is -w <server pid>` child while a
+session of a supervised board is live. It spawns the child through `adapters/exec.ts`. The `-w`
+flag ends the child with the server, and shutdown ends it at once.
+
+**Fixed values.** These are not policy fields: idle after three equal samples 60 s apart, stale
+after 15 minutes with a busy sign and no transcript growth, one continue prompt per stop per
+phase, send waits of 1.5 s, 10 s and 10 s, a ready wait of 60 s, and a reset wait plus 2 minutes.
+
+**Policy route.** `PUT /api/boards/:key/policy` writes the D-6 policy fields of a board. It is a
+user route; no orchestrator route or tool changes a policy.
+
+### Orchestrator Control Surface
+
+LOCAL-90 gives an orchestrator a fixed set of server calls (decision records D-4 and D-9). The
+tool and route reference is the Tool reference of `docs/standards/orchestration-design.md`; this
+section holds the parts that span files.
+
+**Router.** `routes/orchestrator.route.ts` holds every route under `/api/orchestrator/`, and
+`routes/orchestrator.handlers.ts` holds their handlers. The router's `tool()` wrapper
+authenticates the `x-orchestrator-token` header first, runs the handler and
+appends one `tool_call` row to `orchestration_events` for each call, accepted or refused. The row
+is written when the response closes, so a refusal that the error handler answers later carries its
+final status. A close before the response finished is recorded as `client-closed`. A call with no
+token or an unknown token goes under board `-`, which no board read lists; a revoked token is
+recorded on its own board. The row keeps the params, query and
+body apart, with every string cut to 4096 characters.
+
+**Tokens.** `orchestrator-tokens.ts` mints a 256-bit token and stores only its SHA-256 hash in the
+`orchestrator_tokens` table. A new token revokes the earlier live token of the same orchestrator,
+so there is one live token for each orchestrator. Only the user routes
+`POST` and `DELETE /api/boards/:key/orchestrators/:id/token` mint and revoke. A revoked token still
+resolves, so its refused call is recorded on its board.
+
+**Board scope.** Each call acts on the board of its token. `checkScope` in
+`services/domain/orchestrator-scope.ts` refuses a card of another board with 403 `other-board`.
+`refuseOrchestratorTokenOnUserRoute` is mounted first on the API router and answers 403
+`orchestrator-token-on-user-route` for an orchestrator token on any state changing user route,
+the token mint route included. The `/sessions` terminal proxy lies outside `/api` and is not
+covered; the tool allowlist of Unit 4 closes that path.
+
+**Policy.** `services/domain/orchestrator-policy.ts` holds the pure checks: `checkCap` (running
+loops against `concurrencyCap`), `checkBudget` (group cost against `budgetPerGroup`) and
+`checkShipRights` (`shipRights` is not `none`). A refused check is the 403 `policy-refused` with a
+`reason`. Each tool runs its checks before its first write. `start_group` starts the session in
+the tick of its cap check, so two overlapping calls cannot both take the last slot, and waits for
+the start: a failed start restores the queue flag, records a `supervisor_action` event and answers
+409 `start-failed`.
+
+**Session tools.** `orchestrator-sessions.ts` holds `send_input`, `approve_roadmap`,
+`request_handoff`, `resume_loop` and `stop_session`. Each refuses the four keyless states
+(`permission_prompt`, `usage_limit_dialog`, `usage_limit_wait`, `shell_prompt`) with 409
+`session-state-refused`, and refuses a session that stopped on `budget` or `usage_stop` with 403
+`user must resume`; `resume_loop` checks only the stop. A per card in-memory lock answers 409
+`session-busy` for a second session tool on a card, and a running ship flow of the card answers
+409 `ship-running`. `send_input` refuses a text whose typed line starts with `!`, `/`, `#`, `&` or
+`@` with 400 `invalid-text`, because Claude Code reads those as input modes, and a text whose
+typed line is empty. The typed line comes from `typedLine` in `supervisor-send.ts`, the same
+helper `sendConfirmed` types with, so a leading control character cannot hide the mode key.
+`sendLiteral` passes the end of options separator before the text and puts a backslash before a
+trailing semicolon, so a text that starts with a hyphen or ends with a semicolon types as written.
+The ready check refuses a pane whose input box row (the first row between its last two rule lines)
+is not the prompt line, such as a box left in bash, memory or background mode.
+`approve_roadmap` under `roadmapApproval: ask` marks the approve item used in the store write
+that checks it, so one answer approves one plan.
+The budget checks use `groupCost` in `orchestrator-read.ts`, the running total that the supervisor
+budget stop also reads, so a claude relaunch does not reset it. Every typed text goes through
+`supervisor-send.ts#sendConfirmed`, and `stop_session` presses `Escape` once and sets
+`needs_input` with `stop_session`; nothing is killed.
+
+**Decision items and the wait.** `decision-items.ts` stores an open item and records
+`decision_raised`; a `roadmap_approval` item always gets the server options `approve` and
+`reject`. Only the user route `POST /api/decisions/:id/answer` answers an item, and it
+records `decision_answered`. `orchestrator-wait.ts` answers `wait_for_event` from the table first,
+then listens to the store `orchestration` event until a match or the time limit, which is 1 to
+540 seconds. A `tool_call` row never ends a wait unless `kinds` names it, because every call,
+the wait call included, writes one. An aborted request ends the wait and leaves no listener.
+
+**Ship flow.** `ship-flow.ts` runs the D-8 steps for the branches of a finished group in stack
+order. The branch states are `queued`, `merging_main`, `checking`, `pushing`, `waiting_checks`,
+`waiting_merge` (with `open_prs`) or `merging` (with `merge`), `verifying`, `merged` and `failed`.
+Each branch must be a loop unit branch or `test/<slug>-specs`, with a local `refs/heads/<name>`,
+and never `main`, `master`, `HEAD`, a full ref name or the repository base. The first step checks
+that the worktree is clean, then runs `git fetch origin`, a checkout with the no-guess option and
+a merge of `origin/main` with no edit, and records the merged commit as `checked`. The check
+runs on that commit, the push uses the refspec `<checked>:refs/heads/<name>`, and the merge
+passes gh's match head commit option with it; a resumed flow whose HEAD moved stops. Each gh
+call names the repository of the `origin` remote (`repo` on the flow; null unless the host is
+`github.com` or `ssh.github.com`, so an SSH host alias, another host or a local path gives none), and
+an open PR is reused only from the same repository, into `main`, at the checked commit. The
+admin merge retry runs only when every violation clause of the merge error (lines split on
+sentence ends, commas and semicolons) matches the signature rule wording `must have verified
+signatures`.
+The flow never rebases and never edits code. Every git and gh call has a time limit (120 s, 300 s
+for fetch and push, 30 min for the check command) and a 64 MiB output buffer, and the diffs run
+with fixed color, prefix and path settings. The runner reads the board policy before each step
+and poll: `none` stops the flow and `open_prs` stops the merges. The runner keeps its board key,
+and a card that is gone stops it with no write; unwind refuses a group whose flow runs with 409
+`ship-running`. A thrown runner is stored as stopped. A refused move to Done after the last merge
+keeps the flow done and raises a `ship_failure` item for a manual move. A conflict, a failed check or an identity mismatch stops the flow
+and raises one `ship_failure` decision item. The identity stop compares the author and message of
+the new `origin/main` tip with the `git config` identity that the flow read at its start. One flow
+runs on a board at a time. A flow in the state `running` is started again at boot by
+`resumeShipFlows`, and a stopped flow is replaced by a new `start_ship` call.
+
+**MCP server.** `dispatch mcp` serves the 23 tools over stdio. `bootstrap/cli.ts` reads and checks
+`DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and
+`bootstrap/mcp-tools.ts` holds the zod input and the description of each tool. The dependency
+cruiser rule `mcp-server-isolated` refuses an import of `routes`, `services`, `store`, `adapters`
+or `sources` in both files, so they never import the app they call. The server uses `node:http` with no client
+timeout, because `wait_for_event` can hold a response for 540 seconds before any header, and a
+cancelled tool call aborts its request. `src/server/test-support/orchestrator-client.ts` is a
+scripted client that starts this server and replays a manual run on a sandbox.

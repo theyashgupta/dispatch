@@ -6,6 +6,7 @@ import {
 import { store } from "../store/board.store.js";
 import { enabledSources } from "../sources/registry.js";
 import { RateLimited, type TicketSource } from "../sources/ticket.source.js";
+import { ALL_BOARDS } from "../../shared/board-key.js";
 
 const MAX_BACKOFF_MS = 15 * 60_000;
 
@@ -42,6 +43,7 @@ async function fetchTracked(
 ): Promise<TrackedRefresh | undefined> {
   if (truncated || !source.fetchByIds) return undefined;
   const ids = store.trackedIssueIds(
+    ALL_BOARDS,
     source.id,
     new Set(issues.map((i) => i.id)),
   );

@@ -1154,7 +1154,7 @@ async function assertMemberNeverRenders(cdp, sessionId, violations) {
     return;
   }
   console.log(
-    `criterion 2 (member/board): present in /api/board with groupId=${memberCard.groupId}, absent from every board column — excluded above the component by Board.tsx:334, with App.tsx:232 refusing its start request besides`,
+    `criterion 2 (member/board): present in /api/board with groupId=${memberCard.groupId}, absent from every board column, excluded above the component by BoardContainer.tsx, with app-store.ts requestStart refusing its start request besides`,
   );
 }
 
@@ -1936,7 +1936,7 @@ async function main() {
       }
 
       // Card-face DOM half — the Notice+Retry block lives in CardView, which mounts only under
-      // the traditional Board (App.tsx:383), never under OrcaView (App.tsx:371): Orca mode
+      // the traditional Board (the board route), never under OrcaView (the workspace page): Orca mode
       // replaces <Board> outright rather than hiding it, so a query against `#root` while docked
       // in Orca (this harness's standing mode since `enableOrcaMode`) finds zero Retry buttons no
       // matter what the fixture carries — live-reproduced (`count:0` even with a real

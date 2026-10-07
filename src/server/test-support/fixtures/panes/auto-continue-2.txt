@@ -1,0 +1,6 @@
+✻ Cogitated for 1h 27m 4s · done 10:05 PM
+⏺ Automatic continue cancelled · /rate-limit-options to re-arm
+❯ 
+  Opus 5.5 · high  │  ████░░░░░░   41%  414k/1.0M                                                                                              ✔ Update installed · Restart to update
+  GROUP-13  │  thinking  │  Attention-kind  │  7d 10%  │  4h3m  │  +895/-0  │  $45.85                                                          new task? /clear to save 414.7k tokens
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents

@@ -3,18 +3,34 @@ import type { CardSearchResult } from "../../shared/search.js";
 import type {
   AccountEventType,
   ActivityEvent,
+  ArchiveBoardResult,
   ArchivedGroup,
+  Board,
+  BoardPolicy,
+  BoardKey,
+  BoardPatch,
+  BoardScope,
   BoardSnapshot,
   Card,
   Column,
   ColumnChange,
+  CreateBoardResult,
+  DecisionItem,
   EventType,
   Item,
+  LinearComment,
+  NewBoard,
+  LoopProgress,
+  ShipFlow,
+  OrchestrationEvent,
   PreviewInfo,
   PrInfo,
   ProbeUnknown,
   Session,
   SessionFields,
+  SessionMeters,
+  SupervisorState,
+  SupervisorStateReason,
   SettableItemState,
   SourceCursor,
   SourceIssue,
@@ -25,10 +41,11 @@ import type {
   UnwindDestination,
   WorkflowState,
 } from "../../shared/types.js";
-import type { PushSubscriptionRow } from "./board-db.js";
+import type { OrchestratorTokenRow, PushSubscriptionRow } from "./board-db.js";
 import { store, type ReservedSession } from "./board.store.js";
 
 export {
+  BoardUnavailableError,
   redactArchivedGroup,
   redactCard,
   type ReservedSession,
@@ -36,6 +53,7 @@ export {
 
 export interface BoardRepository {
   on: EventEmitter["on"];
+  off: EventEmitter["off"];
   setHookTokenReleaser(
     release: (
       token: string,
@@ -44,7 +62,7 @@ export interface BoardRepository {
     ) => void,
   ): void;
   load(): Promise<void>;
-  snapshot(opts?: { doneLimit?: number }): BoardSnapshot;
+  snapshot(board: BoardKey, opts?: { doneLimit?: number }): BoardSnapshot;
   wireItems(): Item[];
   setPollInterval(ms: number): void;
   setCleanupDelayDays(days: number): void;
@@ -59,18 +77,60 @@ export interface BoardRepository {
   setEnabledSources(ids: string[]): void;
   setSyncUnreachable(flag: boolean): Promise<void>;
   trackedIssueIds(
+    scope: BoardScope,
     sourceId: string,
     returnedIds: ReadonlySet<string>,
     limit?: number,
   ): string[];
   getCard(id: string): Card | undefined;
   membersOf(groupId: string): Card[];
-  getWorkspaceFolders(): { folders: string[]; lastUsed: string | null };
+  getWorkspaceFolders(board: BoardKey): {
+    folders: string[];
+    lastUsed: string | null;
+  };
   searchCards(
+    board: BoardKey,
     query: string,
     limit: number,
   ): { results: CardSearchResult[]; total: number };
-  listEvents(cardId: string | null, limit: number): ActivityEvent[];
+  listEvents(
+    board: BoardKey,
+    cardId: string | null,
+    limit: number,
+  ): ActivityEvent[];
+  listEventsSince(
+    board: BoardKey,
+    cardId: string | null,
+    sinceId: number,
+    limit: number,
+  ): ActivityEvent[];
+  setLoopProgress(cardId: string, progress: LoopProgress): Promise<void>;
+  appendOrchestrationEvent(
+    e: Omit<OrchestrationEvent, "id">,
+  ): OrchestrationEvent;
+  listOrchestrationEvents(
+    board: BoardKey,
+    sinceId: number,
+    limit: number,
+  ): OrchestrationEvent[];
+  replaceOrchestratorToken(
+    tokenHash: string,
+    boardKey: BoardKey,
+    orchestratorId: string,
+  ): void;
+  revokeOrchestratorTokens(boardKey: BoardKey, orchestratorId: string): number;
+  findOrchestratorToken(tokenHash: string): OrchestratorTokenRow | undefined;
+  insertDecisionItem(item: DecisionItem): void;
+  getDecisionItem(id: string): DecisionItem | undefined;
+  listDecisionItems(
+    boardKey: BoardKey,
+    state?: DecisionItem["state"],
+  ): DecisionItem[];
+  answerDecisionItem(
+    id: string,
+    answer: NonNullable<DecisionItem["answer"]>,
+  ): DecisionItem | null;
+  consumeDecisionItem(id: string): boolean;
   addPushSubscription(sub: PushSubscriptionRow): boolean;
   removePushSubscription(endpoint: string): boolean;
   listPushSubscriptions(): PushSubscriptionRow[];
@@ -87,9 +147,9 @@ export interface BoardRepository {
   setProvisioning(id: string, step: string): Promise<void>;
   setExtraDirection(id: string, text: string): Promise<void>;
   setStartIntent(id: string, intent: { playbook?: string }): Promise<void>;
-  addWorkspaceFolder(path: string): Promise<void>;
-  removeWorkspaceFolder(path: string): Promise<void>;
-  setLastUsedFolder(path: string): Promise<void>;
+  addWorkspaceFolder(board: BoardKey, path: string): Promise<void>;
+  removeWorkspaceFolder(board: BoardKey, path: string): Promise<void>;
+  setLastUsedFolder(board: BoardKey, path: string): Promise<void>;
   setCardWorkspace(
     id: string,
     workspace: { folder: string; repos: { path: string; base: string }[] },
@@ -131,6 +191,22 @@ export interface BoardRepository {
   clearPendingAccountsExcept(accountId: string): Promise<void>;
   setOutputChanged(id: string, iso: string): Promise<void>;
   setPrsIfSession(id: string, session: string, prs: PrInfo[]): Promise<void>;
+  setSessionMetersIfSession(
+    id: string,
+    session: string,
+    meters: SessionMeters,
+  ): Promise<boolean>;
+  setSessionStateIfSession(
+    id: string,
+    sessionId: string,
+    state: SupervisorState,
+    reason?: SupervisorStateReason,
+  ): Promise<boolean>;
+  setTranscriptPath(
+    id: string,
+    sessionId: string,
+    transcriptPath: string,
+  ): Promise<void>;
   setPreviewsIfSession(
     id: string,
     session: string,
@@ -183,9 +259,13 @@ export interface BoardRepository {
     reason: string,
     cardId?: string | null,
   ): Promise<void>;
-  listArchive(): ArchivedGroup[];
+  listArchive(board: BoardKey): ArchivedGroup[];
   getArchived(archiveId: string): ArchivedGroup | undefined;
-  archiveDueForDelete(now: number, retentionDays: number): ArchivedGroup[];
+  archiveDueForDelete(
+    scope: BoardScope,
+    now: number,
+    retentionDays: number,
+  ): ArchivedGroup[];
   switchActiveSession(cardId: string, sessionId: string): Promise<void>;
   reserveNewSession(
     cardId: string,
@@ -204,12 +284,13 @@ export interface BoardRepository {
   ): Promise<void>;
   clearLastMarker(id: string, sessionId: string | undefined): Promise<void>;
   flipBack(id: string, sessionId: string | undefined): Promise<boolean>;
-  listCards(): Card[];
-  sessionsWithTmux(): {
+  listCards(scope: BoardScope): Card[];
+  sessionsWithTmux(scope: BoardScope): {
     card: Card;
     session: Session & { tmuxSession: string };
   }[];
   sessionsDueForCleanup(
+    scope: BoardScope,
     now: number,
   ): { card: Card; sessionId: string | undefined; dueAt: number }[];
   moveCardManual(id: string, column: Column): Promise<ColumnChange[]>;
@@ -254,8 +335,39 @@ export interface BoardRepository {
     sessionId: string | undefined,
     message: string,
   ): Promise<void>;
-  createLocalCard(title: string, description: string): Promise<Card>;
+  listBoards(): Board[];
+  getBoard(key: BoardKey): Board | undefined;
+  createBoard(input: NewBoard): Promise<CreateBoardResult>;
+  updateBoard(key: BoardKey, patch: BoardPatch): Promise<Board | undefined>;
+  setBoardArchived(
+    key: BoardKey,
+    archived: boolean,
+  ): Promise<ArchiveBoardResult>;
+  setBoardPolicy(
+    key: BoardKey,
+    policy: BoardPolicy,
+  ): Promise<Board | undefined>;
+  setGroupQueue(
+    id: string,
+    queue: { startQueued: boolean; dependsOn?: string[] },
+  ): Promise<void>;
+  setOrchestratorFields(
+    id: string,
+    fields: Pick<Card, "createdByOrchestrator" | "launch">,
+  ): Promise<void>;
+  setShipFlow(id: string, flow: ShipFlow): Promise<void>;
+  updateLocalCardText(
+    id: string,
+    patch: { title?: string; description?: string },
+  ): Promise<boolean>;
+  addLocalComment(id: string, comment: LinearComment): Promise<boolean>;
+  createLocalCard(
+    board: BoardKey,
+    title: string,
+    description: string,
+  ): Promise<Card>;
   createGroupCard(
+    board: BoardKey,
     title: string,
     memberIds: string[],
   ): Promise<{ ok: true; card: Card } | { ok: false; ineligibleIds: string[] }>;
@@ -292,6 +404,7 @@ export interface BoardRepository {
     untilIso: string,
   ): Promise<"ok" | "unknown" | "promoted">;
   promoteItem(
+    board: BoardKey,
     id: string,
     context?: string,
   ): Promise<{ card: Card; created: boolean } | undefined>;

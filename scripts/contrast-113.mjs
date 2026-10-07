@@ -358,7 +358,7 @@ function srgbMix(hexA, hexB, pctA) {
  * 3. The account popover's pace badges (AccountPopover.tsx): `--status-ok` and `--status-stale`
  *    as text on their own 16% tint over `--surface-column`, and `--destructive-text` on the
  *    `--status-down` 16% tint, because `--status-down` itself is below the text floor there.
- * 4. A column colour as text (`dataInk` in src/web/primitives/data-ink.ts): 35% of the `--col-*` token
+ * 4. A column colour as text (the count chip in `ColumnHeader.tsx`): 35% of the `--col-*` token
  *    mixed with `--text`, on the 16% tint of the same token over every background tier. The
  *    column tokens themselves stay graphic tokens.
  * 5. A source mark (SourceBadge.tsx, SourceIcon.tsx): the `--src-*` token as a graphic on the 16%

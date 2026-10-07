@@ -10,6 +10,7 @@ import {
 import {
   addWorkspaceFolder,
   browseDirectory,
+  discoverWorkspaceFolder,
   getWorkspaceFolders,
   removeWorkspaceFolder,
 } from "./workspace-folders-api.js";
@@ -17,6 +18,7 @@ import {
   addWorkspaceFolderMutationOptions,
   browseDirectoryQueryOptions,
   browseTargetOnOpenChange,
+  discoverWorkspaceFolderQueryOptions,
   removeWorkspaceFolderMutationOptions,
   useFolderBrowser,
   workspaceFoldersKeys,
@@ -277,4 +279,68 @@ void test("closing the folder browser keeps the target", () => {
 
 void test("closing with no target leaves it unset", () => {
   assert.equal(browseTargetOnOpenChange(false, undefined), undefined);
+});
+
+const discovered = [{ path: "/w/a b/api", name: "api", base: "main" }];
+
+test("the discover query keys on the folder path", () => {
+  assert.deepEqual(discoverWorkspaceFolderQueryOptions("/w").queryKey, [
+    "workspaces",
+    "discover",
+    "/w",
+  ]);
+});
+
+test("discoverWorkspaceFolder encodes the path in the query string", async () => {
+  reply(200, { repos: discovered });
+  assert.deepEqual(await discoverWorkspaceFolder("/w/a b&c"), {
+    repos: discovered,
+  });
+  assert.equal(
+    calls[0]?.url,
+    "/api/workspace-folders/discover?path=%2Fw%2Fa%20b%26c",
+  );
+});
+
+test("discoverWorkspaceFolder throws on a non-2xx status", async () => {
+  reply(500, { error: "down" }, "Internal Server Error");
+  await assert.rejects(
+    discoverWorkspaceFolder("/w"),
+    new Error("discoverWorkspaceFolder failed: 500 Internal Server Error"),
+  );
+});
+
+test("an accepted add writes the discovered repos and the folder to the cache", async () => {
+  reply(200, { repos: discovered });
+  const client = newClient();
+  client.setQueryData(workspaceFoldersKeys.folders, {
+    folders: ["/w"],
+    lastUsed: "/w",
+  });
+  const result = await new MutationObserver(
+    client,
+    addWorkspaceFolderMutationOptions(client),
+  ).mutate("/x");
+  assert.deepEqual(result, { ok: true, repos: discovered });
+  assert.deepEqual(client.getQueryData(workspaceFoldersKeys.discover("/x")), {
+    repos: discovered,
+  });
+  assert.deepEqual(client.getQueryData(workspaceFoldersKeys.folders), {
+    folders: ["/w", "/x"],
+    lastUsed: "/w",
+  });
+});
+
+test("a refused add leaves the discovered repos cache alone", async () => {
+  reply(400, { error: "not a directory" });
+  const client = newClient();
+  const result = await new MutationObserver(
+    client,
+    addWorkspaceFolderMutationOptions(client),
+  ).mutate("/x");
+  assert.deepEqual(result, { ok: false, error: "not a directory" });
+  assert.equal(
+    client.getQueryData(workspaceFoldersKeys.discover("/x")),
+    undefined,
+  );
 });

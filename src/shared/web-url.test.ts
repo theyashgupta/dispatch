@@ -19,3 +19,19 @@ test("isWebUrl refuses other schemes, malformed text and a missing url", () => {
     assert.equal(isWebUrl(bad), false, String(bad));
   }
 });
+
+test("isWebUrl refuses javascript, data, mailto and relative urls", () => {
+  for (const bad of [
+    "javascript:alert(1)",
+    "JavaScript:alert(1)",
+    "data:text/html,x",
+    "mailto:a@example.test",
+    "/relative/path",
+    "relative/path",
+    "//example.test/path",
+    "",
+    undefined,
+  ]) {
+    assert.equal(isWebUrl(bad), false, String(bad));
+  }
+});

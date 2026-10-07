@@ -46,7 +46,7 @@ self.addEventListener("push", (event) => {
   /**
    * `tag: data.cardId` is the PUSH-05 dedup contract: it must stay equal to the card id so this
    * push and the in-tab `new Notification(..., { tag: card.id })` in
-   * src/web/hooks/useTransitionNotifications.ts coalesce into one visible notification when a tab
+   * src/web/modules/shell/hooks/use-transition-notifications.ts coalesce into one visible notification when a tab
    * is open. Changing either tag scheme silently reintroduces double-notify.
    */
   event.waitUntil(

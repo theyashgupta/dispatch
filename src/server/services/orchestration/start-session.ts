@@ -20,9 +20,11 @@ import {
 import {
   steps,
   StartStepError,
+  cardSessionsRoot,
   type SagaContext,
   type SagaStep,
 } from "./steps.js";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 
 /** Milliseconds after which a transient reattach statusReason is cleared (shared with resume). */
 export const REATTACH_STATUS_CLEAR_MS = 5000;
@@ -171,14 +173,17 @@ export async function startSession(
       sessionName = reserved.sessionName;
     }
     const session = "dsp-" + sessionName;
-    const workspacePath = path.join(config.workspaceRoot ?? "", sessionName);
+    const workspacePath = path.join(
+      cardSessionsRoot(card, config) ?? "",
+      sessionName,
+    );
 
     if (reserved == null && (await hasSession(`=${session}`))) {
       if (card.hookToken && card.activeSessionId) {
         registerHookToken(card.hookToken, cardId, card.activeSessionId);
       }
       await store.attachExistingSession(cardId, card.activeSessionId, {
-        workspacePath,
+        workspacePath: activeRecord?.workspacePath ?? workspacePath,
         branch: sessionName,
         tmuxSession: session,
       });
@@ -234,7 +239,10 @@ export async function startSession(
         claudeAccountId: ctx.claudeAccountId,
       });
       if (card.workspace?.folder) {
-        await store.setLastUsedFolder(card.workspace.folder);
+        await store.setLastUsedFolder(
+          card.boardKey ?? DEFAULT_BOARD_KEY,
+          card.workspace.folder,
+        );
       }
       if (ctx.warnings.length > 0) {
         await store.setStartWarning(cardId, ctx.warnings.join("; "));

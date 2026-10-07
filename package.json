@@ -1,6 +1,6 @@
 {
   "name": "@theyashgupta/dispatch",
-  "version": "4.0.0",
+  "version": "4.2.0",
   "description": "A local kanban board that turns Linear tickets into live Claude Code agent sessions - one git worktree per ticket, real terminals in the browser.",
   "keywords": [
     "kanban",
@@ -43,9 +43,9 @@
     "terminal-e2e": "node scripts/terminal-appearance-e2e.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "lint": "eslint .",
+    "lint": "eslint . --cache --cache-location node_modules/.cache/eslint/",
     "depcruise": "depcruise src",
-    "lint:fix": "eslint . --fix",
+    "lint:fix": "eslint . --fix --cache --cache-location node_modules/.cache/eslint/",
     "deadcode": "knip && knip --production",
     "build:web": "vite build",
     "analyze": "ANALYZE=1 vite build",
@@ -56,7 +56,8 @@
     "doc-drift": "node scripts/check-doc-drift.mjs",
     "invariants": "node scripts/check-invariants.mjs",
     "check-hooks": "node scripts/check-hooks.mjs",
-    "check:static": "npm run format:check && npm run lint && npm run typecheck && npm run depcruise && npm run deadcode",
+    "check:static": "bash scripts/check-lock.sh npm run check:static:unlocked",
+    "check:static:unlocked": "npm run format:check && npm run lint && npm run typecheck && npm run depcruise && npm run deadcode",
     "selection-guard": "tsx scripts/terminal-selection-guard.ts",
     "sim": "node scripts/fresh-env-sim.mjs",
     "migration-diff": "node scripts/migration-diff-v3.mjs",
@@ -75,10 +76,14 @@
     "contrast-113": "node scripts/contrast-113.mjs",
     "panel-114": "node scripts/panel-114.mjs",
     "panel-115": "node scripts/panel-115.mjs",
-    "check": "npm run format:check && npm run lint && npm run depcruise && npm run typecheck && npm run test && npm run deadcode && npm run replay-gate && npm run doc-drift && npm run invariants && npm run check-hooks",
-    "prepack": "npm run build"
+    "check": "bash scripts/check-lock.sh npm run check:unlocked",
+    "check:unlocked": "npm run format:check && npm run lint && npm run depcruise && npm run typecheck && npm run test && npm run deadcode && npm run replay-gate && npm run doc-drift && npm run invariants && npm run check-hooks",
+    "prepack": "npm run build",
+    "test:visual": "playwright test",
+    "test:visual:update": "playwright test --update-snapshots"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.1",
     "express": "5.2.1",
     "uqr": "0.1.3",
     "write-file-atomic": "8.0.0",
@@ -87,6 +92,7 @@
   "devDependencies": {
     "@dnd-kit/core": "6.3.1",
     "@eslint/js": "10.0.1",
+    "@playwright/test": "1.63.0",
     "@tailwindcss/vite": "4.3.3",
     "@tanstack/react-query": "5.104.0",
     "@tanstack/react-query-devtools": "5.104.0",
@@ -134,5 +140,10 @@
     "typescript": "6.0.3",
     "typescript-eslint": "8.63.0",
     "vite": "8.1.3"
+  },
+  "overrides": {
+    "seroval": "1.6.8",
+    "seroval-plugins": "1.6.8",
+    "shell-quote": "1.12.0"
   }
 }

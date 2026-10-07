@@ -3,6 +3,7 @@ import { afterEach, test } from "node:test";
 import { isolateEnv } from "../test-support/fixtures.js";
 import type { CalendarSourceConfig, Config } from "../../shared/types.js";
 import type { CalendarEvent } from "../sources/calendar/calendar-events.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("../store/board.store.js");
@@ -75,5 +76,7 @@ test("an event gone from a complete read is auto-done through the real poller", 
   assert.ok(call >= 2, `polled ${call} times`);
   assert.equal(states().get("keep"), "unread");
   assert.equal(states().get("drop"), "done");
-  assert.ok(store.snapshot().enabledSources?.includes("calendar"));
+  assert.ok(
+    store.snapshot(DEFAULT_BOARD_KEY).enabledSources?.includes("calendar"),
+  );
 });

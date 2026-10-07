@@ -1,12 +1,13 @@
 import type { ReactNode } from "react";
+import { PageHeaderCount } from "@/components/PageHeaderCount";
 
 interface PageHeaderProps {
   title: string;
   count?: number;
-  actions?: ReactNode;
+  children?: ReactNode;
 }
 
-export function PageHeader({ title, count, actions }: PageHeaderProps) {
+export function PageHeader({ title, count, children }: PageHeaderProps) {
   return (
     <header className="flex h-(--page-header-height) min-w-0 shrink-0 items-center gap-2 border-b border-border bg-(--surface-column) px-4 select-none">
       <h1
@@ -15,14 +16,8 @@ export function PageHeader({ title, count, actions }: PageHeaderProps) {
       >
         {title}
       </h1>
-      {count != null && (
-        <span className="text-sm font-medium text-muted-foreground">
-          {count}
-        </span>
-      )}
-      {actions != null && (
-        <div className="ml-auto flex min-w-0 items-center gap-2">{actions}</div>
-      )}
+      {count != null && <PageHeaderCount count={count} />}
+      {children}
     </header>
   );
 }

@@ -34,6 +34,7 @@ Usage:
                                       Remove dispatch's hooks and launchd plist, keeping your data
   dispatch service <install|status|restart|uninstall>
                                       Run dispatch as a background launchd service (macOS)
+  dispatch mcp                        Serve the orchestrator tools over stdio (needs DISPATCH_ORCHESTRATOR_TOKEN and DISPATCH_PORT)
   dispatch --help | --version
 
 Options:
@@ -377,6 +378,28 @@ async function uninstall(values: {
   process.stdout.write(renderPlan(done));
 }
 
+/**
+ * Serve the orchestrator tools over stdio, with the token and port taken from the environment.
+ *
+ * @remarks A missing or invalid value writes one line to stderr and exits 1 before the server
+ * starts, so stdout carries only the protocol.
+ */
+async function mcp(): Promise<void> {
+  const token = process.env.DISPATCH_ORCHESTRATOR_TOKEN;
+  const rawPort = process.env.DISPATCH_PORT ?? "";
+  const port = /^\d+$/.test(rawPort) ? Number(rawPort) : Number.NaN;
+  if (!token) {
+    process.stderr.write("DISPATCH_ORCHESTRATOR_TOKEN is not set.\n");
+    process.exit(1);
+  }
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    process.stderr.write("DISPATCH_PORT is not set to a valid port.\n");
+    process.exit(1);
+  }
+  const { startMcpServer } = await import("./mcp-server.js");
+  await startMcpServer({ token, port });
+}
+
 async function cli(): Promise<void> {
   let result;
   try {
@@ -421,6 +444,10 @@ async function cli(): Promise<void> {
   if (positionals[0] === "update") {
     await update();
     process.exit();
+  }
+  if (positionals[0] === "mcp") {
+    await mcp();
+    return;
   }
   if (positionals[0] === "service") {
     await service(positionals[1], values);
