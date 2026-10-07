@@ -23,6 +23,7 @@ import type {
   ActivityEvent,
   ArchiveBoardResult,
   Board,
+  BoardPolicy,
   BoardKey,
   BoardPatch,
   BoardScope,
@@ -39,6 +40,8 @@ import type {
   Session,
   SessionFields,
   SessionMeters,
+  SupervisorState,
+  SupervisorStateReason,
   SourceIssue,
   SourceKind,
   TrackedRefresh,
@@ -221,6 +224,13 @@ export function redactCard(card: Card): Card {
   if (activeSession?.model !== undefined) wireCard.model = activeSession.model;
   if (activeSession?.cost !== undefined) wireCard.cost = activeSession.cost;
   if (activeSession?.usage !== undefined) wireCard.usage = activeSession.usage;
+  if (activeSession?.state !== undefined) wireCard.state = activeSession.state;
+  if (activeSession?.stateReason !== undefined)
+    wireCard.stateReason = activeSession.stateReason;
+  if (activeSession?.stateSince !== undefined)
+    wireCard.stateSince = activeSession.stateSince;
+  if (activeSession?.transcriptPath !== undefined)
+    wireCard.transcriptPath = activeSession.transcriptPath;
   const hasMultipleSessions = (card.sessions?.length ?? 0) >= 2;
   wireCard.sessionCount = hasMultipleSessions
     ? card.sessions!.length
@@ -257,6 +267,10 @@ export function redactCard(card: Card): Card {
       model: s.model,
       cost: s.cost,
       usage: s.usage,
+      state: s.state,
+      stateReason: s.stateReason,
+      stateSince: s.stateSince,
+      transcriptPath: s.transcriptPath,
       ...(resolvedParentOrdinal != null
         ? { parentOrdinal: resolvedParentOrdinal }
         : {}),
@@ -2017,6 +2031,51 @@ class BoardStore extends EventEmitter {
       written = true;
       return [];
     }).then(() => written);
+  }
+
+  /**
+   * Write the supervisor state onto one session record and stamp `stateSince`.
+   *
+   * @remarks Resolves false for an unknown card or session before the queue, like `setSessionMetersIfSession`. The reason is cleared when none is given, so an old reason never outlives its state.
+   */
+  setSessionStateIfSession(
+    id: string,
+    sessionId: string,
+    state: SupervisorState,
+    reason?: SupervisorStateReason,
+  ): Promise<boolean> {
+    const owns = () =>
+      this.cards.get(id)?.sessions?.find((s) => s.id === sessionId);
+    if (!owns()) return Promise.resolve(false);
+    let written = false;
+    return this.enqueue(() => {
+      const target = owns();
+      if (!target) return [];
+      target.state = state;
+      target.stateSince = new Date().toISOString();
+      if (reason === undefined) delete target.stateReason;
+      else target.stateReason = reason;
+      written = true;
+      return [];
+    }).then(() => written);
+  }
+
+  /** Store the transcript file of one session; a same value skips the queue. */
+  setTranscriptPath(
+    id: string,
+    sessionId: string,
+    transcriptPath: string,
+  ): Promise<void> {
+    const find = () =>
+      this.cards.get(id)?.sessions?.find((s) => s.id === sessionId);
+    const peek = find();
+    if (!peek || peek.transcriptPath === transcriptPath)
+      return Promise.resolve();
+    return this.enqueue(() => {
+      const target = find();
+      if (target) target.transcriptPath = transcriptPath;
+      return [];
+    });
   }
 
   /**
@@ -4087,6 +4146,36 @@ class BoardStore extends EventEmitter {
       updated = board;
       return [];
     }).then(() => updated);
+  }
+
+  /** Replace the policy of one board; resolves undefined for an unknown board. */
+  setBoardPolicy(
+    key: BoardKey,
+    policy: BoardPolicy,
+  ): Promise<Board | undefined> {
+    let updated: Board | undefined;
+    return this.enqueue(() => {
+      const board = this.boards.get(key);
+      if (board) {
+        board.policy = { ...policy };
+        updated = board;
+      }
+      return [];
+    }).then(() => updated);
+  }
+
+  /** Set the start hold of a group card and, when given, the groups it waits on. */
+  setGroupQueue(
+    id: string,
+    queue: { startQueued: boolean; dependsOn?: string[] },
+  ): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      card.startQueued = queue.startQueued;
+      if (queue.dependsOn !== undefined) card.dependsOn = [...queue.dependsOn];
+      return [];
+    });
   }
 
   /** Archive or restore a board; the default board cannot be archived. */

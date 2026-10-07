@@ -5,6 +5,7 @@ import type {
   ArchiveBoardResult,
   ArchivedGroup,
   Board,
+  BoardPolicy,
   BoardKey,
   BoardPatch,
   BoardScope,
@@ -24,6 +25,8 @@ import type {
   Session,
   SessionFields,
   SessionMeters,
+  SupervisorState,
+  SupervisorStateReason,
   SettableItemState,
   SourceCursor,
   SourceIssue,
@@ -146,6 +149,17 @@ export interface BoardRepository {
     session: string,
     meters: SessionMeters,
   ): Promise<boolean>;
+  setSessionStateIfSession(
+    id: string,
+    sessionId: string,
+    state: SupervisorState,
+    reason?: SupervisorStateReason,
+  ): Promise<boolean>;
+  setTranscriptPath(
+    id: string,
+    sessionId: string,
+    transcriptPath: string,
+  ): Promise<void>;
   setPreviewsIfSession(
     id: string,
     session: string,
@@ -277,6 +291,14 @@ export interface BoardRepository {
     key: BoardKey,
     archived: boolean,
   ): Promise<ArchiveBoardResult>;
+  setBoardPolicy(
+    key: BoardKey,
+    policy: BoardPolicy,
+  ): Promise<Board | undefined>;
+  setGroupQueue(
+    id: string,
+    queue: { startQueued: boolean; dependsOn?: string[] },
+  ): Promise<void>;
   createLocalCard(
     board: BoardKey,
     title: string,
