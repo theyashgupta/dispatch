@@ -58,6 +58,18 @@ export function shellQuote(tokens: string[]): string {
 }
 
 /**
+ * Build the shell line that points a running shell at an account config dir.
+ *
+ * @remarks An undefined `configDir` points the shell back at the home login. The folder is quoted by
+ * {@link shellQuote}, so a control byte throws instead of reaching the line editor.
+ */
+export function accountEnvLine(configDir: string | undefined): string {
+  return configDir === undefined
+    ? "unset CLAUDE_CONFIG_DIR"
+    : `export CLAUDE_CONFIG_DIR=${shellQuote([configDir])}`;
+}
+
+/**
  * True when `text` holds a byte the shell's line editor interprets: a C0 control or DEL, except
  * newline, which an open quote carries onto a continuation prompt as ordinary text.
  */

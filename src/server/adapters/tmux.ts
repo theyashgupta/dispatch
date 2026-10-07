@@ -581,6 +581,24 @@ export async function sessionEnvHas(
 }
 
 /**
+ * Set `key` in session `name`'s tmux environment, or remove it when `value` is undefined.
+ *
+ * @remarks Only processes started after the call inherit the change, so a running shell also
+ * needs the matching export or unset typed into it.
+ */
+export async function setSessionEnv(
+  name: string,
+  key: string,
+  value: string | undefined,
+): Promise<void> {
+  await tmux(
+    value === undefined
+      ? ["set-environment", "-u", "-t", name, key]
+      : ["set-environment", "-t", name, key, value],
+  );
+}
+
+/**
  * Whether a pane's root process (`#{pane_pid}`, the login shell of a command-less session) owns
  * the terminal's foreground process group, i.e. the shell is at its prompt.
  *

@@ -148,3 +148,18 @@ test("a Stop hook with the token of an ACME card moves that card and no card of 
   assert.equal(moved.boardKey, ACME);
   assert.equal(store.getCard(card.id)!.column, localColumn);
 });
+
+test("UserPromptSubmit, Stop and StopFailure posts reach the turn state with the error field", async () => {
+  const { recordedTurnState } =
+    await import("../services/orchestration/session-turn.js");
+  await post(TOKEN, { hook_event_name: "UserPromptSubmit" });
+  assert.equal(recordedTurnState(card.id, sessionId), "busy");
+  await post(TOKEN, { hook_event_name: "Stop", last_assistant_message: "ok" });
+  assert.equal(recordedTurnState(card.id, sessionId), "idle");
+  const res = await post(TOKEN, {
+    hook_event_name: "StopFailure",
+    error: "rate_limit",
+  });
+  assert.equal(res.status, 204);
+  assert.equal(recordedTurnState(card.id, sessionId), "limit");
+});

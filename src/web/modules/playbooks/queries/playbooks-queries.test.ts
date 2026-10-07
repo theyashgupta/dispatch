@@ -5,10 +5,10 @@ import {
   createPlaybook,
   deletePlaybook,
   generatePlaybookDraft,
-  getPickerPlaybooks,
   getPlaybooks,
   updatePlaybook,
 } from "./playbooks-api.js";
+import { getPickerPlaybooks } from "@/queries/playbook-picker-api";
 import {
   createPlaybookMutationOptions,
   deletePlaybookMutationOptions,

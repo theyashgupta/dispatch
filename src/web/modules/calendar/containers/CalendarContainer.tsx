@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouteContext, useRouter } from "@tanstack/react-router";
+import { routeHash } from "../../../../shared/route.js";
 import type { Card, Item } from "../../../../shared/types.js";
 import {
   CALENDAR_ERROR_COPY,
@@ -6,6 +8,10 @@ import {
 } from "../../../../shared/connection-status.js";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { PageColumn } from "@/components/PageColumn";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
+import { useItems } from "@/components/ui/hooks/use-items";
+import { actionServices } from "@/queries/action-services";
+import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
 import { AgendaRowContainer } from "./AgendaRowContainer";
 import { CalendarAgenda } from "@/modules/calendar/components/CalendarAgenda";
 import { CalendarOff } from "@/modules/calendar/components/CalendarOff";
@@ -15,7 +21,7 @@ import {
   useCalendarPollQuery,
 } from "@/modules/calendar/queries/calendar-queries";
 
-interface CalendarContainerProps {
+interface CalendarPageProps {
   items: Item[];
   cards: Card[];
   services: {
@@ -26,13 +32,45 @@ interface CalendarContainerProps {
   onOpenSettings: () => void;
 }
 
-export function CalendarContainer({
+export function CalendarContainer() {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const router = useRouter();
+  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const items = useItems(board);
+  const services = useMemo(
+    () =>
+      actionServices({
+        showUndo: appStore.showUndo,
+        notice: appStore.notice,
+        openStart: appStore.openStart,
+        askAbout: (question) =>
+          void router.navigate({
+            href: routeHash({ page: "ask", id: question }).slice(1),
+          }),
+      }),
+    [appStore, router],
+  );
+  if (board == null) return null;
+  return (
+    <CalendarPage
+      items={items}
+      cards={board.cards}
+      services={services}
+      onStartPromoted={(cardId) => appStore.openStart({ cardId })}
+      onOpenSettings={() =>
+        void router.navigate({ href: routeHash({ page: "settings" }).slice(1) })
+      }
+    />
+  );
+}
+
+function CalendarPage({
   items,
   cards,
   services,
   onStartPromoted,
   onOpenSettings,
-}: CalendarContainerProps) {
+}: CalendarPageProps) {
   const { data: status, isError: loadFailed } = useCalendarPollQuery();
   const [now, setNow] = useState(() => new Date());
 

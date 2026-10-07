@@ -5,7 +5,8 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import { deleteArchived, listArchive, restoreArchived } from "./archive-api.js";
+import { restoreArchived } from "@/queries/archive-api";
+import { deleteArchived, listArchive } from "./archive-api.js";
 
 export const archiveKeys = {
   all: ["archive"] as const,

@@ -7,11 +7,13 @@
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
     "noEmit": true,
+    "incremental": true,
+    "tsBuildInfoFile": "node_modules/.cache/tsc/root.tsbuildinfo",
     "skipLibCheck": true,
     "paths": {
       "@/*": ["./src/web/*"]
     }
   },
-  "include": ["src", "vite.config.ts"],
+  "include": ["src", "vite.config.ts", "playwright.config.ts", "tests"],
   "exclude": ["src/web"]
 }

@@ -1,42 +1,38 @@
 import type {
-  ClaudeAccountSummary,
+  AccountSwitchResponse,
+  ApplyChoice,
   ClaudeLoginView,
   ClaudeUsageSnapshot,
 } from "../../../../shared/types.js";
 import { http, httpError } from "@/lib/http";
 
 /**
- * Fetch every Claude account with its usage snapshot plus the active pointer: GET /api/accounts.
+ * Make an account the one new sessions launch on: PUT /api/accounts/active.
  *
  * @remarks
- * Throws on any non-2xx.
- */
-export async function getAccounts(): Promise<{
-  activeId: string;
-  accounts: ClaudeAccountSummary[];
-}> {
-  const result = await http<{
-    activeId: string;
-    accounts: ClaudeAccountSummary[];
-  }>("/api/accounts");
-  if (!result.ok) {
-    throw httpError("getAccounts", result);
-  }
-  return result.data;
-}
-
-/**
- * Make an account the one new sessions launch on: PUT /api/accounts/active.
+ * `applyToRunning` picks which running sessions follow. A success reports how many moved now,
+ * how many wait for the end of their turn and how many the server skipped.
  */
 export async function setActiveAccount(
   id: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const result = await http("/api/accounts/active", {
+  applyToRunning: ApplyChoice,
+): Promise<
+  | { ok: true; moved: number; queued: number; skipped: number }
+  | { ok: false; error: string }
+> {
+  const result = await http<AccountSwitchResponse>("/api/accounts/active", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ id }),
+    body: JSON.stringify({ id, applyToRunning }),
   });
-  if (result.ok) return { ok: true };
+  if (result.ok) {
+    return {
+      ok: true,
+      moved: result.data.moved.length,
+      queued: result.data.queued.length,
+      skipped: result.data.skipped.length,
+    };
+  }
   if (result.status === 404) {
     return { ok: false, error: "That account is no longer registered." };
   }

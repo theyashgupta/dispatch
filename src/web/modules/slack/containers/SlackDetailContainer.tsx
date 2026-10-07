@@ -17,7 +17,7 @@ import {
   slackActions,
   type SlackActionId,
 } from "@/modules/slack/domain/slack-actions";
-import type { SlackRow } from "@/modules/slack/domain/slack-rows";
+import type { SlackRow } from "../../../../shared/slack-rows.js";
 import { useDraftSlackReplyMutation } from "@/modules/slack/queries/slack-queries";
 
 interface SlackDetailContainerProps {

@@ -1,8 +1,3 @@
-const legacyCycleFiles = [
-  "^src/web/features/board/(index\\.ts|Board\\.tsx)$",
-  "^src/web/features/modals/(index\\.ts|GroupStartModal\\.tsx)$",
-];
-
 const serviceDirection = (name, from, to) => ({
   name,
   severity: "error",
@@ -20,7 +15,7 @@ module.exports = {
       name: "no-circular",
       severity: "error",
       comment: "Import cycles are not allowed.",
-      from: { pathNot: legacyCycleFiles },
+      from: {},
       to: { circular: true },
     },
     {
@@ -30,18 +25,17 @@ module.exports = {
         "A file that no other file imports and that imports nothing is dead code.",
       from: {
         orphan: true,
-        path: "^src/(web/modules|server)/",
-        pathNot: "\\.d\\.ts$",
+        path: "^src/(web|server)/",
+        pathNot: [
+          "\\.d\\.ts$",
+          "^src/web/(main|viewer-main|gallery-main)\\.tsx$",
+          "^src/web/terminal-main\\.ts$",
+          "^src/web/routeTree\\.gen\\.ts$",
+          "^src/server/bootstrap/(index|cli)\\.ts$",
+          "^src/web/public/",
+        ],
       },
       to: {},
-    },
-    {
-      name: "modules-not-from-features",
-      severity: "error",
-      comment:
-        "A module does not import the legacy tree (docs/standards/frontend-architecture.md, Import matrix).",
-      from: { path: "^src/web/modules/" },
-      to: { path: "^src/web/features/" },
     },
     {
       name: "board-store-through-repository",

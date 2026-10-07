@@ -23,7 +23,14 @@ import {
   terminalProxyUpgrade,
 } from "../adapters/terminal-proxy.js";
 import { probePreflight } from "../services/infra/preflight.js";
-import { startUsagePollLoop } from "../services/orchestration/claude-usage.js";
+import {
+  onDefaultUsageRefreshed,
+  startUsagePollLoop,
+} from "../services/orchestration/claude-usage.js";
+import {
+  checkDefaultIdentity,
+  startDefaultIdentityWatch,
+} from "../services/orchestration/default-identity-watch.js";
 import { loadOrCreateVapidKeys } from "../services/infra/push-keys.js";
 import { VAPID_KEYS_PATH } from "../services/infra/paths.js";
 import {
@@ -64,6 +71,7 @@ import {
   startUpdateCheckLoop,
 } from "../services/orchestration/update.js";
 import { startCleanupScheduler } from "../services/orchestration/cleanup-scheduler.js";
+import { startPendingMoveSweep } from "../services/orchestration/session-account-apply.js";
 import { startLoopProgressReader } from "../services/orchestration/loop-progress-reader.js";
 import { healServicePlist } from "../services/orchestration/service.js";
 import type { ActivityEvent } from "../../shared/types.js";
@@ -368,6 +376,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
     });
   }
   startCleanupScheduler();
+  startPendingMoveSweep();
   await sweepStrayTunnels().catch((err: unknown) => {
     console.warn(
       `[cloudflared] boot orphan sweep rejected unexpectedly: ${(err as Error).message}`,
@@ -442,6 +451,8 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   });
   startArtifactDetectionLoop(port);
   if (config.updateCheck !== false) startUpdateCheckLoop(config);
+  onDefaultUsageRefreshed(() => void checkDefaultIdentity());
+  startDefaultIdentityWatch();
   startUsagePollLoop();
   return { port };
 }
