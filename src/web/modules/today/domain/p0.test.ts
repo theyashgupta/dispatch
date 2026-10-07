@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Card, Column, Item } from "../../../../shared/types.js";
-import { clampCount, rankToday, topPicks } from "./p0.js";
+import { P0_COUNTS, clampCount, rankToday, topPicks } from "./p0.js";
 
 const feedItems = (items: Item[], includeErrors: boolean): Item[] =>
   includeErrors ? [...items] : items.filter((i) => i.source !== "sentry");
@@ -336,4 +336,8 @@ test("an entry exactly at local midnight is inside today; one a millisecond earl
     item("before", { createdAt: new Date(midnight - 1).toISOString() }),
   ];
   assert.deepEqual(keys(rankToday([], items, "today", NOW)), ["mid"]);
+});
+
+test("every offered P0 count survives the clamp", () => {
+  for (const count of P0_COUNTS) assert.equal(clampCount(count), count);
 });

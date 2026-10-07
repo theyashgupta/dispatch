@@ -9,6 +9,8 @@ test("queries default to no retry, a 30 second staleTime and no refetch on windo
   assert.equal(queries?.refetchOnWindowFocus, false);
 });
 
-test("mutations default to no retry", () => {
-  assert.equal(queryClient.getDefaultOptions().mutations?.retry, 0);
+test("mutations default to no retry and the always network mode", () => {
+  const { mutations } = queryClient.getDefaultOptions();
+  assert.equal(mutations?.retry, 0);
+  assert.equal(mutations?.networkMode, "always");
 });
