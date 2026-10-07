@@ -65,6 +65,14 @@ module.exports = {
       },
       to: { path: "^src/server/test-support/" },
     },
+    {
+      name: "mcp-server-isolated",
+      severity: "error",
+      comment:
+        "The MCP tool server imports only src/shared, zod, the SDK and node built-ins, so it never reaches the app it calls over HTTP.",
+      from: { path: "^src/server/bootstrap/mcp-(server|tools)\\.ts$" },
+      to: { path: "^src/server/(routes|services|store|adapters|sources)/" },
+    },
     serviceDirection(
       "services-domain-direction",
       "domain",

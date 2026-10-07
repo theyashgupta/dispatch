@@ -73,6 +73,7 @@ import {
   superviseLost,
 } from "../services/orchestration/supervisor-registry.js";
 import { startSupervisorPass } from "../services/orchestration/supervisor-pass.js";
+import { resumeShipFlows } from "../services/orchestration/ship-flow.js";
 import { healServicePlist } from "../services/orchestration/service.js";
 import type { ActivityEvent } from "../../shared/types.js";
 import {
@@ -440,6 +441,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   startMarkerWatcher(statusChannel);
   stopLoopProgressReader = startLoopProgressReader();
   stopSupervisorPass = startSupervisorPass();
+  resumeShipFlows();
   store.on("activity", (event: ActivityEvent) => {
     if (event.type !== "session_lost" || event.cardId == null) return;
     void superviseLost(event.cardId).catch((err: unknown) => {
