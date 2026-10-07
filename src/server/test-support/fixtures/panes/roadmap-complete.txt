@@ -1,0 +1,40 @@
+  → Specs branch. test/g2-foundation-specs has 2587e94: 30 held-back spec files plus fake-source.ts.
+  → Merge of origin/main. It went in at d8ab276, with no conflicts. A plain merge hit 18 conflicts, because git compared against the old pre-G1 base. The only real differences between
+  main and our G1 stack were 3 docs files (main's em dash cleanups). So I merged against the G1 stack tip (0605373), which took main's version of those files and nothing else.
+  → Checks. There are 0 em dashes on lines added versus main. env -u NODE_ENV npm run check exits 0: 492 tests, 491 pass, 1 skipped, 0 fail, 149/149 invariants, lint warnings only.
+  → Worth knowing before /ship: the main merge exists only on the specs branch. Each unit branch on its own still carries the older G1 docs with em dashes underneath the stack.
+  End-of-run report
+  ┌────────────┬───────────────────────────────┬──────────────────┐
+  │    Unit    │            Branch             │     Commits      │
+  ├────────────┼───────────────────────────────┼──────────────────┤
+  │ 1 LOCAL-34 │ feat/LOCAL-34-unit-1-sources  │ 8fa2ac5..1a45ce2 │
+  ├────────────┼───────────────────────────────┼──────────────────┤
+  │ 2 LOCAL-38 │ feat/LOCAL-38-unit-2-items    │ faa241f..9953556 │
+  ├────────────┼───────────────────────────────┼──────────────────┤
+  │ 3 LOCAL-40 │ feat/LOCAL-40-unit-3-inbox    │ 02ca45d..6dcc624 │
+  ├────────────┼───────────────────────────────┼──────────────────┤
+  │ 4 LOCAL-39 │ feat/LOCAL-39-unit-4-sessions │ 02f29fd..e50203c │
+  ├────────────┼───────────────────────────────┼──────────────────┤
+  │ 5 LOCAL-33 │ feat/LOCAL-33-unit-5-palette  │ 02fa89c..fc4c4a9 │
+  └────────────┴───────────────────────────────┴──────────────────┘
+  Specs are on test/g2-foundation-specs (2587e94, then the merge d8ab276). The loop recorded 32 changed decisions and 52 todo items. Nothing was pushed or tagged, and no PR was
+  opened. I stopped the phase 7 sandbox server on port 47900.
+  Next for you: read changed-decisions.md, then todo.md, then the readiness reports, then run /ship for each branch.
+  Also found: feat/LOCAL-32-unit-1-connection-card points at unit 3's tip (6dcc624) and is checked out in another worktree. It's not from this loop, so I left it alone.
+  <promise>ROADMAP COMPLETE g2-foundation</promise>
+✻ Sautéed for 4m 12s · done 3:50 AM
+※ recap: The G2 foundation roadmap is done: all five units and the specs branch are committed locally with origin/main merged, and every check passes. Next, read changed-decisions.md
+  and todo.md, then run /ship for each branch. (disable recaps in /config)
+❯ ash --subject "<PR title> (#<n>)" --body "" (add --admin if the required-signatures rule blocks unsigned commits). 6) git fetch origin and verify git log -1 --format="%an
+  <%ae>%n%b" origin/main shows Yash Gupta with no Co-Authored-By line. 7) Go to the next branch. Stop and report if a check fails, a merge conflict needs judgment, or the identity
+  check fails. At the end print a table of branch, PR number and merge commit.
+⏺ Your message got cut off: it starts partway through step 5 (...ash --subject "<PR title> (#<n>)"), so steps 1 to 4 and the start of step 5 are missing.
+  → I haven't done anything yet. Those steps push branches and squash-merge into main, which I can't undo. I won't guess at them.
+  → One rule to keep in mind when you resend: your global rules say only /ship may push. If the missing steps include a push, I'll do it through /ship unless you tell me otherwise for
+  this run.
+  Next: paste the full instructions again, from step 1.
+✻ Worked for 6s · done 4:01 AM
+❯ 
+  Opus 5.5 (1M context) · high  │  █░░░░░░░░░   11%  109k/1.0M                                                                                 ✔ Update installed · Restart to update
+  dispatch  │  test/g2-foundation-specs  │  thinking  │  Attention-kind  │  5h 70%  │  7d 65%  │  15m  │  $1.54
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents

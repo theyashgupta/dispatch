@@ -1,0 +1,12 @@
+     … +2 lines (ctrl+o to expand)
+  Bash(gh api repos/theyashgupta/dispatch/pulls/165/requested_reviewers -f 'reviewers[]=copilot-pull-request-reviewer[bot]' >/dev/null 2>&1 && echo "Copilot review req…)
+  ⎿  Copilot review requested.
+     ✓ Pull request theyashgupta/dispatch#165 is marked as "ready for review"
+     (2m 27s · timeout 10m)
+     (ctrl+b ctrl+b (twice) to run in background)
+✽ Boondoggling… (25m 53s · ↓ 33.3k tokens)
+  ⎿  Tip: Use /btw to ask a quick side question without interrupting Claude's current work
+❯ 
+  Fable 5.1 · high  │  ██░░░░░░░░   17%  174k/1.0M                                                                                             ✔ Update installed · Restart to update
+  dispatch  │  test/g9-ui-revamp-specs  │  thinking  │  Attention-kind  │  5h 73%  │  7d 59%  │  26m  │  $6.41
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents
