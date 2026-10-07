@@ -231,6 +231,18 @@ async function readModel(sessionRoot: string): Promise<LoopProgress | null> {
   });
 }
 
+/** Read one loop file under a session root with the same guards as the progress read, or null. */
+export async function readLoopFile(
+  root: string,
+  rel: string,
+): Promise<string | null> {
+  try {
+    return await readSafe(root, await realpath(root), rel, []);
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Reads the loop files under a session root into the loop model, or null when the root has no loop.
  *
