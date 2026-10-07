@@ -34,6 +34,11 @@ const CONTROL = /\p{Cc}+/gu;
 
 const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
 
+/** The line `sendConfirmed` types for a text: control characters become a space, then trimmed. */
+export function typedLine(text: string): string {
+  return text.replace(CONTROL, " ").trim();
+}
+
 /** Poll a check until it holds or the time is up; resolves whether it held. */
 export async function waitFor(
   check: () => Promise<boolean>,
@@ -104,9 +109,7 @@ export async function sendConfirmed(
   const pointer = text.length > POINTER_OVER;
   const root = rootOf(card, session);
   if (pointer && root === "") return report("no session root", text);
-  const line = (pointer ? await pointerLine(root, text, kind) : text)
-    .replace(CONTROL, " ")
-    .trim();
+  const line = typedLine(pointer ? await pointerLine(root, text, kind) : text);
   const needle = pointer
     ? normalize(line)
     : normalize(line).slice(0, MATCH_CHARS);

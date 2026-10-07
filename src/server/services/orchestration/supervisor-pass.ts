@@ -9,18 +9,22 @@ import {
   noteMachineWake,
   watcherNames,
 } from "./supervisor-registry.js";
-import { isLiveSessionCard } from "./boards.js";
-import { startSession } from "./start-session.js";
+import { dependencyDone, isRunningCard, runningLoops } from "./boards.js";
+import {
+  recordStartFailure,
+  startGroup,
+  type GroupStartOutcome,
+} from "./group-launch.js";
+import { groupCost } from "./orchestrator-read.js";
 
 export interface PassDeps {
   power: PowerHolder;
-  startGroup: (cardId: string) => boolean;
+  startGroup: (cardId: string) => Promise<GroupStartOutcome> | null;
 }
 
 export interface PassMemory {
   prs: Map<string, string>;
   gates: Map<string, string>;
-  costs: Map<string, { last: number; base: number }>;
 }
 
 const PASS_MS = 60_000;
@@ -30,13 +34,13 @@ const DEFAULT_DEPS: PassDeps = {
   power,
   startGroup: (cardId) => {
     const config = getOrchestrationConfig();
-    if (config === null) return false;
-    void startSession(cardId, "", config).catch((err: unknown) =>
-      console.warn(
-        `[supervisor] held group start failed: ${(err as Error).message}`,
-      ),
+    if (config === null) return null;
+    const launch = store.getCard(cardId)?.launch;
+    return startGroup(
+      cardId,
+      { extraDirection: launch?.direction, playbook: launch?.playbook },
+      config,
     );
-    return true;
   },
 };
 
@@ -72,44 +76,22 @@ function recordPrChanges(cards: Card[], memory: PassMemory): void {
   }
 }
 
-function dependencyDone(id: string): boolean {
-  const dep = store.getCard(id);
-  if (!dep) return false;
-  if (dep.column === "done") return true;
-  const prs = dep.prs ?? [];
-  return prs.length > 0 && prs.every((pr) => pr.state === "merged");
-}
-
-function running(card: Card): boolean {
-  return (
-    card.column !== "done" &&
-    (isLiveSessionCard(card) ||
-      card.provisioningStep != null ||
-      store.isStarting(card.id))
-  );
-}
-
 /**
  * Start each queued group whose dependencies are done, while its board has room under the cap.
  *
- * @remarks A dependency counts as done in Done or with every PR merged. Each start takes one
- * slot at once, so one pass never starts more groups than the cap allows.
+ * @remarks A dependency counts as done in Done or with every PR merged. The running count is read
+ * fresh for each group, because a start marks its card synchronously and an orchestrator start can
+ * land during the queue write. The pass does not wait for a start; a failed one is queued again.
  */
 async function startHeldGroups(cards: Card[], deps: PassDeps): Promise<void> {
-  const runningByBoard = new Map<string, number>();
   for (const card of cards) {
-    if (!running(card)) continue;
-    const key = card.boardKey ?? DEFAULT_BOARD_KEY;
-    runningByBoard.set(key, (runningByBoard.get(key) ?? 0) + 1);
-  }
-  for (const card of cards) {
-    if (!card.startQueued || running(card)) continue;
+    if (!card.startQueued || isRunningCard(card)) continue;
     if (!(card.dependsOn ?? []).every(dependencyDone)) continue;
     const key = card.boardKey ?? DEFAULT_BOARD_KEY;
     const cap = store.getBoard(key)?.policy.concurrencyCap ?? 0;
-    const count = runningByBoard.get(key) ?? 0;
-    if (count >= cap || !deps.startGroup(card.id)) continue;
-    runningByBoard.set(key, count + 1);
+    if (runningLoops(key) >= cap) continue;
+    const outcome = deps.startGroup(card.id);
+    if (outcome === null) continue;
     await store.setGroupQueue(card.id, { startQueued: false });
     store.appendOrchestrationEvent({
       boardKey: key,
@@ -119,30 +101,22 @@ async function startHeldGroups(cards: Card[], deps: PassDeps): Promise<void> {
       data: { action: "start_group", dependsOn: card.dependsOn ?? [] },
       ts: new Date().toISOString(),
     });
+    void outcome
+      .then((result) =>
+        result.ok ? undefined : recordStartFailure(card, true, result.reason),
+      )
+      .catch((err: unknown) =>
+        console.warn(
+          `[supervisor] start failure of ${card.id} not recorded: ${(err as Error).message}`,
+        ),
+      );
   }
-}
-
-/**
- * The cost of one session across claude restarts: a meter that drops below its last value started again from zero.
- *
- * @remarks The status line cost belongs to the current claude process, so a relaunch resets it.
- * The total lives in server memory and starts again after a server restart.
- */
-function runningCost(
-  memory: PassMemory,
-  sessionId: string,
-  meter: number,
-): number {
-  const seen = memory.costs.get(sessionId) ?? { last: 0, base: 0 };
-  const base = meter < seen.last ? seen.base + seen.last : seen.base;
-  memory.costs.set(sessionId, { last: meter, base });
-  return base + meter;
 }
 
 /**
  * Stop a group at its budget: at the next gate change after its cost reaches `budgetPerGroup`.
  *
- * @remarks The cost is the sum of its sessions' costs. Nothing is sent; the session only moves to
+ * @remarks The cost is the running total of `groupCost`. Nothing is sent; the session only moves to
  * `needs_input` with `budget`, and the reason clears once a raised or removed budget allows the cost.
  */
 async function stopOverBudget(
@@ -152,10 +126,7 @@ async function stopOverBudget(
   for (const card of cards) {
     const budget = store.getBoard(card.boardKey ?? DEFAULT_BOARD_KEY)?.policy
       .budgetPerGroup;
-    const cost = (card.sessions ?? []).reduce(
-      (sum, s) => sum + runningCost(memory, s.id, s.cost ?? 0),
-      0,
-    );
+    const cost = groupCost(card);
     const session = card.sessions?.find((s) => s.id === card.activeSessionId);
     if (
       session?.stateReason === "budget" &&
@@ -211,7 +182,7 @@ function recordWake(lateMs: number, now: number): void {
 
 /** Start an empty pass memory. */
 export function initialPassMemory(): PassMemory {
-  return { prs: new Map(), gates: new Map(), costs: new Map() };
+  return { prs: new Map(), gates: new Map() };
 }
 
 /**
