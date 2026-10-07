@@ -245,7 +245,11 @@ describe("dispatch mcp", () => {
   it("exits 1 with one stderr line when the token is missing", async () => {
     await assert.rejects(
       run(process.execPath, ["--import", "tsx", CLI, "mcp"], {
-        env: { DISPATCH_ORCHESTRATOR_TOKEN: "", DISPATCH_PORT: "1" },
+        env: {
+          DISPATCH_ORCHESTRATOR_TOKEN: "",
+          DISPATCH_PORT: "1",
+          NODE_NO_WARNINGS: "1",
+        },
       }),
       (err: { code?: number; stdout: string; stderr: string }) => {
         assert.equal(err.code, 1);
