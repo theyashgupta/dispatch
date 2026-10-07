@@ -4,6 +4,7 @@ import {
   type Marker,
 } from "../../adapters/markers/parse.js";
 import { boardRepository as store } from "../../store/board-repository.js";
+import { isTranscriptPath } from "../../adapters/transcript.js";
 import { getHooksRuntime } from "../infra/config-holder.js";
 
 /**
@@ -244,6 +245,7 @@ export async function applyHookEvent(
         session_id?: unknown;
         tool_name?: unknown;
         tool_use_id?: unknown;
+        transcript_path?: unknown;
       }
     | undefined,
 ): Promise<void> {
@@ -260,6 +262,9 @@ export async function applyHookEvent(
   const sid = body?.session_id;
   if (typeof sid === "string" && /^[\w-]{1,256}$/.test(sid)) {
     await store.setClaudeSessionId(cardId, sessionId, sid);
+  }
+  if (isTranscriptPath(body?.transcript_path)) {
+    await store.setTranscriptPath(cardId, sessionId, body.transcript_path);
   }
 
   const event = body?.hook_event_name;

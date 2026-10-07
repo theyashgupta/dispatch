@@ -88,6 +88,39 @@ const captureFailures = new Map<string, number>();
 
 const lastMeters = new Map<string, string>();
 
+export interface PaneSample {
+  cardId: string;
+  sessionId: string;
+  tmuxSession: string;
+  pane: string;
+}
+
+type PaneSink = (sample: PaneSample) => void | Promise<void>;
+
+let paneSink: PaneSink | null = null;
+
+/**
+ * Register the one consumer of each captured pane, or clear it with null.
+ *
+ * @remarks An adapter cannot import orchestration, so bootstrap registers the supervisor here and
+ * the 2 s capture stays the only capture.
+ */
+export function setPaneSink(sink: PaneSink | null): void {
+  paneSink = sink;
+}
+
+/** Hand one pane to the sink without waiting; a sink failure is logged and never stops the tick. */
+function feedPaneSink(sample: PaneSample): void {
+  if (paneSink === null) return;
+  const warn = (err: unknown) =>
+    console.warn(`[watcher] pane sink failed: ${(err as Error).message}`);
+  try {
+    void Promise.resolve(paneSink(sample)).catch(warn);
+  } catch (err) {
+    warn(err);
+  }
+}
+
 /**
  * Parse the pane's status line and write the meters to the session record when they changed.
  *
@@ -201,6 +234,12 @@ async function scanSession(
   }
 
   recordSessionMeters(card.id, tmuxName, pane);
+  feedPaneSink({
+    cardId: card.id,
+    sessionId: session.id,
+    tmuxSession: tmuxName,
+    pane,
+  });
 
   const paneRouted =
     channel === "pane" || (channel === "auto" && session.hookRoutedAt == null);
