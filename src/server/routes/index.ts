@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { boardRouter } from "./board.route.js";
 import { boardsRouter } from "./boards.route.js";
+import { boardPolicyRouter } from "./board-policy.route.js";
 import { cardsRouter } from "./cards.route.js";
 import { eventsRouter } from "./events.route.js";
 import { sessionsRouter } from "./sessions.route.js";
@@ -39,6 +40,7 @@ export const apiRouter = Router();
 
 apiRouter.use(boardRouter);
 apiRouter.use(boardsRouter);
+apiRouter.use(boardPolicyRouter);
 apiRouter.use(cardsRouter);
 apiRouter.use(eventsRouter);
 apiRouter.use(sessionsRouter);

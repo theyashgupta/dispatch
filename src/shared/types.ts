@@ -341,6 +341,12 @@ export interface Card {
   model?: string | null;
   cost?: number | null;
   usage?: SessionMeters["usage"];
+  state?: SupervisorState;
+  stateReason?: SupervisorStateReason;
+  stateSince?: string;
+  transcriptPath?: string;
+  dependsOn?: string[];
+  startQueued?: boolean;
   /**
    * The id of this card's ACTIVE session within `sessions` — the one the six flat fields mirror.
    * Paired 1:1 with `sessions` being present; absent on a card that has never carried session
@@ -669,6 +675,10 @@ export interface Session {
   cost?: number | null;
   usage?: SessionMeters["usage"];
   metersAt?: string;
+  state?: SupervisorState;
+  stateReason?: SupervisorStateReason;
+  stateSince?: string;
+  transcriptPath?: string;
 }
 
 export interface ClaudeSession {
@@ -743,6 +753,10 @@ export interface SessionSummary {
   model?: string | null;
   cost?: number | null;
   usage?: SessionMeters["usage"];
+  state?: SupervisorState;
+  stateReason?: SupervisorStateReason;
+  stateSince?: string;
+  transcriptPath?: string;
 }
 
 /**
@@ -1745,7 +1759,33 @@ export interface LoopProgress {
   readAt: string;
 }
 
-export type OrchestrationEventKind = "loop_gate";
+export type OrchestrationEventKind =
+  | "loop_gate"
+  | "supervisor_state"
+  | "supervisor_action"
+  | "pr_state"
+  | "machine_wake";
+
+export type SupervisorState =
+  | "working"
+  | "idle"
+  | "needs_input"
+  | "permission_prompt"
+  | "handoff_ready"
+  | "roadmap_complete"
+  | "usage_limit_dialog"
+  | "usage_limit_wait"
+  | "api_error"
+  | "stale"
+  | "lost"
+  | "shell_prompt";
+
+export type SupervisorStateReason =
+  | "usage_stop"
+  | "budget"
+  | "stop_session"
+  | "supervisor_gave_up"
+  | "resume_failed";
 
 export interface OrchestrationEvent {
   id: number;

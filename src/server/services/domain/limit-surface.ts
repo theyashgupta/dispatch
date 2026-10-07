@@ -6,7 +6,8 @@ import type {
 export type LimitSurface =
   { kind: "a" } | { kind: "b"; options: string[]; cursor: number };
 
-export const CREDITS_OPTION = /credit|extra usage|upgrade|funds|pay/i;
+export const CREDITS_OPTION =
+  /credit|extra usage|upgrade|funds|pay|usage billing|switch to usage/i;
 
 const AUTO_CONTINUE = /continuing automatically/i;
 const ESC_TO_CANCEL = /esc to cancel/i;

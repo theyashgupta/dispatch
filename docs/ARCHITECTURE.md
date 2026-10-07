@@ -2108,6 +2108,18 @@ phase's own plan summaries mis-generalized as "never use `=` for `send-keys`/`ca
   `capturePane(`=${tmuxName}:`, ...)` is the one call site in this codebase already shipping the
   correct colon-qualified form.
 
+**The supervisor sends text through one function (`SHELL-01`, LOCAL-89).** Every text that
+the supervisor types into a running Claude session goes through
+`services/orchestration/supervisor-send.ts#sendConfirmed`. The one exception is the fixed
+`/clear` of the handoff, which writes no transcript entry to confirm; it is typed only after the
+same ready check. The ready check (`supervisor-state.ts#paneReady`) waits up to 60 s for the input
+box with no `warming up` row and no dialog or menu open under it, because a key typed into a
+dialog would pick a row. The send replaces control characters in the line with spaces, sends
+`C-u`, the line with `sendLiteral` and a separate `Enter` after 1.5 s, and then reads the
+transcript for the line. Text over 500 characters goes to a file under
+`<session root>/.dispatch-input/`, and the typed line is a pointer to that file. The targets use
+the `=<name>:` form of contract 5. Do not add a second typed surface for the supervisor.
+
 **Closed (Phase 96 plan 11, R2): `steps.ts`'s own kickoff-sending calls now use the colon-qualified
 form too.** `capturePane`/`sendKeys`/`pasteBuffer` inside `awaitReplReady`/`sendKickoff` (`steps.ts`)
 used to pass the bare, unprefixed session name. Live-reproduced by Phase 94 plan 07: with the exact
@@ -3980,6 +3992,10 @@ is a behavior change, not a refactor.
    `Session` record stores the status line meters `contextPercent`, `model`, `cost`, `usage` and
    `metersAt`. The card fields `contextPercent`, `model`, `cost` and `usage` are wire-only:
    `redactCard` copies them from the active session, and `board.json` never stores them on the card.
+   A `Session` record also stores the supervisor fields `state`, `stateReason`, `stateSince` and
+   `transcriptPath` (LOCAL-89, see [Session Supervisor](#session-supervisor)); `redactCard`
+   copies them from the active session onto the wire card. A group card stores `dependsOn` and
+   `startQueued`.
 2. **SSE frame format.** `data: ${JSON.stringify(BoardSnapshot)}\n\n`; named heartbeat
    `event: ping\ndata: 1\n\n`; headers incl. `X-Accel-Buffering: no`; **server `KEEPALIVE_MS` (15s)
    must stay in lockstep with client `HEARTBEAT_MS`** (watchdog trips at 3×). No compression on
@@ -4007,6 +4023,10 @@ real membership directly, independent of windowing` below for the full envelope 
    `POST /api/loops/report` (LOCAL-88) answers `202`, `401` for a missing or unknown
    `x-dispatch-token`, and `400` for a token of a card that is not a group or for a body outside
    the schema.
+   `PUT /api/boards/:key/policy` (LOCAL-89) answers `200` with `{ board }`, `400` for an invalid
+   board key or a body outside the strict policy schema (an unknown field, `usageLimit` other than
+   `wait` or `stop`, a value out of range, `handoffHardPercent` below `handoffPercent`) and `404`
+   for an unknown board.
 4. **Persistence format + location.** `~/.dispatch/{board.json,config.json}`; `board.json` ===
    `BoardSnapshot` JSON; atomic writes via `write-file-atomic`; config at mode `0600`; the `"//"`-keyed
    config template. Pasted ticket images live under `~/.dispatch/attachments/<cardId>/<sha256-16>.<ext>`
@@ -4777,3 +4797,86 @@ card and into `sessionSummaries`. A status line of another format gives no meter
 **Vocabulary check.** `check-doc-drift.mjs` skips its `ROADMAP`, `.planning/` and
 `Phase <number>` patterns for the loop file modules only, because those words are their input
 format.
+
+### Session Supervisor
+
+LOCAL-89 adds the supervisor: server code that watches each Claude session of a board and does
+the fixed duties of decision record D-3. The session root is the session `workspacePath` (else
+the card one), where claude runs and the loop files live; it is never `workspace.folder`, the
+parent folder of the source repositories. It runs only on a board whose policy has
+`supervisor: on`. With `off`, it reads no state, writes no event, sends no key and holds no
+power child; the status line meters still run.
+
+**Transcript.** The supervisor reads the transcript path that the hooks report; else the file
+named by the Claude session id, else the newest `.jsonl`, in the project folder
+`<config dir>/projects/<session root with each character that is not a letter or a digit
+replaced by ->`.
+
+**Feed.** The marker watcher calls the pane sink (`setPaneSink`) after each pane capture. The
+supervisor uses that capture and adds no second capture loop. The registry
+(`supervisor-registry.ts`) keeps one watcher per tmux session name.
+
+**States.** `supervisor-state.ts` (pure) reads the pane, the transcript tail and the loop
+progress and gives one of 12 states: `working`, `idle`, `needs_input`, `permission_prompt`,
+`handoff_ready`, `roadmap_complete`, `usage_limit_dialog`, `usage_limit_wait`, `api_error`,
+`stale`, `lost` and `shell_prompt`. A dialog state needs two captures that agree, and `idle`
+needs three equal samples 60 s apart. Each change is one `supervisor_state` row in
+`orchestration_events` and sets `state`, `stateReason` and `stateSince` on the session. A
+`needs_input` state moves the card to the Needs input column.
+
+**Duties.** `supervisor-plan.ts` (pure) plans the actions for one state change, and
+`supervisor-actions.ts` runs them. An action that sends a key or changes the state writes a
+`supervisor_action` row; an unconfirmed send and a move to `needs_input` add their own rows. An
+action that finds nothing to do, such as an `Escape` already sent, writes no row.
+
+- Restart: an idle group loop with an active engine file gets one continue prompt per unit and
+  phase. The next stop in the same phase sets `needs_input` with `supervisor_gave_up`.
+- API error and sleep cut: one continue prompt per phase. These two share one budget; the
+  restart has its own.
+- Prompts: the dangerous delete prompt and the held peer message are declined. Any other
+  permission prompt gets no key.
+- Loop close: at `roadmap_complete` the engine file is renamed to its `.done` copy.
+- Lost session and shell prompt: a pane whose shell owns the foreground is relaunched with
+  `runClaude`; any other case runs the resume saga. The resume prompt is typed only after claude
+  takes the foreground, within 60 s. A failed relaunch, a lost session that stays gone, or claude
+  that does not start sets `resume_failed`; an unconfirmed resume prompt is recorded as
+  unconfirmed.
+- Handoff (`supervisor-handoff.ts`): at `handoffPercent` the session gets the handoff request
+  once per crossing, and once more at `handoffHardPercent`; the hard request tells the loop to
+  hand off now. At `handoff_ready` the supervisor waits until the pane is ready and not busy (a
+  "Waiting for N background" line counts as busy), types `/clear`, checks the pane again before
+  its `Enter`, sends the resume prompt, and waits up to 80 s for the engine file to name the new
+  transcript. The session keeps its old transcript path until the engine names the new one.
+- Usage limit (`supervisor-limit.ts`): both policies select the stop and wait row, else the wait
+  here row, and never a credits row. Before each `Enter` the supervisor reads the menu again and
+  never presses `Enter` on a credits row. Then policy `stop` sets `needs_input` with
+  `usage_stop`. Policy `wait` continues after the reset time plus 2 minutes; when the engine file
+  says `handoff-pending`, it sends `Escape` at the auto continue notice and starts a fresh session
+  after the reset instead. The timer re-checks at that time that the session is live, has no stop
+  reason, and that its board still has `supervisor: on` and `usageLimit: wait`. A timer delay is
+  capped at the Node timer maximum (2^31 - 1 ms).
+- The 60 s pass (`supervisor-pass.ts`): it holds the keep awake child, records a
+  `machine_wake` row when its timer fires more than 30 s late, records a `pr_state` row for each
+  change of the PR list of a group, starts a queued group when each group in `dependsOn` is done
+  and the board is under `concurrencyCap`, and sets `needs_input` with `budget` at the next gate
+  change after the cost of a group reaches `budgetPerGroup`. The cost of a session is a running
+  total: when its status line meter drops (a claude relaunch starts it at 0), the pass adds the
+  last value. The total lives in server memory.
+
+**Hold.** A `needs_input` that the supervisor set with a `stateReason` stays until a busy sign,
+a permission prompt, a lost session or a shell prompt shows. Quiet samples do not plan again.
+Two reasons hold longer. A `budget` stop sends no key, so only a lost session or a shell prompt
+releases it; the 60 s pass clears its reason when a raised or removed budget allows the cost. A
+`resume_failed` hold releases only on a busy sign, so a failed resume is not planned again on
+every sample.
+
+**Keep awake.** `adapters/power.ts` holds one `caffeinate -is -w <server pid>` child while a
+session of a supervised board is live. It spawns the child through `adapters/exec.ts`. The `-w`
+flag ends the child with the server, and shutdown ends it at once.
+
+**Fixed values.** These are not policy fields: idle after three equal samples 60 s apart, stale
+after 15 minutes with a busy sign and no transcript growth, one continue prompt per stop per
+phase, send waits of 1.5 s, 10 s and 10 s, a ready wait of 60 s, and a reset wait plus 2 minutes.
+
+**Policy route.** `PUT /api/boards/:key/policy` writes the D-6 policy fields of a board. It is a
+user route; no orchestrator route or tool changes a policy.
