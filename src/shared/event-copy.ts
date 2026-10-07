@@ -1,6 +1,11 @@
 import { COLUMN_LABELS } from "./column-labels.js";
 import { LINEAR_PUSH_FAILED_PREFIX } from "./linear-state-map.js";
-import type { ActivityEvent, Column } from "./types.js";
+import type {
+  AccountEventType,
+  ActivityEvent,
+  Column,
+  EventType,
+} from "./types.js";
 
 export { COLUMN_LABELS };
 
@@ -28,9 +33,11 @@ function describeUnknownEvent(type: never): string {
  * Render one `ActivityEvent` as its plain-text verb phrase, with no identifier, timestamp or markup.
  *
  * @remarks
- * The exhaustive `switch` over `EventType` makes a new event kind a compile error instead of a silent default string. `{from}` and `{to}` resolve through the Title Case `COLUMN_LABELS` and degrade to the bare verb when either column is absent.
+ * The exhaustive `switch` over `EventType` and `AccountEventType` makes a new event kind a compile error instead of a silent default string. `{from}` and `{to}` resolve through the Title Case `COLUMN_LABELS` and degrade to the bare verb when either column is absent.
  */
-export function describeEvent(event: ActivityEvent): string {
+export function describeEvent(
+  event: Omit<ActivityEvent, "type"> & { type: EventType | AccountEventType },
+): string {
   switch (event.type) {
     case "sync_in":
       return "synced in from Linear";
@@ -80,6 +87,16 @@ export function describeEvent(event: ActivityEvent): string {
       return event.reason?.startsWith(LINEAR_PUSH_FAILED_PREFIX)
         ? event.reason.slice(LINEAR_PUSH_FAILED_PREFIX.length)
         : `Linear state set to ${event.reason ?? "a new state"}`;
+    case "account_moved":
+      return event.reason
+        ? `Claude account moved: ${event.reason}`
+        : "Claude account moved";
+    case "account_login_changed":
+      return "home Claude login changed";
+    case "account_login_failed":
+      return event.reason
+        ? `Claude login failed: ${event.reason}`
+        : "Claude login failed";
     default:
       return describeUnknownEvent(event.type);
   }

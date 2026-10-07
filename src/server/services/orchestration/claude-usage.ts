@@ -53,12 +53,31 @@ function mergeSnapshot(
   return next;
 }
 
+const defaultRefreshListeners: (() => void)[] = [];
+
+/**
+ * Register a listener that runs after every refresh of the Default account, whatever its result.
+ *
+ * @remarks A listener must not throw; it is called outside any try block.
+ */
+export function onDefaultUsageRefreshed(listener: () => void): void {
+  defaultRefreshListeners.push(listener);
+}
+
 /**
  * Fetch one account's usage now and update the cache. The token lives only inside this call.
  * A 401 or 403 keeps the last windows and marks them stale; a 429 backs off for `Retry-After`;
  * a missing token is `unavailable`; a network failure keeps the last windows as `error`.
  */
 export async function refreshUsage(id: string): Promise<ClaudeUsageSnapshot> {
+  const snapshot = await fetchAccountUsage(id);
+  if (id === DEFAULT_CLAUDE_ACCOUNT_ID) {
+    for (const listener of defaultRefreshListeners) listener();
+  }
+  return snapshot;
+}
+
+async function fetchAccountUsage(id: string): Promise<ClaudeUsageSnapshot> {
   const isDefault = id === DEFAULT_CLAUDE_ACCOUNT_ID;
   const dir = isDefault ? CLAUDE_HOME_DIR : accountDir(id);
   const token = await readAccessToken(

@@ -123,6 +123,11 @@ export async function stageAttachments(
   return dir;
 }
 
+/** Remove a staged folder whose card was never minted. */
+export async function discardStaged(staged: string): Promise<void> {
+  await fsp.rm(staged, { recursive: true, force: true });
+}
+
 /**
  * Move a staged folder into place as the card's attachment folder.
  */

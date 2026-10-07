@@ -19,6 +19,8 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
 - [Module Map](#module-map)
 - Cross-Module Invariants
   - [Single Writer Store](#single-writer-store)
+  - [Boards](#boards)
+  - [Board API](#board-api)
   - [Session Projection Chokepoint](#session-projection-chokepoint)
   - [Marker Protocol](#marker-protocol)
   - [Column Transition Specification](#column-transition-specification)
@@ -32,6 +34,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
   - [Second Session Affordance](#second-session-affordance)
   - [Tmux Invocations](#tmux-invocations)
   - [Claude Accounts](#claude-accounts)
+  - [Session Account Move](#session-account-move)
   - [Orchestration Saga](#orchestration-saga)
   - [Exec Chokepoint](#exec-chokepoint)
   - [Repo Discovery](#repo-discovery)
@@ -54,6 +57,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
 - [Security Threat Model](#security-threat-model)
 - [Known Residuals](#known-residuals)
 - [Verification Gates](#verification-gates)
+- [Orchestration Initiative](#orchestration-initiative)
 
 ## System Overview
 
@@ -158,6 +162,117 @@ own tracked and in-flight sessions when reconciling (`WR-02`), so a ttyd spawn r
 `adapters/ttyd.ts` + `adapters/markers/watcher.ts` and referenced here only so the single-writer
 picture is complete. Finally, the store is content-free in its logging: a failed persist or a
 failed mutation logs only the error, never card fields, marker reasons, or pane text.
+
+### Boards
+
+A board groups cards under one key. The default board has the key `LOCAL`. The boards migration
+puts each existing card, event and archive row on `LOCAL`.
+
+**Tables.** The `boards` table holds one row for each board: `key` (the primary key), `name`,
+`workspace_root`, `repositories`, `linear_team_keys`, `last_used_folder`, `policy`, `created_at` and
+`archived`. The `cards`, `events` and `archive` tables each have a `board_key` column with the
+default `LOCAL` and an index. The JSON blobs of cards and archive rows also hold `boardKey`. The
+`items` table has no board key. Items stay global and each snapshot holds all items, because an
+inbox item has no board until the user promotes it.
+
+**The `LOCAL` row.** The `LOCAL` row keeps `workspace_root` null and `repositories` empty. The
+sessions folder of `LOCAL` stays in `Config.workspaceRoot`, and its folders stay in
+`meta.workspaceFolders` and `meta.lastUsed`. `services/domain/board-workspace.ts` gives the sessions
+folder and the repositories that a session of a board uses.
+
+**Scoped reads and creates.** These store methods take a `BoardKey` as the first parameter:
+`snapshot`, `searchCards`, `listEvents`, `listArchive`, `getWorkspaceFolders`, `addWorkspaceFolder`,
+`removeWorkspaceFolder`, `setLastUsedFolder`, `createLocalCard`, `createGroupCard` and
+`promoteItem`. Each method reads or writes only the cards, events, archive rows and folders of that board. Items stay global. `snapshot(board)` sets
+`BoardSnapshot.boardKey`. Each route passes `DEFAULT_BOARD_KEY`, so each route returns the same body
+as before, plus the `boardKey` fields.
+
+**Sweeps.** These store methods take a `BoardScope`: `listCards`, `sessionsWithTmux`,
+`sessionsDueForCleanup`, `archiveDueForDelete` and `trackedIssueIds`. The marker watcher, the
+poller, the cleanup scheduler, the archive retention sweep and the boot reconcile pass `ALL_BOARDS`,
+so each sweep sees each card of each board. Do not give a sweep one board key.
+
+**Board catalog.** `listBoards`, `getBoard`, `createBoard`, `updateBoard` and `setBoardArchived` read
+and write the `boards` table. The three writes run inside the write queue. The store does not archive
+`LOCAL`.
+
+**Refused creates.** A create on an unknown or archived board throws `BoardUnavailableError`. The
+check runs inside the write queue, and the store mints no id. The store refuses a group with a
+member of another board, with the existing refusal shape. `mirrorMemberColumn` moves only the
+members on the board of the group.
+
+**Ids.** A ticket gets its id from the board key: `LOCAL-n` on `LOCAL`, `ACME-n` on `ACME`. A group
+gets `GROUP-n` on `LOCAL` and the board key on each other board, so the tickets and the groups of a
+new board use one counter. The counters stay in `identifierCounters`, one counter for each prefix.
+
+**Events and archive.** An event gets the `boardKey` of its card. An event with no card gets
+`LOCAL`. `unwindGroup` writes the board key of the group to the archive row. `restoreGroup` puts the
+group back on the stored board, also when that board is archived.
+
+### Board API
+
+The board routes live in `routes/boards.route.ts`, with the checks in
+`services/orchestration/boards.ts`. The router is case sensitive, so a board with the key `COUNTS`
+does not clash with `/api/boards/counts`.
+
+**Board routes.** `GET /api/boards` returns `{ boards, knownLinearTeamKeys }`.
+`knownLinearTeamKeys` holds the identifier prefixes of the Linear cards in the store, plus the
+Linear team keys when Linear is on. The server logs a failed Linear read once and does not read again for 60
+seconds. `POST /api/boards` creates a board and returns `201` with
+`{ board }`. `GET /api/boards/:key` and `PATCH /api/boards/:key` return `{ board }`. A patch accepts
+only `name`, `workspaceRoot`, `repositories` and `linearTeamKeys`, and the key never changes. A
+patch of `LOCAL` writes `workspaceRoot` to `config.json` and the repository paths to the workspace
+folders. `POST /api/boards/:key/archive` and `POST /api/boards/:key/restore` set and clear the
+archive flag. Archive refuses a board that has a live or a starting session.
+
+**Repository folders.** One rule applies on every write path: board create, `PATCH /api/boards/:key`
+and `POST /api/workspace-folders?board=`. A `LOCAL` folder must exist. It can be a parent folder of
+repositories. A folder of any other board must hold a `.git` entry. A patch of `LOCAL` does not check
+a `workspaceRoot` that equals the current one. `DELETE /api/workspace-folders?board=` refuses to
+remove the last repository of a board other than `LOCAL`.
+
+**Counts route.** `GET /api/boards/counts` returns
+`{ counts: [{ key, running, openGroups, attention }], at }` for each board, archived boards
+included. `running` counts the cards that show the Live session chip. `openGroups` counts the group
+cards that are not in Done. `attention` counts the cards in Needs input.
+
+**List routes.** `GET /api/cards?board=&column=&source=&hasSession=` returns `{ cards, total }`
+with the snapshot redaction. `GET /api/sessions?board=&live=` returns `{ sessions }`, and each
+session holds its card id.
+
+**The `board` parameter.** Each collection route takes an optional `board` query parameter. No
+`board` means `LOCAL`, so each request of today returns the same body. A malformed key returns `400`
+`invalid-board`. An unknown key returns `404` `unknown-board`. An archived board serves reads, and a
+create on it returns `409` `board-archived`. A card route (`/api/cards/:id/...`) reads the board
+that is stored on the card and ignores `board`. The stream never rejects: a malformed, unknown or
+archived board gets the `LOCAL` stream. Each stream client gets the snapshot of its board, and an
+activity frame goes only to the clients of the board of the event.
+
+**Typed errors.** A board error body is `{ error, code }`. The `error` string is the UI copy:
+
+- `400` `invalid-key`: "Use 2 to 6 capital letters or digits, starting with a letter."
+- `400` `reserved-key`: "LOCAL and GROUP are reserved."
+- `400` `duplicate-key`: "Board <name> uses this key."
+- `400` `linear-team-key`: "Linear team <KEY> uses this key."
+- `400` `team-key-taken`: "Board <name> lists Linear team <KEY>." Create and patch return it when
+  another board lists the same team key. `LOCAL` and `GROUP` as a team key return `reserved-key`.
+- `400` `missing-name`: "Enter a name."
+- `400` `folder-missing`: "This folder does not exist."
+- `400` `no-repositories`: "Add at least one repository."
+- `409` `sessions-running`: "Stop the <n> running sessions first."
+- `409` `default-board`, `409` `board-archived`, `404` `unknown-board`, `400` `invalid-board`: the
+  `error` string is the code.
+
+`sessions-running` also holds `running`. A repository `folder-missing` from the existence check also holds
+`field` and `path`. A sessions folder `folder-missing` holds only `field`. A path that the schema
+refuses returns `folder-missing` without them. A
+body that fails its schema (an unknown patch field, a bad base branch, check command, repository or
+team key) returns `400` with only `error`, as the other routes do.
+
+**Sessions per board.** A session starts in the sessions folder of the board of its card
+(`cardSessionsRoot` in `services/orchestration/steps.ts`). A `LOCAL` card keeps
+`Config.workspaceRoot`. The escape check compares the session path with the board folder. The
+viewer allows the folder of each board and the path of each live session.
 
 ### Items
 
@@ -612,11 +727,26 @@ one `~/.dispatch/board.db`. The store therefore guards BOTH directions of a vers
 
 **Newer board, older build → refuse.** `assertSchemaOpenable` throws before anything is read,
 migrated, or written when the persisted `meta.schemaVersion` exceeds the build's own
-`SESSION_SCHEMA_VERSION`. A build cannot know what a later migration moved, so continuing would let
+`STORE_SCHEMA_VERSION`. A build cannot know what a later migration moved, so continuing would let
 it write a shape it never learned to read and repairing would reconcile toward a projection that may
 no longer be the newer schema's truth. The refusal is total and damage-free — no snapshot, no
 rotation, no quarantine — which is what lets its message promise the board is untouched and name the
-one-command remedy (update, or restore `board.db.pre-v3` to stay behind deliberately).
+one-command remedy (update, or restore `board.db.pre-boards` to stay behind deliberately).
+
+**Boards migration, schema version 3.** The boards migration sets `meta.schemaVersion` to 3.
+`STORE_SCHEMA_VERSION` in `board-db.ts` is the version of the persisted counter and of
+`assertSchemaOpenable`. Before the migration changes the file, it copies the board to
+`board.db.pre-boards` with `VACUUM INTO`. The migration writes a new copy over an old one, except when the `boards` table and an old copy both exist: then an older build ran the migration again, and the old copy is the true board before the migration. A data folder with no cards, events or archive rows
+gets no copy. If the copy or the migration transaction fails, the server does not start, and the
+error names the copy path. A 4.2 build refuses a version 3 board through its own guard. To go back
+to a 4.2 build:
+
+1. Stop Dispatch.
+2. Delete `~/.dispatch/board.db-wal` and `~/.dispatch/board.db-shm` if they exist.
+3. Copy `~/.dispatch/board.db.pre-boards` over `~/.dispatch/board.db`.
+4. Start the 4.2 build.
+
+The copy does not hold the changes made after the migration. The refusal message of the 4.2 build names `board.db.pre-v3`. Each time the migration writes a new copy, it also writes it to `board.db.pre-v3` and moves an older `board.db.pre-v3` to `board.db.pre-v3.before-boards`, so both names restore the same board. A failure of that second write is logged and does not stop the migration.
 
 **Older build already wrote, newer build opens → repair.** `BoardStore#repairDowngradeDrift` runs on
 every boot, before `hydrateFromParsed`, and reconciles any card whose flat projection disagrees with
@@ -2023,7 +2153,8 @@ a membership guarantee: the registry can be edited out of band. `resolveLaunchAc
 id is registered and its dir exists before `buildClaudeLaunch` produces the argv and env for
 `newSession`; an unresolvable pointer fails the start step with a value-free error and creates no
 tmux session. A resume launches on the account recorded on the session (`Session.claudeAccountId`),
-not on the current pointer, so switching never moves a live conversation. Both the hooks branch and
+not on the current pointer. A pointer change alone does not move a live session; only the
+[Session Account Move](#session-account-move) service changes the recorded account. Both the hooks branch and
 the no-hooks branch of every launch site pass the same env: the builder is the single place the
 variable is added, so one branch cannot drift.
 
@@ -2048,6 +2179,67 @@ subprocess adapters may import only themselves and `shared`.
 **Trust is pre-seeded per config dir.** `preSeedTrust(workspacePath, configDir)` writes into
 `<configDir>/.claude.json` for an added account and into the home file for Default, since Claude
 Code reads the trust map from the config dir it runs under.
+
+### Session Account Move
+
+**Record (2026-10-05, LOCAL-80).** This record replaces the earlier rule, under which an account
+switch left each live session on its old account. A switch can now move a live session to a
+different account. The move keeps the conversation. The move occurs only at a safe point.
+
+**One service moves a session.** `session-account-move.ts#moveSessionAccount` is the only code that
+moves a session. The switch route, the one session route, the pending move, the stale restart and
+the continue action all call it. The service holds the Run Claude card lock
+(`run-claude.ts#withCardLock`) and does these steps in this order:
+
+1. Refuse a session with no tmux session (`no-session`) or with no shell marker (`legacy`).
+2. Return `same` when the session is already on the account and is not stale. Else refuse an account
+   that does not resolve (`account`).
+3. If Claude runs, type `/exit` only when the turn state is idle and the last lines of the pane show
+   the input footer, then
+   wait up to 15 s for the shell prompt. Else return `busy` and change no account state.
+4. Set or unset `CLAUDE_CONFIG_DIR` in the tmux session environment, and type the same export or
+   unset line into the shell.
+5. Seed the workspace trust for the new config dir.
+6. Record `claudeAccountId` on the session before the launch, and record one `account_moved`
+   activity row that names both accounts and the cause.
+7. Type the launch line from the shared launch builder. It resumes the recorded conversation id, or
+   starts a new conversation when no id is recorded, as Run Claude does. `steps.ts#typeLaunchLine`
+   first clears the screen and waits up to 3 s until no old input footer or resume refusal shows, so
+   the readiness check reads only the new REPL.
+8. Wait for the new REPL.
+
+**The safe point.** `session-turn.ts` keeps the turn state of each session in memory.
+`UserPromptSubmit` sets busy, `Stop` sets idle, and a `StopFailure` with a rate limit sets limit. A
+pane check adds to the hook state: `esc to interrupt` sets busy, and a limit surface sets limit.
+After a server restart the state is unknown until the next hook event, and the pane check decides.
+A session is at a safe point when its state is idle or limit. The service treats an unknown state
+as busy.
+
+**A limit surface is cleared before the move.** `limit-surface.ts` holds the limit surface
+patterns. On the auto-continue line, the service sends Escape. On the options menu, it sends only the
+keys that select the stop option, or the wait option when no stop option shows. It never selects an
+option that matches `CREDITS_OPTION`. When the menu shows no stop option and no wait option, it sends
+no key and returns `limit-unknown`.
+
+**A busy session gets a pending move.** The service never interrupts a turn.
+`session-account-apply.ts#moveOrQueue` writes `pendingClaudeAccountId` on a busy session. The move
+runs on the next `Stop` hook of that session and on a 30 s sweep that uses the pane check. The
+pending move stays after a server restart. It clears when any move of that session settles (every
+outcome except `busy` and `limit-unknown`), when its target account is removed, and when a later
+switch selects a different account.
+
+**The apply choice.** `PUT /accounts/active` takes `applyToRunning`. An absent value means `all`, so
+a switch reaches every running session. `none` writes the pointer only. `idle` moves the idle and
+limit sessions now and leaves busy sessions alone. `all` moves the idle and limit sessions now and
+queues each busy session. The switch dialog preselects `all` and shows the running session count.
+`session-account-plan.ts#planApply` skips sessions already on the target, lost sessions and legacy
+sessions. `POST /cards/:id/session/account` moves one session and returns 202 `queued` for a busy
+session.
+
+**A Default identity change marks sessions stale.** `default-identity-watch.ts` compares the home
+login email and organization id after each Default usage refresh and on a 5 minute timer. On a
+change it marks each live session on Default stale. The restart of a stale session is a move to the
+same account through the same service.
 
 ### Orchestration Saga
 
@@ -3817,7 +4009,8 @@ is a behavior change, not a refactor.
    `cards` slice bounded by `doneLimit`; only the persisted file is complete). This break is
    deliberate and UNVERSIONED — single user, localhost, client and server ship in one package, so
    there are no external consumers to keep compatible; a future reader must not "fix" a missing
-   version field. Keep the file location and every field name.
+   version field. Keep the file location and every field name. `Card.boardKey` and
+   `BoardSnapshot.boardKey` name the board of the card and of the snapshot.
 2. **SSE frame format.** `data: ${JSON.stringify(BoardSnapshot)}\n\n`; named heartbeat
    `event: ping\ndata: 1\n\n`; headers incl. `X-Accel-Buffering: no`; **server `KEEPALIVE_MS` (15s)
    must stay in lockstep with client `HEARTBEAT_MS`** (watchdog trips at 3×). No compression on
@@ -3839,7 +4032,9 @@ is a behavior change, not a refactor.
    group members, `members` always an array (`[]` for a non-group card) — and, like every other
    handler in `cards.route.ts` — **`400`, not `404`**, for an unknown id (`T-82-03`); `sync-linear`'s
    `404` stays the sole documented deviation. See `## GET /api/cards/:id answers a group parent's
-real membership directly, independent of windowing` below for the full envelope contract.
+real membership directly, independent of windowing` below for the full envelope contract. Each
+   collection route takes the optional `board` query parameter, and the board routes live under
+   `/api/boards` (see Board API).
 4. **Persistence format + location.** `~/.dispatch/{board.json,config.json}`; `board.json` ===
    `BoardSnapshot` JSON; atomic writes via `write-file-atomic`; config at mode `0600`; the `"//"`-keyed
    config template. Pasted ticket images live under `~/.dispatch/attachments/<cardId>/<sha256-16>.<ext>`
@@ -4549,3 +4744,12 @@ permanently fails)`, which runs the same scenario in the configuration where bot
 - **`phase-smoke-tester`** - the only BEHAVIORAL verification this project runs: an agent derives
   and executes smoke cases against the running app after each phase's implementation lands. This
   is the one gate above that cannot be reduced to a grep.
+
+## Orchestration Initiative
+
+The orchestration initiative (LOCAL-83 to LOCAL-93) adds one board per project, an optional orchestrator per board and a dashboard. LOCAL-83 wrote two documents, and their records govern LOCAL-84 to LOCAL-93:
+
+- `docs/research/orchestration-research.md`: Dispatch today, the manual orchestration run of 2026-09-25 to 2026-10-05, and a survey of 17 products.
+- `docs/standards/orchestration-design.md`: the glossary and the decision records D-1 to D-9 (board model, card identifiers, supervisor and orchestrator duties, control surface, progress protocol, policy, more than one orchestrator, ship flow, never list), with the scope change for each later ticket.
+
+Term rule: "orchestrator" is a Claude session that belongs to one board, and "supervisor" is the server code that watches sessions. The [Orchestration Saga](#orchestration-saga) is the session start saga and keeps its name.

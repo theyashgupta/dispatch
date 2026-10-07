@@ -6,6 +6,7 @@ import path from "node:path";
 import { after, afterEach, test } from "node:test";
 import type { Server } from "node:http";
 import { isolateEnv } from "../test-support/fixtures.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 const env = isolateEnv();
 fs.writeFileSync(
@@ -39,7 +40,11 @@ fs.writeFileSync(path.join(workspace, "plain.txt"), "x");
 
 let seq = 0;
 async function makeSession(): Promise<{ sessionId: string; tmux: string }> {
-  const card = await store.createLocalCard(`proxy ${++seq}`, "");
+  const card = await store.createLocalCard(
+    DEFAULT_BOARD_KEY,
+    `proxy ${++seq}`,
+    "",
+  );
   const tmux = `dsp-proxy-${process.pid}-${seq}`;
   await store.completeStart(card.id, undefined, {
     workspacePath: workspace,

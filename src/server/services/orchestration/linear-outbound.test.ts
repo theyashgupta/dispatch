@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { issue, makeFakeSource } from "../../test-support/fake-source.js";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("../../store/board.store.js");
@@ -82,7 +83,7 @@ test("a failure sets the fixed copy, returns it with 502 and never polls", async
 });
 
 test("a local card is refused with 409 before the source is called", async () => {
-  const local = await store.createLocalCard("local", "");
+  const local = await store.createLocalCard(DEFAULT_BOARD_KEY, "local", "");
   const f = fakeDeps();
   assert.deepEqual(await postComment(local.id, "hi", f.deps), {
     ok: false,
@@ -120,9 +121,9 @@ test("a card with no source field posts as a Linear card", async () => {
 });
 
 test("setLinearError on an unknown card changes nothing", async () => {
-  const before = JSON.stringify(store.snapshot().cards);
+  const before = JSON.stringify(store.snapshot(DEFAULT_BOARD_KEY).cards);
   await store.setLinearError("no-such-card", OUTBOUND_COPY.auth);
-  assert.equal(JSON.stringify(store.snapshot().cards), before);
+  assert.equal(JSON.stringify(store.snapshot(DEFAULT_BOARD_KEY).cards), before);
 });
 
 test("assign to me assigns the viewer, clears linearError and polls linear once", async () => {
@@ -148,7 +149,11 @@ test("a failed assign sets the fixed copy, answers 502 and never polls", async (
 });
 
 test("assign on a local card answers 409 before the source", async () => {
-  const local = await store.createLocalCard("local assign", "");
+  const local = await store.createLocalCard(
+    DEFAULT_BOARD_KEY,
+    "local assign",
+    "",
+  );
   const f = fakeDeps();
   assert.deepEqual(await assignToMe(local.id, f.deps), {
     ok: false,

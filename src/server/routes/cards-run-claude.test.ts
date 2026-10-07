@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import express from "express";
 import type { Server } from "node:http";
 import { isolateEnv } from "../test-support/fixtures.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 const env = isolateEnv();
 const { store } = await import("../store/board.store.js");
@@ -23,14 +24,22 @@ void test("POST /cards/:id/run-claude rejects an unknown card, a card with no li
     });
   try {
     assert.equal((await post("no-such-card")).status, 400);
-    const card = await store.createLocalCard("no session", "");
+    const card = await store.createLocalCard(
+      DEFAULT_BOARD_KEY,
+      "no session",
+      "",
+    );
     const rejected = await post(card.id);
     assert.equal(rejected.status, 400);
     assert.deepEqual(await rejected.json(), {
       error: "card has no live session",
     });
 
-    const starting = await store.createLocalCard("starting", "");
+    const starting = await store.createLocalCard(
+      DEFAULT_BOARD_KEY,
+      "starting",
+      "",
+    );
     await store.completeStart(starting.id, undefined, {
       workspacePath: env.root,
       tmuxSession: "dsp-starting-test",

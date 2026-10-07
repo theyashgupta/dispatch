@@ -1,11 +1,12 @@
 import { useRef, useState } from "react";
+import type { ClaudeAccountSummary } from "../../../../shared/types.js";
+import { AccountSwitchContainer } from "./AccountSwitchContainer";
 import { AccountPopover } from "@/modules/accounts/components/AccountPopover";
 import { UsageChip } from "@/modules/accounts/components/UsageChip";
 import { chipState } from "@/modules/accounts/domain/usage-format";
 import {
   useAccountsQuery,
   useRefreshAccountUsageMutation,
-  useSetActiveAccountMutation,
 } from "@/modules/accounts/queries/accounts-queries";
 
 interface AccountChipContainerProps {
@@ -16,12 +17,14 @@ export function AccountChipContainer({
   onOpenSettings,
 }: AccountChipContainerProps) {
   const { data } = useAccountsQuery();
-  const switchAccount = useSetActiveAccountMutation();
   const refreshUsage = useRefreshAccountUsageMutation();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [switchTarget, setSwitchTarget] = useState<ClaudeAccountSummary | null>(
+    null,
+  );
 
   const active =
     data?.accounts.find((a) => a.id === data.activeId) ?? data?.accounts[0];
@@ -43,45 +46,57 @@ export function AccountChipContainer({
   };
 
   return (
-    <UsageChip
-      email={active.email}
-      summary={chip.summary}
-      label={chip.label}
-      tone={chip.tone}
-      open={open}
-      triggerRef={triggerRef}
-      onOpenChange={handleOpenChange}
-    >
-      <AccountPopover
-        accounts={data.accounts}
-        activeId={data.activeId}
-        busyId={busyId}
-        notice={notice}
-        onSwitch={(id) => {
-          setBusyId(id);
-          switchAccount.mutate(id, {
-            ...settle,
-            onError: () => setNotice("Couldn't switch the Claude account."),
-          });
-        }}
-        onRefresh={(id) => {
-          setBusyId(id);
-          refreshUsage.mutate(id, {
-            ...settle,
-            onError: () => setNotice("Couldn't refresh usage."),
-          });
-        }}
-        onOpenSettings={() => {
-          setOpen(false);
-          onOpenSettings();
-        }}
-        onCloseAutoFocus={(event) => {
-          event.preventDefault();
-          if (document.activeElement === document.body) {
+    <>
+      <UsageChip
+        email={active.email}
+        summary={chip.summary}
+        label={chip.label}
+        tone={chip.tone}
+        open={open}
+        triggerRef={triggerRef}
+        onOpenChange={handleOpenChange}
+      >
+        <AccountPopover
+          accounts={data.accounts}
+          activeId={data.activeId}
+          busyId={busyId}
+          notice={notice}
+          onSwitch={(id) => {
+            const target = data.accounts.find((a) => a.id === id);
+            if (target === undefined) return;
+            setOpen(false);
+            setSwitchTarget(target);
+          }}
+          onRefresh={(id) => {
+            setBusyId(id);
+            refreshUsage.mutate(id, {
+              ...settle,
+              onError: () => setNotice("Couldn't refresh usage."),
+            });
+          }}
+          onOpenSettings={() => {
+            setOpen(false);
+            onOpenSettings();
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            if (document.activeElement === document.body) {
+              triggerRef.current?.focus();
+            }
+          }}
+        />
+      </UsageChip>
+      {switchTarget && (
+        <AccountSwitchContainer
+          target={switchTarget}
+          sessions={data.sessions}
+          onClose={() => setSwitchTarget(null)}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
             triggerRef.current?.focus();
-          }
-        }}
-      />
-    </UsageChip>
+          }}
+        />
+      )}
+    </>
   );
 }

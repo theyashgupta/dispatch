@@ -6,6 +6,7 @@ import {
   REAL_INVALID_CODE_OUTPUT,
   REAL_LOGIN_OUTPUT,
   REAL_LOGIN_URL,
+  REAL_REFUSED_CODE_OUTPUT,
 } from "../test-support/claude-transcripts.js";
 import { isolateEnv } from "../test-support/fixtures.js";
 
@@ -52,6 +53,11 @@ void test("the recorded real CLI transcript parses: BEL-terminated OSC 8 url wit
   assert.match(REAL_LOGIN_URL, /\?code=true&/);
   assert.equal(login.hasInvalidCode(REAL_LOGIN_OUTPUT), false);
   assert.equal(login.hasInvalidCode(REAL_INVALID_CODE_OUTPUT), true);
+  assert.equal(login.hasInvalidCode(REAL_REFUSED_CODE_OUTPUT), true);
+  assert.equal(
+    login.hasInvalidCode("Login failed: Request failed with status code 500"),
+    false,
+  );
   assert.equal(login.hasAccessDenied(REAL_LOGIN_OUTPUT), false);
 });
 
