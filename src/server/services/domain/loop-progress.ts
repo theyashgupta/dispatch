@@ -336,11 +336,16 @@ export function phaseDir(
   return `${prdPath.slice(0, at)}${PLANNING}${slug}-unit-${unit}`;
 }
 
+/** Returns the relative path of one ledger file of a loop slug. */
+export function loopFilePath(slug: string, name: string): string {
+  return `.roadmap/${slug}/${name}`;
+}
+
 /**
  * Returns the relative path of the progress ledger of a loop slug.
  */
 export function progressPathOf(slug: string): string {
-  return `.roadmap/${slug}/progress.md`;
+  return loopFilePath(slug, "progress.md");
 }
 
 /**
