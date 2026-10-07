@@ -3,7 +3,7 @@ import type {
   ClaudeAccountSummary,
 } from "../../../../shared/types.js";
 import { moveReasonLabel } from "@/modules/accounts/domain/chain-state";
-import { accountName } from "@/modules/accounts/domain/running-sessions";
+import { accountName } from "../../../../shared/session-account-view.js";
 
 interface ChainHistoryProps {
   moves: ChainMove[];

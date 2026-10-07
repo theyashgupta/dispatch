@@ -2,6 +2,12 @@ import type {
   AccountSessionEntry,
   ClaudeAccountSummary,
 } from "../../../../shared/types.js";
+import {
+  accountName,
+  pendingNote,
+  type SessionNote,
+} from "../../../../shared/session-account-view.js";
+import { SessionNoteText } from "@/components/badges/SessionNoteText";
 import { SessionAccountLabel } from "@/components/badges/SessionAccountLabel";
 import { StaleBadge } from "@/components/badges/StaleBadge";
 import { SessionContinueButton } from "@/components/SessionContinueButton";
@@ -9,22 +15,13 @@ import { SessionRestartButton } from "@/components/SessionRestartButton";
 import { Item } from "@/components/ui/item";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import {
-  accountName,
-  pendingNote,
-  turnLabel,
-} from "@/modules/accounts/domain/running-sessions";
-
-export interface SessionNote {
-  tone: "error" | "info";
-  text: string;
-}
+import { turnLabel } from "@/modules/accounts/domain/running-sessions";
 
 interface RunningSessionsListProps {
   sessions: AccountSessionEntry[];
   accounts: ClaudeAccountSummary[];
   notes: Record<string, SessionNote>;
-  pendingSessionId: string | null;
+  pending: { key: string; kind: "restart" | "continue" | "pin" } | null;
   onRestart: (session: AccountSessionEntry) => void;
   onContinue: (session: AccountSessionEntry) => void;
   onPinChange: (session: AccountSessionEntry, pinned: boolean) => void;
@@ -34,7 +31,7 @@ export function RunningSessionsList({
   sessions,
   accounts,
   notes,
-  pendingSessionId,
+  pending,
   onRestart,
   onContinue,
   onPinChange,
@@ -59,7 +56,7 @@ export function RunningSessionsList({
       <ul className="m-0 flex list-none flex-col gap-2 p-0">
         {sessions.map((session) => {
           const note = notes[session.sessionId];
-          const busy = pendingSessionId !== null;
+          const busy = pending !== null;
           return (
             <li key={session.sessionId}>
               <Item
@@ -90,7 +87,7 @@ export function RunningSessionsList({
                   </span>
                   {session.pendingAccountId !== undefined && (
                     <span
-                      className="text-xs text-muted-foreground"
+                      className="min-w-0 text-xs break-words text-muted-foreground"
                       data-testid="session-pending"
                     >
                       {pendingNote(
@@ -99,19 +96,7 @@ export function RunningSessionsList({
                       )}
                     </span>
                   )}
-                  {note && (
-                    <span
-                      role={note.tone === "error" ? "alert" : "status"}
-                      className={
-                        note.tone === "error"
-                          ? "text-xs text-destructive-text"
-                          : "text-xs text-muted-foreground"
-                      }
-                      data-testid="session-note"
-                    >
-                      {note.text}
-                    </span>
-                  )}
+                  {note && <SessionNoteText note={note} />}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="flex items-center gap-2">
@@ -131,7 +116,10 @@ export function RunningSessionsList({
                   </div>
                   {session.stale && (
                     <SessionRestartButton
-                      pending={pendingSessionId === session.sessionId}
+                      pending={
+                        pending?.key === session.sessionId &&
+                        pending.kind === "restart"
+                      }
                       disabled={busy}
                       onRestart={() => onRestart(session)}
                     />
@@ -139,7 +127,10 @@ export function RunningSessionsList({
                   {session.continueAction !== undefined && (
                     <SessionContinueButton
                       action={session.continueAction}
-                      pending={pendingSessionId === session.sessionId}
+                      pending={
+                        pending?.key === session.sessionId &&
+                        pending.kind === "continue"
+                      }
                       disabled={busy}
                       onContinue={() => onContinue(session)}
                     />

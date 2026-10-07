@@ -1,5 +1,12 @@
 import type { ReactNode, Ref } from "react";
 import { RotateCw } from "lucide-react";
+import type { SessionNote } from "../../../../shared/session-account-view.js";
+import type { ContinueAction } from "../../../../shared/types.js";
+import { SessionAccountLabel } from "@/components/badges/SessionAccountLabel";
+import { SessionNoteText } from "@/components/badges/SessionNoteText";
+import { StaleBadge } from "@/components/badges/StaleBadge";
+import { SessionContinueButton } from "@/components/SessionContinueButton";
+import { SessionRestartButton } from "@/components/SessionRestartButton";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PanelAlert } from "./PanelNotice";
@@ -83,18 +90,65 @@ export function PanelRow({ children }: { children: ReactNode }) {
   );
 }
 
-export function PanelAccountRow({ email }: { email: string }) {
+interface PanelAccountRowProps {
+  name: string;
+  stale: boolean;
+  continueAction: ContinueAction | undefined;
+  pendingNote: string | undefined;
+  pending: "restart" | "continue" | null;
+  busy: boolean;
+  note: SessionNote | undefined;
+  onRestart: () => void;
+  onContinue: () => void;
+}
+
+export function PanelAccountRow({
+  name,
+  stale,
+  continueAction,
+  pendingNote,
+  pending,
+  busy,
+  note,
+  onRestart,
+  onContinue,
+}: PanelAccountRowProps) {
   return (
     <div
       data-testid="session-account"
-      className="flex items-center gap-(--space-xs) border-b border-border py-(--space-xs) pr-(--space-lg) pl-(--space-xl) font-sans text-sm text-muted-foreground"
+      className="flex flex-wrap items-center gap-(--space-xs) border-b border-border py-(--space-xs) pr-(--space-lg) pl-(--space-xl) font-sans text-sm text-muted-foreground"
     >
       <span className="text-sm font-semibold text-muted-foreground">
         Account
       </span>
-      <span className="text-foreground" title={email}>
-        {email}
-      </span>
+      <SessionAccountLabel name={name} />
+      {stale && (
+        <>
+          <StaleBadge />
+          <SessionRestartButton
+            pending={pending === "restart"}
+            disabled={busy}
+            onRestart={onRestart}
+          />
+        </>
+      )}
+      {continueAction !== undefined && (
+        <SessionContinueButton
+          action={continueAction}
+          pending={pending === "continue"}
+          disabled={busy}
+          onContinue={onContinue}
+        />
+      )}
+      {pendingNote !== undefined && (
+        <span
+          className="min-w-0 text-xs break-words text-muted-foreground"
+          data-testid="session-pending"
+        >
+          {pendingNote}
+        </span>
+      )}
+      {note && <SessionNoteText note={note} />}
     </div>
   );
 }

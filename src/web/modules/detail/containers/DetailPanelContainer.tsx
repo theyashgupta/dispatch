@@ -6,7 +6,6 @@ import {
   useRouter,
   useRouterState,
 } from "@tanstack/react-router";
-import { DEFAULT_CLAUDE_ACCOUNT_ID } from "../../../../shared/types.js";
 import type {
   Card as CardModel,
   UnwindDestination,
@@ -20,11 +19,15 @@ import {
 } from "../../../../shared/pinned-card.js";
 import { routeFromMatch, routeHash } from "../../../../shared/route.js";
 import {
+  accountName,
+  sessionAccountView,
+} from "../../../../shared/session-account-view.js";
+import {
   startTarget,
   type StartRequest,
 } from "../../../../shared/start-request.js";
 import { undoToastCopy } from "../../../../shared/undo-toast.js";
-import { accountsQueryOptions } from "@/queries/accounts-queries";
+import { useAccountsQuery } from "@/queries/accounts-queries";
 import { activityFeedQueryOptions } from "@/queries/activity-queries";
 import { restoreArchived } from "@/queries/archive-api";
 import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
@@ -33,6 +36,7 @@ import {
   useResumeCardMutation,
   useStartCardMutation,
 } from "@/queries/cards-queries";
+import { useSessionAccountMove } from "@/queries/session-account-queries";
 import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { stampLastOpened } from "@/components/ui/hooks/use-last-opened";
 import { CAROUSEL_QUERY } from "../../../../shared/media-queries.js";
@@ -86,7 +90,7 @@ export function DetailPanelContainer() {
   const pinnedHydrating = useAppStore(appStore, (s) => s.pinnedHydrating);
   const pinFetchErrorState = useAppStore(appStore, (s) => s.pinFetchError);
   const pinFetch = useAppStore(appStore, (s) => s.pinFetch);
-  const { data: accountsData } = useQuery(accountsQueryOptions());
+  const { data: accountsData } = useAccountsQuery();
   const { data: activityEvents } = useQuery({
     ...activityFeedQueryOptions(),
     refetchOnMount: false,
@@ -186,6 +190,7 @@ export function DetailPanelContainer() {
   const { mutateAsync: cleanupCard } = useCleanupCardMutation();
   const { mutateAsync: startCard } = useStartCardMutation();
   const { mutateAsync: resumeCard } = useResumeCardMutation();
+  const accountMove = useSessionAccountMove();
 
   const [prevCardId, setPrevCardId] = useState<string | null>(card?.id ?? null);
   if ((card?.id ?? null) !== prevCardId) {
@@ -271,13 +276,26 @@ export function DetailPanelContainer() {
   }, [card, ensureTerminal]);
 
   const c = shown;
-  const sessionAccountEmail =
-    c?.claudeAccountId != null
-      ? (accounts?.find((a) => a.id === c.claudeAccountId)?.email ??
-        (c.claudeAccountId === DEFAULT_CLAUDE_ACCOUNT_ID
-          ? "Default"
-          : c.claudeAccountId))
-      : null;
+  const sessionAccount = sessionAccountView({
+    sessionId: c?.activeSessionId,
+    accountId: c?.claudeAccountId,
+    accounts,
+    sessions: accountsData?.sessions,
+  });
+  const accountKey = c == null ? null : (c.activeSessionId ?? c.id);
+  const moveSessionAccount = (
+    kind: "restart" | "continue",
+    accountId: string,
+    movedText: string,
+  ) => {
+    if (c == null || accountKey == null) return;
+    accountMove.move(
+      accountKey,
+      kind,
+      { cardId: c.id, accountId, sessionId: c.activeSessionId },
+      movedText,
+    );
+  };
 
   const showStartAnother =
     c != null &&
@@ -369,8 +387,37 @@ export function DetailPanelContainer() {
             onAskRequest={onAskRequest}
           />
 
-          {sessionAccountEmail != null && (
-            <PanelAccountRow email={sessionAccountEmail} />
+          {sessionAccount != null && (
+            <PanelAccountRow
+              name={sessionAccount.name}
+              stale={sessionAccount.stale}
+              continueAction={sessionAccount.continueAction}
+              pendingNote={sessionAccount.pendingNote}
+              pending={
+                accountMove.pending?.key === accountKey
+                  ? accountMove.pending.kind
+                  : null
+              }
+              busy={accountMove.pending !== null}
+              note={
+                accountKey == null ? undefined : accountMove.notes[accountKey]
+              }
+              onRestart={() =>
+                moveSessionAccount(
+                  "restart",
+                  sessionAccount.accountId,
+                  "Restarted",
+                )
+              }
+              onContinue={() => {
+                if (accountsData == null) return;
+                moveSessionAccount(
+                  "continue",
+                  accountsData.activeId,
+                  `Moved to ${accountName(accountsData.accounts, accountsData.activeId)}`,
+                );
+              }}
+            />
           )}
           {((c?.sessionSummaries?.length ?? 0) >= 2 || showStartAnother) && (
             <PanelRow>

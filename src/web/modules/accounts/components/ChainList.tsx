@@ -1,5 +1,5 @@
 import type { ClaudeAccountSummary } from "../../../../shared/types.js";
-import { accountName } from "@/modules/accounts/domain/running-sessions";
+import { accountName } from "../../../../shared/session-account-view.js";
 import { ChainRow } from "./ChainRow";
 import { ChainDndContext } from "./dnd/ChainDndContext";
 import { ChainDragRow } from "./dnd/ChainDragRow";

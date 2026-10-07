@@ -4,13 +4,21 @@ import {
   type SessionRow as SessionRowModel,
 } from "../../../../shared/sessions.js";
 import { formatAge } from "../../../../shared/format-age.js";
+import type {
+  SessionAccountView,
+  SessionNote,
+} from "../../../../shared/session-account-view.js";
 import {
   PR_CHIP_CAP,
   PrOverflowChip,
 } from "@/components/badges/PrOverflowChip";
+import { SessionAccountLabel } from "@/components/badges/SessionAccountLabel";
+import { SessionNoteText } from "@/components/badges/SessionNoteText";
+import { StaleBadge } from "@/components/badges/StaleBadge";
 import { PrBadge } from "@/components/badges/PrBadge";
 import { PreviewBadge } from "@/components/badges/PreviewBadge";
 import { Badge } from "@/components/ui/badge";
+import { SessionRestartButton } from "@/components/SessionRestartButton";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Item,
@@ -24,6 +32,11 @@ import { cn } from "@/lib/utils";
 
 interface SessionRowProps {
   row: SessionRowModel;
+  account: SessionAccountView | null;
+  pending: boolean;
+  disabled: boolean;
+  note: SessionNote | undefined;
+  onRestart: () => void;
   now: number;
   selected: boolean;
   checked: boolean;
@@ -48,6 +61,11 @@ const TONE: Partial<
 
 export function SessionRow({
   row,
+  account,
+  pending,
+  disabled,
+  note,
+  onRestart,
   now,
   selected,
   checked,
@@ -59,7 +77,7 @@ export function SessionRow({
   const snippet = [
     row.shortId,
     row.playbook ?? "no playbook",
-    row.account ?? "no account",
+    ...(account == null && row.account == null ? ["no account"] : []),
     `started ${formatAge(row.startedAt, now)}`,
     `${row.running ? "running" : "ran for"} ${formatElapsed(row.elapsedMs)}`,
   ].join(" · ");
@@ -82,7 +100,10 @@ export function SessionRow({
         "cursor-pointer flex-nowrap gap-2 rounded-none px-4 py-2 focus-visible:-outline-offset-2",
         !selected && "border-b-border hover:bg-accent",
       )}
-      onClick={() => onSelect(row)}
+      onClick={(event) => {
+        if ((event.target as HTMLElement).closest("[data-row-action]")) return;
+        onSelect(row);
+      }}
       onKeyDown={(event) => {
         if (event.target !== event.currentTarget || event.repeat) return;
         if (event.key !== "Enter" && event.key !== " ") return;
@@ -105,8 +126,33 @@ export function SessionRow({
         <ItemDescription className="leading-(--line-label) text-wrap break-words">
           {snippet}
         </ItemDescription>
+        {(account != null || note) && (
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {account != null && <SessionAccountLabel name={account.name} />}
+            {account?.stale && <StaleBadge />}
+            {account?.pendingNote !== undefined && (
+              <span
+                className="min-w-0 text-xs break-words text-muted-foreground"
+                data-testid="session-pending"
+              >
+                {account.pendingNote}
+              </span>
+            )}
+            {note && <SessionNoteText note={note} />}
+          </div>
+        )}
       </ItemContent>
       <ItemActions className="shrink-0">
+        {account?.stale && (
+          <span data-row-action className="inline-flex">
+            <SessionRestartButton
+              pending={pending}
+              disabled={disabled}
+              label={`Restart session ${row.shortId}`}
+              onRestart={onRestart}
+            />
+          </span>
+        )}
         {row.cleaningUp ? <Badge tone="accent">Cleaning up</Badge> : null}
         {row.cleanupBlocked.length > 0 ? (
           <Badge
