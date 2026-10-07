@@ -19,6 +19,7 @@ import {
 import { Kbd } from "@/components/ui/kbd";
 import {
   filterCommands,
+  groupCommands,
   type Command as PaletteCommand,
 } from "@/modules/shell/domain/commands";
 import {
@@ -112,19 +113,24 @@ export function CommandPalette({
             }}
           />
           <CommandList className="max-h-[50vh]">
-            <CommandGroup>
-              {shown.map((command, index) => (
-                <CommandItem
-                  key={command.id}
-                  value={values[index]}
-                  onSelect={() => runAt(index)}
-                  className="min-h-8 text-base"
-                >
-                  <span className="flex-1">{command.label}</span>
-                  {command.key && <Kbd>{command.key}</Kbd>}
-                </CommandItem>
-              ))}
-            </CommandGroup>
+            {groupCommands(shown).map((section) => (
+              <CommandGroup
+                key={section.heading ?? ""}
+                heading={section.heading}
+              >
+                {section.rows.map(({ command, index }) => (
+                  <CommandItem
+                    key={command.id}
+                    value={values[index]}
+                    onSelect={() => runAt(index)}
+                    className="min-h-8 text-base"
+                  >
+                    <span className="flex-1">{command.label}</span>
+                    {command.key && <Kbd>{command.key}</Kbd>}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ))}
             {results.length > 0 && (
               <CommandGroup heading="Tickets">
                 {results.map((result, i) => {
