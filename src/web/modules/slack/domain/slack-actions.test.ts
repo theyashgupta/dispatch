@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Item } from "../../../../shared/types.js";
 import { slackActions } from "./slack-actions.js";
-import type { SlackRow } from "./slack-rows.js";
+import type { SlackRow } from "../../../../shared/slack-rows.js";
 
 function row(url: string | undefined): SlackRow {
   const item = {

@@ -84,3 +84,21 @@ export async function removeWorkspaceFolder(path: string): Promise<void> {
     throw httpError("removeWorkspaceFolder", result);
   }
 }
+
+/**
+ * Re-discover the repos of a registered folder: GET /api/workspace-folders/discover?path=.
+ *
+ * @remarks
+ * A registered folder whose directory was deleted returns `{ repos: [] }` with a 200. Any non-2xx throws.
+ */
+export async function discoverWorkspaceFolder(
+  path: string,
+): Promise<{ repos: DiscoveredRepo[] }> {
+  const result = await http<{ repos: DiscoveredRepo[] }>(
+    `/api/workspace-folders/discover?path=${encodeURIComponent(path)}`,
+  );
+  if (!result.ok) {
+    throw httpError("discoverWorkspaceFolder", result);
+  }
+  return result.data;
+}

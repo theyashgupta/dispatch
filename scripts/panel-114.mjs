@@ -83,7 +83,7 @@
  * BREAK EVIDENCE, appended to by every plan in this phase that registers a check. The quoted
  * lines below are the VERBATIM TRIP-leg output captured from a real `--break` run:
  *   - `density` proven able to fail (Plan 03): replacing the sole `"var(--card-padding)"` regular-
- *     card-padding token reference in `src/web/features/board/CardView.tsx` with the exact
+ *     card-padding token reference in `src/web/components/ui/card.tsx` with the exact
  *     retired spacing-scale shorthand this plan repointed away from,
  *     `"var(--space-xs) var(--space-sm)"`, rebuilding, and re-running the same `checkDensity`
  *     function against a real booted sandbox and real headless Chrome produced, verbatim:
@@ -93,10 +93,12 @@
  *     `density(BP-D): regular card padding expected "6px 8px", observed "4px 8px"`
  *     The RESTORE leg re-ran clean after the captured bytes were restored, and
  *     `git diff --quiet src/` confirmed a byte-identical restore.
- *   - `board-states` proven able to fail (Plan 04): reinserting the exact deleted
+ *   - `board-states` proven able to fail. Since the boxShadowParts list was deleted, the break adds
+ *     the same shadow as a class after the Card className anchor. The Plan 04 record follows:
+ *     reinserting the exact deleted
  *     `if (hover && !elevated && !selected && !needsAttention) { boxShadowParts.push("0 2px 8px
  *     rgba(0,0,0,0.3)"); }` branch immediately after the `elevated`/`--shadow-float` line in
- *     `src/web/features/board/CardView.tsx`, rebuilding, and re-running the same
+ *     `src/web/modules/board/components/CardView.tsx`, rebuilding, and re-running the same
  *     `checkBoardStates` function against a real booted sandbox and real headless Chrome
  *     produced, verbatim:
  *     `board-states(BP-A): card hover boxShadow expected "none", observed "rgba(0, 0, 0, 0.3) 0px 2px 8px 0px" (mode: real)`
@@ -105,7 +107,9 @@
  *     `board-states(BP-D): card hover boxShadow expected "none", observed "rgba(0, 0, 0, 0.3) 0px 2px 8px 0px" (mode: rendered-state)`
  *     The RESTORE leg re-ran clean after the captured bytes were restored, and
  *     `git diff --quiet src/` confirmed a byte-identical restore.
- *   - `control-states` proven able to fail (Plan 05): moving `IconButton.tsx`'s `...style` spread
+ *   - `control-states` proven able to fail. Since IconButton.tsx was deleted, the break removes the
+ *     default variant's hover class from `components/ui/button.tsx` and trips on the primary button
+ *     hover line. The Plan 05 record follows: moving `IconButton.tsx`'s `...style` spread
  *     line back to LAST (the exact pre-fix order Task 1 undid), rebuilding, and re-running the
  *     same `checkControlStates` function against a real booted sandbox and real headless Chrome
  *     produced, verbatim (the inactive segment's own assertions did not appear in the trip
@@ -2017,7 +2021,7 @@ async function probeBaseline() {
 // ---------------------------------------------------------------------------
 // PROBES.surfaces (Plan 116-02): a board-wide governed-property sweep. A
 // PROBE, never a CHECK: it measures and prints, it never asserts pass or
-// fail. Covers every src/web/features/board/*.tsx file, plus two
+// fail. Covers every src/web/modules/board/components/*.tsx file, plus two
 // incidentally-reachable non-board tokens (--font-display, --font-heading)
 // that the same booted page happens to mount alongside the board.
 // ---------------------------------------------------------------------------
@@ -2948,12 +2952,12 @@ const CARD_VIEW_PATH = join(
   REPO_ROOT,
   "src",
   "web",
-  "features",
-  "board",
-  "CardView.tsx",
+  "components",
+  "ui",
+  "card.tsx",
 );
-const DENSITY_BREAK_TARGET = '"var(--card-padding)"';
-const DENSITY_BREAK_REPLACEMENT = '"var(--space-xs) var(--space-sm)"';
+const DENSITY_BREAK_TARGET = '"p-(--card-padding)"';
+const DENSITY_BREAK_REPLACEMENT = '"px-(--space-sm) py-(--space-xs)"';
 
 function restoreCardViewSource(original) {
   writeFileSync(CARD_VIEW_PATH, original);
@@ -3396,7 +3400,7 @@ async function checkBoardStatesOnce(violations) {
         );
       }
 
-      // CARD FOCUS: a real Tab traversal, asserting the governed focusRing (never the native
+      // CARD FOCUS: a real Tab traversal, asserting the governed outline focus classes (never the native
       // default outlineStyle "auto"), then a real pointer click proving :focus-visible gates it.
       const traversal = await tabTraverseTo(cdp, sessionId, card);
       if (!traversal.reached) {
@@ -3430,7 +3434,7 @@ async function checkBoardStatesOnce(violations) {
         }
         if (focusOutline.outlineStyle === "auto") {
           violations.push(
-            `${label}: card focus outlineStyle read "auto", the browser's native default ring, never focusRing()`,
+            `${label}: card focus outlineStyle read "auto", the browser's native default ring, never the outline focus classes`,
           );
         }
       }
@@ -3739,7 +3743,7 @@ async function checkBoardStatesOnce(violations) {
         }
         if (focusH != null && focusH.outlineStyle !== "solid") {
           violations.push(
-            `${label}: resize handle focus outlineStyle expected "solid" (focusRing), observed ${JSON.stringify(focusH.outlineStyle)}`,
+            `${label}: resize handle focus outlineStyle expected "solid" (outline focus classes), observed ${JSON.stringify(focusH.outlineStyle)}`,
           );
         }
         if (focusH != null && focusH.outlineWidth !== "2px") {
@@ -3794,37 +3798,51 @@ async function checkBoardStatesOnce(violations) {
 }
 
 // ---------------------------------------------------------------------------
-// BREAKS["board-states"]: reintroduces the real deleted hover box-shadow branch
-// (Task 1's own deletion) into CardView.tsx, rebuilds, and re-runs
-// checkBoardStates itself against the mutated source, then restores the
-// captured bytes unconditionally.
+// BREAKS["board-states"]: reintroduces a hover box-shadow (the shadow Task 1
+// deleted, now as a class on the Card className list) into CardView.tsx,
+// rebuilds, and re-runs checkBoardStates itself against the mutated source,
+// then restores the captured bytes unconditionally.
 // ---------------------------------------------------------------------------
 
+const BOARD_STATES_CARD_VIEW_PATH = join(
+  REPO_ROOT,
+  "src",
+  "web",
+  "modules",
+  "board",
+  "components",
+  "CardView.tsx",
+);
 const BOARD_STATES_BREAK_ANCHOR =
-  'if (elevated) boxShadowParts.push("var(--shadow-float)");\n';
+  '        "relative cursor-pointer touch-manipulation gap-(--space-xs) transition-[background-color,border-color,color,box-shadow] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",\n';
 const BOARD_STATES_BREAK_INSERT =
   BOARD_STATES_BREAK_ANCHOR +
-  "  if (hover && !elevated && !selected && !needsAttention) {\n" +
-  '    boxShadowParts.push("0 2px 8px rgba(0,0,0,0.3)");\n' +
-  "  }\n";
+  '        hover && !elevated && !selected && !needsAttention && "shadow-[0_2px_8px_rgba(0,0,0,0.3)]",\n';
+
+function restoreBoardStatesCardViewSource(original) {
+  writeFileSync(BOARD_STATES_CARD_VIEW_PATH, original);
+  resetBuildCache();
+  rmSync(join(REPO_ROOT, "dist"), { recursive: true, force: true });
+  unregisterRestore(BOARD_STATES_CARD_VIEW_PATH);
+}
 
 async function runBreakBoardStates() {
   assertBuilt();
-  const original = readFileSync(CARD_VIEW_PATH, "utf8");
+  const original = readFileSync(BOARD_STATES_CARD_VIEW_PATH, "utf8");
   const occurrences = original.split(BOARD_STATES_BREAK_ANCHOR).length - 1;
   if (occurrences !== 1) {
     throw new Error(
-      `panel-114: refusing to run --break board-states, expected the shadow-float anchor to ` +
-        `occur exactly once in ${CARD_VIEW_PATH}, measured ${occurrences}. A miscounted anchor ` +
+      `panel-114: refusing to run --break board-states, expected the Card className anchor to ` +
+        `occur exactly once in ${BOARD_STATES_CARD_VIEW_PATH}, measured ${occurrences}. A miscounted anchor ` +
         `would mutate the wrong spot and report a false "the check cannot fail".`,
     );
   }
 
   let tripFired = false;
-  registerRestore(CARD_VIEW_PATH, original);
+  registerRestore(BOARD_STATES_CARD_VIEW_PATH, original);
   try {
     writeFileSync(
-      CARD_VIEW_PATH,
+      BOARD_STATES_CARD_VIEW_PATH,
       original.replace(BOARD_STATES_BREAK_ANCHOR, BOARD_STATES_BREAK_INSERT),
     );
     resetBuildCache();
@@ -3836,7 +3854,7 @@ async function runBreakBoardStates() {
     );
     tripFired = tripViolations.some((v) => v.includes("card hover boxShadow"));
   } finally {
-    restoreCardViewSource(original);
+    restoreBoardStatesCardViewSource(original);
   }
 
   const restoreViolations = [];
@@ -3864,15 +3882,9 @@ const BUTTON_TSX_PATH = join(
   REPO_ROOT,
   "src",
   "web",
-  "primitives",
-  "Button.tsx",
-);
-const ICON_BUTTON_TSX_PATH = join(
-  REPO_ROOT,
-  "src",
-  "web",
-  "primitives",
-  "IconButton.tsx",
+  "components",
+  "ui",
+  "button.tsx",
 );
 
 /** Focuses `elExpr`, dispatches `Input.insertText`, then reads the value back and throws on
@@ -4029,17 +4041,20 @@ async function checkControlStatesOnce(violations) {
     // danger's behaviour without an untrustworthy replica (the seeded board does not reliably
     // render a danger-variant instance, the same reason Phase 113 used a runtime replica).
     const buttonSrc = readFileSync(BUTTON_TSX_PATH, "utf8");
-    const bgStart = buttonSrc.indexOf(
-      "background:",
-      buttonSrc.indexOf("const composed"),
-    );
-    const bgSeg = buttonSrc.slice(bgStart, bgStart + 600);
+    const variantStart = buttonSrc.indexOf("variant: {");
+    const bgSeg =
+      variantStart === -1
+        ? ""
+        : buttonSrc.slice(
+            variantStart,
+            buttonSrc.indexOf("size: {", variantStart),
+          );
     if (
       !bgSeg.includes("--hover-button-danger") ||
       !bgSeg.includes("--hover-button-primary")
     ) {
       violations.push(
-        "control-states: danger is not proven by shared mechanism, Button.tsx's composed background expression does not resolve both --hover-button-primary and --hover-button-danger inside the same expression",
+        "control-states: danger is not proven by shared mechanism, button.tsx's cva variant block does not resolve both --hover-button-primary and --hover-button-danger",
       );
     }
     console.log(
@@ -4299,7 +4314,7 @@ async function checkControlStatesOnce(violations) {
             gearOutline.outlineStyle !== "solid"
           ) {
             violations.push(
-              `${label}: Settings gear focus outline expected 2px solid (focusRing()), observed ${JSON.stringify(gearOutline)}`,
+              `${label}: Settings gear focus outline expected 2px solid (outline focus classes), observed ${JSON.stringify(gearOutline)}`,
             );
           }
         }
@@ -4459,50 +4474,46 @@ async function checkControlStatesOnce(violations) {
 }
 
 // ---------------------------------------------------------------------------
-// BREAKS["control-states"]: moves IconButton.tsx's `...style` spread back to
-// LAST (the exact pre-fix order Task 1 undid), rebuilds, and re-runs
-// checkControlStates itself against the mutated source, then restores the
-// captured bytes unconditionally.
+// BREAKS["control-states"]: deletes the default variant's hover background
+// class from button.tsx, rebuilds, and re-runs checkControlStates itself
+// against the mutated source (the live primary hover proof must fail), then
+// restores the captured bytes unconditionally.
 // ---------------------------------------------------------------------------
 
-const ICON_BUTTON_STYLE_SPREAD_LINE = "    ...style,\n";
-const ICON_BUTTON_FOCUS_RING_LINE = "    ...focusRing(focused),\n";
+const BUTTON_PRIMARY_HOVER_ANCHOR =
+  '"bg-primary text-primary-foreground hover:bg-(--hover-button-primary) active:bg-(--pressed-button-primary)"';
+const BUTTON_PRIMARY_HOVER_BROKEN =
+  '"bg-primary text-primary-foreground active:bg-(--pressed-button-primary)"';
 
-function restoreIconButtonSource(original) {
-  writeFileSync(ICON_BUTTON_TSX_PATH, original);
+function restoreButtonSource(original) {
+  writeFileSync(BUTTON_TSX_PATH, original);
   resetBuildCache();
   rmSync(join(REPO_ROOT, "dist"), { recursive: true, force: true });
-  unregisterRestore(ICON_BUTTON_TSX_PATH);
+  unregisterRestore(BUTTON_TSX_PATH);
 }
 
 async function runBreakControlStates() {
   assertBuilt();
-  const original = readFileSync(ICON_BUTTON_TSX_PATH, "utf8");
-  const styleOccurrences =
-    original.split(ICON_BUTTON_STYLE_SPREAD_LINE).length - 1;
-  const focusRingOccurrences =
-    original.split(ICON_BUTTON_FOCUS_RING_LINE).length - 1;
-  if (styleOccurrences !== 1 || focusRingOccurrences !== 1) {
+  const original = readFileSync(BUTTON_TSX_PATH, "utf8");
+  const occurrences = original.split(BUTTON_PRIMARY_HOVER_ANCHOR).length - 1;
+  if (occurrences !== 1) {
     throw new Error(
-      `panel-114: refusing to run --break control-states, expected the style-spread line to occur ` +
-        `exactly once (measured ${styleOccurrences}) and the focusRing spread line to occur exactly ` +
-        `once (measured ${focusRingOccurrences}) in ${ICON_BUTTON_TSX_PATH}. A miscounted anchor ` +
+      `panel-114: refusing to run --break control-states, expected the default variant class anchor ` +
+        `to occur exactly once in ${BUTTON_TSX_PATH}, measured ${occurrences}. A miscounted anchor ` +
         `would mutate the wrong spot and report a false "the check cannot fail".`,
     );
   }
 
   let tripFired = false;
-  registerRestore(ICON_BUTTON_TSX_PATH, original);
+  registerRestore(BUTTON_TSX_PATH, original);
   try {
-    const withoutStyleLine = original.replace(
-      ICON_BUTTON_STYLE_SPREAD_LINE,
-      "",
+    writeFileSync(
+      BUTTON_TSX_PATH,
+      original.replace(
+        BUTTON_PRIMARY_HOVER_ANCHOR,
+        BUTTON_PRIMARY_HOVER_BROKEN,
+      ),
     );
-    const mutated = withoutStyleLine.replace(
-      ICON_BUTTON_FOCUS_RING_LINE,
-      ICON_BUTTON_FOCUS_RING_LINE + ICON_BUTTON_STYLE_SPREAD_LINE,
-    );
-    writeFileSync(ICON_BUTTON_TSX_PATH, mutated);
     resetBuildCache();
 
     const tripViolations = [];
@@ -4510,13 +4521,11 @@ async function runBreakControlStates() {
     console.log(
       `\n--break control-states TRIP leg output:\n${tripViolations.join("\n") || "(no violations)"}`,
     );
-    tripFired = tripViolations.some(
-      (v) =>
-        v.includes("view-switch active segment hover backgroundColor") &&
-        v.includes("does not differ from resting"),
+    tripFired = tripViolations.some((v) =>
+      v.includes("primary button hover backgroundColor expected"),
     );
   } finally {
-    restoreIconButtonSource(original);
+    restoreButtonSource(original);
   }
 
   const restoreViolations = [];
@@ -4896,8 +4905,9 @@ const CARD_MOVE_FLIP_PATH = join(
   REPO_ROOT,
   "src",
   "web",
-  "features",
+  "modules",
   "board",
+  "hooks",
   "card-move-flip.ts",
 );
 const MOTION_BREAK_TARGET =
@@ -5303,14 +5313,15 @@ const DETAIL_PANEL_PATH = join(
   REPO_ROOT,
   "src",
   "web",
-  "features",
+  "modules",
   "detail",
-  "DetailPanel.tsx",
+  "components",
+  "PanelFrame.tsx",
 );
 const PANEL_MOTION_BREAK_TARGET =
-  '"transform var(--motion-panel-close) var(--easing-exit)"';
+  "translate-x-full duration-(--motion-panel-close) ease-(--easing-exit)";
 const PANEL_MOTION_BREAK_REPLACEMENT =
-  '"transform var(--motion-panel-close) var(--easing-enter)"';
+  "translate-x-full duration-(--motion-panel-close) ease-(--easing-enter)";
 
 function restoreDetailPanelSource(original) {
   writeFileSync(DETAIL_PANEL_PATH, original);

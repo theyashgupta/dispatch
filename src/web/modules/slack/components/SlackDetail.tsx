@@ -23,7 +23,7 @@ import {
   slackPills,
   slackPlace,
   type SlackRow,
-} from "@/modules/slack/domain/slack-rows";
+} from "../../../../shared/slack-rows.js";
 
 interface SlackDetailProps {
   row: SlackRow;

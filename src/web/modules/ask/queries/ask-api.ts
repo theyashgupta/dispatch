@@ -1,9 +1,9 @@
 import type { AskTurn } from "../../../../shared/types.js";
 import { http } from "@/lib/http";
+import type { AskErrorKind } from "@/modules/ask/domain/ask-conversation";
 
 export type AskResult =
-  | { ok: true; answer: string }
-  | { ok: false; error: "busy" | "timeout" | "failed" | "invalid" };
+  { ok: true; answer: string } | { ok: false; error: AskErrorKind };
 
 /**
  * Ask Claude a question about the board; an abort rejects with the fetch AbortError.

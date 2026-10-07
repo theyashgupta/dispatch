@@ -13,7 +13,7 @@ import {
   type SettingsTab,
 } from "@/modules/settings/domain/settings-tab";
 
-export interface SettingsFrameProps {
+interface SettingsFrameProps {
   tabId: string | undefined;
   onTabChange: (tab: SettingsTab) => void;
   onOpenPage: (page: Page) => void;

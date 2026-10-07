@@ -1,12 +1,6 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { TodayPage } from "@/features/today";
-import { useAppState } from "@/components/AppState";
+import { TodayView } from "@/modules/today";
 
 export const Route = createLazyFileRoute("/today/{-$id}")({
-  component: TodayRoute,
+  component: TodayView,
 });
-
-function TodayRoute() {
-  const props = useAppState().today;
-  return <TodayPage {...props} />;
-}

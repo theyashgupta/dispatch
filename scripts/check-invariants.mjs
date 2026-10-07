@@ -11,11 +11,11 @@
  *    a // body/line comment does NOT count as homed — that JSDoc-vs-body-comment
  *    distinction (Pattern 2 in 10-RESEARCH.md) is what keeps the gate meaningful
  *    while the original body comments still exist.
- * 2. Has any design literal this project deliberately retired come back into
- *    src/**\/*.{ts,tsx}? See RETIRED_PATTERNS below.
+ * 2. Do the scoped fences below (terminal client, panel contract, chokepoints,
+ *    attention and status colour single sources) still hold?
  *
  * Modes:
- *   node scripts/check-invariants.mjs               diff + exit 0 iff MISSING, ORPHAN, EXTRA, and RETIRED are ALL empty
+ *   node scripts/check-invariants.mjs               diff + exit 0 iff every leg below is empty
  *   node scripts/check-invariants.mjs --generate-baseline   print sorted labeled IDs (src + docs)
  *
  * The bare `⏺` protocol glyph is DELIBERATELY excluded from ID_RE: it is a
@@ -72,24 +72,26 @@ const ID_RE =
  * re-freeze (`NEW-24`), see docs/ARCHITECTURE.md#design-system-invariants.
  * @remarks Moved from 150 to 149 when `NEW-18` (the sync strip token cascades) retired with the
  * strip on 2026-09-23, see docs/ARCHITECTURE.md#app-shell-zones.
+ * @remarks Moved from 149 to 145 on 2026-10-07 when `NEW-15`, `NEW-16`, `NEW-17` and `NEW-19`
+ * retired for lint rules in eslint.config.ts: `retiredLiteralBan`, `designLiteralBan` and
+ * `boardZoneBan`, see docs/ARCHITECTURE.md#design-system-invariants.
  */
-const FROZEN_COUNT = 149;
+const FROZEN_COUNT = 145;
 
 const SRC_DIR = "src";
 const SKIP_DIR = join("src", "web", "dist");
 const DOCS_PATH = join("docs", "ARCHITECTURE.md");
 const BASELINE_PATH = join("scripts", "invariant-baseline.txt");
 const TOKENS_PATH = join("src", "web", "styles", "tokens.css");
-const BOARD_DIR = join("src", "web", "features", "board");
 const WEB_DIR = join("src", "web");
-const COLUMN_META_PATH = join(
+const COLUMN_META_PATH = join("src", "shared", "column-accent.ts");
+const PRIORITY_DOT_PATH = join(
   "src",
   "web",
-  "features",
-  "board",
-  "column-meta.ts",
+  "components",
+  "badges",
+  "priority-dot.ts",
 );
-const CARD_VIEW_PATH = join("src", "web", "features", "board", "CardView.tsx");
 const SOURCE_ACCENT_PATH = join(
   "src",
   "web",
@@ -102,13 +104,7 @@ const TERMINAL_CLIENT_PATHS = [
   join("src", "web", "terminal.html"),
 ];
 const BOARD_STORE_PATH = join("src", "server", "store", "board.store.ts");
-const CARD_ATTENTION_PATH = join(
-  "src",
-  "web",
-  "features",
-  "board",
-  "card-attention.ts",
-);
+const CARD_ATTENTION_PATH = join("src", "shared", "card-attention.ts");
 
 /**
  * The three `Card` fields the attention predicate is composed of. An ATTENTION CLAIM is a boolean
@@ -265,97 +261,6 @@ function walkSrc(dir, extRe = /\.(ts|tsx)$/) {
 }
 
 /**
- * Design literals this project deliberately retired during the Phase 84 design-system
- * migration, each replaced by a single named definition. `pattern` is a plain substring, not a
- * regex — every one of these literals contains regex metacharacters, and a substring
- * `includes()` check is both simpler and impossible to get subtly wrong.
- */
-const RETIRED_PATTERNS = [
-  {
-    id: "NEW-15",
-    pattern: "0 0 0 2px var(--accent)",
-    replacement: "focusRing() in src/web/primitives/focus-ring.ts",
-  },
-  {
-    id: "NEW-16",
-    pattern: "0 6px 16px rgba(0,0,0,0.45)",
-    replacement: "var(--shadow-float) in src/web/styles/tokens.css",
-  },
-  {
-    id: "NEW-17",
-    pattern: "fontWeight: 800",
-    replacement: "wordmarkStyle in src/web/components/icons/Glyph.tsx",
-  },
-];
-
-/**
- * Find every line under src/**\/*.{ts,tsx} that still contains a retired design literal.
- * @remarks Scans comments as well as code, deliberately: a comment that reproduces a retired
- * literal is exactly how the pattern gets copied back into real code by the next reader. Only
- * `.ts`/`.tsx` are scanned (via `walkSrc`), so `src/web/styles/tokens.css` can remain the
- * canonical home of the float-shadow value this gate otherwise forbids.
- * @returns Violation report lines, one per matching line.
- */
-function checkRetiredPatterns() {
-  const violations = [];
-  for (const file of walkSrc(SRC_DIR)) {
-    const lines = readFileSync(file, "utf8").split("\n");
-    lines.forEach((line, i) => {
-      for (const { id, pattern, replacement } of RETIRED_PATTERNS) {
-        if (line.includes(pattern)) {
-          violations.push(
-            `${file}:${i + 1}: retired pattern ${id} — use ${replacement}`,
-          );
-        }
-      }
-    });
-  }
-  return violations;
-}
-
-/**
- * Directory-scoped board reading-rhythm gate (`NEW-19`). Deliberately NOT a `RETIRED_PATTERNS`
- * entry: that array scans all of `src/**`, and `.reading-surface` is legitimately used outside
- * `board/` (`Modal.tsx`, `DetailPanel.tsx`) — a global scan would false-positive on both.
- * @remarks Quotes are stripped from each line before matching because a `.tsx` inline-style
- * override is written with a quoted custom-property key (`"--line-body": "1.6"`), so the raw
- * `--line-body:` declaration form never appears verbatim — stripping `"`/`'` first normalizes
- * that form to the same shape as a plain CSS declaration.
- * @remarks `var(--line-body)` CONSUMPTION is deliberately permitted, not fenced: the token
- * resolves to 1.5 globally and only the `.reading-surface` class lifts it to 1.6
- * (`src/web/styles/tokens.css`), and `docs/standards/design-contract.md`'s Typography table
- * names `--line-body` as the card title's own mandated line height — barring consumption would
- * force a card-height change, which criterion 2 forbids outright.
- * @see docs/ARCHITECTURE.md#design-system-invariants
- * @returns Violation report lines, one per matching line; a single line if the directory is missing.
- */
-function checkBoardReadingRhythm() {
-  if (!existsSync(BOARD_DIR)) {
-    return [
-      `${BOARD_DIR}: directory not found — NEW-19 cannot verify board surfaces`,
-    ];
-  }
-  const violations = [];
-  for (const file of walkSrc(BOARD_DIR)) {
-    const lines = readFileSync(file, "utf8").split("\n");
-    lines.forEach((line, i) => {
-      const stripped = line.replaceAll('"', "").replaceAll("'", "");
-      if (stripped.includes("reading-surface")) {
-        violations.push(
-          `${file}:${i + 1}: retired pattern NEW-19 — the .reading-surface class is barred from src/web/features/board/`,
-        );
-      }
-      if (stripped.includes("--line-body:")) {
-        violations.push(
-          `${file}:${i + 1}: retired pattern NEW-19 — a local --line-body redefinition is barred from src/web/features/board/`,
-        );
-      }
-    });
-  }
-  return violations;
-}
-
-/**
  * File-scoped embedded-terminal-client fence (`NEW-20`). The fenced subject is exactly
  * `TERMINAL_CLIENT_PATHS` — there is no terminal-client directory on disk, so this names paths
  * rather than a glob. `TerminalRegion.tsx` (the panel container that renders the terminal
@@ -389,6 +294,138 @@ function checkTerminalFence() {
           `${full}: retired pattern NEW-20 — a new embedded-terminal-client file appeared outside the fenced set`,
         );
       }
+    }
+  }
+  return violations;
+}
+
+const PANEL_DIR = join("src", "web", "modules", "detail");
+const PANEL_CONTRACT = [
+  [
+    join(PANEL_DIR, "components", "TerminalRegion.tsx"),
+    'sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"',
+  ],
+  [
+    join(PANEL_DIR, "components", "TerminalRegion.tsx"),
+    "src={`/sessions/${c.activeSessionId}/terminal/`}",
+  ],
+  [
+    join(PANEL_DIR, "components", "PanelFrame.tsx"),
+    'aria-label="Ticket detail"',
+  ],
+  [
+    join(PANEL_DIR, "components", "PanelFrame.tsx"),
+    'data-docked={docked ? "true" : undefined}',
+  ],
+  [join(PANEL_DIR, "components", "PanelFrame.tsx"), "inert={!docked && !open}"],
+  [
+    join(PANEL_DIR, "components", "PanelHeader.tsx"),
+    '"Exit fullscreen" : "Enter fullscreen"',
+  ],
+  [
+    join(PANEL_DIR, "components", "PanelHeader.tsx"),
+    '"Back to board" : "Close panel"',
+  ],
+  [
+    join(PANEL_DIR, "components", "PanelResizeHandle.tsx"),
+    'aria-label="Resize panel"',
+  ],
+  [
+    join(PANEL_DIR, "components", "SessionSwitcher.tsx"),
+    'aria-label="Sessions"',
+  ],
+  [
+    join(PANEL_DIR, "containers", "DetailPanelContainer.tsx"),
+    "setTimeout(() => setShown(null), 200)",
+  ],
+  [
+    join(PANEL_DIR, "containers", "DetailPanelContainer.tsx"),
+    "useFocusReturn(open)",
+  ],
+  [join(PANEL_DIR, "hooks", "use-panel-resize.ts"), '"dsp.panel.width"'],
+  [
+    join(PANEL_DIR, "queries", "detail-queries.ts"),
+    "previousQuery?.queryKey[2] === id ? previous : []",
+  ],
+  [
+    join(
+      "src",
+      "web",
+      "modules",
+      "workspace",
+      "components",
+      "WorkspaceNav.tsx",
+    ),
+    'aria-label="Tickets"',
+  ],
+  [
+    join(
+      "src",
+      "web",
+      "modules",
+      "workspace",
+      "domain",
+      "workspace-choices.ts",
+    ),
+    'key: "dsp.workspaceGroup", allowed: ["workspace"], fallback: "status",',
+  ],
+  [
+    join(
+      "src",
+      "web",
+      "modules",
+      "workspace",
+      "domain",
+      "workspace-choices.ts",
+    ),
+    'key: "dsp.workspaceSubgroup", allowed: ["status", "workspace"], fallback: "none",',
+  ],
+  [
+    join(
+      "src",
+      "web",
+      "modules",
+      "workspace",
+      "domain",
+      "workspace-choices.ts",
+    ),
+    'key: "dsp.workspaceSort", allowed: ["title"], fallback: "id",',
+  ],
+  [
+    join("src", "web", "components", "ui", "hooks", "use-shortcuts.ts"),
+    '[role="checkbox"]',
+  ],
+  [
+    join("src", "web", "components", "ui", "dialog.tsx"),
+    'data-slot="dialog-content"',
+  ],
+  [
+    join("src", "web", "components", "ui", "alert-dialog.tsx"),
+    'data-slot="alert-dialog-content"',
+  ],
+];
+
+/**
+ * Report every detail panel, Workspace and shortcut contract literal that is missing from its file.
+ *
+ * @remarks PANEL-03 and the Unit 3 parity contracts (iframe sandbox and src, the selectors that
+ * `scripts/panel-mount-92.mjs` reads, stored choice keys, the shortcut gates, the 200 ms clear)
+ * have no other committed guard. Whitespace is collapsed before the match, so a prettier reflow
+ * never trips it.
+ * @returns One line per missing file or missing literal.
+ */
+function checkPanelContract() {
+  const squash = (text) => text.replace(/\s+/g, " ");
+  const violations = [];
+  for (const [path, literal] of PANEL_CONTRACT) {
+    if (!existsSync(path)) {
+      violations.push(
+        `${path}: file not found, PANEL-03 contract subject is missing or renamed`,
+      );
+      continue;
+    }
+    if (!squash(readFileSync(path, "utf8")).includes(squash(literal))) {
+      violations.push(`${path}: PANEL-03 contract literal missing: ${literal}`);
     }
   }
   return violations;
@@ -459,7 +496,7 @@ function attentionClaims(sourceFile) {
  * the shared helper, so it was invisible; meanwhile a new surface that correctly IMPORTED the
  * single source turned the build red until someone widened the list — a check that fires on the
  * good event and stays silent on the bad one. Real sites it could not see were already present
- * (`card-badges.ts`, `DetailPanel.tsx`, `App.tsx`). This is the same shape as Phase 90's `NEW-21`,
+ * (`card-badges.ts`, `DetailPanel.tsx`, and `App.tsx`, now `lib/app-store.ts`). This is the same shape as Phase 90's `NEW-21`,
  * which shipped fenced against the wrong subject and reported PASS.
  * @remarks Consumers are deliberately UNRESTRICTED now. Importing the single source is the
  * behaviour this invariant wants, so it must never be what fails the build; the closed consumer
@@ -469,7 +506,7 @@ function attentionClaims(sourceFile) {
  * FAIL instead of silently exempting nothing. Conjunctions are NOT claims: `card.sessionLost !==
  * true && isUnseen(…)` (`card-badges.ts`, deriving an activity dot), `c.tmuxSession &&
  * !c.sessionLost` (`DetailPanel.tsx`, deriving liveness), and `card.column !== "todo" &&
- * card.sessionLost !== true` (`App.tsx`, gating start-eligibility) each narrow ONE attention field
+ * card.sessionLost !== true` (`lib/app-store.ts` `requestStart`, gating start-eligibility) each narrow ONE attention field
  * with unrelated state to make a different claim — a dot is not an attention ring — so fencing
  * them would be the cry-wolf failure in a new costume.
  * @remarks The definition half fences EXPORTED declarations only. `CardView.tsx` binds the shared
@@ -502,7 +539,7 @@ function checkAttentionSingleSource() {
     }
   }
 
-  for (const file of walkSrc(WEB_DIR)) {
+  for (const file of [...walkSrc(WEB_DIR), ...walkSrc(join("src", "shared"))]) {
     if (file === CARD_ATTENTION_PATH) continue;
     const content = readFileSync(file, "utf8");
 
@@ -970,7 +1007,7 @@ function readStatusColorPalette() {
 
 /**
  * The mechanism half of `NEW-24`: `COLUMN_ACCENT` ({@link COLUMN_META_PATH}) and `PRIORITY_DOT`
- * ({@link CARD_VIEW_PATH}) are each fenced as the single definition of "which colour a column or
+ * ({@link PRIORITY_DOT_PATH}) are each fenced as the single definition of "which colour a column or
  * priority renders", asserted still exported and still holding only `var(--col-*)`/`var(--accent)`
  * or `var(--prio-*)` string values. A missing/renamed export is a sentinel violation, not a silent
  * pass: a literal-only fence would pass unchanged against a build that deleted either map and
@@ -1013,16 +1050,16 @@ function checkStatusColorMechanism() {
     }
   }
 
-  if (!existsSync(CARD_VIEW_PATH)) {
+  if (!existsSync(PRIORITY_DOT_PATH)) {
     violations.push(
-      `${CARD_VIEW_PATH}: file not found, NEW-24's PRIORITY_DOT subject is missing or renamed`,
+      `${PRIORITY_DOT_PATH}: file not found, NEW-24's PRIORITY_DOT subject is missing or renamed`,
     );
   } else {
-    const content = readFileSync(CARD_VIEW_PATH, "utf8");
+    const content = readFileSync(PRIORITY_DOT_PATH, "utf8");
     const priorityDotMatch = /export const PRIORITY_DOT\b/.exec(content);
     if (!priorityDotMatch) {
       violations.push(
-        `${CARD_VIEW_PATH}: export const PRIORITY_DOT not found, NEW-24's single-source mechanism is missing or renamed`,
+        `${PRIORITY_DOT_PATH}: export const PRIORITY_DOT not found, NEW-24's single-source mechanism is missing or renamed`,
       );
     } else {
       const tail = content.slice(priorityDotMatch.index);
@@ -1030,13 +1067,13 @@ function checkStatusColorMechanism() {
       const values = [...body.matchAll(/color:\s*"([^"]*)"/g)].map((m) => m[1]);
       if (values.length === 0) {
         violations.push(
-          `${CARD_VIEW_PATH}: PRIORITY_DOT holds no color values, NEW-24's single-source mechanism is malformed`,
+          `${PRIORITY_DOT_PATH}: PRIORITY_DOT holds no color values, NEW-24's single-source mechanism is malformed`,
         );
       }
       for (const value of values) {
         if (!/^var\(-{2}prio-[a-z-]+\)$/.test(value)) {
           violations.push(
-            `${CARD_VIEW_PATH}: PRIORITY_DOT color "${value}" is not a var(--prio-*) reference, NEW-24's single-source mechanism is broken`,
+            `${PRIORITY_DOT_PATH}: PRIORITY_DOT color "${value}" is not a var(--prio-*) reference, NEW-24's single-source mechanism is broken`,
           );
         }
       }
@@ -1103,13 +1140,12 @@ function checkSourceAccentMechanism() {
 }
 
 /**
- * Status-colour single-source fence (`NEW-24`). Deliberately NOT a `RETIRED_PATTERNS` entry: that
- * array scans all of `src/**`, hardcodes its literals, and this gate's subject is `src/web` with a
- * denylist derived from {@link TOKENS_PATH} at run time, not a fixed literal list.
+ * Status-colour single-source fence (`NEW-24`). Its subject is `src/web` with a denylist derived
+ * from {@link TOKENS_PATH} at run time, not a fixed literal list.
  * @remarks Asserts the MECHANISM as well as the literal, the same discipline `NEW-22`'s own
- * JSDoc argues for: `COLUMN_ACCENT` (`column-meta.ts`) and `PRIORITY_DOT`
- * (`CardView.tsx`) are each the single definition of "which colour a column or priority renders",
- * consumed by `Column.tsx`, `SearchBox.tsx` and `StatusPillSwitcher.tsx` (columns) and `CardView.tsx`
+ * JSDoc argues for: `COLUMN_ACCENT` (`column-accent.ts`) and `PRIORITY_DOT`
+ * (`priority-dot.ts`) are each the single definition of "which colour a column or priority renders",
+ * consumed by `ColumnHeader.tsx`, `SearchField.tsx` and `StatusPillSwitcher.tsx` (columns) and `CardView.tsx`
  * itself (priority). A gate that only fenced literals would pass unchanged against a build that
  * deleted either map and inlined its `var()` strings by hand.
  * @remarks All twenty {@link STATUS_COLOR_PALETTE_TOKENS} names must be present in `tokens.css`
@@ -1273,37 +1309,12 @@ function generateBaseline() {
 }
 
 /**
- * Run the invariant-home diff, the global retired-pattern scan, the
- * directory-scoped board reading-rhythm check, the
- * file-scoped terminal-client fence, the session-projection chokepoint check,
- * and the attention single-source census, then set the process exit code.
- * @remarks All seven diff legs gate the exit, not just MISSING: in a
- * frozen-baseline world an EXTRA (homed but unbaselined — a typo'd ID in docs
- * or an unratified new ID in JSDoc) and an ORPHAN (present in src but
- * unbaselined) are always defects, and an informational-only leg would let
- * them accumulate silently through the body-comment deletion phases. The
- * retired-pattern leg, the board reading-rhythm leg,
- * the terminal-fence leg, the session-projection chokepoint leg, and the
- * attention single-source leg are all independent of the ID-baseline
- * arithmetic above — a design literal coming back, the terminal-client
- * subject set changing, a flat session field being assigned outside its sole
- * chokepoint, or a second independent computation of "does this card need
- * attention" is a defect regardless of whether any invariant ID also moved.
- * The board reading-rhythm leg (`NEW-19`),
- * the terminal-fence leg (`NEW-20`), the session-projection chokepoint leg
- * (`NEW-21`), and the attention single-source leg (`NEW-22`) are all
- * deliberately scoped (file- or directory-scoped) rather than folded into
- * `RETIRED_PATTERNS`, since each pattern is legitimate outside its own scope.
- * The terminal-fence leg only proves the fenced SUBJECT SET is intact — it
- * cannot prove the fenced files' CONTENTS are unchanged; see
- * `checkTerminalFence`'s own JSDoc for the split. See
- * `checkSessionProjectionChokepoint`'s and `checkAttentionSingleSource`'s own
- * JSDoc for their respective two-tier fence/slice split and missing-subject
- * sentinels.
- * @returns Nothing; exits 0 iff MISSING, ORPHAN, EXTRA, RETIRED,
- * BOARD READING RHYTHM, TERMINAL FENCE, SESSION PROJECTION
- * CHOKEPOINT, ATTENTION SINGLE SOURCE, LAUNCHCTL READ-ONLY, and STATUS COLOR
- * SINGLE SOURCE are all empty.
+ * Run the invariant-home diff and every scoped fence, then set the process exit code.
+ *
+ * @remarks Every leg gates the exit, not just MISSING: in a frozen-baseline world an EXTRA (an ID
+ * in docs or JSDoc that the baseline does not hold) and an ORPHAN (an ID in src that the baseline
+ * does not hold) are always defects. The fences are independent of the ID arithmetic; see each
+ * check's own JSDoc for its scope and missing-subject sentinel.
  */
 function run() {
   const home = new Set();
@@ -1321,9 +1332,8 @@ function run() {
   const missing = diffSorted(baseline, home);
   const orphan = diffSorted(present, baseline);
   const extra = diffSorted(home, baseline);
-  const retired = checkRetiredPatterns();
-  const boardReadingRhythm = checkBoardReadingRhythm();
   const terminalFence = checkTerminalFence();
+  const panelContract = checkPanelContract();
   const sessionChokepoint = checkSessionProjectionChokepoint();
   const cleanupMirrorChokepoint = checkCleanupMirrorChokepoint();
   const attentionSingleSource = checkAttentionSingleSource();
@@ -1333,9 +1343,8 @@ function run() {
   report("MISSING (baseline - home)", missing);
   report("ORPHAN  (present - baseline)", orphan);
   report("EXTRA   (home - baseline)", extra);
-  report("RETIRED (design literals that came back)", retired);
-  report("BOARD READING RHYTHM (NEW-19)", boardReadingRhythm);
   report("TERMINAL FENCE (NEW-20)", terminalFence);
+  report("PANEL CONTRACT (PANEL-03)", panelContract);
   report("SESSION PROJECTION CHOKEPOINT (NEW-21)", sessionChokepoint);
   report("CLEANUP MIRROR CHOKEPOINT (NEW-23)", cleanupMirrorChokepoint);
   report("ATTENTION SINGLE SOURCE (NEW-22)", attentionSingleSource);
@@ -1346,9 +1355,8 @@ function run() {
     missing.length +
     orphan.length +
     extra.length +
-    retired.length +
-    boardReadingRhythm.length +
     terminalFence.length +
+    panelContract.length +
     sessionChokepoint.length +
     cleanupMirrorChokepoint.length +
     attentionSingleSource.length +
@@ -1360,14 +1368,11 @@ function run() {
       (orphan.length || extra.length
         ? ` (${orphan.length} orphan, ${extra.length} extra — unbaselined IDs)`
         : "") +
-      (retired.length
-        ? ` (${retired.length} retired pattern(s) reappeared)`
-        : "") +
-      (boardReadingRhythm.length
-        ? ` (${boardReadingRhythm.length} board reading-rhythm regression(s))`
-        : "") +
       (terminalFence.length
         ? ` (${terminalFence.length} terminal-fence regression(s))`
+        : "") +
+      (panelContract.length
+        ? ` (${panelContract.length} panel-contract regression(s))`
         : "") +
       (sessionChokepoint.length
         ? ` (${sessionChokepoint.length} session-projection-chokepoint violation(s))`

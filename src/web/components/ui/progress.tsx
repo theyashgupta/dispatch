@@ -30,6 +30,9 @@ function Progress({
   ...props
 }: React.ComponentProps<typeof ProgressPrimitive.Root> &
   VariantProps<typeof progressIndicatorVariants>) {
+  const indicatorStyle = {
+    transform: `translateX(-${100 - (value || 0)}%)`,
+  };
   return (
     <ProgressPrimitive.Root
       data-slot="progress"
@@ -43,7 +46,7 @@ function Progress({
         data-slot="progress-indicator"
         data-tone={tone ?? undefined}
         className={progressIndicatorVariants({ tone })}
-        style={{ transform: `translateX(-${100 - (value || 0)}%)` }}
+        style={indicatorStyle}
       />
     </ProgressPrimitive.Root>
   );

@@ -79,12 +79,48 @@ const fixtures = [
     deny: ["index.ts", "Layer definitions"],
   },
   {
-    name: "allow: inline style in a legacy features file gets pointer text",
+    name: "deny: style prop in a web root .tsx file",
+    payload: edit("src/web/main.tsx", "<div style={{ gap: 4 }} />"),
+    deny: ["Tailwind", "The only-shadcn rule"],
+  },
+  {
+    name: "allow: style prop in a viewer file",
+    payload: edit("src/web/viewer/ViewerDoc.tsx", "<h1 style={h1Style} />"),
+    pointer: DOC,
+  },
+  {
+    name: "allow: style prop in viewer-main.tsx",
+    payload: edit("src/web/viewer-main.tsx", "<p style={bodyStyle} />"),
+    pointer: DOC,
+  },
+  {
+    name: "allow: fetch and hex colour in terminal-main.ts",
     payload: edit(
-      "src/web/features/board/Board.tsx",
-      "<div style={{ gap: 4 }} />",
+      "src/web/terminal-main.ts",
+      'const res = await fetch("/api/terminal"); const bg = "#0b0b0c";',
     ),
-    pointer: "folder-structure.md",
+    pointer: DOC,
+  },
+  {
+    name: "allow: style prop in a components/ui file",
+    payload: edit(
+      "src/web/components/ui/progress.tsx",
+      "<div style={{ width: 4 }} />",
+    ),
+    pointer: DOC,
+  },
+  {
+    name: "allow: style prop in a dnd component",
+    payload: edit(
+      "src/web/modules/board/components/dnd/Overlay.tsx",
+      "<div style={{ width: 4 }} />",
+    ),
+    pointer: DOC,
+  },
+  {
+    name: "allow: hex colour in the web app manifest",
+    payload: edit("src/web/public/manifest.json", '"theme_color": "#0b0b0c"'),
+    pointer: DOC,
   },
   {
     name: "allow: Radix import inside components/ui",

@@ -3,10 +3,22 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { isolateEnv } from "../../test-support/fixtures.js";
+import { fakeBoardRepository } from "../../test-support/fake-board-repository.js";
 
 const env = isolateEnv();
+const { setBoardRepository } = await import("../../store/board-repository.js");
 const accounts = await import("./claude-accounts.js");
 const login = await import("./claude-login.js");
+
+const failures: string[] = [];
+setBoardRepository(
+  fakeBoardRepository({
+    recordAccountEvent: (type, reason) => {
+      failures.push(`${type}:${reason}`);
+      return Promise.resolve();
+    },
+  }),
+);
 
 const registryPath = path.join(
   env.dispatchDir,
@@ -42,6 +54,7 @@ void test("access denied on the sign-in page ends in its own error and removes t
   assert.deepEqual(login.submitLoginCode("deny"), { ok: true });
   await waitFor("error");
   assert.equal(errorMessage(), "Sign-in was denied on the Claude page.");
+  assert.equal(failures.at(-1), "account_login_failed:access-denied");
   assert.equal(fs.existsSync(accounts.accountDir(id)), false);
   await login.cancelLogin();
 });
@@ -66,6 +79,7 @@ void test("a throw while saving the login is caught, reported, and leaves no dir
   await waitFor("error");
   fs.writeFileSync(registryPath, '{"version":1,"accounts":[]}');
   assert.equal(errorMessage(), "Claude login could not be saved. Try again.");
+  assert.equal(failures.at(-1), "account_login_failed:save-failed");
   assert.equal(fs.existsSync(accounts.accountDir(id)), false);
   await login.cancelLogin();
 });
@@ -80,7 +94,11 @@ void test("the login timeout (DISPATCH_LOGIN_TIMEOUT_MS) kills a login the user 
     Date.now() - t0 < 3_000,
     "timed out within a few tenths of a second",
   );
-  assert.equal(errorMessage(), "Claude login did not complete. Try again.");
+  assert.equal(
+    errorMessage(),
+    "The sign-in took too long and was stopped. Start again.",
+  );
+  assert.equal(failures.at(-1), "account_login_failed:timeout");
   assert.equal(fs.existsSync(accounts.accountDir(id)), false);
   await login.cancelLogin();
   assert.equal(login.getLoginView().state, "idle");

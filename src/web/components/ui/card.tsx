@@ -1,4 +1,5 @@
 import * as React from "react";
+import { cva } from "class-variance-authority";
 import { cn } from "cn";
 
 function Card({ className, ...props }: React.ComponentProps<"div">) {
@@ -13,6 +14,56 @@ function Card({ className, ...props }: React.ComponentProps<"div">) {
     />
   );
 }
+
+const cardVariants = cva("", {
+  variants: {
+    identity: {
+      rest: "border-border",
+      hover: "border-(--text-muted)",
+      multi: "border-(--text)",
+      attention: "border-(--accent)",
+    },
+    surface: {
+      rest: "bg-card",
+      hover: "bg-(--surface-card-hover)",
+      pressed: "bg-(--pressed-card)",
+      "pressed-hover": "bg-(--pressed-card-hover)",
+      elevated: "bg-card",
+    },
+    density: {
+      default: "p-(--card-padding)",
+      compact: "p-(--card-padding-compact)",
+    },
+    dimmed: { true: "opacity-40", false: "" },
+  },
+  compoundVariants: [
+    {
+      identity: ["rest", "hover"],
+      surface: "elevated",
+      className: "shadow-(--shadow-float)",
+    },
+    {
+      identity: "attention",
+      surface: ["rest", "hover", "pressed", "pressed-hover"],
+      className: "shadow-card-attention",
+    },
+    {
+      identity: "attention",
+      surface: "elevated",
+      className: "shadow-card-attention-float",
+    },
+    {
+      identity: "multi",
+      surface: ["rest", "hover", "pressed", "pressed-hover"],
+      className: "shadow-card-multi",
+    },
+    {
+      identity: "multi",
+      surface: "elevated",
+      className: "shadow-card-multi-float",
+    },
+  ],
+});
 
 function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
@@ -88,4 +139,5 @@ export {
   CardAction,
   CardDescription,
   CardContent,
+  cardVariants,
 };

@@ -191,6 +191,13 @@ const hrStyle: CSSProperties = {
   margin: "var(--space-lg) 0",
 };
 
+function cellStyle(
+  base: CSSProperties,
+  style: CSSProperties | undefined,
+): CSSProperties {
+  return { ...base, ...style };
+}
+
 const staticComponents: Components = {
   h1: ({ id, children }) => (
     <h1 id={id} style={h1Style}>
@@ -277,10 +284,10 @@ const staticComponents: Components = {
     </div>
   ),
   th: ({ children, style }) => (
-    <th style={{ ...thStyle, ...style }}>{children}</th>
+    <th style={cellStyle(thStyle, style)}>{children}</th>
   ),
   td: ({ children, style }) => (
-    <td style={{ ...tdStyle, ...style }}>{children}</td>
+    <td style={cellStyle(tdStyle, style)}>{children}</td>
   ),
   blockquote: ({ children }) => (
     <blockquote style={blockquoteStyle}>{children}</blockquote>
@@ -298,7 +305,7 @@ export default function ViewerDoc({
   const [activeId, setActiveId] = useState<string | null>(null);
 
   const headingIdsPlugin = useMemo(() => {
-    // eslint-disable-next-line react-hooks/refs
+    // eslint-disable-next-line react-hooks/refs -- the plugin records headings as a side channel and the effect below reads them after commit
     const transform = rehypeHeadingIds((found) => {
       headingsRef.current = found;
     });

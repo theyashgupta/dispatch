@@ -3,12 +3,13 @@ import { useMutation } from "@tanstack/react-query";
 import type { WorkspacesInventory } from "../../../../shared/types.js";
 import { createLatestLoader } from "../../../../shared/latest-loader.js";
 import { inventoryRefetchDelay } from "@/modules/workspaces/domain/inventory-refetch";
-import { getWorkspaces, openWorkspaceEditor } from "./workspaces-api.js";
+import { openEditor } from "@/queries/cards-api";
+import { getWorkspaces } from "./workspaces-api.js";
 
 export function openWorkspaceEditorMutationOptions() {
   return {
     mutationFn: (vars: { cardId: string; editor: "code" | "cursor" }) =>
-      openWorkspaceEditor(vars.cardId, vars.editor),
+      openEditor(vars.cardId, vars.editor),
   };
 }
 

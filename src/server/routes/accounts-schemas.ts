@@ -21,7 +21,12 @@ export const removableAccountIdSchema = accountOrDefaultIdSchema.refine(
 );
 
 export const activeBodySchema = z.object(
-  { id: accountOrDefaultIdSchema },
+  {
+    id: accountOrDefaultIdSchema,
+    applyToRunning: z
+      .enum(["none", "idle", "all"], "invalid-apply")
+      .default("all"),
+  },
   "invalid-id",
 );
 

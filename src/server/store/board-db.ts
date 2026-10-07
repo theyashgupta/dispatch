@@ -7,6 +7,7 @@ import {
   defaultBoardPolicy,
 } from "../../shared/board-key.js";
 import type {
+  AccountActivityEvent,
   ActivityEvent,
   Board,
   BoardKey,
@@ -116,7 +117,7 @@ export interface BoardDb {
   persist(
     cards: Card[],
     meta: BoardMeta,
-    events: Omit<ActivityEvent, "id">[],
+    events: Omit<ActivityEvent | AccountActivityEvent, "id">[],
     itemWrites?: ItemWrites,
     boards?: Board[],
   ): number[];
@@ -1004,7 +1005,7 @@ export function openBoardDb(): BoardDb {
   function persistTxn(
     cards: Card[],
     meta: BoardMeta,
-    events: Omit<ActivityEvent, "id">[],
+    events: Omit<ActivityEvent | AccountActivityEvent, "id">[],
     itemWrites?: ItemWrites,
     boards: Board[] = [],
   ): number[] {
