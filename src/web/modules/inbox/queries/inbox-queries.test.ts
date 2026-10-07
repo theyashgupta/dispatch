@@ -6,7 +6,6 @@ import {
   setItemState,
   snoozeItem,
 } from "@/queries/item-actions-api";
-import { inboxKeys } from "./inbox-queries.js";
 
 const realFetch = globalThis.fetch;
 const calls: { url: string; init?: RequestInit }[] = [];
@@ -28,10 +27,6 @@ function reply(status: number, body: unknown, statusText = ""): void {
 afterEach(() => {
   globalThis.fetch = realFetch;
   calls.length = 0;
-});
-
-test("inboxKeys has the documented shape", () => {
-  assert.deepEqual(inboxKeys.all, ["inbox"]);
 });
 
 test("setItemState posts the state to the encoded item route", async () => {

@@ -3,13 +3,12 @@ import { afterEach, test } from "node:test";
 import { MutationObserver, QueryClient } from "@tanstack/react-query";
 import {
   disablePush,
-  isPushSupported,
-  refreshPushSubscription,
   saveClaudeArgs,
   saveCleanupDelay,
   saveProfile,
   saveTerminalAppearance,
 } from "./settings-api.js";
+import { isPushSupported, refreshPushSubscription } from "@/queries/push-api";
 import {
   claudeArgsQueryOptions,
   cleanupDelayQueryOptions,

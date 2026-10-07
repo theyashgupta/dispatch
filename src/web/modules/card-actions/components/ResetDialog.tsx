@@ -2,7 +2,7 @@ import type { Card } from "../../../../shared/types.js";
 import { CardConfirmDialog } from "./CardConfirmDialog";
 import { resetItems } from "@/modules/card-actions/domain/reset-items";
 
-export interface ResetDialogProps {
+interface ResetDialogProps {
   card: Card;
   onConfirm: () => void;
   onClose: () => void;

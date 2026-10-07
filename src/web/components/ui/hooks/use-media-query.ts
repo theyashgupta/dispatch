@@ -1,8 +1,5 @@
 import { useCallback, useSyncExternalStore } from "react";
 
-export const CAROUSEL_QUERY = "(max-width: 1023px)";
-export const NARROW_QUERY = "(max-width: 767px)";
-
 /**
  * Subscribe to a CSS media query and return whether it matches now.
  *

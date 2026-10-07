@@ -1,17 +1,20 @@
 import { useEffect, useRef, useState } from "react";
+import { useRouteContext } from "@tanstack/react-router";
 import {
   CreateTicketDialog,
   type TicketPhase,
 } from "@/modules/card-actions/components/CreateTicketDialog";
 import { acceptErrorCopy } from "@/modules/card-actions/domain/ticket-copy";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { useDialogClose } from "@/components/ui/hooks/use-dialog-close";
+import { closeOverlay } from "@/components/ui/hooks/overlay-return";
 import { usePastedImages } from "@/modules/card-actions/hooks/use-pasted-images";
 import {
   useCreateLocalTicketMutation,
   useGenerateTicketDraftMutation,
 } from "@/queries/cards-queries";
 
-export interface CreateTicketContainerProps {
+interface CreateTicketContainerProps {
   onClose: () => void;
   onFromMeetingNotes: () => void;
 }
@@ -133,6 +136,22 @@ export function CreateTicketContainer({
       onCancelGenerate={() => abortControllerRef.current?.abort()}
       onAccept={() => void handleAccept()}
       onFromMeetingNotes={onFromMeetingNotes}
+    />
+  );
+}
+
+export function CreateTicketRequestContainer() {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const open = useAppStore(appStore, (s) => s.createTicketOpen);
+  if (!open) return null;
+  return (
+    <CreateTicketContainer
+      onClose={() => closeOverlay(appStore, appStore.closeCreateTicket)}
+      onFromMeetingNotes={() => {
+        appStore.getState().overlayReturn?.focus();
+        appStore.closeCreateTicket();
+        appStore.openMeetingNotes();
+      }}
     />
   );
 }

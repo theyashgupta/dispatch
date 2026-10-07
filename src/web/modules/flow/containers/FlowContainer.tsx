@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouteContext, useRouter } from "@tanstack/react-router";
+import { routeHash } from "../../../../shared/route.js";
 import type { BoardSnapshot } from "../../../../shared/types.js";
 import { nowMs } from "../../../../shared/format-age.js";
 import { NARROW_QUERY } from "../../../../shared/media-queries.js";
 import { sourceAccent } from "@/components/badges";
 import type { FlowToken } from "@/components/FlowStage";
 import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
+import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
 import { usePollSourceMutation } from "@/queries/source-poll-queries";
 import { FlowWideFrame } from "@/modules/flow/components/FlowWideFrame";
 import { FlowDiagram } from "@/modules/flow/components/FlowDiagram";
@@ -24,7 +28,7 @@ import {
   type FlowRow,
 } from "@/modules/flow/domain/flow-model";
 
-export interface FlowContainerProps {
+interface FlowPageProps {
   board: BoardSnapshot;
   onOpenList: () => void;
 }
@@ -42,7 +46,22 @@ function rideToken(row: FlowRow, id: string, speed: Speed): FlowToken {
   };
 }
 
-export function FlowContainer({ board, onOpenList }: FlowContainerProps) {
+export function FlowContainer() {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const router = useRouter();
+  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  if (board == null) return null;
+  return (
+    <FlowPage
+      board={board}
+      onOpenList={() =>
+        void router.navigate({ href: routeHash({ page: "inbox" }).slice(1) })
+      }
+    />
+  );
+}
+
+function FlowPage({ board, onOpenList }: FlowPageProps) {
   const narrow = useMediaQuery(NARROW_QUERY);
   const { mutateAsync: poll } = usePollSourceMutation();
   const [speed, setSpeed] = useState<Speed>(1);

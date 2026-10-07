@@ -9,10 +9,6 @@ import {
   syncCardToLinear,
 } from "./cards-api.js";
 
-export const cardsKeys = {
-  all: ["cards"] as const,
-};
-
 interface SyncCardToLinearVariables {
   id: string;
   teamId: string;

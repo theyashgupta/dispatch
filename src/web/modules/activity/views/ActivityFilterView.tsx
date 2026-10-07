@@ -1,8 +1,10 @@
-import {
-  ActivityFilterContainer,
-  type ActivityFilterContainerProps,
-} from "@/modules/activity/containers/ActivityFilterContainer";
+import { PageHeaderActions } from "@/components/PageHeaderActions";
+import { ActivityFilterContainer } from "@/modules/activity/containers/ActivityFilterContainer";
 
-export function ActivityFilterView(props: ActivityFilterContainerProps) {
-  return <ActivityFilterContainer {...props} />;
+export function ActivityFilterView() {
+  return (
+    <PageHeaderActions>
+      <ActivityFilterContainer />
+    </PageHeaderActions>
+  );
 }

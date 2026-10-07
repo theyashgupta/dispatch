@@ -5,12 +5,12 @@ import { cn } from "@/lib/utils";
 import { AppSidebar } from "@/modules/shell/components/AppSidebar";
 import { PageHeader } from "@/modules/shell/components/PageHeader";
 import { TopBar } from "@/modules/shell/components/TopBar";
-import type { NavCounts, NavItem } from "@/modules/shell/domain/nav-items";
+import type { NavCounts, NavItem } from "../../../../shared/nav-items.js";
 import type { SyncSnapshot } from "@/modules/shell/domain/sync-status";
 import { useChromeTop } from "@/modules/shell/hooks/use-chrome-top";
 import { useMenuFocusReturn } from "@/modules/shell/hooks/use-menu-focus-return";
 
-export interface ShellFrameProps {
+interface ShellFrameProps {
   route: Route;
   onNavigate: (page: Page) => void;
   navItems: readonly NavItem[];
@@ -24,7 +24,7 @@ export interface ShellFrameProps {
   carousel: boolean;
   pageTitle: string;
   pageCount?: number;
-  headerActions?: ReactNode;
+  headerView?: ReactNode;
   banner: ReactNode;
   content: ReactNode;
   detail: ReactNode;
@@ -44,7 +44,7 @@ export function ShellFrame({
   carousel,
   pageTitle,
   pageCount,
-  headerActions,
+  headerView,
   banner,
   content,
   detail,
@@ -110,11 +110,9 @@ export function ShellFrame({
         <div ref={setChrome} className="shrink-0">
           {isMobile ? <TopBar title={pageTitle} /> : null}
           {banner}
-          <PageHeader
-            title={pageTitle}
-            count={pageCount}
-            actions={headerActions}
-          />
+          <PageHeader title={pageTitle} count={pageCount}>
+            {headerView}
+          </PageHeader>
         </div>
         {content}
       </div>

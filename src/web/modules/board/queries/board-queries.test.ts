@@ -6,12 +6,8 @@ import {
   boardSnapshotKeys,
   tunnelKeys,
 } from "@/queries/board-snapshot-queries";
-import { getCard, unwindGroup } from "./board-api.js";
-import {
-  boardKeys,
-  cardQueryOptions,
-  moveCardMutationOptions,
-} from "./board-queries.js";
+import { getCard, unwindGroup } from "@/queries/cards-api";
+import { moveCardMutationOptions } from "./board-queries.js";
 
 const realFetch = globalThis.fetch;
 const calls: { url: string; init?: RequestInit }[] = [];
@@ -40,22 +36,6 @@ afterEach(() => {
 });
 
 const card = { id: "c1", title: "A card" };
-
-test("boardKeys has the documented shape", () => {
-  assert.deepEqual(boardKeys.all, ["board"]);
-  assert.deepEqual(boardKeys.detail("c1"), ["board", "card", "c1"]);
-});
-
-test("cardQueryOptions keys on the card id and requests /api/cards/:id", async () => {
-  const options = cardQueryOptions("a/b");
-  assert.deepEqual(options.queryKey, ["board", "card", "a/b"]);
-  reply(200, { card, members: [] });
-  assert.deepEqual(await newClient().fetchQuery(options), {
-    card,
-    members: [],
-  });
-  assert.equal(calls[0]?.url, "/api/cards/a%2Fb");
-});
 
 test("getCard resolves the card and members on a 200", async () => {
   reply(200, { card, members: [{ id: "m1" }] }, "OK");

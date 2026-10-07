@@ -1,3 +1,5 @@
+import { PageHeaderActions } from "@/components/PageHeaderActions";
+import { PageHeaderCount } from "@/components/PageHeaderCount";
 import { AskClearButton } from "@/modules/ask/components/AskClearButton";
 import {
   useAskConversationQuery,
@@ -8,9 +10,14 @@ export function AskHeaderContainer() {
   const { data } = useAskConversationQuery();
   const { mutate } = useAskQuestionMutation();
   return (
-    <AskClearButton
-      disabled={data.turns.length === 0 && data.pending === null}
-      onClear={() => mutate({ type: "clear" })}
-    />
+    <>
+      <PageHeaderCount count={data.turns.length} />
+      <PageHeaderActions>
+        <AskClearButton
+          disabled={data.turns.length === 0 && data.pending === null}
+          onClear={() => mutate({ type: "clear" })}
+        />
+      </PageHeaderActions>
+    </>
   );
 }

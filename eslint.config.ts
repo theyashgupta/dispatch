@@ -7,6 +7,7 @@ import boundaries from "eslint-plugin-boundaries";
 import checkFile from "eslint-plugin-check-file";
 import prettier from "eslint-config-prettier";
 import commentsJsdocOnly from "./eslint-local/comments-jsdoc-only.js";
+import { builtinRules } from "eslint/use-at-your-own-risk";
 
 const importResolver = {
   typescript: {
@@ -42,15 +43,14 @@ const moduleImportMatrix: Record<string, string[]> = {
   query: ["query", "domain"],
   domain: ["domain"],
 };
-const legacyWebTypes = ["primitives", "hooks", "feature", "web"];
 const uiTier = { type: "ui" };
 const uiPrimitiveTier = { type: "ui", fileInternalPath: "!hooks/**" };
 const sharedComponentTier = { type: "shared-component" };
 const sharedQueryTier = { type: "shared-query" };
-const libTier = { type: "lib", fileInternalPath: "!{api,http}.ts" };
+const libTier = { type: "lib", fileInternalPath: "!http.ts" };
 const libNotUtilsTier = {
   type: "lib",
-  fileInternalPath: "!{api,http,utils}.ts",
+  fileInternalPath: "!{http,utils}.ts",
 };
 const moduleSharedTiers: Record<
   string,
@@ -101,14 +101,7 @@ const newWebTypes = [
   "shared-component",
   "shared-query",
 ];
-const webTypes = [
-  ...newWebTypes,
-  "primitives",
-  "hooks",
-  "lib",
-  "feature",
-  "web",
-];
+const webTypes = [...newWebTypes, "lib", "web"];
 
 /**
  * Shared element descriptors for both boundary blocks below (backend +
@@ -117,7 +110,7 @@ const webTypes = [
  * places: the module layer elements come before `module`, which then matches
  * only the barrel and stray files of a module; `ui` comes before
  * `shared-component`; and every frontend element comes before the `web`
- * catch-all, which keeps App.tsx, main.tsx, the viewer and styles.
+ * catch-all, which keeps the web root entry files, the viewer and styles.
  *
  * `exec.ts`/`git.ts`/`tmux.ts`/`image-proxy.ts` classify as plain `adapters`
  * here — their transport-narrowing and config-consumer carve-out are enforced
@@ -161,14 +154,7 @@ const boundaryElements = [
   { type: "ui", pattern: "src/web/components/ui" },
   { type: "shared-component", pattern: "src/web/components" },
   { type: "shared-query", pattern: "src/web/queries" },
-  { type: "primitives", pattern: "src/web/primitives" },
-  { type: "hooks", pattern: "src/web/hooks" },
   { type: "lib", pattern: "src/web/lib" },
-  {
-    type: "feature",
-    pattern: "src/web/features/*",
-    capture: ["feature"],
-  },
   { type: "web", pattern: "src/web" },
 ];
 
@@ -350,13 +336,13 @@ const boundariesConfig = {
 };
 
 /**
- * Frontend import policies, used by `feWebBoundariesConfig` below: the legacy
- * import direction and feature entry points, then the new-tree rows of
- * docs/standards/frontend-architecture.md (Import matrix), which are module
- * capture, the layer order inside one module, each layer's shared tiers, the
- * legacy-tree ban and the route, ui, shared-component and shared-query rows.
- * `default: "allow"` is deliberate: only the explicit `disallow` policies
- * below produce findings, so an unlisted legacy edge stays allowed. Uses
+ * Frontend import policies, used by `feWebBoundariesConfig` below: the rows of
+ * docs/standards/frontend-architecture.md (Import matrix), which are the lib
+ * row, module capture, the layer order inside one module, each layer's shared
+ * tiers, the entry file ban and the route, ui, shared-component and
+ * shared-query rows. `default: "allow"` is deliberate: only the explicit
+ * `disallow` policies below produce findings, so an unlisted edge stays
+ * allowed. Uses
  * `policies` (not the deprecated `rules` alias) and
  * `{{ }}` Handlebars capture templates — the plugin's current, non-deprecated
  * syntax.
@@ -367,68 +353,17 @@ const boundariesConfig = {
  * replaces earlier rule entries wholesale (severity AND options) — so for
  * every `src/web/**` file this options object is the only one in effect, and
  * omitting the policy here silently disables the frontend->backend import ban.
- *
- * Policy evaluation is last-write-wins: the trailing allow policies MUST stay
- * after the disallow policies or they stop overriding them. The same-feature
- * allow is a deliberate belt-and-braces guard should policy 1's
- * negated-capture template (`!{{from.captured.feature}}`) ever regress.
- *
- * Exception R-05, dated 2026-09-30: only src/web/lib/api.ts and src/web/lib/push.ts
- * can import a query or shared-query file. Ticket 16 removes both barrels and this allow.
- *
- * Exception R-14, dated 2026-09-30: route files (which include the `__root.tsx` import of
- * src/web/styles/*) can import the legacy tree, and src/web/components/AppState.tsx can
- * import the legacy pages and module barrels (for the page prop types). Ticket 16 removes both allows.
- *
- * Exception for the legacy hooks/useUnseenActivity.ts: it re-exports the one last-opened store from
- * components/ui/hooks, so it can import that file until the legacy tree is gone.
  */
 const feWebBoundaryPolicies = {
   default: "allow",
   policies: [
     {
-      from: { element: { type: "feature" } },
-      disallow: {
-        element: {
-          type: "feature",
-          captured: { feature: "!{{from.captured.feature}}" },
-          fileInternalPath: "!index.ts",
-        },
-      },
-      message:
-        "Cross-feature import must go through the feature's index.ts barrel (docs/standards/folder-structure.md).",
-    },
-    {
-      from: { element: { type: ["web", ...newWebTypes] } },
-      disallow: {
-        element: { type: "feature", fileInternalPath: "!index.ts" },
-      },
-      message:
-        "App composes features through their index.ts barrel (docs/standards/folder-structure.md).",
-    },
-    {
-      from: { element: { type: "primitives" } },
-      disallow: {
-        element: { type: ["hooks", "lib", "feature", "web", ...newWebTypes] },
-      },
-      message:
-        "Import direction is primitives -> hooks/lib -> features -> App (docs/standards/folder-structure.md).",
-    },
-    {
-      from: { element: { type: "hooks" } },
-      disallow: { element: { type: ["feature", "web", ...newWebTypes] } },
-      message:
-        "Import direction is primitives -> hooks/lib -> features -> App (docs/standards/folder-structure.md).",
-    },
-    {
       from: { element: { type: "lib" } },
       disallow: {
-        element: {
-          type: ["primitives", "hooks", "feature", "web", ...newWebTypes],
-        },
+        element: { type: webTypes.filter((type) => type !== "lib") },
       },
       message:
-        "Import direction is primitives -> hooks/lib -> features -> App (docs/standards/folder-structure.md).",
+        "A src/web/lib file imports only src/web/lib and src/shared/ (docs/standards/frontend-architecture.md, Import matrix).",
     },
     {
       from: { element: { type: webTypes } },
@@ -480,9 +415,9 @@ const feWebBoundaryPolicies = {
     },
     {
       from: { element: { type: moduleTypes } },
-      disallow: { element: { type: legacyWebTypes } },
+      disallow: { element: { type: "web" } },
       message:
-        "A module file does not import the legacy tree (docs/standards/frontend-architecture.md, Import matrix).",
+        "A module file does not import a web root entry file or the viewer (docs/standards/frontend-architecture.md, Import matrix).",
     },
     {
       from: { element: { type: "route" } },
@@ -495,9 +430,7 @@ const feWebBoundaryPolicies = {
     },
     {
       from: { element: { type: "route" } },
-      disallow: {
-        element: { type: legacyWebTypes },
-      },
+      disallow: { element: { type: "web" } },
       message:
         "A route imports only module barrels, src/web/queries/, src/web/lib/, components/ui and shared components (docs/standards/frontend-architecture.md, Import matrix).",
     },
@@ -516,7 +449,7 @@ const feWebBoundaryPolicies = {
       disallow: [
         {
           element: {
-            type: ["route", ...moduleTypes, "shared-query", ...legacyWebTypes],
+            type: ["route", ...moduleTypes, "shared-query", "web"],
           },
         },
         { element: libNotUtilsTier },
@@ -529,13 +462,7 @@ const feWebBoundaryPolicies = {
       disallow: [
         {
           element: {
-            type: [
-              "route",
-              ...moduleTypes,
-              "ui",
-              "shared-component",
-              ...legacyWebTypes,
-            ],
+            type: ["route", ...moduleTypes, "ui", "shared-component", "web"],
           },
         },
         { element: libTier },
@@ -543,42 +470,11 @@ const feWebBoundaryPolicies = {
       message:
         "A shared query imports only src/web/lib/http.ts, other shared queries and src/shared/ (docs/standards/frontend-architecture.md, Import matrix).",
     },
-    {
-      from: { element: { type: "feature" } },
-      allow: {
-        element: {
-          type: "feature",
-          captured: { feature: "{{from.captured.feature}}" },
-        },
-      },
-    },
-    {
-      from: { element: { type: "lib", fileInternalPath: "{api,push}.ts" } },
-      allow: { element: { type: ["query", "shared-query"] } },
-    },
-    {
-      from: { element: { type: "route" } },
-      allow: { element: { type: legacyWebTypes } },
-    },
-    {
-      from: {
-        element: { type: "shared-component", fileInternalPath: "AppState.tsx" },
-      },
-      allow: { element: { type: [...legacyWebTypes, "module"] } },
-    },
-    {
-      from: {
-        element: { type: "hooks", fileInternalPath: "useUnseenActivity.ts" },
-      },
-      allow: {
-        element: { type: "ui", fileInternalPath: "hooks/use-last-opened.ts" },
-      },
-    },
   ],
 };
 
 /**
- * ENF-01 error-flip: frontend import-direction + feature entry-point rules
+ * ENF-01 error-flip: frontend import-direction rules
  * enforced at error for every `src/web/**` file. This is the only frontend
  * `boundaries/dependencies` block; there is no trailing carve-out to keep in sync.
  *
@@ -662,7 +558,31 @@ const panelIdentityBan = [
     message: "PANEL-03: the terminal iframe sandbox value is locked (U3-07).",
   },
 ];
-const globalSyntax = [...copyGuardSelectors, ...panelIdentityBan];
+const retiredLiteralBan = [
+  ...copyNodePrefixes.map((prefix) => ({
+    selector: `${prefix}/0 0 0 2px var\\(--accent\\)/]`,
+    message:
+      "Do not draw keyboard focus with an accent box-shadow. Use the outline focus classes (docs/ARCHITECTURE.md#design-system-invariants).",
+  })),
+  ...copyNodePrefixes.map((prefix) => ({
+    selector: `${prefix}/0 6px 16px rgba\\(0, ?0, ?0, ?0?\\.45\\)/]`,
+    message:
+      "Do not write the float shadow value. It lives once in src/web/styles/tokens.css as --shadow-float (docs/ARCHITECTURE.md#design-system-invariants).",
+  })),
+  ...[
+    "Property:matches([key.name='fontWeight'],[key.value='fontWeight']) > Literal[value=800]",
+    "Property:matches([key.name='fontWeight'],[key.value='fontWeight']) > :matches(TSAsExpression, TSSatisfiesExpression) > Literal[value=800]",
+  ].map((selector) => ({
+    selector,
+    message:
+      "Do not write font weight 800. Use the Wordmark component or a --weight-* token (docs/ARCHITECTURE.md#design-system-invariants).",
+  })),
+];
+const globalSyntax = [
+  ...copyGuardSelectors,
+  ...panelIdentityBan,
+  ...retiredLiteralBan,
+];
 const styleBan = [
   {
     selector: 'JSXAttribute[name.name="style"]',
@@ -688,11 +608,6 @@ const radixBan = {
   message:
     "Import Radix only in components/ui. Compose the shadcn primitive (docs/standards/frontend-architecture.md, The only-shadcn rule).",
 };
-const apiBan = {
-  regex: "(^|/)lib/api(\\.[cm]?[jt]sx?)?$",
-  message:
-    "src/web/lib/api.ts is part of the legacy tree, and the new tree does not import the legacy tree. A query file calls src/web/lib/http.ts (docs/standards/frontend-architecture.md, Status and scope, Import matrix global ban 3).",
-};
 const httpBan = {
   regex: "(^|/)lib/http(\\.[cm]?[jt]sx?)?$",
   message:
@@ -708,52 +623,122 @@ const routerBan = {
   message:
     "Import TanStack Router only in routes, views and containers. Components and domain files never import it (docs/standards/frontend-architecture.md, Layer definitions).",
 };
-const newTreeSyntax = [...styleBan, ...hexBan, ...fetchBan];
-const newTreeZones = [
+const reactBan = {
+  regex: "^react(-dom)?(/.*)?$",
+  message:
+    "Keep src/web/lib free of React. Put a React hook in components/ui/hooks/ (docs/standards/frontend-architecture.md, Shared tiers).",
+};
+const designLiteralBan = [
+  ...copyNodePrefixes.map((prefix) => ({
+    selector: `${prefix}/shadow-\\[/]`,
+    message:
+      "Do not write an arbitrary shadow class. Use a shadow token class such as shadow-lg or shadow-(--shadow-float) (docs/ARCHITECTURE.md#design-system-invariants).",
+  })),
+  ...copyNodePrefixes.map((prefix) => ({
+    selector: `${prefix}/font-(extrabold|\\[800\\])/]`,
+    message:
+      "Do not write a weight 800 class. Use font-normal, font-medium or font-semibold (docs/ARCHITECTURE.md#design-system-invariants).",
+  })),
+];
+const boardZoneBan = [
+  ...copyNodePrefixes.map((prefix) => ({
+    selector: `${prefix}/reading-surface/]`,
+    message:
+      "Do not use the reading-surface class in the board module. Board cards keep the global --line-body (docs/ARCHITECTURE.md#design-system-invariants).",
+  })),
+  ...[
+    ...copyNodePrefixes.map((prefix) => `${prefix}/--line-body\\s*:/]`),
+    "Property[key.value='--line-body']",
+  ].map((selector) => ({
+    selector,
+    message:
+      "Do not redefine --line-body in the board module. Read var(--line-body) only (docs/ARCHITECTURE.md#design-system-invariants).",
+  })),
+];
+const designPlugin = {
+  rules: { "restricted-syntax": builtinRules.get("no-restricted-syntax")! },
+};
+const selectorBan = [
   {
-    files: ["src/web/{modules,routes,components}/**/*.{ts,tsx}"],
+    selector:
+      'CallExpression[callee.name="useAppStore"] > ArrowFunctionExpression[body.type=/^(?:ObjectExpression|ArrayExpression)$/]',
+    message:
+      "Select one stored field or a primitive from useAppStore. A selector that builds an object or array returns a new value on every read and loops useSyncExternalStore (src/web/components/ui/hooks/use-app-store.ts).",
+  },
+];
+const newTreeSyntax = [...styleBan, ...hexBan, ...fetchBan, ...selectorBan];
+const newTreeZones = [
+  /**
+   * The terminal client stays fenced outside the React zones (NEW-20).
+   */
+  {
+    files: ["src/web/**/*.{ts,tsx}"],
+    ignores: ["src/web/terminal-main.ts"],
     syntax: newTreeSyntax,
-    imports: [radixBan, apiBan, httpBan, queryBan, routerBan],
+    imports: [radixBan, httpBan, queryBan, routerBan],
+  },
+  {
+    files: ["src/web/main.tsx"],
+    syntax: newTreeSyntax,
+    imports: [radixBan, httpBan],
+  },
+  {
+    files: ["src/web/lib/**/*.ts"],
+    syntax: newTreeSyntax,
+    imports: [radixBan, httpBan, queryBan, routerBan, reactBan],
+  },
+  {
+    files: ["src/web/lib/query-client.ts"],
+    syntax: newTreeSyntax,
+    imports: [radixBan, httpBan, routerBan, reactBan],
+  },
+  {
+    files: ["src/web/lib/http.ts"],
+    syntax: [...styleBan, ...hexBan],
+    imports: [radixBan, queryBan, routerBan, reactBan],
   },
   {
     files: ["src/web/routes/**/*.{ts,tsx}"],
     syntax: newTreeSyntax,
-    imports: [
-      radixBan,
-      apiBan,
-      httpBan,
-      { ...queryBan, allowTypeImports: true },
-    ],
+    imports: [radixBan, httpBan, { ...queryBan, allowTypeImports: true }],
   },
   {
     files: ["src/web/modules/*/views/**/*.{ts,tsx}"],
     syntax: newTreeSyntax,
-    imports: [radixBan, apiBan, httpBan, queryBan],
+    imports: [radixBan, httpBan, queryBan],
   },
   {
     files: ["src/web/modules/*/containers/**/*.{ts,tsx}"],
     syntax: newTreeSyntax,
-    imports: [radixBan, apiBan, httpBan],
+    imports: [radixBan, httpBan],
   },
   {
     files: ["src/web/modules/*/components/dnd/**/*.{ts,tsx}"],
-    syntax: [...hexBan, ...fetchBan],
-    imports: [radixBan, apiBan, httpBan, queryBan, routerBan],
+    syntax: [...hexBan, ...fetchBan, ...selectorBan],
+    imports: [radixBan, httpBan, queryBan, routerBan],
   },
   {
     files: ["src/web/modules/*/queries/**/*.{ts,tsx}"],
     syntax: [...styleBan, ...hexBan],
-    imports: [radixBan, apiBan, routerBan],
+    imports: [radixBan, routerBan],
   },
   {
     files: ["src/web/components/ui/**/*.{ts,tsx}"],
-    syntax: [...hexBan, ...fetchBan],
-    imports: [apiBan, httpBan, queryBan, routerBan],
+    syntax: [...hexBan, ...fetchBan, ...selectorBan],
+    imports: [httpBan, queryBan, routerBan],
   },
   {
     files: ["src/web/queries/**/*.{ts,tsx}"],
-    syntax: [],
-    imports: [radixBan, apiBan, routerBan],
+    syntax: [...styleBan, ...hexBan],
+    imports: [radixBan, routerBan],
+  },
+  /**
+   * Exception U4-13, dated 2026-10-01: the viewer keeps its style constants and its file fetch.
+   */
+  {
+    files: ["src/web/viewer/**/*.{ts,tsx}", "src/web/viewer-main.tsx"],
+    syntax: hexBan,
+    imports: [radixBan, httpBan, queryBan, routerBan],
   },
 ];
 
@@ -763,6 +748,7 @@ const newTreeZones = [
  * required) so the suffix subtrees are precisely as strict as the base block.
  */
 const KEBAB = "+([a-z])*([a-z0-9])*(-+([a-z0-9]))";
+const ROUTE_FILE = `@(__root|${KEBAB}.\\{-$id\\}?(.lazy))`;
 
 export default tseslint.config(
   {
@@ -839,16 +825,6 @@ export default tseslint.config(
     },
   },
 
-  {
-    files: ["src/web/lib/**/*.ts"],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        { paths: ["react", "react-dom"], patterns: ["react/*", "react-dom/*"] },
-      ],
-    },
-  },
-
   boundariesConfig,
   feWebBoundariesConfig,
 
@@ -905,13 +881,33 @@ export default tseslint.config(
     },
   },
 
-  ...newTreeZones.map(({ files, syntax, imports }) => ({
+  ...newTreeZones.map(({ files, ignores, syntax, imports }) => ({
     files,
+    ignores: ignores ?? [],
     rules: {
       "no-restricted-syntax": ["error", ...globalSyntax, ...syntax],
       "no-restricted-imports": ["error", { patterns: imports }],
     },
   })),
+
+  {
+    files: ["src/web/**/*.{ts,tsx}"],
+    ignores: ["src/web/components/ui/**"],
+    plugins: { design: designPlugin },
+    rules: { "design/restricted-syntax": ["error", ...designLiteralBan] },
+  },
+
+  {
+    files: ["src/web/modules/board/**/*.{ts,tsx}"],
+    plugins: { design: designPlugin },
+    rules: {
+      "design/restricted-syntax": [
+        "error",
+        ...designLiteralBan,
+        ...boardZoneBan,
+      ],
+    },
+  },
 
   {
     files: ["src/**/*.{ts,tsx}"],
@@ -937,7 +933,7 @@ export default tseslint.config(
    * kebab-case .ts, kebab-case folders. Layered override blocks exist because
    * overlapping glob keys inside ONE check-file options object require ALL
    * matching patterns to pass — a hook file would fail the broad kebab key.
-   * The hooks/routes/store/sources/.d.ts subtrees therefore each replace the
+   * The routes/store/sources/.d.ts subtrees therefore each replace the
    * filename rule wholesale (flat-config last-match-wins); those blocks reuse
    * the check-file plugin registered once in the general block. Middle
    * extensions are validated in every block so role suffixes
@@ -961,16 +957,6 @@ export default tseslint.config(
       "check-file/folder-naming-convention": [
         "error",
         { "src/**/": "KEBAB_CASE" },
-      ],
-    },
-  },
-  {
-    files: ["src/web/hooks/**/*.ts"],
-    rules: {
-      "check-file/filename-naming-convention": [
-        "error",
-        { "src/web/hooks/**/*.ts": "use[A-Z]*([a-zA-Z0-9])" },
-        { ignoreMiddleExtensions: false },
       ],
     },
   },
@@ -1025,13 +1011,15 @@ export default tseslint.config(
       "local/comments-jsdoc-only": "off",
     },
   },
-  /**
-   * Exception R-14, dated 2026-09-30: TanStack route file names are exempt from the case
-   * rule. Ticket 16 removes this block.
-   */
   {
     files: ["src/web/routes/**/*.{ts,tsx}"],
-    rules: { "check-file/filename-naming-convention": "off" },
+    rules: {
+      "check-file/filename-naming-convention": [
+        "error",
+        { "src/web/routes/**/*.{ts,tsx}": ROUTE_FILE },
+        { ignoreMiddleExtensions: false },
+      ],
+    },
   },
   {
     files: ["src/**/*.d.ts"],

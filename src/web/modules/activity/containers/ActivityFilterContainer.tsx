@@ -1,32 +1,32 @@
-import type { ActivityEvent } from "../../../../shared/types.js";
+import { useQuery } from "@tanstack/react-query";
+import { useRouteContext } from "@tanstack/react-router";
+import { cardIdentifiers } from "../../../../shared/card-identifiers.js";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { ActivityFilterBar } from "@/modules/activity/components/ActivityFilterBar";
 import { activityFilterOptions } from "@/modules/activity/domain/activity-filter-options";
-import type { ActivityFilter } from "@/modules/activity/domain/activity-groups";
+import { useActivityFilter } from "@/modules/activity/hooks/use-activity-filter";
+import { activityFeedQueryOptions } from "@/queries/activity-queries";
+import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
 
-export interface ActivityFilterContainerProps {
-  events: ActivityEvent[];
-  identifiers: Record<string, string>;
-  filter: ActivityFilter;
-  onFilterChange: (filter: ActivityFilter) => void;
-}
-
-export function ActivityFilterContainer({
-  events,
-  identifiers,
-  filter,
-  onFilterChange,
-}: ActivityFilterContainerProps) {
+export function ActivityFilterContainer() {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const { data } = useQuery({
+    ...activityFeedQueryOptions(),
+    refetchOnMount: false,
+  });
+  const [filter, setFilter] = useActivityFilter();
   const { cardOptions, typeOptions } = activityFilterOptions(
-    events,
+    data ?? [],
     filter,
-    identifiers,
+    cardIdentifiers(board?.cards ?? []),
   );
   return (
     <ActivityFilterBar
       cardOptions={cardOptions}
       typeOptions={typeOptions}
       filter={filter}
-      onFilterChange={onFilterChange}
+      onFilterChange={setFilter}
     />
   );
 }

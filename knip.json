@@ -12,9 +12,6 @@
     "src/**/*.test.ts",
     "eslint-local/**/*.test.ts",
     "src/web/vite-env.d.ts",
-    "src/web/lib/utils.ts",
-    "src/web/queries/*-queries.ts!",
-    "src/web/modules/*/queries/*-queries.ts!",
     "src/web/components/ui/**/*.{ts,tsx}!"
   ],
   "project": ["src/**/*.{ts,tsx}!", "!src/server/test-support/**!"],

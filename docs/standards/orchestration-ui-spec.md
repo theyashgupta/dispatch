@@ -387,19 +387,21 @@ This view matches the board of today. The only added part is the "Add orchestrat
 | ---------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Add orchestrator | `button`, `tooltip` | "Add orchestrator" (outline variant). At 390 px: "+ Orchestrator"; the plus glyph marks the add action, and the accessible name stays "Add orchestrator". Tooltip "Add an orchestrator to plan tickets and run loops on this board." It opens the orchestrator panel (Screen 3) in its empty state. |
 
-The board parts of today stay as they are, in their legacy files. The UI ticket does not change them:
+The board parts of today stay as they are, in their module files. The UI ticket does not change them:
 
-| Board part of today                                         | Source of today                                                            |
-| ----------------------------------------------------------- | -------------------------------------------------------------------------- |
-| Page header with the title "Board" and the card count       | `src/web/App.tsx`, `src/web/modules/shell/components/PageHeader.tsx`       |
-| Toolbar strip with the search box "Search tickets…"         | `src/web/features/board/Board.tsx`, `src/web/features/board/SearchBox.tsx` |
-| Status pills in carousel mode                               | `src/web/features/board/StatusPillSwitcher.tsx`                            |
-| Seven columns with label, count chip and resize handle      | `src/web/features/board/Column.tsx`                                        |
-| Column empty text                                           | `src/web/features/board/EmptyState.tsx`                                    |
-| Card face: priority dot, identifier, title and session chip | `src/web/features/board/CardView.tsx`                                      |
-| Selection bar for multi-select                              | `src/web/features/board/SelectionBar.tsx`                                  |
-| Detail panel with its own resize handle                     | `src/web/modules/detail/views/DetailPanelView.tsx`                         |
-| Sidebar header with the glyph and the wordmark              | `src/web/modules/shell/components/AppSidebar.tsx`                          |
+| Board part of today                                         | Source of today                                                                                                |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Page header with the title "Board" and the card count       | `src/web/modules/shell/containers/ShellContainer.tsx`, `src/web/modules/shell/components/PageHeader.tsx`       |
+| Toolbar strip with the search box "Search tickets…"         | `src/web/modules/board/components/BoardLayout.tsx`, `src/web/modules/board/components/SearchField.tsx`         |
+| Status pills in carousel mode                               | `src/web/modules/board/components/StatusPillSwitcher.tsx`                                                      |
+| Seven columns with label, count chip and resize handle      | `src/web/modules/board/components/ColumnHeader.tsx`, `src/web/modules/board/components/ColumnResizeHandle.tsx` |
+| Column empty text                                           | `src/web/modules/board/components/EmptyState.tsx`                                                              |
+| Card face: priority dot, identifier, title and session chip | `src/web/modules/board/components/CardView.tsx`                                                                |
+| Selection bar for multi-select                              | `src/web/modules/board/components/SelectionBar.tsx`                                                            |
+| Detail panel with its own resize handle                     | `src/web/modules/detail/views/DetailPanelView.tsx`                                                             |
+| Sidebar header with the glyph and the wordmark              | `src/web/modules/shell/components/AppSidebar.tsx`                                                              |
+
+Updated 2026-10-07 (LOCAL-77): the source paths above moved to the board and shell modules when the legacy tree was deleted. The board parts did not change.
 
 ### States
 

@@ -1,4 +1,9 @@
-import type { Card, Column } from "../../shared/types.js";
+import type {
+  ArchivedGroupSummary,
+  Card,
+  Column,
+  UnwindDestination,
+} from "../../shared/types.js";
 import { http, httpError } from "@/lib/http";
 
 /**
@@ -314,5 +319,111 @@ export async function resumeCard(id: string): Promise<ResumeResult> {
     return { ok: false, status: result.status };
   } catch {
     return { ok: false, status: null };
+  }
+}
+
+/**
+ * Fetch a single card by id: GET /api/cards/:id.
+ *
+ * @remarks
+ * Resolves `null` on a 400 (unknown id), so a card that has gone away reads distinctly from a
+ * network failure, which still throws.
+ */
+export async function getCard(
+  id: string,
+): Promise<{ card: Card; members: Card[] } | null> {
+  const result = await http<{ card: Card; members: Card[] }>(
+    `/api/cards/${encodeURIComponent(id)}`,
+  );
+  if (result.status === 400) {
+    return null;
+  }
+  if (!result.ok) {
+    throw httpError("getCard", result);
+  }
+  return result.data;
+}
+
+/**
+ * Unwind a group: POST /api/cards/:id/unwind with the members' destination.
+ *
+ * @remarks
+ * `id` may be the group card or any member. A 200 gives the redacted archive summary, a 400, 404
+ * or 409 gives the server's reason, and any other status throws.
+ */
+export async function unwindGroup(
+  id: string,
+  to: UnwindDestination,
+): Promise<
+  | { ok: true; archived: ArchivedGroupSummary }
+  | { ok: false; status: number; error: string }
+> {
+  const result = await http<{ archived: ArchivedGroupSummary }>(
+    `/api/cards/${encodeURIComponent(id)}/unwind`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ to }),
+    },
+  );
+  if (result.ok) {
+    return { ok: true, archived: result.data.archived };
+  }
+  if (result.status === 400 || result.status === 404 || result.status === 409) {
+    return {
+      ok: false,
+      status: result.status,
+      error: result.error ?? "Couldn't unwind this group.",
+    };
+  }
+  throw httpError("unwindGroup", result);
+}
+
+/**
+ * Move a card's active pointer to a sibling session: POST /api/cards/:id/session.
+ *
+ * @remarks
+ * The store's single-writer switch runs server-side and the SSE snapshot carries the outcome, so
+ * there is no response body to parse. The switcher's optimistic highlight is local state
+ * reconciled by the next broadcast, and this call does not drive it. Throws on any non-2xx.
+ */
+export async function switchSession(
+  cardId: string,
+  sessionId: string,
+): Promise<void> {
+  const result = await http(
+    `/api/cards/${encodeURIComponent(cardId)}/session`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId }),
+    },
+  );
+  if (!result.ok) {
+    throw httpError("switchSession", result);
+  }
+}
+
+/**
+ * Open a card's workspace folder in VS Code or Cursor: POST /api/cards/:id/open-editor.
+ *
+ * @remarks
+ * Sends only the `editor` discriminant, because the server reads the path from
+ * `card.workspacePath`, never from the client. Answers 204 and throws on any non-2xx.
+ */
+export async function openEditor(
+  id: string,
+  editor: "code" | "cursor",
+): Promise<void> {
+  const result = await http(
+    `/api/cards/${encodeURIComponent(id)}/open-editor`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ editor }),
+    },
+  );
+  if (!result.ok) {
+    throw httpError("openEditor", result);
   }
 }

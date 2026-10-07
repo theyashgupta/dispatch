@@ -1,4 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { useRouter } from "@tanstack/react-router";
+import { routeHash } from "../../../../shared/route.js";
 import { AskComposer } from "@/modules/ask/components/AskComposer";
 import {
   useAskConversationQuery,
@@ -7,13 +9,18 @@ import {
 
 export interface AskComposerContainerProps {
   prefill?: string;
-  onPrefillConsumed: () => void;
 }
 
-export function AskComposerContainer({
-  prefill,
-  onPrefillConsumed,
-}: AskComposerContainerProps) {
+export function AskComposerContainer({ prefill }: AskComposerContainerProps) {
+  const router = useRouter();
+  const onPrefillConsumed = useCallback(
+    () =>
+      void router.navigate({
+        href: routeHash({ page: "ask" }).slice(1),
+        replace: true,
+      }),
+    [router],
+  );
   const { data } = useAskConversationQuery();
   const { mutate } = useAskQuestionMutation();
   const [draft, setDraft] = useState(prefill ?? "");

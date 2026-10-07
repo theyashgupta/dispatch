@@ -1,6 +1,6 @@
 # Code Review Rules (per layer)
 
-The review-agent standard: a per-layer checklist for anything checking a diff against Dispatch's architecture, extracted from the already-ratified standards (`backend-design.md`, `folder-structure.md`, `frontend-design-system.md`, `comments.md`) and the as-landed `eslint.config.ts`. Every line below is an objectively checkable assertion, not a restatement of rationale — see the linked doc for the WHY.
+The review-agent standard: a per-layer checklist for anything checking a diff against Dispatch's architecture, extracted from the already-ratified standards (`backend-design.md`, `folder-structure.md`, `frontend-architecture.md`, `comments.md`) and the as-landed `eslint.config.ts`. Every line below is an objectively checkable assertion, not a restatement of rationale. The linked doc gives the WHY.
 
 ## The three enforcement layers
 
@@ -58,41 +58,6 @@ Scope: this doc exists for what layer 1 cannot express — a route file with zer
 - [ ] Composition-root only: wiring, config holder, binary preflight, boot reconcile. No business logic lives here — if a bootstrap file grows business rules, that's a domain-layer extraction, not a bootstrap concern.
 - [ ] The named `bootstrap/` exec carve-out (`cli.ts`) keeps its direct `node:child_process` import narrowly scoped to the ruled behavior (a detached fire-and-forget browser opener) — do not widen it beyond its ruled shape.
 
-## Frontend: `primitives/`
-
-Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new code. Until ticket 16, this checklist applies only to the legacy tree that the new standard names in "Status and scope".
-
-- [ ] Props in, no data fetching: zero imports from `hooks/`, `lib/`, `feature`, or `web` (lint-enforced at error; this is the intent check — a primitive that reaches into `lib/` for formatting is a layering violation, e.g. the one Phase 57 fixed in `ActivityItem.tsx` by hoisting the formatting calls to its callers).
-- [ ] Purely presentational; a props type is declared immediately above the component (`docs/standards/frontend-design-system.md` anatomy checklist).
-
-## Frontend: `hooks/`
-
-Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new code. Until ticket 16, this checklist applies only to the legacy tree that the new standard names in "Status and scope".
-
-- [ ] May import `lib/` (data hooks legitimately sit on `lib/api`), but never `feature` or `web` — import direction is `primitives -> hooks/lib -> features -> App`.
-- [ ] Filename is `useX.ts` camelCase (`docs/standards/folder-structure.md` naming convention).
-
-## Frontend: `lib/`
-
-Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new code. Until ticket 16, this checklist applies only to the legacy tree that the new standard names in "Status and scope".
-
-- [ ] Never imports React or `react-dom` (lint-enforced at error via `no-restricted-imports` scoped to `src/web/lib/**/*.ts`) — `lib` is the pure-helper floor of the tier.
-- [ ] Never imports `primitives/`, `hooks/`, `feature`, or `web` — the asymmetric rule: `hooks` may import `lib`, `lib` never imports upward into `hooks`.
-
-## Frontend: `features/`
-
-Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new code. Until ticket 16, this checklist applies only to the legacy tree that the new standard names in "Status and scope".
-
-- [ ] Cross-feature imports go through the target feature's `index.ts` barrel only — a deep import into a sibling feature's internals is a violation (lint-enforced at error).
-- [ ] The badges live in the shared tier `src/web/components/badges/` (moved from `features/badges/` in G11 Unit 3), so there is no cross-feature exception to flag.
-
-## Frontend: web root (`App.tsx`, `main.tsx`)
-
-Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new code. Until ticket 16, this checklist applies only to the legacy tree that the new standard names in "Status and scope".
-
-- [ ] Composes features through their `index.ts` barrel only — no reach-in past a feature's public entry point.
-- [ ] Zero `createContext`/`useContext` usage anywhere in `src/web`, except the files `frontend-architecture.md` (Providers) names. Plain props over Context is the standing decision (`docs/standards/frontend-design-system.md`). One dated exception: `src/web/components/AppState.tsx` (R-15, transitional, ticket 16 removes it).
-
 ## Frontend module: route (`src/web/routes/`)
 
 - [ ] The file renders exactly one view, or one shared layout component that gets module views as children. The root route `__root.tsx` is exempt from this section (`docs/standards/frontend-architecture.md`, Layer definitions, Route).
@@ -138,7 +103,7 @@ Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new co
 
 ## Frontend modules, every layer folder
 
-- [ ] No file imports a sibling module or the legacy tree (`docs/standards/frontend-architecture.md`, Import matrix, Global bans).
+- [ ] No file imports a sibling module (`docs/standards/frontend-architecture.md`, Import matrix, Global bans).
 - [ ] The module `index.ts` exports only views and `queryOptions` factories.
 
 ## Frontend shared: `src/web/components/ui/`
@@ -148,7 +113,7 @@ Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new co
 
 ## Frontend shared: `src/web/components/`
 
-- [ ] The file serves two or more modules, or it is the layout where a route composes two modules. It can also be in `icons/`, `markdown/`, `AppState.tsx` or `ThemeProvider.tsx` (`docs/standards/frontend-architecture.md`, Shared tiers, Shared components).
+- [ ] The file serves two or more modules, or it is the layout where a route composes two modules. It can also be in `icons/`, `markdown/` or `splash/`, or be `ThemeProvider.tsx` (`docs/standards/frontend-architecture.md`, Shared tiers, Shared components).
 - [ ] The file imports no file of a module.
 
 ## Frontend shared: `src/web/queries/`
@@ -157,7 +122,7 @@ Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new co
 
 ## Frontend shared: `src/web/lib/`
 
-- [ ] A new file is `http.ts`, `query-client.ts` or `utils.ts`. It imports no module or component and holds no React state. Legacy helpers keep their legacy rules (`docs/standards/frontend-architecture.md`, Shared tiers, Configured clients).
+- [ ] The file is `app-store.ts`, `http.ts`, `query-client.ts` or `utils.ts`, or `md-links.ts` (read only by the fenced terminal client). It imports no module or component and holds no React state (`docs/standards/frontend-architecture.md`, Shared tiers, Configured clients).
 
 ## Frontend shared: `src/web/styles/`
 
@@ -176,8 +141,8 @@ Every exception below is a named, narrow allow-rule that survives the error-leve
 - **Granola settings and check routes.** `PUT /api/meetings/granola` (LOCAL-31) waits for the settings apply, which can wait up to 5 s for an aborted claude child to exit, so the status it answers is true; `POST /api/meetings/granola/check` waits for one `claude mcp list` (up to 60 s) because the response body is the only channel for the check result. Both are named exceptions to the fire-and-forget rule.
 - **Session account move routes and the Stop hook move (LOCAL-80).** `PUT /api/accounts/active` with `applyToRunning` and `POST /api/cards/:id/session/account` await the move service (`services/orchestration/session-account-move.ts`), because the response body is the only channel for the `moved`, `queued` and `skipped` result. The `Stop` branch of `services/orchestration/hook-events.ts` starts `session-account-apply.ts#runPendingMove` without awaiting it; the 30 s sweep runs the same queued move, so a restart reconciles it and the producer DAG holds.
 - **The `watcher -> ttyd -> store` edge.** Both `watcher` and `ttyd` classify as the general `adapters` element; `adapters -> store` is an already-allowed edge. This is a documented architecture invariant (`docs/ARCHITECTURE.md#preserved-import-edges`), not an unenforced gap — no allow-rule was needed to encode it, and none should be added.
-- **Exception R-05: the two lib barrels.** `src/web/lib/api.ts` and `src/web/lib/push.ts` re-export query files. One allow rule in `eslint.config.ts` allows only these two files to import a query file or a shared query file. No other lib file may import a query file. The rule starts on 2026-09-30. Ticket 16 removes both barrels and this rule. Do not flag these two imports.
-- **Exception R-14: router transitional imports.** Route files under `src/web/routes/` may import the legacy tree, to render legacy pages, and `__root.tsx` may import `src/web/styles/*`. `src/web/components/AppState.tsx` may type-import the legacy pages, and the `@/modules/settings` and `@/modules/connections` barrels for the settings page props. Route file names under `src/web/routes/` are exempt from the filename case rule. No other file gets these allows: a module file still may not import the legacy tree. The rules start on 2026-09-30. Ticket 16 removes them. Do not flag these imports.
+- **Exception U4-13: the viewer.** `src/web/viewer/` and `src/web/viewer-main.tsx` keep their style constants and their file fetch. One dated block in `eslint.config.ts` (2026-10-01) allows them. Do not flag these.
+- **Record, 2026-10-07 (LOCAL-77).** The exceptions R-05 (the two lib barrels) and R-14 (router transitional imports) are removed with the legacy tree. Route file names follow the lint pattern in `docs/standards/frontend-architecture.md` (Naming).
 
 ## Comments (all layers)
 

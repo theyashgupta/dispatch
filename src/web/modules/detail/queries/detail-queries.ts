@@ -1,16 +1,19 @@
 import { queryOptions, useMutation, useQuery } from "@tanstack/react-query";
 import type { Column } from "../../../../shared/types.js";
 import { fetchEvents } from "@/queries/activity-api";
-import { cleanupCard, moveCard } from "@/queries/cards-api";
+import {
+  cleanupCard,
+  moveCard,
+  openEditor,
+  switchSession,
+} from "@/queries/cards-api";
 import {
   assignCardToMe,
   ensureTerminal,
   getCardComments,
-  openEditor,
   postCardComment,
   runClaude,
   setCardLinearState,
-  switchSession,
 } from "./detail-api.js";
 
 export const detailKeys = {

@@ -1,8 +1,5 @@
-import {
-  CreateTicketContainer,
-  type CreateTicketContainerProps,
-} from "@/modules/card-actions/containers/CreateTicketContainer";
+import { CreateTicketRequestContainer } from "@/modules/card-actions/containers/CreateTicketContainer";
 
-export function CreateTicketView(props: CreateTicketContainerProps) {
-  return <CreateTicketContainer {...props} />;
+export function CreateTicketView() {
+  return <CreateTicketRequestContainer />;
 }

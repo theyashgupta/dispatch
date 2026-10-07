@@ -1,4 +1,10 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
+import { useRouteContext, useRouter } from "@tanstack/react-router";
+import { inboxFeed } from "../../../../shared/feed-items.js";
+import {
+  pinFromBoard,
+  selectedCardOf,
+} from "../../../../shared/pinned-card.js";
 import {
   INBOX_ACTIONS,
   runAction,
@@ -23,6 +29,10 @@ import {
   useLastOpened,
 } from "@/components/ui/hooks/use-last-opened";
 import { useShortcuts } from "@/components/ui/hooks/use-shortcuts";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
+import { useItems } from "@/components/ui/hooks/use-items";
+import { actionServices } from "@/queries/action-services";
+import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
 import {
   InboxList,
   type InboxOpenMenu,
@@ -48,7 +58,7 @@ import {
   useSnoozeItemMutation,
 } from "@/modules/inbox/queries/inbox-queries";
 
-export interface InboxContainerProps {
+interface InboxPageProps {
   board: BoardSnapshot;
   items: Item[];
   selectedCardId: string | null;
@@ -59,6 +69,58 @@ export interface InboxContainerProps {
 }
 
 export function InboxContainer({
+  scopeId,
+  renderSlackThread,
+}: Pick<InboxPageProps, "scopeId" | "renderSlackThread">) {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const router = useRouter();
+  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const errorsInFeeds = useAppStore(appStore, (s) => s.errorsInFeeds);
+  const selectedId = useAppStore(appStore, (s) => s.selectedCardId);
+  const pinned = useAppStore(appStore, (s) => s.pinned);
+  const items = useItems(board);
+  const enabledSources = board?.enabledSources;
+  const rows = useMemo(
+    () =>
+      inboxFeed(items, errorsInFeeds, enabledSources ?? []).filter(
+        (item) => item.source !== "calendar",
+      ),
+    [items, errorsInFeeds, enabledSources],
+  );
+  const services = useMemo(
+    () =>
+      actionServices({
+        showUndo: appStore.showUndo,
+        notice: appStore.notice,
+        openStart: appStore.openStart,
+        askAbout: (question) =>
+          void router.navigate({
+            href: routeHash({ page: "ask", id: question }).slice(1),
+          }),
+      }),
+    [appStore, router],
+  );
+  if (board == null) return null;
+  return (
+    <InboxPage
+      board={board}
+      items={rows}
+      selectedCardId={
+        selectedCardOf(board.cards, selectedId, pinned) != null
+          ? selectedId
+          : null
+      }
+      onSelectCard={(id) =>
+        appStore.selectCard(id, pinFromBoard(id, board.cards))
+      }
+      services={services}
+      scopeId={scopeId}
+      renderSlackThread={renderSlackThread}
+    />
+  );
+}
+
+function InboxPage({
   board,
   items,
   selectedCardId,
@@ -66,7 +128,7 @@ export function InboxContainer({
   services,
   scopeId,
   renderSlackThread,
-}: InboxContainerProps) {
+}: InboxPageProps) {
   const lastOpened = useLastOpened();
   const { mutateAsync: setItemState } = useSetItemStateMutation();
   const { mutateAsync: snoozeItem } = useSnoozeItemMutation();

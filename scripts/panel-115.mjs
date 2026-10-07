@@ -1807,7 +1807,7 @@ async function probeBaseline() {
 // PROBES.surfaces (Plan 116-03): a detail-panel-wide governed-property
 // sweep, ported in shape from panel-114.mjs's own PROBES.surfaces (Plan
 // 116-02). A PROBE, never a CHECK: it measures and prints, it never asserts
-// pass or fail. Covers every src/web/features/detail/*.tsx file (11 total).
+// pass or fail. Covers every src/web/modules/detail/components/*.tsx file (11 total).
 // ---------------------------------------------------------------------------
 
 /** The one property set the generic reader below reads off every resolved surface root, matching
@@ -1951,7 +1951,7 @@ function isTakeoverBp(bp) {
 
 /**
  * Every detail-panel surface descriptor's reading for one breakpoint, covering all 11
- * `src/web/features/detail/*.tsx` files. Three of the eleven are structurally NOT-MOUNTED by this
+ * `src/web/modules/detail/components/*.tsx` files. Three of the eleven are structurally NOT-MOUNTED by this
  * fixture at EVERY breakpoint, each confirmed by reading the component's own source gate rather
  * than assumed:
  *   - `SessionLostSection.tsx` renders only when `activeSessionLost`
@@ -2736,21 +2736,20 @@ const DETAIL_PANEL_PATH = join(
   REPO_ROOT,
   "src",
   "web",
-  "features",
+  "modules",
   "detail",
-  "DetailPanel.tsx",
+  "components",
+  "PanelFrame.tsx",
 );
-// 26-space indent is unique to the hasLiveSession wrapper; the sibling reading-surface wrapper
-// carries the identical property at 24-space indent. Confirmed by the exact occurrence-count
-// guard below before any mutation runs.
-const RHYTHM_BREAK_TARGET =
-  '                          gap: "var(--panel-section-gap)",\n';
+// The leading space keeps the match to the one panel-section-gap utility class. Confirmed by the
+// exact occurrence-count guard below before any mutation runs.
+const RHYTHM_BREAK_TARGET = " gap-(--panel-section-gap)";
 
-function restoreDetailPanelSource(original) {
-  writeFileSync(DETAIL_PANEL_PATH, original);
+function restoreDetailPanelSource(original, path = DETAIL_PANEL_PATH) {
+  writeFileSync(path, original);
   resetBuildCache();
   rmSync(join(REPO_ROOT, "dist"), { recursive: true, force: true });
-  unregisterRestore(DETAIL_PANEL_PATH);
+  unregisterRestore(path);
 }
 
 async function runBreakRhythm() {
@@ -3327,10 +3326,8 @@ async function checkElevation(violations) {
 // assertion, naming both surfaces and both luminances.
 // ---------------------------------------------------------------------------
 
-const ELEVATION_BREAK_TARGET =
-  '          background: "var(--surface-column)",\n';
-const ELEVATION_BREAK_REPLACEMENT =
-  '          background: "var(--surface-card)",\n';
+const ELEVATION_BREAK_TARGET = "bg-(--surface-column)";
+const ELEVATION_BREAK_REPLACEMENT = "bg-(--surface-card)";
 
 async function runBreakElevation() {
   assertBuilt();
@@ -3389,56 +3386,63 @@ const PANEL_HEADER_PATH = join(
   REPO_ROOT,
   "src",
   "web",
-  "features",
+  "modules",
   "detail",
+  "components",
   "PanelHeader.tsx",
 );
 const SESSION_LOST_SECTION_PATH = join(
   REPO_ROOT,
   "src",
   "web",
-  "features",
+  "modules",
   "detail",
+  "components",
   "SessionLostSection.tsx",
 );
 const START_ANOTHER_SESSION_BUTTON_PATH = join(
   REPO_ROOT,
   "src",
   "web",
-  "features",
+  "modules",
   "detail",
+  "components",
   "StartAnotherSessionButton.tsx",
 );
 const CARD_TIMELINE_PATH = join(
   REPO_ROOT,
   "src",
   "web",
-  "features",
+  "modules",
   "detail",
+  "components",
   "CardTimeline.tsx",
 );
 const PR_LIST_PATH = join(
   REPO_ROOT,
   "src",
   "web",
-  "features",
+  "modules",
   "detail",
+  "components",
   "PrList.tsx",
 );
 const PREVIEW_ROW_PATH = join(
   REPO_ROOT,
   "src",
   "web",
-  "features",
+  "modules",
   "detail",
+  "components",
   "PreviewRow.tsx",
 );
 const SESSION_SWITCHER_PATH = join(
   REPO_ROOT,
   "src",
   "web",
-  "features",
+  "modules",
   "detail",
+  "components",
   "SessionSwitcher.tsx",
 );
 
@@ -4012,26 +4016,35 @@ async function checkStatesOnce(violations) {
 // against the mutated source, then restores the captured bytes unconditionally.
 // ---------------------------------------------------------------------------
 
-const STATES_BREAK_TARGET = '"2px solid var(--hover-resize-handle)"';
-const STATES_BREAK_REPLACEMENT = '"2px solid var(--accent)"';
+const RESIZE_HANDLE_PATH = join(
+  REPO_ROOT,
+  "src",
+  "web",
+  "modules",
+  "detail",
+  "components",
+  "PanelResizeHandle.tsx",
+);
+const STATES_BREAK_TARGET = "border-l-(--hover-resize-handle)";
+const STATES_BREAK_REPLACEMENT = "border-l-(--accent)";
 
 async function runBreakStates() {
   assertBuilt();
-  const original = readFileSync(DETAIL_PANEL_PATH, "utf8");
+  const original = readFileSync(RESIZE_HANDLE_PATH, "utf8");
   const occurrences = original.split(STATES_BREAK_TARGET).length - 1;
   if (occurrences !== 1) {
     throw new Error(
       `panel-115: refusing to run --break states, expected the resize handle's hover-tier ` +
-        `declaration to occur exactly once in ${DETAIL_PANEL_PATH}, measured ${occurrences}. A ` +
+        `declaration to occur exactly once in ${RESIZE_HANDLE_PATH}, measured ${occurrences}. A ` +
         `miscounted anchor would mutate the wrong spot and report a false "the check cannot fail".`,
     );
   }
 
   let tripFired = false;
-  registerRestore(DETAIL_PANEL_PATH, original);
+  registerRestore(RESIZE_HANDLE_PATH, original);
   try {
     writeFileSync(
-      DETAIL_PANEL_PATH,
+      RESIZE_HANDLE_PATH,
       original.replace(STATES_BREAK_TARGET, STATES_BREAK_REPLACEMENT),
     );
     resetBuildCache();
@@ -4049,7 +4062,7 @@ async function runBreakStates() {
           v.includes("not pairwise distinct")),
     );
   } finally {
-    restoreDetailPanelSource(original);
+    restoreDetailPanelSource(original, RESIZE_HANDLE_PATH);
   }
 
   const restoreViolations = [];

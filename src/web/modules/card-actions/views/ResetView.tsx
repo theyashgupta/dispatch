@@ -1,8 +1,5 @@
-import {
-  ResetDialog,
-  type ResetDialogProps,
-} from "@/modules/card-actions/components/ResetDialog";
+import { ResetContainer } from "@/modules/card-actions/containers/ResetContainer";
 
-export function ResetView(props: ResetDialogProps) {
-  return <ResetDialog {...props} />;
+export function ResetView() {
+  return <ResetContainer />;
 }

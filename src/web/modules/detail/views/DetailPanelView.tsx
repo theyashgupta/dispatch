@@ -1,8 +1,5 @@
-import {
-  DetailPanelContainer,
-  type DetailPanelContainerProps,
-} from "@/modules/detail/containers/DetailPanelContainer";
+import { DetailPanelContainer } from "@/modules/detail/containers/DetailPanelContainer";
 
-export function DetailPanelView(props: DetailPanelContainerProps) {
-  return <DetailPanelContainer {...props} />;
+export function DetailPanelView() {
+  return <DetailPanelContainer />;
 }

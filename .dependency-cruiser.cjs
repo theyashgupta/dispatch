@@ -25,18 +25,17 @@ module.exports = {
         "A file that no other file imports and that imports nothing is dead code.",
       from: {
         orphan: true,
-        path: "^src/(web/modules|server)/",
-        pathNot: "\\.d\\.ts$",
+        path: "^src/(web|server)/",
+        pathNot: [
+          "\\.d\\.ts$",
+          "^src/web/(main|viewer-main|gallery-main)\\.tsx$",
+          "^src/web/terminal-main\\.ts$",
+          "^src/web/routeTree\\.gen\\.ts$",
+          "^src/server/bootstrap/(index|cli)\\.ts$",
+          "^src/web/public/",
+        ],
       },
       to: {},
-    },
-    {
-      name: "modules-not-from-features",
-      severity: "error",
-      comment:
-        "A module does not import the legacy tree (docs/standards/frontend-architecture.md, Import matrix).",
-      from: { path: "^src/web/modules/" },
-      to: { path: "^src/web/features/" },
     },
     {
       name: "board-store-through-repository",

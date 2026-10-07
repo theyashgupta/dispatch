@@ -1,8 +1,5 @@
-import {
-  FlowContainer,
-  type FlowContainerProps,
-} from "@/modules/flow/containers/FlowContainer";
+import { FlowContainer } from "@/modules/flow/containers/FlowContainer";
 
-export function FlowView(props: FlowContainerProps) {
-  return <FlowContainer {...props} />;
+export function FlowView() {
+  return <FlowContainer />;
 }

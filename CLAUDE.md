@@ -12,12 +12,11 @@
 10. Build UI from `src/web/components/ui/` primitives, except the allowed custom families.
 11. Add a primitive with `npx shadcn@latest add`. Do not write a lookalike.
 12. Change a primitive with a `cva` variant in its own file, or with an edit that "Primitive conventions" names.
-13. Do not use the JSX `style` prop, except in `components/ui/` files and `modules/<feature>/components/dnd/` files. Use Tailwind token classes.
+13. Do not use the JSX `style` prop, except in `components/ui/` files, `modules/<feature>/components/dnd/` files, `src/web/viewer/` files and `src/web/viewer-main.tsx` (U4-13). Use Tailwind token classes.
 14. Do not write a colour value outside `src/web/styles/tokens.css`.
 15. Show focus with an outline, not a ring or a box-shadow.
 16. Name `.tsx` files in PascalCase, except in `components/ui/` and route files. Name `.ts` files in kebab-case.
 17. Put a `<subject>.test.ts` file next to each non-test domain file and each `*-queries.ts` file.
-18. Do not add a new feature to the legacy tree. Do not migrate part of a legacy file.
 
 # Backend agent rules
 

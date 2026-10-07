@@ -36,55 +36,6 @@ export async function runClaude(id: string): Promise<void> {
 }
 
 /**
- * Move a card's active pointer to a sibling session: POST /api/cards/:id/session.
- *
- * @remarks
- * The store's single-writer switch runs server-side and the SSE snapshot carries the outcome, so
- * there is no response body to parse. The switcher's optimistic highlight is local state
- * reconciled by the next broadcast, and this call does not drive it. Throws on any non-2xx.
- */
-export async function switchSession(
-  cardId: string,
-  sessionId: string,
-): Promise<void> {
-  const result = await http(
-    `/api/cards/${encodeURIComponent(cardId)}/session`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId }),
-    },
-  );
-  if (!result.ok) {
-    throw httpError("switchSession", result);
-  }
-}
-
-/**
- * Open a card's workspace folder in VS Code or Cursor: POST /api/cards/:id/open-editor.
- *
- * @remarks
- * Sends only the `editor` discriminant, because the server reads the path from
- * `card.workspacePath`, never from the client. Answers 204 and throws on any non-2xx.
- */
-export async function openEditor(
-  id: string,
-  editor: "code" | "cursor",
-): Promise<void> {
-  const result = await http(
-    `/api/cards/${encodeURIComponent(id)}/open-editor`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ editor }),
-    },
-  );
-  if (!result.ok) {
-    throw httpError("openEditor", result);
-  }
-}
-
-/**
  * The stored Linear comments of a card, oldest first: GET /api/cards/:id/comments.
  *
  * @remarks

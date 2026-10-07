@@ -2,7 +2,7 @@ import type { Card } from "../../../../shared/types.js";
 import { CardConfirmDialog } from "./CardConfirmDialog";
 import { cleanupPlan } from "@/modules/card-actions/domain/cleanup-plan";
 
-export interface CleanupDialogProps {
+interface CleanupDialogProps {
   card: Card;
   onConfirm: (force: boolean) => void;
   onClose: () => void;

@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
+import { useRouteContext } from "@tanstack/react-router";
+import {
+  pinFromBoard,
+  selectedCardOf,
+} from "../../../../shared/pinned-card.js";
 import type { BoardSnapshot } from "../../../../shared/types.js";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { useLastOpened } from "@/components/ui/hooks/use-last-opened";
+import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
 import { OrcaControls } from "@/modules/workspace/components/OrcaControls";
 import { OrcaGroupSection } from "@/modules/workspace/components/OrcaGroupSection";
 import { WorkspaceNav } from "@/modules/workspace/components/WorkspaceNav";
@@ -17,7 +24,7 @@ import {
   type StoredChoice,
 } from "@/modules/workspace/domain/workspace-choices";
 
-export interface WorkspaceContainerProps {
+interface WorkspacePageProps {
   board: BoardSnapshot;
   selectedCardId: string | null;
   onSelectCard: (id: string) => void;
@@ -31,11 +38,32 @@ function readStoredChoice<T extends string>(choice: StoredChoice<T>): T {
   }
 }
 
-export function WorkspaceContainer({
+export function WorkspaceContainer() {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const selectedId = useAppStore(appStore, (s) => s.selectedCardId);
+  const pinned = useAppStore(appStore, (s) => s.pinned);
+  if (board == null) return null;
+  return (
+    <WorkspacePage
+      board={board}
+      selectedCardId={
+        selectedCardOf(board.cards, selectedId, pinned) != null
+          ? selectedId
+          : null
+      }
+      onSelectCard={(id) =>
+        appStore.selectCard(id, pinFromBoard(id, board.cards))
+      }
+    />
+  );
+}
+
+function WorkspacePage({
   board,
   selectedCardId,
   onSelectCard,
-}: WorkspaceContainerProps) {
+}: WorkspacePageProps) {
   const [group, setGroup] = useState(() => readStoredChoice(GROUP_CHOICE));
   const [subgroup, setSubgroup] = useState(() =>
     readStoredChoice(SUBGROUP_CHOICE),

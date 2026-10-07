@@ -1,34 +1,10 @@
 import type {
-  AccountSessionEntry,
   AccountSwitchResponse,
   ApplyChoice,
-  ClaudeAccountSummary,
   ClaudeLoginView,
   ClaudeUsageSnapshot,
 } from "../../../../shared/types.js";
 import { http, httpError } from "@/lib/http";
-
-/**
- * Fetch every Claude account with its usage snapshot plus the active pointer: GET /api/accounts.
- *
- * @remarks
- * Throws on any non-2xx.
- */
-export async function getAccounts(): Promise<{
-  activeId: string;
-  accounts: ClaudeAccountSummary[];
-  sessions: AccountSessionEntry[];
-}> {
-  const result = await http<{
-    activeId: string;
-    accounts: ClaudeAccountSummary[];
-    sessions: AccountSessionEntry[];
-  }>("/api/accounts");
-  if (!result.ok) {
-    throw httpError("getAccounts", result);
-  }
-  return result.data;
-}
 
 /**
  * Make an account the one new sessions launch on: PUT /api/accounts/active.

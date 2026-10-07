@@ -4,7 +4,6 @@ export {
   linearFiltersQueryOptions,
   linearOptionsQueryOptions,
   linearStateMapQueryOptions,
-  linearWorkflowQueryOptions,
   savedSlackChannelsQueryOptions,
   slackChannelsQueryOptions,
 } from "@/modules/connections/queries/connections-queries";

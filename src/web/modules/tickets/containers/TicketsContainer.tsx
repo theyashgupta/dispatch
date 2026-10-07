@@ -1,11 +1,20 @@
 import { useMemo, useState } from "react";
+import { useRouteContext } from "@tanstack/react-router";
+import {
+  pinFromBoard,
+  selectedCardOf,
+} from "../../../../shared/pinned-card.js";
+import { startTarget } from "../../../../shared/start-request.js";
 import type { BoardSnapshot, Card, Column } from "../../../../shared/types.js";
 import { routeHash } from "../../../../shared/route.js";
 import {
   CAROUSEL_QUERY,
   NARROW_QUERY,
-  useMediaQuery,
-} from "@/components/ui/hooks/use-media-query";
+} from "../../../../shared/media-queries.js";
+import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
+import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
+import { moveCard } from "@/queries/cards-api";
 import { TicketRow } from "@/modules/tickets/components/TicketRow";
 import { TicketsList } from "@/modules/tickets/components/TicketsList";
 import { TicketsPane } from "@/modules/tickets/components/TicketsPane";
@@ -18,7 +27,7 @@ import {
 import { useTicketShortcuts } from "@/modules/tickets/hooks/use-ticket-shortcuts";
 import { useTicketsGroupBy } from "@/modules/tickets/hooks/use-tickets-group-by";
 
-interface TicketsContainerProps {
+interface TicketsPageProps {
   board: BoardSnapshot;
   selectedCardId: string | null;
   onSelectCard: (id: string) => void;
@@ -29,14 +38,40 @@ interface TicketsContainerProps {
 
 const SCOPE_ID = "tickets-view";
 
-export function TicketsContainer({
+export function TicketsContainer() {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const selectedId = useAppStore(appStore, (s) => s.selectedCardId);
+  const pinned = useAppStore(appStore, (s) => s.pinned);
+  if (board == null) return null;
+  return (
+    <TicketsPage
+      board={board}
+      selectedCardId={
+        selectedCardOf(board.cards, selectedId, pinned) != null
+          ? selectedId
+          : null
+      }
+      onSelectCard={(id) =>
+        appStore.selectCard(id, pinFromBoard(id, board.cards))
+      }
+      onStartRequest={(cardId) =>
+        appStore.requestStart(cardId, startTarget(cardId, board.cards))
+      }
+      onMoveCard={moveCard}
+      onNotice={appStore.notice}
+    />
+  );
+}
+
+function TicketsPage({
   board,
   selectedCardId,
   onSelectCard,
   onStartRequest,
   onMoveCard,
   onNotice,
-}: TicketsContainerProps) {
+}: TicketsPageProps) {
   const [search, setSearch] = useState("");
   const [groupBy, setGroupBy] = useTicketsGroupBy();
   const [cursorId, setCursorId] = useState<string | null>(null);

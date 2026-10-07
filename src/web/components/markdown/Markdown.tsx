@@ -1,4 +1,4 @@
-import { useMemo, type CSSProperties } from "react";
+import { useMemo } from "react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -19,10 +19,13 @@ const ANCHOR =
   "text-(--accent-text) underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 const CELL = "border border-border px-2 py-1 text-sm";
 
-const ALIGN: Partial<Record<NonNullable<CSSProperties["textAlign"]>, string>> =
-  { left: "text-left", center: "text-center", right: "text-right" };
+const ALIGN: Record<string, string> = {
+  left: "text-left",
+  center: "text-center",
+  right: "text-right",
+};
 
-function cellAlign(style: CSSProperties | undefined): string {
+function cellAlign(style: { textAlign?: string } | undefined): string {
   return (style?.textAlign && ALIGN[style.textAlign]) || "text-left";
 }
 

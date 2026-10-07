@@ -52,7 +52,7 @@
  *                                                     Chrome tab. Never edits a source file.
  *                                                     <name> one of autofill-defusal | query-param.
  *                                                     `query-param` is the one exception: it edits
- *                                                     a real source file (`src/web/lib/api.ts`),
+ *                                                     a real source file (`src/web/modules/vault/queries/vault-api.ts`),
  *                                                     stands its own sandbox up and down (never
  *                                                     shares main()'s), and restores the captured
  *                                                     original unconditionally.
@@ -72,7 +72,7 @@
  * control, never an unlabelled throw), and a plain `--check crud` re-run after reverting the edit
  * passed clean.
  * Plan 06's `query-param` break, proven against a real build: patching
- * `src/web/lib/api.ts#setVaultValue` to append `?value=${encodeURIComponent(value)}` to the PUT
+ * `src/web/modules/vault/queries/vault-api.ts#setVaultValue` to append `?value=${encodeURIComponent(value)}` to the PUT
  * url, then rebuilding, produced (verbatim):
  *   `no-query-param: expected zero VALUE_SENTINEL occurrences in the url of PUT
  *   http://127.0.0.1:47878/api/vault/PANEL104_QP/value?value=p104-s3nt1nel-7ac91f2b, measured
@@ -81,7 +81,7 @@
  *   `sentinel-capture` violation: `sentinel-capture: expected the sentinel to occur exactly once
  *   across the whole capture, measured 2.`). Restore leg (writing back the captured original
  *   string) re-confirmed PASS on both checks, `--break query-param` reported
- *   `tripFired=true restoreClean=true`, `git status --porcelain src/web/lib/api.ts` was empty
+ *   `tripFired=true restoreClean=true`, `git status --porcelain src/web/modules/vault/queries/vault-api.ts` was empty
  *   afterward, and a plain `node scripts/panel-104.mjs` (all four checks) exited 0 on the restored
  *   tree.
  *
@@ -1488,7 +1488,7 @@ function rebuild() {
 
 /**
  * `query-param` break: the only break in this phase that patches a real source file. Patches
- * `src/web/lib/api.ts#setVaultValue` to append the value as a query parameter, rebuilds, proves
+ * `src/web/modules/vault/queries/vault-api.ts#setVaultValue` to append the value as a query parameter, rebuilds, proves
  * `checkNoQueryParam` (and, corroborating, `checkSentinelCapture`) fail against the real built
  * bundle, then restores the captured original unconditionally and proves both checks pass again.
  *
@@ -1497,7 +1497,14 @@ function rebuild() {
  * functions rather than inlined into `main()`.
  */
 async function runBreakQueryParam() {
-  const REL_PATH = join("src", "web", "lib", "api.ts");
+  const REL_PATH = join(
+    "src",
+    "web",
+    "modules",
+    "vault",
+    "queries",
+    "vault-api.ts",
+  );
   const API_PATH = join(REPO_ROOT, REL_PATH);
   const ANCHOR = "/api/vault/${encodeURIComponent(name)}/value";
 

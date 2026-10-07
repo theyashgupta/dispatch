@@ -1,21 +1,42 @@
 import { useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import {
+  useLocation,
+  useRouteContext,
+  useRouter,
+  useRouterState,
+} from "@tanstack/react-router";
 import { DEFAULT_CLAUDE_ACCOUNT_ID } from "../../../../shared/types.js";
 import type {
-  ActivityEvent,
   Card as CardModel,
-  ClaudeAccountSummary,
   UnwindDestination,
 } from "../../../../shared/types.js";
-import type { StartRequest } from "../../../../shared/start-request.js";
+import { askAboutQuestion } from "../../../../shared/ask.js";
+import { cardIdentifiers as identifiersOf } from "../../../../shared/card-identifiers.js";
+import { membersOf } from "../../../../shared/group-members.js";
+import {
+  actionablePinnedMembers,
+  selectedCardOf,
+} from "../../../../shared/pinned-card.js";
+import { routeFromMatch, routeHash } from "../../../../shared/route.js";
+import {
+  startTarget,
+  type StartRequest,
+} from "../../../../shared/start-request.js";
+import { undoToastCopy } from "../../../../shared/undo-toast.js";
+import { accountsQueryOptions } from "@/queries/accounts-queries";
+import { activityFeedQueryOptions } from "@/queries/activity-queries";
+import { restoreArchived } from "@/queries/archive-api";
+import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
+import { getCard, unwindGroup } from "@/queries/cards-api";
 import {
   useResumeCardMutation,
   useStartCardMutation,
 } from "@/queries/cards-queries";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { stampLastOpened } from "@/components/ui/hooks/use-last-opened";
-import {
-  CAROUSEL_QUERY,
-  useMediaQuery,
-} from "@/components/ui/hooks/use-media-query";
+import { CAROUSEL_QUERY } from "../../../../shared/media-queries.js";
+import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
 import {
   PanelAccountRow,
   PanelBody,
@@ -53,47 +74,94 @@ import {
 import { CardTimelineContainer } from "./CardTimelineContainer";
 import { LinearSectionContainer } from "./LinearSectionContainer";
 
-export interface DetailPanelContainerProps {
-  card: CardModel | null;
-  hydrating?: boolean;
-  pinFetchError?: "not-found" | "network" | null;
-  onRetryPinFetch?: () => void;
-  editors?: { code: boolean; cursor: boolean };
-  activityEvents?: ActivityEvent[];
-  cardIdentifiers?: Record<string, string>;
-  members?: CardModel[];
-  membersActionable: boolean;
-  onClose: () => void;
-  onStartRequest?: (req: string | StartRequest) => void;
-  onCleanupRequest?: (id: string) => void;
-  onUnwindRequest?: (id: string, to: UnwindDestination) => void;
-  onResetRequest?: (id: string) => void;
-  onSyncRequest?: (id: string) => void;
-  onAskRequest?: (card: CardModel) => void;
-  docked?: boolean;
-  accounts?: ClaudeAccountSummary[];
-}
+export function DetailPanelContainer() {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const router = useRouter();
+  const leaf = useRouterState({ select: (s) => s.matches.at(-1) });
+  const pathname = useLocation({ select: (l) => l.pathname });
+  const docked = routeFromMatch(leaf, pathname).page === "workspace";
+  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const selectedCardId = useAppStore(appStore, (s) => s.selectedCardId);
+  const pinned = useAppStore(appStore, (s) => s.pinned);
+  const pinnedHydrating = useAppStore(appStore, (s) => s.pinnedHydrating);
+  const pinFetchErrorState = useAppStore(appStore, (s) => s.pinFetchError);
+  const pinFetch = useAppStore(appStore, (s) => s.pinFetch);
+  const { data: accountsData } = useQuery(accountsQueryOptions());
+  const { data: activityEvents } = useQuery({
+    ...activityFeedQueryOptions(),
+    refetchOnMount: false,
+  });
 
-export function DetailPanelContainer({
-  card,
-  hydrating = false,
-  pinFetchError = null,
-  onRetryPinFetch,
-  editors,
-  activityEvents,
-  cardIdentifiers,
-  members,
-  membersActionable,
-  onClose,
-  onStartRequest,
-  onCleanupRequest,
-  onUnwindRequest,
-  onResetRequest,
-  onSyncRequest,
-  onAskRequest,
-  docked = false,
-  accounts,
-}: DetailPanelContainerProps) {
+  const cards = board?.cards;
+  const card = selectedCardOf(cards, selectedCardId, pinned);
+  const inWindow = cards?.some((c) => c.id === selectedCardId) === true;
+  const members =
+    card == null || card.source !== "group"
+      ? undefined
+      : inWindow
+        ? membersOf(card, cards ?? [])
+        : pinned?.card.id === selectedCardId
+          ? pinned.members
+          : [];
+  const membersActionable =
+    inWindow || actionablePinnedMembers(selectedCardId, pinned);
+  const pinFetchError =
+    !inWindow &&
+    pinFetchErrorState != null &&
+    pinFetchErrorState.id === selectedCardId
+      ? pinFetchErrorState.kind
+      : null;
+  const hydrating = pinnedHydrating && !inWindow;
+  const editors = board?.editors;
+  const accounts = accountsData?.accounts;
+  const cardIdentifiers = identifiersOf(cards ?? []);
+  const onClose = appStore.closePanel;
+  const onRetryPinFetch = appStore.retryPinFetch;
+  const onStartRequest = (req: string | StartRequest) =>
+    appStore.requestStart(req, startTarget(req, cards));
+  const onCleanupRequest = appStore.openCleanup;
+  const onResetRequest = appStore.openReset;
+  const onSyncRequest = appStore.openSync;
+  const onAskRequest = (target: CardModel) => {
+    const question = askAboutQuestion({
+      kind: "card",
+      identifier: target.identifier,
+      title: target.title,
+    });
+    void router.navigate({
+      href: routeHash({ page: "ask", id: question }).slice(1),
+    });
+  };
+  const onUnwindRequest = (id: string, to: UnwindDestination) => {
+    void unwindGroup(id, to)
+      .then((result) => {
+        if (result.ok) {
+          const archivedId = result.archived.id;
+          appStore.showUndo(undoToastCopy(result.archived), async () => {
+            const restored = await restoreArchived(archivedId);
+            if (!restored.ok) throw new Error(restored.error);
+          });
+          appStore.deselect(archivedId);
+          return;
+        }
+        appStore.notice(result.error);
+      })
+      .catch((err: unknown) => {
+        console.error("unwindGroup failed", err);
+        appStore.notice("Couldn't unwind this group.");
+      });
+  };
+
+  const fetchedGen = useRef(0);
+  useEffect(() => {
+    if (pinFetch == null || pinFetch.gen === fetchedGen.current) return;
+    fetchedGen.current = pinFetch.gen;
+    const { id, gen } = pinFetch;
+    getCard(id)
+      .then((fetched) => appStore.pinFetched(gen, fetched))
+      .catch(() => appStore.pinFetchFailed(gen));
+  }, [pinFetch, appStore]);
+
   const open = card != null;
 
   const [detailsExpanded, setDetailsExpanded] = useState(false);

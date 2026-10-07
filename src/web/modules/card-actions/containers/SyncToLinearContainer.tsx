@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useRouteContext } from "@tanstack/react-router";
 import type { Card } from "../../../../shared/types.js";
 import { defaultTeamId } from "../../../../shared/linear-state.js";
 import { SyncToLinearDialog } from "@/modules/card-actions/components/SyncToLinearDialog";
@@ -7,11 +8,13 @@ import {
   TEAM_DEFAULT_STATE,
   stateIdOf,
 } from "@/modules/card-actions/domain/sync-target";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { useDialogClose } from "@/components/ui/hooks/use-dialog-close";
+import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
 import { useSyncCardToLinearMutation } from "@/queries/cards-queries";
 import { useLinearWorkflowQuery } from "@/queries/linear-workflow-queries";
 
-export interface SyncToLinearContainerProps {
+interface SyncToLinearContainerProps {
   card: Card;
   cards: readonly Card[];
   onClose: () => void;
@@ -69,6 +72,22 @@ export function SyncToLinearContainer({
       pending={sync.isPending}
       syncError={syncError}
       onSync={() => void handleSync()}
+    />
+  );
+}
+
+export function SyncToLinearRequestContainer() {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const board = useBoardSnapshot(useAppStore(appStore, (s) => s.doneLimit));
+  const syncCardId = useAppStore(appStore, (s) => s.syncCardId);
+  const card = board?.cards.find((c) => c.id === syncCardId);
+  if (card == null) return null;
+  return (
+    <SyncToLinearContainer
+      key={syncCardId}
+      card={card}
+      cards={board?.cards ?? []}
+      onClose={appStore.closeSync}
     />
   );
 }

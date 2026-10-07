@@ -1,8 +1,5 @@
-import {
-  StartContainer,
-  type StartContainerProps,
-} from "@/modules/card-actions/containers/StartContainer";
+import { StartRequestContainer } from "@/modules/card-actions/containers/StartContainer";
 
-export function StartView(props: StartContainerProps) {
-  return <StartContainer {...props} />;
+export function StartView() {
+  return <StartRequestContainer />;
 }

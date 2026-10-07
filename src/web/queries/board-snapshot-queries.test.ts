@@ -16,6 +16,7 @@ import {
   boardSnapshotQueryOptions,
   connectBoardStream,
   latestBoard,
+  newestBoardSnapshot,
   shouldPrefetchBoard,
   tunnelKeys,
   type ConnectBoardStreamOptions,
@@ -602,4 +603,15 @@ test("latestBoard keeps the previous snapshot when current is undefined", () => 
 
 test("latestBoard is null when both are empty", () => {
   assert.equal(latestBoard(undefined, null), null);
+});
+
+test("newestBoardSnapshot picks the most recently updated board at any done limit", () => {
+  const client = newClient();
+  assert.equal(newestBoardSnapshot(client), undefined);
+  client.setQueryData(boardSnapshotKeys.detail(50), snap(1), { updatedAt: 10 });
+  client.setQueryData(boardSnapshotKeys.detail(100), snap(2), {
+    updatedAt: 20,
+  });
+  client.setQueryData(boardSnapshotKeys.detail(150), snap(3), { updatedAt: 5 });
+  assert.equal(newestBoardSnapshot(client)?.syncedAt, "2");
 });

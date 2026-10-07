@@ -103,7 +103,7 @@ The rules are in `docs/standards/frontend-architecture.md`, in the sections "Lay
 1. Put each file in one of the six layer folders. Do not put other files in the module root. The module root holds only `index.ts`.
 2. Export only views and `queryOptions` factories from `index.ts`.
 3. Import a file in another folder with the `@/` alias. Import a file in the same layer folder with a relative path.
-4. Do not import a sibling module or the legacy tree.
+4. Do not import a sibling module.
 5. Do not use the JSX `style` prop. Do not write a hex colour. Use Tailwind token classes.
 6. Call `fetch` and import `src/web/lib/http.ts` only in `queries/`.
 7. Give each new `.tsx` file a PascalCase name. Give each new `.ts` file a kebab-case name.

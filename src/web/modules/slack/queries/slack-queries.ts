@@ -1,7 +1,7 @@
 import { queryOptions, useMutation, useQuery } from "@tanstack/react-query";
 import type { Item, SlackThread } from "../../../../shared/types.js";
 import { draftReplyPrompt } from "../../../../shared/slack-prompt.js";
-import { getSlackThread } from "./slack-api.js";
+import { getSlackThread } from "@/queries/slack-thread-api";
 
 export const slackKeys = {
   all: ["slack"] as const,

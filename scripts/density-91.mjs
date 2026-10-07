@@ -700,8 +700,8 @@ function assertChipReadings(readings) {
 }
 
 /**
- * Flip the already-loaded page to the Orca nav view (`App.tsx`'s `viewMode` lazily reads
- * `localStorage["dsp.view"]` once on mount) via a real reload — never a synthetic React state
+ * Flip the already-loaded page to the Orca nav view (`main.tsx`'s `initialHash` reads
+ * `localStorage["dsp.view"]` once on load) via a real reload, never a synthetic React state
  * poke — then poll until the Orca nav (`nav[aria-label="Tickets"]`, `OrcaView.tsx`) renders both
  * fixture identifiers. A transient evaluate failure immediately after `Page.reload` (the old
  * execution context torn down before the new one is ready) is swallowed and retried, matching
