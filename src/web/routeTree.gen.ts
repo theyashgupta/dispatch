@@ -11,6 +11,7 @@
 import { createFileRoute } from '@tanstack/react-router'
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as BoardsChar123IdChar125RouteImport } from './routes/boards.{-$id}'
 import { Route as ErrorsChar123IdChar125RouteImport } from './routes/errors.{-$id}'
 import { Route as PullRequestsChar123IdChar125RouteImport } from './routes/pull-requests.{-$id}'
 
@@ -81,6 +82,11 @@ const BoardChar123IdChar125LazyRoute =
   } as any).lazy(() =>
     import('./routes/board.{-$id}.lazy').then((d) => d.Route),
   )
+const BoardsChar123IdChar125Route = BoardsChar123IdChar125RouteImport.update({
+  id: '/boards/{-$id}',
+  path: '/boards/{-$id}',
+  getParentRoute: () => rootRouteImport,
+} as any).lazy(() => import('./routes/boards.{-$id}.lazy').then((d) => d.Route))
 const CalendarChar123IdChar125LazyRoute =
   CalendarChar123IdChar125LazyRouteImport.update({
     id: '/calendar/{-$id}',
@@ -198,6 +204,7 @@ const WorkspacesChar123IdChar125LazyRoute =
   )
 
 export interface FileRoutesByFullPath {
+  '/boards/{-$id}': typeof BoardsChar123IdChar125Route
   '/errors/{-$id}': typeof ErrorsChar123IdChar125Route
   '/pull-requests/{-$id}': typeof PullRequestsChar123IdChar125Route
   '/accounts/{-$id}': typeof AccountsChar123IdChar125LazyRoute
@@ -220,6 +227,7 @@ export interface FileRoutesByFullPath {
   '/workspaces/{-$id}': typeof WorkspacesChar123IdChar125LazyRoute
 }
 export interface FileRoutesByTo {
+  '/boards/{-$id}': typeof BoardsChar123IdChar125Route
   '/errors/{-$id}': typeof ErrorsChar123IdChar125Route
   '/pull-requests/{-$id}': typeof PullRequestsChar123IdChar125Route
   '/accounts/{-$id}': typeof AccountsChar123IdChar125LazyRoute
@@ -243,6 +251,7 @@ export interface FileRoutesByTo {
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
+  '/boards/{-$id}': typeof BoardsChar123IdChar125Route
   '/errors/{-$id}': typeof ErrorsChar123IdChar125Route
   '/pull-requests/{-$id}': typeof PullRequestsChar123IdChar125Route
   '/accounts/{-$id}': typeof AccountsChar123IdChar125LazyRoute
@@ -267,6 +276,7 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
+    | '/boards/{-$id}'
     | '/errors/{-$id}'
     | '/pull-requests/{-$id}'
     | '/accounts/{-$id}'
@@ -289,6 +299,7 @@ export interface FileRouteTypes {
     | '/workspaces/{-$id}'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/boards/{-$id}'
     | '/errors/{-$id}'
     | '/pull-requests/{-$id}'
     | '/accounts/{-$id}'
@@ -311,6 +322,7 @@ export interface FileRouteTypes {
     | '/workspaces/{-$id}'
   id:
     | '__root__'
+    | '/boards/{-$id}'
     | '/errors/{-$id}'
     | '/pull-requests/{-$id}'
     | '/accounts/{-$id}'
@@ -334,6 +346,7 @@ export interface FileRouteTypes {
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
+  BoardsChar123IdChar125Route: typeof BoardsChar123IdChar125Route
   ErrorsChar123IdChar125Route: typeof ErrorsChar123IdChar125Route
   PullRequestsChar123IdChar125Route: typeof PullRequestsChar123IdChar125Route
   AccountsChar123IdChar125LazyRoute: typeof AccountsChar123IdChar125LazyRoute
@@ -391,6 +404,13 @@ declare module '@tanstack/react-router' {
       path: '/board/{-$id}'
       fullPath: '/board/{-$id}'
       preLoaderRoute: typeof BoardChar123IdChar125LazyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/boards/{-$id}': {
+      id: '/boards/{-$id}'
+      path: '/boards/{-$id}'
+      fullPath: '/boards/{-$id}'
+      preLoaderRoute: typeof BoardsChar123IdChar125RouteImport
       parentRoute: typeof rootRouteImport
     }
     '/calendar/{-$id}': {
@@ -502,6 +522,7 @@ declare module '@tanstack/react-router' {
 }
 
 const rootRouteChildren: RootRouteChildren = {
+  BoardsChar123IdChar125Route: BoardsChar123IdChar125Route,
   ErrorsChar123IdChar125Route: ErrorsChar123IdChar125Route,
   PullRequestsChar123IdChar125Route: PullRequestsChar123IdChar125Route,
   AccountsChar123IdChar125LazyRoute: AccountsChar123IdChar125LazyRoute,

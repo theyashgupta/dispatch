@@ -3,10 +3,10 @@ import assert from "node:assert/strict";
 import { PAGES, parseRoute } from "./route.js";
 import { NAV_ITEMS, navGroups } from "./nav-items.js";
 
-test("every route page except settings has exactly one nav row", () => {
+test("every route page except settings and boards has exactly one nav row", () => {
   for (const page of PAGES) {
     const rows = NAV_ITEMS.filter((item) => item.page === page).length;
-    assert.equal(rows, page === "settings" ? 0 : 1, page);
+    assert.equal(rows, page === "settings" || page === "boards" ? 0 : 1, page);
   }
 });
 
