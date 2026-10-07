@@ -57,6 +57,9 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
 - [Known Residuals](#known-residuals)
 - [Verification Gates](#verification-gates)
 - [Orchestration Initiative](#orchestration-initiative)
+  - [Loop Progress](#loop-progress)
+  - [Session Supervisor](#session-supervisor)
+  - [Orchestrator Control Surface](#orchestrator-control-surface)
 
 ## System Overview
 
@@ -2111,7 +2114,8 @@ the supervisor types into a running Claude session goes through
 `/clear` of the handoff, which writes no transcript entry to confirm; it is typed only after the
 same ready check. The ready check (`supervisor-state.ts#paneReady`) waits up to 60 s for the input
 box with no `warming up` row and no dialog or menu open under it, because a key typed into a
-dialog would pick a row. The send replaces control characters in the line with spaces, sends
+dialog would pick a row, and with the prompt line as the input box row, so a box left in bash
+mode does not run the line. The send replaces control characters in the line with spaces, sends
 `C-u`, the line with `sendLiteral` and a separate `Enter` after 1.5 s, and then reads the
 transcript for the line. Text over 500 characters goes to a file under
 `<session root>/.dispatch-input/`, and the typed line is a pointer to that file. The targets use
@@ -3998,6 +4002,25 @@ real membership directly, independent of windowing` below for the full envelope 
    board key or a body outside the strict policy schema (an unknown field, `usageLimit` other than
    `wait` or `stop`, a value out of range, `handoffHardPercent` below `handoffPercent`) and `404`
    for an unknown board.
+   The orchestrator routes (LOCAL-90, see
+   [Orchestrator Control Surface](#orchestrator-control-surface)) all sit under `/api/orchestrator/`
+   and answer `401` for a missing or bad token, `403` for a card of another board or a policy
+   refusal (`policy-refused`, `done-not-own-card`), `400`, `404` or `409` for a refusal, and `502`
+   when Linear refuses an `add_comment`. Their success codes: `200` for `GET /cards`, `GET /cards/:id`,
+   `GET /sessions`, `GET /groups/:id/progress`, `GET /sessions/:cardId/pane`, `GET /events`,
+   `GET /policy`, `PATCH /tickets/:id`, `POST /tickets/:id/move`, `POST /sessions/:cardId/input`,
+   `POST /sessions/:cardId/resume`, `POST /sessions/:cardId/stop`,
+   `POST /groups/:cardId/approve-roadmap`, `POST /events/wait` and `GET /groups/:cardId/ship`;
+   `201` for `POST /tickets`, `POST /tickets/:id/comments`, `POST /base-branches`,
+   `POST /groups` and `POST /decisions`; `202` for `POST /groups/:id/start`,
+   `POST /sessions/:cardId/handoff` and `POST /groups/:cardId/ship`.
+   `GET /api/decisions` answers `200` with `{ items }`, and the optional `?state=` is `open` or
+   `answered`. `POST /api/decisions/:id/answer` takes `{ optionId, note? }` and answers `200` with
+   `{ item }`, `400` for an unknown option or a bad body, `404` for an unknown item and `409`
+   `already-answered`.
+   `GET /api/events` takes `?since=<event id>` (digits only). With it the route answers the rows
+   after that id, oldest first, in the same `{ events }` envelope, and a value that is not a
+   safe integer answers `400`.
 4. **Persistence format + location.** `~/.dispatch/{board.json,config.json}`; `board.json` ===
    `BoardSnapshot` JSON; atomic writes via `write-file-atomic`; config at mode `0600`; the `"//"`-keyed
    config template. Pasted ticket images live under `~/.dispatch/attachments/<cardId>/<sha256-16>.<ext>`
@@ -4851,3 +4874,105 @@ phase, send waits of 1.5 s, 10 s and 10 s, a ready wait of 60 s, and a reset wai
 
 **Policy route.** `PUT /api/boards/:key/policy` writes the D-6 policy fields of a board. It is a
 user route; no orchestrator route or tool changes a policy.
+
+### Orchestrator Control Surface
+
+LOCAL-90 gives an orchestrator a fixed set of server calls (decision records D-4 and D-9). The
+tool and route reference is the Tool reference of `docs/standards/orchestration-design.md`; this
+section holds the parts that span files.
+
+**Router.** `routes/orchestrator.route.ts` holds every route under `/api/orchestrator/`, and
+`routes/orchestrator.handlers.ts` holds their handlers. The router's `tool()` wrapper
+authenticates the `x-orchestrator-token` header first, runs the handler and
+appends one `tool_call` row to `orchestration_events` for each call, accepted or refused. The row
+is written when the response closes, so a refusal that the error handler answers later carries its
+final status. A close before the response finished is recorded as `client-closed`. A call with no
+token or an unknown token goes under board `-`, which no board read lists; a revoked token is
+recorded on its own board. The row keeps the params, query and
+body apart, with every string cut to 4096 characters.
+
+**Tokens.** `orchestrator-tokens.ts` mints a 256-bit token and stores only its SHA-256 hash in the
+`orchestrator_tokens` table. A new token revokes the earlier live token of the same orchestrator,
+so there is one live token for each orchestrator. Only the user routes
+`POST` and `DELETE /api/boards/:key/orchestrators/:id/token` mint and revoke. A revoked token still
+resolves, so its refused call is recorded on its board.
+
+**Board scope.** Each call acts on the board of its token. `checkScope` in
+`services/domain/orchestrator-scope.ts` refuses a card of another board with 403 `other-board`.
+`refuseOrchestratorTokenOnUserRoute` is mounted first on the API router and answers 403
+`orchestrator-token-on-user-route` for an orchestrator token on any state changing user route,
+the token mint route included. The `/sessions` terminal proxy lies outside `/api` and is not
+covered; the tool allowlist of Unit 4 closes that path.
+
+**Policy.** `services/domain/orchestrator-policy.ts` holds the pure checks: `checkCap` (running
+loops against `concurrencyCap`), `checkBudget` (group cost against `budgetPerGroup`) and
+`checkShipRights` (`shipRights` is not `none`). A refused check is the 403 `policy-refused` with a
+`reason`. Each tool runs its checks before its first write. `start_group` starts the session in
+the tick of its cap check, so two overlapping calls cannot both take the last slot, and waits for
+the start: a failed start restores the queue flag, records a `supervisor_action` event and answers
+409 `start-failed`.
+
+**Session tools.** `orchestrator-sessions.ts` holds `send_input`, `approve_roadmap`,
+`request_handoff`, `resume_loop` and `stop_session`. Each refuses the four keyless states
+(`permission_prompt`, `usage_limit_dialog`, `usage_limit_wait`, `shell_prompt`) with 409
+`session-state-refused`, and refuses a session that stopped on `budget` or `usage_stop` with 403
+`user must resume`; `resume_loop` checks only the stop. A per card in-memory lock answers 409
+`session-busy` for a second session tool on a card, and a running ship flow of the card answers
+409 `ship-running`. `send_input` refuses a text whose typed line starts with `!`, `/`, `#`, `&` or
+`@` with 400 `invalid-text`, because Claude Code reads those as input modes, and a text whose
+typed line is empty. The typed line comes from `typedLine` in `supervisor-send.ts`, the same
+helper `sendConfirmed` types with, so a leading control character cannot hide the mode key.
+`sendLiteral` passes the end of options separator before the text and puts a backslash before a
+trailing semicolon, so a text that starts with a hyphen or ends with a semicolon types as written.
+The ready check refuses a pane whose input box row (the first row between its last two rule lines)
+is not the prompt line, such as a box left in bash, memory or background mode.
+`approve_roadmap` under `roadmapApproval: ask` marks the approve item used in the store write
+that checks it, so one answer approves one plan.
+The budget checks use `groupCost` in `orchestrator-read.ts`, the running total that the supervisor
+budget stop also reads, so a claude relaunch does not reset it. Every typed text goes through
+`supervisor-send.ts#sendConfirmed`, and `stop_session` presses `Escape` once and sets
+`needs_input` with `stop_session`; nothing is killed.
+
+**Decision items and the wait.** `decision-items.ts` stores an open item and records
+`decision_raised`; a `roadmap_approval` item always gets the server options `approve` and
+`reject`. Only the user route `POST /api/decisions/:id/answer` answers an item, and it
+records `decision_answered`. `orchestrator-wait.ts` answers `wait_for_event` from the table first,
+then listens to the store `orchestration` event until a match or the time limit, which is 1 to
+540 seconds. A `tool_call` row never ends a wait unless `kinds` names it, because every call,
+the wait call included, writes one. An aborted request ends the wait and leaves no listener.
+
+**Ship flow.** `ship-flow.ts` runs the D-8 steps for the branches of a finished group in stack
+order. The branch states are `queued`, `merging_main`, `checking`, `pushing`, `waiting_checks`,
+`waiting_merge` (with `open_prs`) or `merging` (with `merge`), `verifying`, `merged` and `failed`.
+Each branch must be a loop unit branch or `test/<slug>-specs`, with a local `refs/heads/<name>`,
+and never `main`, `master`, `HEAD`, a full ref name or the repository base. The first step checks
+that the worktree is clean, then runs `git fetch origin`, a checkout with the no-guess option and
+a merge of `origin/main` with no edit, and records the merged commit as `checked`. The check
+runs on that commit, the push uses the refspec `<checked>:refs/heads/<name>`, and the merge
+passes gh's match head commit option with it; a resumed flow whose HEAD moved stops. Each gh
+call names the repository of the `origin` remote (`repo` on the flow; null unless the host is
+`github.com` or `ssh.github.com`, so an SSH host alias, another host or a local path gives none), and
+an open PR is reused only from the same repository, into `main`, at the checked commit. The
+admin merge retry runs only when every violation clause of the merge error (lines split on
+sentence ends, commas and semicolons) matches the signature rule wording `must have verified
+signatures`.
+The flow never rebases and never edits code. Every git and gh call has a time limit (120 s, 300 s
+for fetch and push, 30 min for the check command) and a 64 MiB output buffer, and the diffs run
+with fixed color, prefix and path settings. The runner reads the board policy before each step
+and poll: `none` stops the flow and `open_prs` stops the merges. The runner keeps its board key,
+and a card that is gone stops it with no write; unwind refuses a group whose flow runs with 409
+`ship-running`. A thrown runner is stored as stopped. A refused move to Done after the last merge
+keeps the flow done and raises a `ship_failure` item for a manual move. A conflict, a failed check or an identity mismatch stops the flow
+and raises one `ship_failure` decision item. The identity stop compares the author and message of
+the new `origin/main` tip with the `git config` identity that the flow read at its start. One flow
+runs on a board at a time. A flow in the state `running` is started again at boot by
+`resumeShipFlows`, and a stopped flow is replaced by a new `start_ship` call.
+
+**MCP server.** `dispatch mcp` serves the 23 tools over stdio. `bootstrap/cli.ts` reads and checks
+`DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and
+`bootstrap/mcp-tools.ts` holds the zod input and the description of each tool. The dependency
+cruiser rule `mcp-server-isolated` refuses an import of `routes`, `services`, `store`, `adapters`
+or `sources` in both files, so they never import the app they call. The server uses `node:http` with no client
+timeout, because `wait_for_event` can hold a response for 540 seconds before any header, and a
+cancelled tool call aborts its request. `src/server/test-support/orchestrator-client.ts` is a
+scripted client that starts this server and replays a manual run on a sandbox.
