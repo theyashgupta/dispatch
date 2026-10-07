@@ -133,7 +133,7 @@ export function runInChainQueue<T>(task: () => Promise<T>): Promise<T> {
 /**
  * Resolve once every queued controller task has finished.
  *
- * @internal Tests use it to observe the controller.
+ * @public The account chain specs are the callers.
  */
 export async function whenChainIdle(): Promise<void> {
   let seen: Promise<unknown>;
@@ -146,7 +146,7 @@ export async function whenChainIdle(): Promise<void> {
 /**
  * List the pending controller timers by key (`return:<id>` or `exhausted`) with their due time.
  *
- * @internal Tests use it to observe the controller.
+ * @public The account chain specs are the callers.
  */
 export function chainTimers(): { key: string; at: string }[] {
   return [...timers].map(([key, t]) => ({
