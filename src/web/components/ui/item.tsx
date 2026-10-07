@@ -43,10 +43,15 @@ const itemVariants = cva(
         default: "gap-4 p-4",
         sm: "gap-2.5 px-4 py-3",
       },
+      selected: {
+        true: "border-primary bg-card shadow-[inset_0_0_0_1px_var(--accent)]",
+        false: "",
+      },
     },
     defaultVariants: {
       variant: "default",
       size: "default",
+      selected: false,
     },
   },
 );
@@ -55,6 +60,7 @@ function Item({
   className,
   variant = "default",
   size = "default",
+  selected = false,
   asChild = false,
   ...props
 }: React.ComponentProps<"div"> &
@@ -65,7 +71,7 @@ function Item({
       data-slot="item"
       data-variant={variant}
       data-size={size}
-      className={cn(itemVariants({ variant, size, className }))}
+      className={cn(itemVariants({ variant, size, selected, className }))}
       {...props}
     />
   );

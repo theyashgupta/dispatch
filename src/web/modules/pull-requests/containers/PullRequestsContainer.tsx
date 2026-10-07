@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { useRouteContext, useRouter } from "@tanstack/react-router";
+import { startAgentFor } from "../../../../shared/item-actions.js";
 import type { BoardSnapshot, Item } from "../../../../shared/types.js";
 import {
   buildPrRows,
@@ -9,14 +11,17 @@ import {
 import { routeHash } from "../../../../shared/route.js";
 import { DetailPlaceholder, DetailScroll } from "@/components/DetailPaneBody";
 import { SplitPane } from "@/components/SplitPane";
-import {
-  CAROUSEL_QUERY,
-  useMediaQuery,
-} from "@/components/ui/hooks/use-media-query";
+import { CAROUSEL_QUERY } from "../../../../shared/media-queries.js";
+import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
+import { useItems } from "@/components/ui/hooks/use-items";
+import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
+import { actionApi } from "@/queries/action-services";
+import { setItemState } from "@/queries/item-actions-api";
 import { PrList } from "@/modules/pull-requests/components/PrList";
 import { PrDetailContainer } from "./PrDetailContainer";
 
-interface PullRequestsContainerProps {
+interface PullRequestsPageProps {
   board: BoardSnapshot;
   items: Item[];
   selectedKey: string | null;
@@ -27,6 +32,51 @@ interface PullRequestsContainerProps {
 }
 
 export function PullRequestsContainer({
+  selectedKey,
+}: {
+  selectedKey: string | null;
+}) {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const router = useRouter();
+  const boardKey = useAppStore(appStore, (s) => s.board);
+  const board = useBoardSnapshot(
+    boardKey,
+    useAppStore(appStore, (s) => s.doneLimit),
+  );
+  const items = useItems(board);
+  if (board == null) return null;
+  return (
+    <PullRequestsPage
+      board={board}
+      items={items}
+      selectedKey={selectedKey}
+      onSelect={(key) =>
+        void router.navigate({
+          href: routeHash({
+            page: "pull-requests",
+            id: key ?? undefined,
+          }).slice(1),
+          replace: true,
+        })
+      }
+      onMarkRead={(id) => void setItemState(id, "read")}
+      onNotice={appStore.notice}
+      onStartAgent={(row, prompt) =>
+        void startAgentFor(
+          {
+            ...actionApi(boardKey),
+            openStart: appStore.openStart,
+            notice: appStore.notice,
+          },
+          { itemId: row.itemId, cardId: row.cardId },
+          prompt,
+        )
+      }
+    />
+  );
+}
+
+function PullRequestsPage({
   board,
   items,
   selectedKey,
@@ -34,7 +84,7 @@ export function PullRequestsContainer({
   onMarkRead,
   onStartAgent,
   onNotice,
-}: PullRequestsContainerProps) {
+}: PullRequestsPageProps) {
   const narrow = useMediaQuery(CAROUSEL_QUERY);
   const [groupBy, setGroupBy] = useState<PrGroupBy>("repo");
   const rows = useMemo(

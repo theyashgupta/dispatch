@@ -3,6 +3,7 @@ import {
   ITEM_TITLE_MAX,
 } from "../../shared/orchestrator-limits.js";
 import type {
+  BoardKey,
   Card,
   Item,
   SettableItemState,
@@ -133,6 +134,7 @@ export function redactItem(item: Item): Item {
  */
 export function buildPromotedCard(
   item: Item,
+  boardKey: BoardKey,
   identifier: string,
   now: string,
   context?: string,
@@ -151,6 +153,7 @@ export function buildPromotedCard(
   ).replace(/DISPATCH_STATUS:/gi, "DISPATCH-STATUS:");
   return {
     id: identifier,
+    boardKey,
     issueId: item.id,
     identifier,
     title: item.title.trim().slice(0, ITEM_TITLE_MAX),

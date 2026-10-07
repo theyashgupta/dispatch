@@ -1,16 +1,31 @@
-import type { ClaudeAccountSummary } from "../../../shared/types.js";
+import {
+  DEFAULT_CLAUDE_ACCOUNT_ID,
+  type AccountSessionEntry,
+  type ChainView,
+  type ClaudeAccountSummary,
+} from "../../../shared/types.js";
 import {
   logoutClaudeConfigDir,
   readClaudeIdentity,
   type ClaudeIdentity,
 } from "../../adapters/claude-cli.js";
+import { getClaudeAccountsSettings } from "../infra/config-holder.js";
+import { continueActionFor } from "../domain/limit-surface.js";
 import {
   accountDir,
+  isExternalAccountDir,
+  getActiveAccountId,
   listAccounts,
+  readChainOrder,
   readRegistry,
   removeAccount,
 } from "./claude-accounts.js";
-import { forgetUsage, getUsage } from "./claude-usage.js";
+import { readChainState } from "./account-chain-state.js";
+import { forgetChainAccount } from "./account-chain.js";
+import { forgetUsage, getUsage, usageBuckets } from "./claude-usage.js";
+import { liveTurnState } from "./session-turn.js";
+import { boardRepository as store } from "../../store/board-repository.js";
+import { ALL_BOARDS } from "../../../shared/board-key.js";
 
 const IDENTITY_TTL_MS = 5 * 60 * 1000;
 
@@ -32,24 +47,111 @@ export async function homeIdentity(): Promise<ClaudeIdentity> {
 }
 
 /**
- * Every account with its cached usage snapshot, the shape `GET /api/accounts` returns.
+ * Replace the cached home identity with a fresh read, so the next listing shows it at once.
  */
-export async function listAccountSummaries(): Promise<ClaudeAccountSummary[]> {
-  const accounts = await listAccounts(await homeIdentity());
-  return accounts.map((a) => ({ ...a, usage: getUsage(a.id) }));
+export function cacheHomeIdentity(identity: ClaudeIdentity): void {
+  homeIdentityCache = { at: Date.now(), identity };
 }
 
 /**
- * Remove an added account end to end: sign its dir out so Claude Code deletes its own keychain
- * item, then drop the dir, the registry record, and the cached usage.
+ * List every account in chain order with its usage snapshot and chain fields for `GET /accounts`.
+ *
+ * @remarks `state`, `buckets` and `limitedUntil` come from the chain state file; an account the
+ * controller has not read yet is `unknown` with the buckets of its usage snapshot.
+ */
+export async function listAccountSummaries(): Promise<ClaudeAccountSummary[]> {
+  const [accounts, order, chain] = await Promise.all([
+    homeIdentity().then(listAccounts),
+    readChainOrder(),
+    readChainState(),
+  ]);
+  const activeId = getActiveAccountId();
+  return accounts
+    .map((a) => {
+      const usage = getUsage(a.id);
+      const entry = chain.accounts[a.id];
+      return {
+        ...a,
+        usage,
+        position: order.indexOf(a.id),
+        state: entry?.state ?? "unknown",
+        buckets: entry?.buckets ?? usageBuckets(usage),
+        limitedUntil: entry?.limitedUntil ?? null,
+        inUse: a.id === activeId,
+      } satisfies ClaudeAccountSummary;
+    })
+    .sort((a, b) => a.position - b.position);
+}
+
+/**
+ * Return the chain settings, exhausted record and history for `GET /api/accounts`, newest move first.
+ */
+export async function readChainView(): Promise<ChainView> {
+  const chain = await readChainState();
+  return {
+    settings: getClaudeAccountsSettings(),
+    exhausted: chain.exhausted,
+    history: [...chain.moves].reverse(),
+    inUseSince: chain.inUseSince,
+  };
+}
+
+/**
+ * List one entry per live session on every card.
+ *
+ * @remarks An entry carries the account, a fresh turn state, the stale flag, the queued account and
+ * the continue action; a session with no tmux session is lost and not listed. The continue action
+ * is offered only when the session runs on another account than the
+ * active one and the active account has allowance (U1-11).
+ */
+export async function listAccountSessions(): Promise<AccountSessionEntry[]> {
+  const activeId = getActiveAccountId();
+  return Promise.all(
+    store.sessionsWithTmux(ALL_BOARDS).map(async ({ card, session }) => {
+      const accountId = session.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID;
+      const turn = await liveTurnState(
+        card.id,
+        session.id,
+        session.tmuxSession,
+      );
+      const continueAction =
+        turn === "limit" && accountId !== activeId
+          ? continueActionFor(getUsage(activeId))
+          : undefined;
+      return {
+        cardId: card.id,
+        sessionId: session.id,
+        cardTitle: card.title,
+        accountId,
+        turn,
+        stale: session.claudeAccountStale === true,
+        pinned: session.accountPinned === true,
+        ...(session.pendingClaudeAccountId !== undefined
+          ? { pendingAccountId: session.pendingClaudeAccountId }
+          : {}),
+        ...(continueAction !== undefined ? { continueAction } : {}),
+      };
+    }),
+  );
+}
+
+/**
+ * Remove an added account with its dir, registry record, cached usage, queued moves and chain entry.
+ *
+ * @remarks The dir is signed out first so Claude Code deletes its own keychain item.
  */
 export async function removeAccountAndLogout(
   id: string,
 ): Promise<{ ok: true } | { ok: false; error: "not-found" }> {
   const known = (await readRegistry()).some((a) => a.id === id);
-  if (!known) return { ok: false, error: "not-found" };
+  if (!known || isExternalAccountDir(id))
+    return { ok: false, error: "not-found" };
   await logoutClaudeConfigDir(accountDir(id));
   const result = await removeAccount(id);
-  if (result.ok) forgetUsage(id);
+  if (result.ok) {
+    forgetUsage(id);
+    await store.clearPendingAccountsFor(id);
+    await forgetChainAccount(id);
+  }
   return result;
 }

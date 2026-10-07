@@ -711,7 +711,7 @@ test("archive refuses the default board and a board with a live session", async 
   await expectRefusal(
     call("POST", "/boards/RUNB/archive"),
     409,
-    "Stop the 1 running sessions first.",
+    "Stop the 1 running session first.",
     "sessions-running",
     { running: 1 },
   );

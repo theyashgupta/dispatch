@@ -13,6 +13,7 @@ interface AccountRowProps {
   account: ClaudeAccountSummary;
   active: boolean;
   reloginDisabled: boolean;
+  onSwitch: () => void;
   onRelogin: () => void;
   onRemove: () => void;
 }
@@ -21,6 +22,7 @@ export function AccountRow({
   account,
   active,
   reloginDisabled,
+  onSwitch,
   onRelogin,
   onRemove,
 }: AccountRowProps) {
@@ -41,10 +43,10 @@ export function AccountRow({
     <Item
       variant="outline"
       size="sm"
-      className="flex-nowrap gap-2 bg-card p-2 text-foreground"
+      className="gap-2 bg-card p-2 text-foreground"
       data-account-id={account.id}
     >
-      <ItemContent className="min-w-0 flex-auto gap-1">
+      <ItemContent className="min-w-40 flex-auto gap-1">
         <span className="truncate text-sm font-semibold" title={account.email}>
           {account.email}
         </span>
@@ -58,6 +60,16 @@ export function AccountRow({
         </span>
       </ItemContent>
       {active && <Badge tone="accent">Active</Badge>}
+      {!active && (
+        <Button
+          variant="secondary"
+          size="sm"
+          aria-label={`Switch to ${account.email}`}
+          onClick={onSwitch}
+        >
+          Switch
+        </Button>
+      )}
       {!account.isDefault && (
         <>
           <Button

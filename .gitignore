@@ -7,3 +7,5 @@ docs/superpowers/
 !.claude/hooks/
 !.claude/skills/
 */**/.claude/
+test-results/
+playwright-report/

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { DEFAULT_CLAUDE_ACCOUNT_ID } from "../../../shared/types.js";
 import { isolateEnv } from "../../test-support/fixtures.js";
 
 const env = isolateEnv();
@@ -304,4 +305,181 @@ void test("materializeConfigDir tolerates two concurrent calls for the same acco
     ]),
     /no longer registered/,
   );
+});
+
+const ID_C = "33333333-3333-4333-8333-333333333333";
+const IDENTITY = { email: "home@example.com", orgId: "org-home" };
+
+function datedRecord(id: string, email: string, createdAt: string) {
+  return { ...record(id, email), createdAt };
+}
+
+function writeRegistryJson(body: unknown): void {
+  fs.mkdirSync(paths.CLAUDE_ACCOUNTS_DIR, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(paths.CLAUDE_ACCOUNTS_REGISTRY_PATH, JSON.stringify(body), {
+    mode: 0o600,
+  });
+}
+
+function registryOnDisk(): {
+  version: number;
+  defaultPosition: number;
+  defaultIdentity?: unknown;
+  accounts: { id: string; position: number }[];
+} {
+  return JSON.parse(
+    fs.readFileSync(paths.CLAUDE_ACCOUNTS_REGISTRY_PATH, "utf8"),
+  ) as ReturnType<typeof registryOnDisk>;
+}
+
+void test("a version 1 registry with no account migrates to Default at 0 and saves as version 2", async () => {
+  writeRegistryJson({ version: 1, accounts: [] });
+  assert.deepEqual(await accounts.readRegistry(), []);
+  await accounts.writeDefaultIdentity(IDENTITY);
+  const saved = registryOnDisk();
+  assert.equal(saved.version, 2);
+  assert.equal(saved.defaultPosition, 0);
+  assert.deepEqual(saved.accounts, []);
+});
+
+void test("a version 1 registry with one account puts it at position 1 and keeps every field", async () => {
+  const original = datedRecord(
+    ID_A,
+    "a@example.com",
+    "2026-09-01T00:00:00.000Z",
+  );
+  writeRegistryJson({ version: 1, accounts: [original] });
+  assert.deepEqual(await accounts.readRegistry(), [
+    { ...original, position: 1 },
+  ]);
+});
+
+void test("a version 1 registry with three accounts orders them by creation time from 1 to 3", async () => {
+  const late = datedRecord(ID_A, "a@example.com", "2026-09-03T00:00:00.000Z");
+  const early = datedRecord(ID_B, "b@example.com", "2026-09-01T00:00:00.000Z");
+  const middle = datedRecord(ID_C, "c@example.com", "2026-09-02T00:00:00.000Z");
+  writeRegistryJson({ version: 1, accounts: [late, early, middle] });
+  const read = await accounts.readRegistry();
+  assert.deepEqual(
+    read.map((a) => [a.id, a.position]),
+    [
+      [ID_B, 1],
+      [ID_C, 2],
+      [ID_A, 3],
+    ],
+  );
+  assert.deepEqual(read[0], { ...early, position: 1 });
+});
+
+void test("migrating a version 1 registry keeps defaultIdentity and the next write is version 2", async () => {
+  const original = datedRecord(
+    ID_A,
+    "a@example.com",
+    "2026-09-01T00:00:00.000Z",
+  );
+  writeRegistryJson({
+    version: 1,
+    accounts: [original],
+    defaultIdentity: IDENTITY,
+  });
+  assert.deepEqual(await accounts.readDefaultIdentity(), IDENTITY);
+  await accounts.upsertAccount(
+    datedRecord(ID_B, "b@example.com", "2026-09-02T00:00:00.000Z"),
+  );
+  const saved = registryOnDisk();
+  assert.equal(saved.version, 2);
+  assert.equal(saved.defaultPosition, 0);
+  assert.deepEqual(saved.defaultIdentity, IDENTITY);
+  assert.deepEqual(
+    saved.accounts.map((a) => [a.id, a.position]),
+    [
+      [ID_A, 1],
+      [ID_B, 2],
+    ],
+  );
+});
+
+void test("a version 2 registry round trips positions and defaultPosition", async () => {
+  writeRegistryJson({
+    version: 2,
+    defaultPosition: 1,
+    accounts: [
+      { ...record(ID_A, "a@example.com"), position: 2 },
+      { ...record(ID_B, "b@example.com"), position: 0 },
+    ],
+  });
+  assert.deepEqual(
+    (await accounts.readRegistry()).map((a) => [a.id, a.position]),
+    [
+      [ID_B, 0],
+      [ID_A, 2],
+    ],
+  );
+  await accounts.writeDefaultIdentity(IDENTITY);
+  const saved = registryOnDisk();
+  assert.equal(saved.version, 2);
+  assert.equal(saved.defaultPosition, 1);
+  assert.deepEqual(
+    saved.accounts.map((a) => [a.id, a.position]),
+    [
+      [ID_B, 0],
+      [ID_A, 2],
+    ],
+  );
+});
+
+void test("upsertAccount appends a new account at the end and keeps the position of a replaced one", async () => {
+  writeRegistryJson({ version: 2, defaultPosition: 0, accounts: [] });
+  await accounts.upsertAccount(record(ID_A, "a@example.com"));
+  await accounts.upsertAccount(record(ID_B, "b@example.com"));
+  await accounts.upsertAccount(record(ID_C, "c@example.com"));
+  await accounts.upsertAccount({ ...record(ID_A, "a2@example.com") });
+  const read = await accounts.readRegistry();
+  assert.deepEqual(
+    read.map((a) => [a.id, a.position]),
+    [
+      [ID_A, 1],
+      [ID_B, 2],
+      [ID_C, 3],
+    ],
+  );
+  assert.equal(read[0]?.email, "a2@example.com");
+});
+
+void test("removeAccount keeps the relative order of the other accounts", async () => {
+  writeRegistryJson({ version: 2, defaultPosition: 0, accounts: [] });
+  for (const [id, email] of [
+    [ID_A, "a@example.com"],
+    [ID_B, "b@example.com"],
+    [ID_C, "c@example.com"],
+  ] as const) {
+    await accounts.upsertAccount(record(id, email));
+  }
+  assert.deepEqual(await accounts.removeAccount(ID_B), { ok: true });
+  assert.deepEqual(
+    (await accounts.readRegistry()).map((a) => a.id),
+    [ID_A, ID_C],
+  );
+  await accounts.upsertAccount(record(ID_B, "b@example.com"));
+  assert.deepEqual(
+    (await accounts.readRegistry()).map((a) => a.id),
+    [ID_A, ID_C, ID_B],
+  );
+});
+
+void test("upsertAccount puts a new account after Default when Default is last in the chain", async () => {
+  writeRegistryJson({ version: 2, defaultPosition: 0, accounts: [] });
+  await accounts.upsertAccount(record(ID_A, "a@example.com"));
+  await accounts.upsertAccount(record(ID_B, "b@example.com"));
+  assert.deepEqual(
+    await accounts.setChainOrder([ID_A, ID_B, DEFAULT_CLAUDE_ACCOUNT_ID]),
+    { ok: true, order: [ID_A, ID_B, DEFAULT_CLAUDE_ACCOUNT_ID] },
+  );
+  assert.deepEqual(await accounts.removeAccount(ID_B), { ok: true });
+  await accounts.upsertAccount(record(ID_C, "c@example.com"));
+  assert.deepEqual(await accounts.readChainOrder(), [
+    ID_A,
+    DEFAULT_CLAUDE_ACCOUNT_ID,
+    ID_C,
+  ]);
 });

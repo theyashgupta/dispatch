@@ -1,4 +1,8 @@
-import type { ArchivedGroupSummary } from "../../../../shared/types.js";
+import { withBoard } from "../../../../shared/board-select.js";
+import type {
+  ArchivedGroupSummary,
+  BoardKey,
+} from "../../../../shared/types.js";
 import { http, httpError } from "@/lib/http";
 
 /**
@@ -7,35 +11,16 @@ import { http, httpError } from "@/lib/http";
  * @remarks
  * Throws on any non-2xx.
  */
-export async function listArchive(): Promise<ArchivedGroupSummary[]> {
+export async function listArchive(
+  board: BoardKey,
+): Promise<ArchivedGroupSummary[]> {
   const result = await http<{ archived: ArchivedGroupSummary[] }>(
-    "/api/archive",
+    withBoard("/api/archive", board),
   );
   if (!result.ok) {
     throw httpError("listArchive", result);
   }
   return result.data.archived;
-}
-
-/**
- * Restore an archived group all-or-nothing: POST /api/archive/:id/restore.
- *
- * @remarks
- * A 404 or 409 answers the server's reason, naming the member that moved on, and any other failure
- * throws.
- */
-export async function restoreArchived(
-  id: string,
-): Promise<{ ok: true } | { ok: false; error: string }> {
-  const result = await http(`/api/archive/${encodeURIComponent(id)}/restore`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-  });
-  if (result.ok) return { ok: true };
-  if (result.status === 404 || result.status === 409) {
-    return { ok: false, error: result.error ?? "Couldn't restore this group." };
-  }
-  throw httpError("restoreArchived", result);
 }
 
 /**

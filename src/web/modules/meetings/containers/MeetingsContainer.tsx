@@ -1,19 +1,24 @@
 import { useEffect, useMemo, useRef } from "react";
+import { useRouteContext, useRouter } from "@tanstack/react-router";
+import { routeHash } from "../../../../shared/route.js";
 import type { Item } from "../../../../shared/types.js";
 import { DetailPlaceholder, DetailScroll } from "@/components/DetailPaneBody";
+import { PageHeaderActions } from "@/components/PageHeaderActions";
 import { SplitPane } from "@/components/SplitPane";
 import { Button } from "@/components/ui/button";
-import {
-  CAROUSEL_QUERY,
-  useMediaQuery,
-} from "@/components/ui/hooks/use-media-query";
+import { CAROUSEL_QUERY } from "../../../../shared/media-queries.js";
+import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
+import { openOverlay } from "@/components/ui/hooks/overlay-return";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
+import { useItems } from "@/components/ui/hooks/use-items";
+import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
 import { useSetItemStateMutation } from "@/queries/item-actions-queries";
 import { MeetingList } from "@/modules/meetings/components/MeetingList";
 import { MeetingsEmpty } from "@/modules/meetings/components/MeetingsEmpty";
 import { meetingGroups } from "@/modules/meetings/domain/meetings";
 import { MeetingDetailContainer } from "./MeetingDetailContainer";
 
-interface MeetingsContainerProps {
+interface MeetingsPageProps {
   items: Item[];
   selectedId: string | undefined;
   onSelect: (id: string | null) => void;
@@ -24,6 +29,55 @@ interface MeetingsContainerProps {
 }
 
 export function MeetingsContainer({
+  selectedId,
+}: {
+  selectedId: string | undefined;
+}) {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const router = useRouter();
+  const board = useBoardSnapshot(
+    useAppStore(appStore, (s) => s.board),
+    useAppStore(appStore, (s) => s.doneLimit),
+  );
+  const items = useItems(board);
+  const meetingItems = useMemo(
+    () => items.filter((item) => item.source === "meeting"),
+    [items],
+  );
+  return (
+    <MeetingsPage
+      items={meetingItems}
+      selectedId={selectedId}
+      onSelect={(id) =>
+        void router.navigate({
+          href: routeHash({ page: "meetings", id: id ?? undefined }).slice(1),
+        })
+      }
+      onOpenMeetingNotes={() =>
+        openOverlay(appStore, appStore.openMeetingNotes)
+      }
+      onNotice={appStore.notice}
+      onShowUndo={appStore.showUndo}
+      onStartPromoted={(cardId) => appStore.openStart({ cardId })}
+    />
+  );
+}
+
+export function MeetingsHeaderContainer() {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  return (
+    <PageHeaderActions>
+      <Button
+        size="sm"
+        onClick={() => openOverlay(appStore, appStore.openMeetingNotes)}
+      >
+        From meeting notes
+      </Button>
+    </PageHeaderActions>
+  );
+}
+
+function MeetingsPage({
   items,
   selectedId,
   onSelect,
@@ -31,7 +85,7 @@ export function MeetingsContainer({
   onNotice,
   onShowUndo,
   onStartPromoted,
-}: MeetingsContainerProps) {
+}: MeetingsPageProps) {
   const narrow = useMediaQuery(CAROUSEL_QUERY);
   const groups = useMemo(() => meetingGroups(items), [items]);
   const selected = items.find((item) => item.id === selectedId);

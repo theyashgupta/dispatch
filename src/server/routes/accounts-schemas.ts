@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  CLAUDE_ACCOUNTS_BOUNDS,
   DEFAULT_CLAUDE_ACCOUNT_ID,
   MAX_LOGIN_CODE_LEN,
 } from "../../shared/types.js";
@@ -21,7 +22,12 @@ export const removableAccountIdSchema = accountOrDefaultIdSchema.refine(
 );
 
 export const activeBodySchema = z.object(
-  { id: accountOrDefaultIdSchema },
+  {
+    id: accountOrDefaultIdSchema,
+    applyToRunning: z
+      .enum(["none", "idle", "all"], "invalid-apply")
+      .default("all"),
+  },
   "invalid-id",
 );
 
@@ -56,4 +62,28 @@ export const loginCodeBodySchema = z.object(
       ),
   },
   "invalid-code",
+);
+
+export const chainOrderBodySchema = z.strictObject(
+  { order: z.array(z.string("invalid-order"), "invalid-order") },
+  "invalid-order",
+);
+
+export const chainSettingsBodySchema = z.strictObject(
+  {
+    autoMove: z.boolean("invalid-settings").optional(),
+    thresholdPercent: z
+      .number("invalid-settings")
+      .int("invalid-settings")
+      .min(CLAUDE_ACCOUNTS_BOUNDS.thresholdPercent.min, "invalid-settings")
+      .max(CLAUDE_ACCOUNTS_BOUNDS.thresholdPercent.max, "invalid-settings")
+      .optional(),
+    minDwellMinutes: z
+      .number("invalid-settings")
+      .int("invalid-settings")
+      .min(CLAUDE_ACCOUNTS_BOUNDS.minDwellMinutes.min, "invalid-settings")
+      .max(CLAUDE_ACCOUNTS_BOUNDS.minDwellMinutes.max, "invalid-settings")
+      .optional(),
+  },
+  "invalid-settings",
 );

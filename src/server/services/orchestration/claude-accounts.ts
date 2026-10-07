@@ -7,6 +7,7 @@ import {
   DEFAULT_CLAUDE_ACCOUNT_ID,
   type ClaudeAccountSummary,
 } from "../../../shared/types.js";
+import { isValidChainOrder } from "../domain/account-order.js";
 import type { ClaudeIdentity } from "../../adapters/claude-cli.js";
 import {
   CLAUDE_ACCOUNTS_DIR,
@@ -27,11 +28,19 @@ export interface ClaudeAccountRecord {
   subscriptionType: string;
   createdAt: string;
   lastLoginAt: string;
+  position?: number;
 }
 
-export type AccountSummaryWithoutUsage = Omit<ClaudeAccountSummary, "usage">;
+export type AccountSummaryWithoutUsage = Omit<
+  ClaudeAccountSummary,
+  "usage" | "position" | "state" | "buckets" | "limitedUntil" | "inUse"
+>;
 
-export type LaunchAccount = { id: string; configDir?: string };
+export type LaunchAccount = {
+  id: string;
+  configDir?: string;
+  external?: boolean;
+};
 
 type LinkAction = "link" | "replace" | "keep";
 
@@ -104,6 +113,31 @@ function isAccountRecord(raw: unknown): raw is ClaudeAccountRecord {
 }
 
 /**
+ * Read the test harness map of account ids to config dirs that live outside the Dispatch folder.
+ *
+ * @remarks `DISPATCH_ACCOUNT_DIRS` (`<id>=<absolute path>`, comma separated) lets a sandbox use an
+ * account that another Dispatch logged in, because the keychain item is keyed by the dir path. It
+ * is never set in a real install.
+ */
+function externalAccountDirs(): Map<string, string> {
+  const dirs = new Map<string, string>();
+  for (const pair of (process.env.DISPATCH_ACCOUNT_DIRS ?? "").split(",")) {
+    const at = pair.indexOf("=");
+    const id = pair.slice(0, at).trim();
+    const dir = pair.slice(at + 1).trim();
+    if (at > 0 && isAccountId(id) && path.isAbsolute(dir)) dirs.set(id, dir);
+  }
+  return dirs;
+}
+
+/**
+ * Tell whether an account runs under a config dir that Dispatch must never write, link or remove.
+ */
+export function isExternalAccountDir(id: string): boolean {
+  return externalAccountDirs().has(id);
+}
+
+/**
  * The `CLAUDE_CONFIG_DIR` an added account runs under. Throws on a malformed id so a client string
  * can never become a path segment.
  */
@@ -111,6 +145,8 @@ export function accountDir(id: string): string {
   if (!isAccountId(id)) {
     throw new Error("invalid claude account id");
   }
+  const external = externalAccountDirs().get(id);
+  if (external !== undefined) return external;
   const dir = path.resolve(CLAUDE_ACCOUNTS_DIR, id);
   if (!dir.startsWith(CLAUDE_ACCOUNTS_DIR + path.sep)) {
     throw new Error("invalid claude account id");
@@ -236,6 +272,7 @@ export function materializeConfigDir(id: string): Promise<string> {
 
 async function materializeConfigDirNow(id: string): Promise<string> {
   const dir = accountDir(id);
+  if (isExternalAccountDir(id)) return dir;
   await fsp.mkdir(dir, { recursive: true, mode: 0o700 });
   fs.chmodSync(dir, 0o700);
 
@@ -267,54 +304,200 @@ async function materializeConfigDirNow(id: string): Promise<string> {
  * registry record goes too.
  */
 export async function removeConfigDir(id: string): Promise<void> {
+  if (isExternalAccountDir(id)) return;
   await fsp
     .rm(accountDir(id), { recursive: true, force: true })
     .catch(() => undefined);
 }
 
+export interface DefaultIdentity {
+  email: string;
+  orgId: string;
+}
+
+interface RegistryFile {
+  accounts: ClaudeAccountRecord[];
+  defaultIdentity?: DefaultIdentity;
+  defaultPosition: number;
+}
+
+function hasPosition(
+  record: ClaudeAccountRecord,
+): record is ClaudeAccountRecord & { position: number } {
+  return Number.isFinite(record.position);
+}
+
 /**
- * Read the registry fresh on every call. A missing file is an empty registry; a malformed one
- * throws so a corrupt file surfaces as a 500 instead of hiding accounts that still have config
- * dirs and keychain items on disk.
+ * Order the records of a registry file and give each a position.
+ *
+ * @remarks A version 2 file keeps its stored positions. A version 1 file, or a version 2 file where
+ * a record lacks a position, is numbered 1..n by creation time with Default at 0, so the order
+ * never depends on the array order of the file.
  */
-export async function readRegistry(): Promise<ClaudeAccountRecord[]> {
+function orderRecords(
+  accounts: ClaudeAccountRecord[],
+  version: unknown,
+): ClaudeAccountRecord[] {
+  if (version === 2 && accounts.every(hasPosition)) {
+    return [...accounts].sort((a, b) => a.position - b.position);
+  }
+  return accounts
+    .map((a, index) => ({ a, index, at: Date.parse(a.createdAt) || 0 }))
+    .sort((x, y) => x.at - y.at || x.index - y.index)
+    .map(({ a }, index) => ({ ...a, position: index + 1 }));
+}
+
+async function readRegistryFile(): Promise<RegistryFile> {
   let raw: string;
   try {
     raw = await fsp.readFile(CLAUDE_ACCOUNTS_REGISTRY_PATH, "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      return [];
+      return { accounts: [], defaultPosition: 0 };
     }
     throw err;
   }
-  const parsed: unknown = JSON.parse(raw);
-  const accounts = (parsed as { accounts?: unknown } | null)?.accounts;
+  const parsed = JSON.parse(raw) as {
+    version?: unknown;
+    accounts?: unknown;
+    defaultPosition?: unknown;
+    defaultIdentity?: Partial<DefaultIdentity> | null;
+  } | null;
+  const accounts = parsed?.accounts;
   if (!Array.isArray(accounts) || !accounts.every(isAccountRecord)) {
     throw new Error("claude accounts registry is malformed");
   }
-  return accounts;
+  const identity = parsed?.defaultIdentity;
+  const file: RegistryFile = {
+    accounts: orderRecords(accounts, parsed?.version),
+    defaultPosition:
+      parsed?.version === 2 && typeof parsed.defaultPosition === "number"
+        ? parsed.defaultPosition
+        : 0,
+  };
+  if (
+    typeof identity?.email === "string" &&
+    typeof identity.orgId === "string"
+  ) {
+    file.defaultIdentity = { email: identity.email, orgId: identity.orgId };
+  }
+  return file;
 }
 
-async function writeRegistry(accounts: ClaudeAccountRecord[]): Promise<void> {
+/**
+ * Read the registry fresh on every call.
+ *
+ * @remarks A missing file is an empty registry; a malformed one throws so a corrupt file surfaces
+ * as a 500 instead of hiding accounts that still have config dirs and keychain items on disk.
+ */
+export async function readRegistry(): Promise<ClaudeAccountRecord[]> {
+  return (await readRegistryFile()).accounts;
+}
+
+/**
+ * Read the chain order: every account id, Default included, from the lowest position up.
+ *
+ * @remarks Default sorts before an added account at the same position.
+ */
+export async function readChainOrder(): Promise<string[]> {
+  const { accounts, defaultPosition } = await readRegistryFile();
+  return [
+    { id: DEFAULT_CLAUDE_ACCOUNT_ID, position: defaultPosition },
+    ...accounts,
+  ]
+    .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+    .map((a) => a.id);
+}
+
+/**
+ * Read the last seen Default identity, `undefined` before the first recorded read.
+ */
+export async function readDefaultIdentity(): Promise<
+  DefaultIdentity | undefined
+> {
+  return (await readRegistryFile()).defaultIdentity;
+}
+
+async function writeRegistryFile(file: RegistryFile): Promise<void> {
   await fsp.mkdir(CLAUDE_ACCOUNTS_DIR, { recursive: true, mode: 0o700 });
   fs.chmodSync(CLAUDE_ACCOUNTS_DIR, 0o700);
   await writeFileAtomic(
     CLAUDE_ACCOUNTS_REGISTRY_PATH,
-    JSON.stringify({ version: 1, accounts }, null, 2) + "\n",
+    JSON.stringify({ version: 2, ...file }, null, 2) + "\n",
     { mode: 0o600 },
   );
   fs.chmodSync(CLAUDE_ACCOUNTS_REGISTRY_PATH, 0o600);
 }
 
+async function writeRegistry(accounts: ClaudeAccountRecord[]): Promise<void> {
+  const { defaultIdentity, defaultPosition } = await readRegistryFile();
+  await writeRegistryFile({
+    accounts,
+    defaultPosition,
+    ...(defaultIdentity ? { defaultIdentity } : {}),
+  });
+}
+
+/**
+ * Persist the last seen Default identity next to the accounts.
+ *
+ * @remarks Stores the email and organisation id only, never a token. The write is serialized
+ * behind the module mutation chain.
+ */
+export function writeDefaultIdentity(identity: DefaultIdentity): Promise<void> {
+  return serialized(async () => {
+    const { accounts, defaultPosition } = await readRegistryFile();
+    await writeRegistryFile({
+      accounts,
+      defaultPosition,
+      defaultIdentity: { email: identity.email, orgId: identity.orgId },
+    });
+  });
+}
+
 /**
  * Insert or replace a registry record by id, serialized behind the module mutation chain.
+ *
+ * @remarks A new record goes to the end of the chain order; a replaced record keeps its position.
  */
 export function upsertAccount(record: ClaudeAccountRecord): Promise<void> {
   accountDir(record.id);
   return serialized(async () => {
-    const accounts = (await readRegistry()).filter((a) => a.id !== record.id);
-    accounts.push(record);
+    const { accounts: current, defaultPosition } = await readRegistryFile();
+    const previous = current.find((a) => a.id === record.id);
+    const accounts = current.filter((a) => a.id !== record.id);
+    const last = accounts.reduce(
+      (max, a) => Math.max(max, a.position ?? 0),
+      defaultPosition,
+    );
+    accounts.push({ ...record, position: previous?.position ?? last + 1 });
     await writeRegistry(accounts);
+  });
+}
+
+/**
+ * Store a new chain order, Default included, and return it.
+ *
+ * @remarks The list is checked against the registry inside the registry lock, so an account added
+ * or removed meanwhile makes it invalid and nothing is written.
+ */
+export function setChainOrder(
+  order: readonly string[],
+): Promise<
+  { ok: true; order: string[] } | { ok: false; error: "invalid-order" }
+> {
+  return serialized(async () => {
+    const { accounts, defaultIdentity } = await readRegistryFile();
+    const current = [DEFAULT_CLAUDE_ACCOUNT_ID, ...accounts.map((a) => a.id)];
+    if (!isValidChainOrder(current, order)) {
+      return { ok: false, error: "invalid-order" };
+    }
+    await writeRegistryFile({
+      accounts: accounts.map((a) => ({ ...a, position: order.indexOf(a.id) })),
+      defaultPosition: order.indexOf(DEFAULT_CLAUDE_ACCOUNT_ID),
+      ...(defaultIdentity ? { defaultIdentity } : {}),
+    });
+    return { ok: true, order: await readChainOrder() };
   });
 }
 
@@ -367,7 +550,7 @@ export function resolveLaunchAccount(id: string): Promise<LaunchAccount> {
       );
     }
     await materializeConfigDirNow(id);
-    return { id, configDir: dir };
+    return { id, configDir: dir, external: isExternalAccountDir(id) };
   });
 }
 

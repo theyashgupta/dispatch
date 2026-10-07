@@ -12,10 +12,13 @@ export interface IsolatedEnv {
 }
 
 const FAKE_CLAUDE = `#!/bin/sh
+HOME_IDENTITY='{"loggedIn":true,"email":"home@example.com","orgId":"org-home","orgName":"Home Org","subscriptionType":"max"}'
 case "$1 $2" in
   "auth status")
-    if [ -z "$CLAUDE_CONFIG_DIR" ]; then
-      echo '{"loggedIn":true,"email":"home@example.com","orgId":"org-home","orgName":"Home Org","subscriptionType":"max"}'
+    if [ -z "$CLAUDE_CONFIG_DIR" ] && [ -f "$FAKE_CLAUDE_IDENTITY_FILE" ]; then
+      cat "$FAKE_CLAUDE_IDENTITY_FILE"
+    elif [ -z "$CLAUDE_CONFIG_DIR" ]; then
+      echo "$HOME_IDENTITY"
     elif [ -f "$CLAUDE_CONFIG_DIR/.fake-login" ]; then
       cat "$CLAUDE_CONFIG_DIR/.fake-login"
     else
@@ -37,9 +40,29 @@ case "$1 $2" in
       fi
       case "$code" in
         good)
-          echo '{"loggedIn":true,"email":"second@example.com","orgId":"org-2","orgName":"Second Org","subscriptionType":"pro"}' > "$CLAUDE_CONFIG_DIR/.fake-login"
+          if [ -f "$FAKE_CLAUDE_LOGIN_IDENTITY_FILE" ]; then
+            cp "$FAKE_CLAUDE_LOGIN_IDENTITY_FILE" "$CLAUDE_CONFIG_DIR/.fake-login"
+          else
+            echo '{"loggedIn":true,"email":"second@example.com","orgId":"org-2","orgName":"Second Org","subscriptionType":"pro"}' > "$CLAUDE_CONFIG_DIR/.fake-login"
+          fi
           echo "Logged in"
           exit 0
+          ;;
+        home)
+          if [ -f "$FAKE_CLAUDE_IDENTITY_FILE" ]; then
+            cp "$FAKE_CLAUDE_IDENTITY_FILE" "$CLAUDE_CONFIG_DIR/.fake-login"
+          else
+            echo "$HOME_IDENTITY" > "$CLAUDE_CONFIG_DIR/.fake-login"
+          fi
+          echo "Logged in"
+          exit 0
+          ;;
+        stale)
+          echo "Login failed: Request failed with status code 400" >&2
+          exit 1
+          ;;
+        crash)
+          exit 1
           ;;
         hang)
           sleep 30
@@ -210,19 +233,132 @@ export async function isolateTmuxEnv(): Promise<TmuxEnv> {
 }
 
 /**
- * Install a fake `claude` REPL on the isolated PATH: it records its argv to `argvFile`, prints
- * the READY footer, exits on SIGINT like the real one does on Ctrl-C, and refuses a
- * `--resume missing-*` id with Claude's own "No conversation found" message.
+ * Build the REPL body of {@link writeFakeRepl} in state folder mode, with `stateDir` baked in.
+ *
+ * @remarks The files in `stateDir` drive it, so a QA script changes its state with no access to
+ * the pane environment. Keys are read one at a time, so Escape and the arrow keys reach the limit
+ * surfaces the way they reach the real CLI.
+ */
+function stateDirRepl(stateDir: string, refuseContinue: string): string {
+  const state = `'${stateDir.replace(/'/g, `'\\''`)}'`;
+  return `#!/bin/bash
+state=${state}
+if [ "$1" = "auth" ]; then
+  FAKE_CLAUDE_IDENTITY_FILE="$state/identity.json" FAKE_CLAUDE_LOGIN_IDENTITY_FILE="$state/login-identity.json" exec "$(dirname "$0")/claude-auth" "$@"
+fi
+if [ "$1" = "--version" ]; then
+  echo "2.1.289 (Claude Code)"
+  exit 0
+fi
+printf 'CLAUDE_CONFIG_DIR=%s\\t%s\\n' "\${CLAUDE_CONFIG_DIR:-}" "$*" >> "$state/launches.log"
+if [ -n "$FAKE_CLAUDE_ARGV_FILE" ]; then printf '%s\\n' "$@" > "$FAKE_CLAUDE_ARGV_FILE"; fi
+case " $* " in
+  *" --resume missing-"*) echo "No conversation found with session ID: $2"; exit 1 ;;
+${refuseContinue}esac
+trap 'exit 0' INT
+menu() {
+  case "$1" in
+    b) options=("Stop and wait for limit to reset" "Wait here, then continue automatically at 10:40am" "Switch to usage credits" "Upgrade your plan") ;;
+    b-credits-first) options=("Switch to usage credits" "Upgrade your plan" "Stop and wait for limit to reset" "Wait here, then continue automatically at 10:40am") ;;
+    *) options=("Switch to usage credits" "Upgrade your plan") ;;
+  esac
+}
+render() {
+  printf '\\033[2J\\033[H'
+  case "$shown" in
+    busy) echo "* Working... (esc to interrupt)" ;;
+    limit-a) echo "Usage limit reached · continuing automatically at 10:40am · esc to cancel" ;;
+    limit-b*)
+      echo "What do you want to do?"
+      echo
+      for i in "\${!options[@]}"; do
+        if [ "$i" -eq "$cursor" ]; then mark="❯"; else mark=" "; fi
+        echo " $mark $((i + 1)). \${options[$i]}"
+      done
+      ;;
+    *) echo "? for shortcuts" ;;
+  esac
+}
+key() {
+  printf '%s\\n' "$1" >> "$state/keys.log"
+}
+shown=""
+line=""
+cursor=0
+while :; do
+  if [ -f "$state/limit-mode" ]; then now="limit-$(head -n 1 "$state/limit-mode")"
+  elif [ -f "$state/busy" ]; then now=busy
+  else now=idle; fi
+  if [ "$now" != "$shown" ]; then
+    shown=$now
+    cursor=0
+    menu "\${shown#limit-}"
+    render
+  fi
+  IFS= read -r -s -n 1 -d '' -t 1 ch
+  rc=$?
+  if [ "$rc" -gt 128 ]; then continue; fi
+  if [ "$rc" -ne 0 ]; then sleep 1; continue; fi
+  case "$ch" in
+    $'\\e')
+      IFS= read -r -s -n 2 -t 1 rest
+      case "$rest" in
+        '[A') key "<Up>"; [ "$cursor" -gt 0 ] && cursor=$((cursor - 1)); render ;;
+        '[B') key "<Down>"; [ "$cursor" -lt $((\${#options[@]} - 1)) ] && cursor=$((cursor + 1)); render ;;
+        *)
+          key "<Esc>"
+          case "$shown" in limit-*) rm -f "$state/limit-mode" ;; esac
+          ;;
+      esac
+      ;;
+    $'\\r'|$'\\n')
+      if [ -n "$line" ]; then key "$line"; else key "<Enter>"; fi
+      case "$shown" in
+        limit-b*)
+          key "selected: \${options[$cursor]}"
+          rm -f "$state/limit-mode"
+          ;;
+      esac
+      [ "$line" = "/exit" ] && exit 0
+      line=""
+      ;;
+    *) line="$line$ch" ;;
+  esac
+done
+`;
+}
+
+/**
+ * Install a fake `claude` REPL on the isolated PATH.
+ *
+ * @remarks It records its argv to `argvFile`, prints the READY footer, exits on SIGINT like the
+ * real one, and refuses a `--resume missing-*` id with Claude's own "No conversation found"
+ * message. With `stateDir` it also answers `auth` from the auth fake (the home identity from
+ * `identity.json`), logs each launch to `launches.log` and each key to `keys.log`, exits on
+ * `/exit`, and shows `esc to interrupt` while `busy` exists or the limit surface that
+ * `limit-mode` names (`a`, `b`, `b-credits-first`, `b-nostop`).
  */
 export function writeFakeRepl(
-  env: IsolatedEnv,
+  env: Pick<IsolatedEnv, "binDir">,
   argvFile: string,
-  opts: { refuseContinue?: boolean } = {},
+  opts: { refuseContinue?: boolean; stateDir?: string } = {},
 ): void {
   process.env.FAKE_CLAUDE_ARGV_FILE = argvFile;
   const refuseContinue = opts.refuseContinue
     ? `  *" --continue "*) echo "No conversation found to continue"; exit 1 ;;\n`
     : "";
+  if (opts.stateDir !== undefined) {
+    fs.mkdirSync(opts.stateDir, { recursive: true });
+    fs.writeFileSync(path.join(env.binDir, "claude-auth"), FAKE_CLAUDE, {
+      mode: 0o755,
+    });
+    fs.writeFileSync(
+      path.join(env.binDir, "claude"),
+      stateDirRepl(opts.stateDir, refuseContinue),
+      { mode: 0o755 },
+    );
+    return;
+  }
   fs.writeFileSync(
     path.join(env.binDir, "claude"),
     `#!/bin/sh

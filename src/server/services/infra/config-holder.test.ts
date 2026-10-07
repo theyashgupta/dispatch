@@ -11,9 +11,11 @@ const configPath = path.join(home, ".dispatch", "config.json");
 const { CONFIG_PATH } = await import("./paths.js");
 assert.ok(CONFIG_PATH.startsWith(home), "CONFIG_PATH escaped the temp HOME");
 const {
+  getClaudeAccountsSettings,
   getOrchestrationConfig,
   patchSourceConfig,
   setOrchestrationConfig,
+  updateClaudeAccountsSettings,
   updateLinearApiKey,
   updateSourceFilters,
 } = await import("./config-holder.js");
@@ -91,4 +93,78 @@ test("patchSourceConfig writes only sources.meeting, keeps the Linear block and 
     windowHours: 168,
   });
   assert.equal(getOrchestrationConfig()?.sources?.linear?.apiKey, "k");
+});
+
+test("claude accounts settings default when the key is absent", () => {
+  writeConfig();
+  setOrchestrationConfig({ linearApiKey: "", port: 4700 });
+  assert.deepEqual(getClaudeAccountsSettings(), {
+    autoMove: false,
+    thresholdPercent: 100,
+    minDwellMinutes: 15,
+  });
+});
+
+test("claude accounts settings merge partial keys over the defaults", () => {
+  setOrchestrationConfig({
+    linearApiKey: "",
+    port: 4700,
+    claudeAccounts: { autoMove: true, minDwellMinutes: 30 },
+  });
+  assert.deepEqual(getClaudeAccountsSettings(), {
+    autoMove: true,
+    thresholdPercent: 100,
+    minDwellMinutes: 30,
+  });
+});
+
+test("updateClaudeAccountsSettings writes only the claudeAccounts key and keeps stored keys", () => {
+  writeConfig();
+  setOrchestrationConfig({ linearApiKey: "", port: 4700 });
+  const before = JSON.parse(fs.readFileSync(configPath, "utf8")) as Record<
+    string,
+    unknown
+  >;
+  updateClaudeAccountsSettings({ thresholdPercent: 80 });
+  updateClaudeAccountsSettings({ autoMove: true });
+  const after = JSON.parse(fs.readFileSync(configPath, "utf8")) as Record<
+    string,
+    unknown
+  >;
+  assert.deepEqual(after, {
+    ...before,
+    claudeAccounts: { thresholdPercent: 80, autoMove: true },
+  });
+  assert.deepEqual(getClaudeAccountsSettings(), {
+    autoMove: true,
+    thresholdPercent: 80,
+    minDwellMinutes: 15,
+  });
+});
+
+test("updateClaudeAccountsSettings with an empty patch leaves config.json byte-identical", () => {
+  writeConfig();
+  setOrchestrationConfig({ linearApiKey: "", port: 4700 });
+  const before = fs.readFileSync(configPath, "utf8");
+  updateClaudeAccountsSettings({});
+  assert.equal(fs.readFileSync(configPath, "utf8"), before);
+});
+
+test("updateClaudeAccountsSettings never makes a wrong-typed stored key live", () => {
+  writeConfig();
+  const raw = JSON.parse(fs.readFileSync(configPath, "utf8")) as Record<
+    string,
+    unknown
+  >;
+  fs.writeFileSync(
+    configPath,
+    JSON.stringify({ ...raw, claudeAccounts: { thresholdPercent: "90" } }),
+  );
+  setOrchestrationConfig({ linearApiKey: "", port: 4700, claudeAccounts: {} });
+  updateClaudeAccountsSettings({ minDwellMinutes: 5 });
+  assert.deepEqual(getClaudeAccountsSettings(), {
+    autoMove: false,
+    thresholdPercent: 100,
+    minDwellMinutes: 5,
+  });
 });

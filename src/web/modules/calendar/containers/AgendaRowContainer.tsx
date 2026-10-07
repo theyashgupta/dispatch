@@ -1,4 +1,6 @@
+import { useRouteContext } from "@tanstack/react-router";
 import type { Card, Item } from "../../../../shared/types.js";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { useSingleFlight } from "@/queries/single-flight";
 import { AgendaRow } from "@/modules/calendar/components/AgendaRow";
 import {
@@ -24,7 +26,9 @@ export function AgendaRowContainer({
   onNotice,
   onStartPromoted,
 }: AgendaRowContainerProps) {
-  const prepare = usePrepareTicketMutation((result) => {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const board = useAppStore(appStore, (s) => s.board);
+  const prepare = usePrepareTicketMutation(board, (result) => {
     if (result.ok) onStartPromoted(result.card.id);
     else onNotice("Couldn't create the prepare ticket.");
   });

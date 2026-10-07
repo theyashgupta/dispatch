@@ -8,7 +8,10 @@ import {
 } from "../../../shared/board-key.js";
 import type {
   Board,
+  BoardCount,
+  BoardCounts,
   BoardKey,
+  BoardList,
   BoardPolicy,
   BoardWorkspaceRepo,
   Card,
@@ -63,13 +66,6 @@ interface BoardUpdateInput {
   workspaceRoot?: string;
   repositories?: BoardWorkspaceRepo[];
   linearTeamKeys?: string[];
-}
-
-interface BoardCount {
-  key: BoardKey;
-  running: number;
-  openGroups: number;
-  attention: number;
 }
 
 /** True when a variant carries fixed UI copy, so a schema message can become a typed error. */
@@ -228,7 +224,7 @@ export function listBoardSessions(
 }
 
 /** The counts of every board, from a single pass over the cards of all boards. */
-export function boardCounts(): { counts: BoardCount[]; at: string } {
+export function boardCounts(): BoardCounts {
   const byKey = new Map<BoardKey, BoardCount>(
     store
       .listBoards()
@@ -319,7 +315,7 @@ function linearCardPrefixes(): string[] {
  */
 export async function listBoards(
   readTeamKeys: LinearTeamKeyReader = readLinearTeamKeys,
-): Promise<{ boards: Board[]; knownLinearTeamKeys: string[] }> {
+): Promise<BoardList> {
   const known = new Set(linearCardPrefixes());
   for (const key of (await readTeamKeys()) ?? []) known.add(key);
   return {
@@ -537,7 +533,7 @@ export async function archiveBoard(key: BoardKey): Promise<Board> {
   if (running > 0) {
     throw new BoardConflictError(
       "sessions-running",
-      `Stop the ${running} running sessions first.`,
+      `Stop the ${running} running ${running === 1 ? "session" : "sessions"} first.`,
       { running },
     );
   }

@@ -1,3 +1,4 @@
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Card } from "../../../shared/types.js";
@@ -11,6 +12,7 @@ const LINKED = `Fix the header.\n\n## Screenshots\n\n![screenshot 1](attachments
 function card(over: Partial<Card>): Card {
   return {
     id: "LOCAL-3",
+    boardKey: DEFAULT_BOARD_KEY,
     issueId: "LOCAL-3",
     identifier: "LOCAL-3",
     title: "Header bug",

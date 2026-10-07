@@ -201,7 +201,7 @@ export interface Item {
 export interface Card {
   /** Internal card id (can equal issueId in Phase 1). */
   id: string;
-  boardKey?: BoardKey;
+  boardKey: BoardKey;
   /** Linear issue id — the upsert key for the poller. */
   issueId: string;
   /** Human-readable Linear identifier, e.g. "PROP-123". */
@@ -550,6 +550,9 @@ export interface Session {
    * NON-SECRET: a uuid, rides `snapshot()` unredacted.
    */
   claudeAccountId?: string;
+  pendingClaudeAccountId?: string;
+  claudeAccountStale?: boolean;
+  accountPinned?: boolean;
   /**
    * Per-session hook-auth secret. NEVER serialized to the wire — the store's
    * `redactCard`/`snapshot()` chokepoint strips it from the card AND from every session copy,
@@ -718,6 +721,7 @@ export interface SessionSummary {
   lastMarker?: string;
   /** Mirrors `Session.claudeAccountId`; absent for sessions that predate account tagging. */
   claudeAccountId?: string;
+  claudeAccountStale?: boolean;
   /**
    * Mirrors {@link Session.cleanupBlocked} for THIS session. Absent when this session is not
    * blocked, the same absent-means-nothing-to-report idiom as `sessionCount`, which stays absent
@@ -815,7 +819,7 @@ export interface SessionFields {
  */
 export interface BoardSnapshot {
   cards: Card[];
-  boardKey?: BoardKey;
+  boardKey: BoardKey;
   syncedAt: string | null;
   /** Non-fatal sync problem from the last poll cycle (e.g. truncated pull); null when healthy. */
   syncWarning?: string | null;
@@ -1297,6 +1301,7 @@ export interface Config {
    * login. Added accounts are registry ids under `claude-accounts/`.
    */
   activeClaudeAccountId?: string;
+  claudeAccounts?: Partial<ClaudeAccountsSettings>;
   /** Terminal appearance chosen in Settings; absent or invalid resolves to the shipped default. */
   terminal?: TerminalAppearance;
   profile?: UserProfile;
@@ -1351,6 +1356,42 @@ export interface ClaudeAccountSummary {
   isDefault: boolean;
   lastLoginAt?: string;
   usage: ClaudeUsageSnapshot;
+  position: number;
+  state: ChainAccountState;
+  buckets: ChainBucket[];
+  limitedUntil: string | null;
+  inUse: boolean;
+}
+
+export type SessionTurnState = "idle" | "busy" | "limit" | "unknown";
+
+export type ApplyChoice = "none" | "idle" | "all";
+
+export interface SessionRef {
+  cardId: string;
+  sessionId: string;
+}
+
+export type ContinueAction = "available" | "usage-unknown";
+
+export interface AccountSessionEntry extends SessionRef {
+  cardTitle: string;
+  accountId: string;
+  turn: SessionTurnState;
+  stale: boolean;
+  pendingAccountId?: string;
+  continueAction?: ContinueAction;
+  pinned: boolean;
+}
+
+export interface AccountApplyResult {
+  moved: SessionRef[];
+  queued: SessionRef[];
+  skipped: (SessionRef & { reason: string })[];
+}
+
+export interface AccountSwitchResponse extends AccountApplyResult {
+  activeId: string;
 }
 
 export type ClaudeLoginView =
@@ -1360,6 +1401,64 @@ export type ClaudeLoginView =
   | { state: "finishing"; accountId: string }
   | { state: "done"; account: ClaudeAccountSummary }
   | { state: "error"; message: string };
+
+export interface ClaudeAccountsSettings {
+  autoMove: boolean;
+  thresholdPercent: number;
+  minDwellMinutes: number;
+}
+
+export const DEFAULT_CLAUDE_ACCOUNTS_SETTINGS: ClaudeAccountsSettings = {
+  autoMove: false,
+  thresholdPercent: 100,
+  minDwellMinutes: 15,
+};
+
+export const CLAUDE_ACCOUNTS_BOUNDS = {
+  thresholdPercent: { min: 50, max: 100 },
+  minDwellMinutes: { min: 0, max: 240 },
+} as const;
+
+export type ChainAccountState =
+  "available" | "near-limit" | "limited" | "login-expired" | "unknown";
+
+export interface ChainBucket {
+  kind: string;
+  percent: number;
+  resetsAt: string | null;
+}
+
+export interface ChainAccountEntry {
+  state: ChainAccountState;
+  buckets: ChainBucket[];
+  limitedUntil: string | null;
+}
+
+export interface ChainExhaustedRecord {
+  since: string;
+  earliestResetAt: string | null;
+}
+
+export interface ChainMove {
+  at: string;
+  from: string;
+  to: string;
+  reason: string;
+}
+
+export interface ChainView {
+  settings: ClaudeAccountsSettings;
+  exhausted: ChainExhaustedRecord | null;
+  history: ChainMove[];
+  inUseSince: string | null;
+}
+
+export interface ChainStateFile {
+  accounts: Record<string, ChainAccountEntry>;
+  inUseSince: string | null;
+  exhausted: ChainExhaustedRecord | null;
+  moves: ChainMove[];
+}
 
 /**
  * The runtime-mutable filter selection for a source. An empty array (or `currentCycle: false`) means
@@ -1650,6 +1749,23 @@ export type BoardPatch = Partial<
   Pick<Board, "name" | "workspaceRoot" | "repositories" | "linearTeamKeys">
 >;
 
+export interface BoardList {
+  boards: Board[];
+  knownLinearTeamKeys: string[];
+}
+
+export interface BoardCount {
+  key: BoardKey;
+  running: number;
+  openGroups: number;
+  attention: number;
+}
+
+export interface BoardCounts {
+  counts: BoardCount[];
+  at: string;
+}
+
 export type CreateBoardResult =
   | { ok: true; board: Board }
   | { ok: false; reason: "invalid-key" | "reserved-key" }
@@ -1659,6 +1775,18 @@ export type CreateBoardResult =
 export type ArchiveBoardResult =
   | { ok: true; board: Board }
   | { ok: false; reason: "default-board" | "unknown-board" };
+
+export type AccountEventType =
+  | "account_moved"
+  | "account_login_changed"
+  | "account_login_failed"
+  | "account_failover"
+  | "account_return"
+  | "account_chain_exhausted";
+
+export type AccountActivityEvent = Omit<ActivityEvent, "type"> & {
+  type: AccountEventType;
+};
 
 export type LoopUnitStatus =
   | "not started"

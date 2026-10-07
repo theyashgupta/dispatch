@@ -11,14 +11,16 @@ import {
   SidebarSeparator,
   useSidebar,
 } from "@/components/ui/sidebar";
+import { Wordmark } from "@/components/Wordmark";
 import { cn } from "@/lib/utils";
+import { BoardSwitcher, type BoardSwitcherData } from "./BoardSwitcher";
 import { NavRow } from "@/modules/shell/components/NavRow";
 import { SidebarFooterActions } from "@/modules/shell/components/SidebarFooterActions";
 import {
   navGroups,
   type NavCounts,
   type NavItem,
-} from "@/modules/shell/domain/nav-items";
+} from "../../../../shared/nav-items.js";
 import type { SyncSnapshot } from "@/modules/shell/domain/sync-status";
 
 export interface AppSidebarProps {
@@ -30,6 +32,7 @@ export interface AppSidebarProps {
   activityUnseen: boolean;
   activityOpen: boolean;
   carousel: boolean;
+  switcher?: BoardSwitcherData;
   onNavigate: (page: Page) => void;
   onOpenCreateTicket: () => void;
   onOpenActivity: () => void;
@@ -44,6 +47,7 @@ export function AppSidebar({
   activityUnseen,
   activityOpen,
   carousel,
+  switcher,
   onNavigate,
   onOpenCreateTicket,
   onOpenActivity,
@@ -51,6 +55,12 @@ export function AppSidebar({
   const { state, isMobile } = useSidebar();
   const collapsed = state === "collapsed" && !isMobile;
   const canToggle = !isMobile && !carousel;
+  const brand = (
+    <>
+      <Glyph size={16} title={collapsed ? "Dispatch" : undefined} />
+      {collapsed ? null : <Wordmark />}
+    </>
+  );
 
   return (
     <Sidebar collapsible="icon" className="z-11">
@@ -62,13 +72,29 @@ export function AppSidebar({
           className={cn(
             "h-(--page-header-height) shrink-0 flex-row items-center gap-1 border-b border-border p-0 px-4 text-foreground",
             collapsed && "justify-center px-0",
+            switcher && "h-auto flex-col items-stretch gap-0 px-0",
           )}
         >
-          <Glyph size={16} title={collapsed ? "Dispatch" : undefined} />
-          {collapsed ? null : (
-            <span className="text-(length:--font-display) font-semibold tracking-[0.18em]">
-              DISPATCH
-            </span>
+          {switcher ? (
+            <>
+              <div
+                className={cn(
+                  "flex h-(--page-header-height) shrink-0 items-center gap-1 px-4",
+                  collapsed && "justify-center px-0",
+                )}
+              >
+                {brand}
+              </div>
+              <div className="flex h-8 shrink-0 items-start px-2">
+                <BoardSwitcher
+                  {...switcher}
+                  collapsed={collapsed}
+                  mobile={isMobile}
+                />
+              </div>
+            </>
+          ) : (
+            brand
           )}
         </SidebarHeader>
 

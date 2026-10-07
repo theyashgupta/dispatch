@@ -6,6 +6,8 @@ import {
 import { boardRepository as store } from "../../store/board-repository.js";
 import { isTranscriptPath } from "../../adapters/transcript.js";
 import { getHooksRuntime } from "../infra/config-holder.js";
+import { runPendingMove } from "./session-account-apply.js";
+import { forgetTurnState, recordTurnEvent } from "./session-turn.js";
 
 /**
  * Tool names whose `PreToolUse` fires the structural Needs-Input safety net (HOOK-03) and whose
@@ -70,6 +72,7 @@ export function reapActivityThrottle(
   const key = throttleKey(cardId, sessionId);
   lastActivityStampMs.delete(key);
   preToolUseSeq.delete(key);
+  forgetTurnState(cardId, sessionId);
 }
 
 /**
@@ -245,11 +248,13 @@ export async function applyHookEvent(
         session_id?: unknown;
         tool_name?: unknown;
         tool_use_id?: unknown;
+        error?: unknown;
         transcript_path?: unknown;
       }
     | undefined,
 ): Promise<void> {
   if (getHooksRuntime()?.statusChannel === "pane") return;
+  recordTurnEvent(cardId, sessionId, body?.hook_event_name, body?.error);
 
   const session = store
     .getCard(cardId)
@@ -260,7 +265,7 @@ export async function applyHookEvent(
 
   const key = throttleKey(cardId, sessionId);
   const sid = body?.session_id;
-  if (typeof sid === "string" && /^[\w-]{1,256}$/.test(sid)) {
+  if (typeof sid === "string" && /^\w[\w-]{0,255}$/.test(sid)) {
     await store.setClaudeSessionId(cardId, sessionId, sid);
   }
   if (isTranscriptPath(body?.transcript_path)) {
@@ -300,5 +305,13 @@ export async function applyHookEvent(
 
   if (event === "PostToolUse" && toolName !== undefined) {
     await store.flipBack(cardId, sessionId);
+  }
+
+  if (event === "Stop") {
+    runPendingMove(cardId, sessionId).catch((err: unknown) => {
+      console.warn(
+        `[hooks] pending account move failed for card ${cardId}: ${(err as Error).message}`,
+      );
+    });
   }
 }

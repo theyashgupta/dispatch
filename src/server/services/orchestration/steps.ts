@@ -60,6 +60,7 @@ const IDENTIFIER_RE = /^[A-Za-z0-9]+-\d+$/;
 /** Trust dialog signatures (02-RESEARCH § "Pattern 3", captured on Claude Code v2.1.200). */
 const TRUST_DIALOG =
   /Yes, I trust this folder|Do you trust the files in this folder/;
+const TRUST_NO_FOCUSED = /❯\s*(?:\d+\.\s*)?No, exit/;
 /**
  * Bypass Permissions mode dialog (57-RESEARCH item 5, live-probed on Claude Code v2.1.214):
  * its default-focused option is "1. No, exit", not an accept — a blind Enter here would exit
@@ -85,7 +86,8 @@ const RESUME_DIALOG = /Resume from summary|Resume full session as-is/;
  * are footer chrome that the trust dialog never renders, preserving the "not matched until past
  * the trust prompt" property.
  */
-const READY = /\? for shortcuts|bypass permissions on|shift\+tab to cycle/;
+export const READY =
+  /\? for shortcuts|bypass permissions on|shift\+tab to cycle/;
 
 /**
  * Claude's refusal when `--resume <id>` or `--continue` names a conversation whose transcript
@@ -97,6 +99,8 @@ export const RESUME_MISSING = /No conversation found/;
 
 const READINESS_TIMEOUT_MS = 30_000;
 const POLL_INTERVAL_MS = 500;
+const LAUNCH_CLEAR_MS = 3_000;
+const LAUNCH_CLEAR_POLL_MS = 150;
 const PASTE_SETTLE_MS = 500;
 
 /**
@@ -399,6 +403,7 @@ const createWorktrees: SagaStep = {
  * @remarks (`NEW-13`, Phase 96 R2) `capturePane`/`sendKeys` are pane-level targets and require the
  * TRAILING-COLON exact-match form (`=<name>:`), built once here rather than at each call site, so
  * a suffixed sibling session can never be silently prefix-matched once the exact session is gone.
+ * Claude Code 2.1.291 lists "No, exit" first in the trust dialog, so a focused "No" gets Down first.
  * @see docs/ARCHITECTURE.md#tmux-invocations
  * @see docs/ARCHITECTURE.md#in-review-lifecycle
  */
@@ -418,6 +423,9 @@ export async function awaitReplReady(session: string): Promise<void> {
       resumeAccepted = true;
     }
     if (!trustAccepted && TRUST_DIALOG.test(lastPane)) {
+      if (TRUST_NO_FOCUSED.test(lastPane)) {
+        await sendKeys(paneTarget, ["Down"]);
+      }
       await sendKeys(paneTarget, ["Enter"]);
       trustAccepted = true;
     }
@@ -440,9 +448,12 @@ export async function awaitReplReady(session: string): Promise<void> {
  * polls are required because a fresh pane reads idle for a few tens of milliseconds before the
  * rc's first child takes the tty (measured 35ms to 72ms after `new-session`).
  */
-async function awaitShellPrompt(session: string): Promise<void> {
+export async function awaitShellPrompt(
+  session: string,
+  timeoutMs = READINESS_TIMEOUT_MS,
+): Promise<void> {
   const paneTarget = `=${session}:`;
-  const deadline = Date.now() + READINESS_TIMEOUT_MS;
+  const deadline = Date.now() + timeoutMs;
   let idlePolls = 0;
   while (Date.now() < deadline) {
     idlePolls = (await paneAtPrompt(paneTarget)) ? idlePolls + 1 : 0;
@@ -484,7 +495,7 @@ type LaunchHooks = { port: number; token: string; cardId: string } | null;
  */
 export async function launchClaude(input: LaunchClaudeInput): Promise<boolean> {
   const { cardId, sessionId, tmuxSession, cwd, leadingArgs, account } = input;
-  await preSeedTrust(cwd, account.configDir);
+  if (account.external !== true) await preSeedTrust(cwd, account.configDir);
   const created = !(await hasSession(`=${tmuxSession}`));
   const hooks = created
     ? await mintHooks(cardId, sessionId)
@@ -572,12 +583,12 @@ export async function buildLaunch(
 }
 
 /**
- * Type a claude argv into a session's shell as one pty-shimmed, fully quoted line and submit it
- * with a separate `Enter`.
+ * Type a claude argv into a session's shell as one pty-shimmed, quoted line, then press `Enter`.
  *
  * @remarks `C-u` discards anything the person had half-typed at the prompt and `C-l` clears the
- * screen so `awaitReplReady` cannot match a READY footer left over from the previous run; both
- * are line-editor keys, never history entries. The caller decides that the pane is at its prompt.
+ * screen; both are line-editor keys, never history entries. The line waits up to 3 s for the old
+ * READY or RESUME_MISSING text to leave the pane, so `awaitReplReady` cannot match it, and goes
+ * out regardless when the wait runs out or a capture fails.
  */
 export async function typeLaunchLine(
   session: string,
@@ -586,6 +597,28 @@ export async function typeLaunchLine(
   const paneTarget = `=${session}:`;
   const line = shellQuote(wrapWithPtyShim(argv));
   await sendKeys(paneTarget, ["C-u", "C-l"]);
+  const deadline = Date.now() + LAUNCH_CLEAR_MS;
+  while (Date.now() < deadline) {
+    const pane = await capturePane(paneTarget).catch(() => null);
+    if (pane === null || !(READY.test(pane) || RESUME_MISSING.test(pane)))
+      break;
+    await sleep(LAUNCH_CLEAR_POLL_MS);
+  }
+  await sendLiteral(paneTarget, line);
+  await sendKeys(paneTarget, ["Enter"]);
+}
+
+/**
+ * Type the export or unset line for `CLAUDE_CONFIG_DIR` into a session's shell and submit it.
+ *
+ * @remarks Same shape as {@link typeLaunchLine}: the caller decides that the pane is at its prompt.
+ */
+export async function typeAccountEnvLine(
+  session: string,
+  line: string,
+): Promise<void> {
+  const paneTarget = `=${session}:`;
+  await sendKeys(paneTarget, ["C-u"]);
   await sendLiteral(paneTarget, line);
   await sendKeys(paneTarget, ["Enter"]);
 }

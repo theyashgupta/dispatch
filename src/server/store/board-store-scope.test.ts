@@ -7,6 +7,7 @@ import {
   DEFAULT_BOARD_KEY,
   parseBoardKey,
 } from "../../shared/board-key.js";
+import { isInboxWaiting } from "../../shared/inbox-count.js";
 import type { BoardKey } from "../../shared/types.js";
 
 isolateEnv();
@@ -300,4 +301,17 @@ void test("minting skips an id that a Linear card holds as its identifier", asyn
   counters.ACME = 59;
   const card = await store.createLocalCard(ACME, "after a Linear id", "");
   assert.equal(card.id, "ACME-61");
+});
+
+void test("the Inbox cards of a snapshot belong to its board, so a LOCAL Inbox card never reaches ACME", async () => {
+  const localInbox = await store.createLocalCard(LOCAL, "local inbox", "");
+  const acmeInbox = await store.createLocalCard(ACME, "acme inbox", "");
+  await store.moveCardManual(localInbox.id, "inbox");
+  await store.moveCardManual(acmeInbox.id, "inbox");
+  const waiting = (board: BoardKey) =>
+    store.snapshot(board).cards.filter(isInboxWaiting);
+  assert.ok(waiting(ACME).some((c) => c.id === acmeInbox.id));
+  assert.ok(waiting(ACME).every((c) => c.boardKey === ACME));
+  assert.ok(waiting(LOCAL).some((c) => c.id === localInbox.id));
+  assert.ok(waiting(LOCAL).every((c) => c.boardKey === LOCAL));
 });

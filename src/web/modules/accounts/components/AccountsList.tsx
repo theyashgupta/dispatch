@@ -10,6 +10,7 @@ interface AccountsListProps {
   failed: boolean;
   addDisabled: boolean;
   onAdd: () => void;
+  onSwitch: (account: ClaudeAccountSummary) => void;
   onRelogin: (account: ClaudeAccountSummary) => void;
   onRemove: (account: ClaudeAccountSummary) => void;
   reloginDisabled: boolean;
@@ -22,10 +23,13 @@ export function AccountsList({
   failed,
   addDisabled,
   onAdd,
+  onSwitch,
   onRelogin,
   onRemove,
   reloginDisabled,
 }: AccountsListProps) {
+  const defaultOnly = accounts.every((account) => account.isDefault);
+  const defaultEmail = accounts.find((account) => account.isDefault)?.email;
   return (
     <div className="flex flex-col gap-4" data-testid="accounts-tab">
       <div className="flex justify-between gap-2">
@@ -49,6 +53,17 @@ export function AccountsList({
       )}
       {failed && <ErrorAlert>Couldn't load Claude accounts.</ErrorAlert>}
 
+      {loaded && defaultOnly && (
+        <p
+          className="text-sm text-foreground"
+          data-testid="accounts-empty-registry"
+        >
+          No accounts added yet. Default follows your home login
+          {defaultEmail ? ` (${defaultEmail})` : ""}. Add an account to run
+          sessions on another login.
+        </p>
+      )}
+
       {loaded && (
         <div className="flex flex-col gap-2">
           {accounts.map((account) => (
@@ -57,6 +72,7 @@ export function AccountsList({
               account={account}
               active={account.id === activeId}
               reloginDisabled={reloginDisabled}
+              onSwitch={() => onSwitch(account)}
               onRelogin={() => onRelogin(account)}
               onRemove={() => onRemove(account)}
             />

@@ -44,16 +44,7 @@ export function SidebarFooterActions({
   return (
     <SidebarFooter className="gap-1 border-t border-border p-2">
       <SyncStatus sync={sync} collapsed={collapsed} />
-      {accountSlot != null && (
-        <div
-          className={cn(
-            "flex min-w-0 items-center gap-1",
-            collapsed && "justify-center",
-          )}
-        >
-          {accountSlot}
-        </div>
-      )}
+      {accountSlot}
       <Button
         variant="outline"
         size="sm"

@@ -6,47 +6,27 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import type { ClaudeLoginView } from "../../../../shared/types.js";
+import type {
+  ApplyChoice,
+  ClaudeAccountsSettings,
+  ClaudeLoginView,
+} from "../../../../shared/types.js";
 import {
   cancelLogin,
-  getAccounts,
   getLoginState,
   refreshAccountUsage,
   removeAccount,
   setActiveAccount,
+  setChainOrder,
+  setChainSettings,
+  setSessionPin,
   startLogin,
   submitLoginCode,
+  switchNow,
 } from "./accounts-api.js";
-
-export const accountsKeys = {
-  all: ["accounts"] as const,
-  list: ["accounts", "list"] as const,
-  login: ["accounts", "login"] as const,
-  start: ["accounts", "login", "start"] as const,
-};
-
-export const ACCOUNTS_REFETCH_MS = 60_000;
+import { accountsKeys } from "@/queries/accounts-queries";
 
 export const LOGIN_POLL_MS = 1_000;
-
-/**
- * Read the accounts, refetching every minute and whenever the tab regains focus.
- *
- * @remarks
- * The poll reads the local API, which serves the server's cached usage, so it costs nothing
- * against the usage budget. Focus always refetches and a new observer never does, so the page and
- * the chip read as often as the one legacy hook did, whatever the shared 30 s staleTime says.
- */
-export function accountsQueryOptions() {
-  return queryOptions({
-    queryKey: accountsKeys.list,
-    queryFn: getAccounts,
-    refetchInterval: ACCOUNTS_REFETCH_MS,
-    refetchIntervalInBackground: true,
-    refetchOnWindowFocus: "always",
-    refetchOnMount: false,
-  });
-}
 
 function loginPollInterval(view: ClaudeLoginView | undefined): number | false {
   return view?.state === "done" || view?.state === "error"
@@ -69,10 +49,6 @@ export function loginStateQueryOptions() {
     refetchIntervalInBackground: true,
     gcTime: 0,
   });
-}
-
-export function useAccountsQuery() {
-  return useQuery(accountsQueryOptions());
 }
 
 /**
@@ -99,11 +75,13 @@ function invalidateLogin(queryClient: QueryClient) {
  *
  * @remarks
  * The list is marked stale after the call whether it was accepted or refused, as the header
- * popover always reloaded. A refusal resolves `{ ok: false, error }`.
+ * popover always reloaded. A refusal resolves `{ ok: false, error }`. `applyToRunning` rides in the
+ * body and a success resolves the moved, queued and skipped counts.
  */
 export function setActiveAccountMutationOptions(queryClient: QueryClient) {
   return {
-    mutationFn: (id: string) => setActiveAccount(id),
+    mutationFn: (vars: { id: string; applyToRunning: ApplyChoice }) =>
+      setActiveAccount(vars.id, vars.applyToRunning),
     onSuccess: () => invalidateAccounts(queryClient),
   };
 }
@@ -225,4 +203,91 @@ export function removeAccountMutationOptions(queryClient: QueryClient) {
 export function useRemoveAccountMutation() {
   const queryClient = useQueryClient();
   return useMutation(removeAccountMutationOptions(queryClient));
+}
+
+/**
+ * Build the mutation options that save the chain order.
+ *
+ * @remarks
+ * The list is marked stale after the call whether it was accepted or refused, so a refusal over a
+ * changed account list shows the current order. A refusal resolves `{ ok: false, error }`.
+ */
+export function setChainOrderMutationOptions(queryClient: QueryClient) {
+  return {
+    mutationFn: (order: string[]) => setChainOrder(order),
+    onSuccess: () => invalidateAccounts(queryClient),
+  };
+}
+
+/** Save the chain order and reread the account list after any answer. */
+export function useSetChainOrderMutation() {
+  const queryClient = useQueryClient();
+  return useMutation(setChainOrderMutationOptions(queryClient));
+}
+
+/**
+ * Build the mutation options that save part of the chain settings.
+ *
+ * @remarks
+ * An accepted save marks the list stale so the chain settings reread. A refusal resolves
+ * `{ ok: false, error }` and leaves the cache alone.
+ */
+export function setChainSettingsMutationOptions(queryClient: QueryClient) {
+  return {
+    mutationFn: (patch: Partial<ClaudeAccountsSettings>) =>
+      setChainSettings(patch),
+    onSuccess: (result: Awaited<ReturnType<typeof setChainSettings>>) => {
+      if (result.ok) return invalidateAccounts(queryClient);
+    },
+  };
+}
+
+/** Save part of the chain settings and reread the account list after an accepted save. */
+export function useSetChainSettingsMutation() {
+  const queryClient = useQueryClient();
+  return useMutation(setChainSettingsMutationOptions(queryClient));
+}
+
+/**
+ * Build the mutation options that move to the next eligible account now.
+ *
+ * @remarks
+ * The list is marked stale after the call whether it was accepted or refused. A refusal resolves
+ * `{ ok: false, error }`, with a readable line when no account is eligible.
+ */
+export function switchNowMutationOptions(queryClient: QueryClient) {
+  return {
+    mutationFn: () => switchNow(),
+    onSuccess: () => invalidateAccounts(queryClient),
+  };
+}
+
+/** Move to the next eligible account now and reread the account list after any answer. */
+export function useSwitchNowMutation() {
+  const queryClient = useQueryClient();
+  return useMutation(switchNowMutationOptions(queryClient));
+}
+
+/**
+ * Build the mutation options that pin a session to its account or release it.
+ *
+ * @remarks
+ * The list carries each session's pin, so it is marked stale after the call whether it was
+ * accepted or refused. A refusal resolves `{ ok: false, error }`.
+ */
+export function setSessionPinMutationOptions(queryClient: QueryClient) {
+  return {
+    mutationFn: (vars: {
+      cardId: string;
+      sessionId: string;
+      pinned: boolean;
+    }) => setSessionPin(vars.cardId, vars.sessionId, vars.pinned),
+    onSuccess: () => invalidateAccounts(queryClient),
+  };
+}
+
+/** Pin a session to its account or release it, then reread the account list. */
+export function useSetSessionPinMutation() {
+  const queryClient = useQueryClient();
+  return useMutation(setSessionPinMutationOptions(queryClient));
 }

@@ -1,0 +1,8 @@
+phase 1 repository-holder-fake GREEN 2026-09-30T03:31:30Z gate=pass
+phase 2 services-routes-use-repository GREEN 2026-09-30T03:51:37Z gate=pass
+phase 3 domain-moves-doc-citations GREEN 2026-09-30T04:15:53Z gate=pass
+phase 4 test-conventions-reversal-record GREEN 2026-09-30T04:22:57Z gate=pass
+phase 5 group10-merge-boundaries-error GREEN 2026-09-30T05:06:09Z gate=pass
+phase 6 scaffold-proof-claude-md GREEN 2026-09-30T08:11:52Z gate=pass
+phase 7 gap-analysis GREEN 2026-09-30T08:59:32Z gate=pass
+phase 8 test-suite-e2e GREEN 2026-09-30T10:03:02Z gate=pass

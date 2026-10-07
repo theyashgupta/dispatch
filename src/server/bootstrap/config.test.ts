@@ -302,3 +302,20 @@ test("a calendar block reads tolerantly: unknown mode is macos, bad titles drop,
   writeConfig({});
   assert.deepEqual(loadConfig().sources?.calendar, { mode: "macos" });
 });
+
+test("claudeAccounts settings out of range are clamped to the route bounds at load (F12)", () => {
+  writeConfig({
+    claudeAccounts: { thresholdPercent: 0, minDwellMinutes: -5 },
+  });
+  assert.deepEqual(loadConfig().claudeAccounts, {
+    thresholdPercent: 50,
+    minDwellMinutes: 0,
+  });
+  writeConfig({
+    claudeAccounts: { thresholdPercent: 150, minDwellMinutes: 1000 },
+  });
+  assert.deepEqual(loadConfig().claudeAccounts, {
+    thresholdPercent: 100,
+    minDwellMinutes: 240,
+  });
+});

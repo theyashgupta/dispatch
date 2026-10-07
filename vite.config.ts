@@ -48,7 +48,7 @@ export default defineConfig({
   server: {
     proxy: {
       // Regex key: a bare "/api" prefix also matches frontend module URLs under
-      // src/web (e.g. lib/api.ts), which would be proxied to Express and blank the
+      // src/web (e.g. lib/http.ts), which would be proxied to Express and blank the
       // page. Anchoring to /api/ ensures only backend API paths are proxied.
       "^/api/": {
         target: "http://localhost:4700",

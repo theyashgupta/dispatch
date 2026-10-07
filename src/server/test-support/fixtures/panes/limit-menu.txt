@@ -1,0 +1,9 @@
+✻ Waiting for 2 background agents to finish
+❯ /rate-limit-options
+──────────────────────────────────────────────────
+  What do you want to do?
+  ❯ 1. Stop and wait for limit to reset
+    2. Wait here, then continue automatically at Sep 29 at 8:30am
+    3. Switch to usage credits
+  Enter to confirm · Esc to cancel
+3 background task updates waiting while this panel is open

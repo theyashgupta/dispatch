@@ -51,7 +51,7 @@ Term rule: in this codebase, "orchestration" also names the session start saga (
 
 **Governs:** LOCAL-85, LOCAL-86, LOCAL-87, LOCAL-92
 
-**Evidence:** research section 2 (no board id exists; Inbox rows are items plus Inbox-column cards, `web/features/inbox/InboxView.tsx:110`; the snapshot is a "Do Not Change" contract); the group payload at H25:96-104.
+**Evidence:** research section 2 (no board id exists; Inbox rows are items plus Inbox-column cards, `web/features/inbox/InboxView.tsx:110` at the time, now `web/modules/inbox/`; the snapshot is a "Do Not Change" contract); the group payload at H25:96-104.
 
 **Amendment, 2026-10-06 (LOCAL-84):** the `Config` fields `repoPaths` and `baseBranches` are retired today: the config loader drops them and logs that they are no longer used (`server/bootstrap/config.ts:360`, `:472-476`). So the default board reads `workspaceRoot` from `Config`, and its repositories from the workspace folders in the store (`workspaceFolders`, Settings, Workspaces), as today. The default board has no stored base branch: the start picks it, as today. Its check command is `npm run check`. An edit of the default board writes `workspaceRoot` to `Config` and the folder list to `workspaceFolders`. A new board stores these values on its own row, as above.
 

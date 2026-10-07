@@ -1,0 +1,12 @@
+⏺ Full check passed on Unit 1 (exit 0). Grabbing the test counts for the PR body.
+⏺ API Error: Your computer went to sleep mid-response. The response above may be incomplete.
+✻ Waiting for 4 background agents to finish
+❯ 
+  Opus 5.5 · high  │  █░░░░░░░░░   11%  112k/1.0M                                                                                              ✔ Update installed · Restart to update
+  GROUP-12  │  thinking  │  Attention-kind  │  5h 13%  │  7d 97%  │  1h32m  │  $3.27
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents
+  ⏺ main
+  ◯ general-purpose  Counting lint warnings in gate logs                                                                                                    10m 16s · ↓ 122.8k tokens
+  ◯ general-purpose  Grepping fill.md for failed legs                                                                                                        10m 7s · ↓ 136.1k tokens
+  ◯ general-purpose  Summarizing diff against merge 437925f                                                                                                  9m 56s · ↓ 128.9k tokens
+  ◯ general-purpose  Comparing ask-queries.test.ts across branches                                                                                            9m 47s · ↓ 76.7k tokens

@@ -10,6 +10,7 @@ const { redactCard } = await import("./board.store.js");
 function card(sessions: Card["sessions"], activeSessionId?: string): Card {
   return {
     id: "c1",
+    boardKey: DEFAULT_BOARD_KEY,
     issueId: "c1",
     identifier: "LOCAL-1",
     title: "t",
@@ -531,11 +532,20 @@ void test("redactCard emits one widened summary for a single-session card, activ
       workspaceFolder: "acme-app",
       lastMarker: "NEEDS_INPUT",
       claudeAccountId: undefined,
+      claudeAccountStale: undefined,
       cleanupBlocked: undefined,
       prs: undefined,
       prsUnknown: undefined,
       previews: undefined,
       previewsUnknown: undefined,
+      contextPercent: undefined,
+      model: undefined,
+      cost: undefined,
+      usage: undefined,
+      state: undefined,
+      stateReason: undefined,
+      stateSince: undefined,
+      transcriptPath: undefined,
     },
   ]);
   const json = JSON.stringify(wire);
@@ -621,5 +631,24 @@ void test("redactCard keeps every secret off a multi-session summary", () => {
   assert.deepEqual(
     wire.sessionSummaries?.map((s) => s.workspaceFolder),
     ["app", "app", "app"],
+  );
+});
+
+void test("a stale mark shows on the wire summary and setSessionAccount clears it", async () => {
+  const { store, cardId, sessionId } =
+    await parkedCardWithSession("stale-wire");
+  const staleOf = () =>
+    redactCard(store.getCard(cardId)!).sessionSummaries?.find(
+      (s) => s.id === sessionId,
+    )?.claudeAccountStale;
+  assert.equal(staleOf(), undefined);
+  await store.markAccountStale(cardId, sessionId);
+  assert.equal(staleOf(), true);
+  await store.setSessionAccount(cardId, sessionId, "default");
+  assert.equal(staleOf(), undefined);
+  assert.equal(
+    store.getCard(cardId)?.sessions?.find((s) => s.id === sessionId)
+      ?.claudeAccountId,
+    "default",
   );
 });

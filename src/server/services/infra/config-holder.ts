@@ -2,6 +2,8 @@ import fs from "node:fs";
 import writeFileAtomic from "write-file-atomic";
 import {
   DEFAULT_CLAUDE_ACCOUNT_ID,
+  DEFAULT_CLAUDE_ACCOUNTS_SETTINGS,
+  type ClaudeAccountsSettings,
   type Config,
   type ItemSourceId,
   type LinearStateMap,
@@ -359,6 +361,31 @@ export function markOnboardingDone(): void {
 export function updateProfile(profile: UserProfile): void {
   patchConfig({
     profile: Object.keys(profile).length > 0 ? profile : undefined,
+  });
+}
+
+/**
+ * Read the chain settings (Settings ▸ Accounts), each absent key resolved to its default.
+ */
+export function getClaudeAccountsSettings(): ClaudeAccountsSettings {
+  return {
+    ...DEFAULT_CLAUDE_ACCOUNTS_SETTINGS,
+    ...orchestrationConfig?.claudeAccounts,
+  };
+}
+
+/**
+ * Persist chain settings under the `claudeAccounts` key and make them live immediately.
+ *
+ * @remarks The merge starts from the loaded block, which `loadConfig` already type filtered, so a
+ * wrong-typed key on disk never becomes live. The caller validates the ranges.
+ */
+export function updateClaudeAccountsSettings(
+  patch: Partial<ClaudeAccountsSettings>,
+): void {
+  if (Object.keys(patch).length === 0) return;
+  patchConfig({
+    claudeAccounts: { ...orchestrationConfig?.claudeAccounts, ...patch },
   });
 }
 

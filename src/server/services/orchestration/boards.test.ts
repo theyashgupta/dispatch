@@ -318,7 +318,7 @@ test("archiveBoard counts a card whose start is in flight or provisioning", asyn
   store.beginStart(flagged.id);
   await assert.rejects(
     archiveBoard(key("STRT")),
-    refusal(409, "sessions-running", "Stop the 1 running sessions first.", {
+    refusal(409, "sessions-running", "Stop the 1 running session first.", {
       running: 1,
     }),
   );
@@ -327,7 +327,7 @@ test("archiveBoard counts a card whose start is in flight or provisioning", asyn
   await store.setProvisioning(provisioning.id, "worktrees");
   await assert.rejects(
     archiveBoard(key("STRT")),
-    refusal(409, "sessions-running", "Stop the 1 running sessions first.", {
+    refusal(409, "sessions-running", "Stop the 1 running session first.", {
       running: 1,
     }),
   );

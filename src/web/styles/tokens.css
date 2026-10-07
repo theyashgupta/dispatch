@@ -82,8 +82,14 @@
   --radius-sm: 4px; /* chips and badges, up to ~19-27px tall */
   --radius: 8px;
   --radius-lg: 12px; /* modal dialog, ~200px tall and above */
-  --radius-pill: 999px; /* pill shape; no consumer yet, a chip keeps --radius-sm */
-  --shadow-float: 0 6px 16px rgba(0, 0, 0, 0.45); /* the only shadow token; see docs/ARCHITECTURE.md#design-system-invariants for the consumer list */
+  --radius-pill: 999px; /* pill shape (the drag count badge); a chip keeps --radius-sm */
+  --shadow-float: 0 6px 16px rgba(0, 0, 0, 0.45); /* the only float shadow value; the ring tokens below compose it; see docs/ARCHITECTURE.md#design-system-invariants for the consumer list */
+  --shadow-ring-attention: 0 0 0 1px var(--accent);
+  --shadow-ring-multi: 0 0 0 1px var(--text);
+  --shadow-ring-attention-float:
+    var(--shadow-ring-attention), var(--shadow-float);
+  --shadow-ring-multi-float: var(--shadow-ring-multi), var(--shadow-float);
+  --shadow-column-edge: inset 0 1px 0 var(--edge-highlight);
 
   /* Priority signal palette (card stripe) */
   --prio-urgent: #e5484d;
@@ -115,6 +121,10 @@
   --src-meeting: #c792ea;
   --src-calendar: #efb14a;
   --src-agent: #4fd1c5;
+
+  /* Editor brand mark (the VS Code button in the detail panel header), the
+     same value in both themes. */
+  --editor-vscode: #007acc;
 
   /* Motion (v3.4), CSS-only transition/animation durations and easings, so the
      prefers-reduced-motion kill-switch above reaches every motion this phase
@@ -198,6 +208,7 @@
   --src-meeting: color-mix(in srgb, #c792ea 52%, black);
   --src-calendar: color-mix(in srgb, #efb14a 46%, black);
   --src-agent: color-mix(in srgb, #4fd1c5 46%, black);
+  --editor-vscode: #007acc;
   --scrim: rgba(15, 17, 21, 0.4);
   --edge-highlight: rgba(255, 255, 255, 0.7);
   --shadow-float: 0 6px 16px rgba(15, 17, 21, 0.16);
@@ -359,6 +370,34 @@ body {
   }
   50% {
     opacity: 0.45;
+  }
+}
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+@keyframes modal-out {
+  to {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+@keyframes modal-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes modal-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes modal-layer-hold {
+  from,
+  to {
+    opacity: 1;
   }
 }
 @keyframes spin {

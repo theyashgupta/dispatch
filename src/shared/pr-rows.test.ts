@@ -1,3 +1,4 @@
+import { DEFAULT_BOARD_KEY } from "./board-key.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Card, Item, PrInfo } from "./types.js";
@@ -50,6 +51,7 @@ function card(
 ): Card {
   return {
     id,
+    boardKey: DEFAULT_BOARD_KEY,
     issueId: id,
     identifier: id,
     title: id,

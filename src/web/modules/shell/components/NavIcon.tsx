@@ -6,6 +6,7 @@ import {
   Inbox,
   Kanban,
   KeyRound,
+  LayoutGrid,
   MessageCircleQuestion,
   PanelLeft,
   Settings,
@@ -39,6 +40,7 @@ export const NAV_ICON: Record<Page, ComponentType<{ size?: number }>> = {
   slack: sourceMark("slack"),
   workspaces: HardDrive,
   flow: Workflow,
+  boards: LayoutGrid,
   settings: Settings,
 };
 

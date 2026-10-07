@@ -31,6 +31,7 @@ import {
 import { unwindGroup } from "../services/orchestration/unwind.js";
 import { resetCard } from "../services/orchestration/reset.js";
 import { runClaude } from "../services/orchestration/run-claude.js";
+import { moveOrQueue } from "../services/orchestration/session-account-apply.js";
 import { editorPath, launchEditor } from "../adapters/editors.js";
 import { getOrchestrationConfig } from "../services/infra/config-holder.js";
 import {
@@ -71,7 +72,9 @@ import {
   linearStateBodySchema,
   moveBodySchema,
   openEditorBodySchema,
+  sessionAccountBodySchema,
   sessionBodySchema,
+  sessionPinBodySchema,
   startBodySchema,
   syncBodySchema,
   unwindBodySchema,
@@ -314,6 +317,36 @@ cardsRouter.post("/cards/:id/run-claude", async (req, res) => {
     throw new ValidationError("card has no live session");
   }
   res.status(202).json({ launched: true });
+});
+
+cardsRouter.post("/cards/:id/session/account", async (req, res) => {
+  const { accountId, sessionId } = parseOrThrow(
+    sessionAccountBodySchema,
+    req.body,
+  );
+  if (!store.getCard(req.params.id)) throw new NotFoundError("not-found");
+  const outcome = await moveOrQueue(req.params.id, accountId, sessionId);
+  if (outcome === "account") throw new NotFoundError("not-found");
+  if (outcome === "queued") {
+    res.status(202).json({ outcome });
+    return;
+  }
+  if (outcome === "moved" || outcome === "same") {
+    res.status(200).json({ outcome });
+    return;
+  }
+  throw new ConflictError(outcome);
+});
+
+cardsRouter.put("/cards/:id/session/account-pin", async (req, res) => {
+  const { sessionId, pinned } = parseOrThrow(sessionPinBodySchema, req.body);
+  const card = store.getCard(req.params.id);
+  if (!card) throw new NotFoundError("not-found");
+  if (!card.sessions?.some((s) => s.id === sessionId)) {
+    throw new ValidationError("invalid sessionId");
+  }
+  await store.setAccountPinned(card.id, sessionId, pinned);
+  res.status(200).json({ pinned });
 });
 
 cardsRouter.post("/cards/:id/session", async (req, res) => {

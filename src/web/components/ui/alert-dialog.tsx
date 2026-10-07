@@ -1,4 +1,5 @@
 import * as React from "react";
+import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "cn";
 import { AlertDialog as AlertDialogPrimitive } from "radix-ui";
 
@@ -26,17 +27,43 @@ function AlertDialogPortal({
   );
 }
 
+const alertDialogOverlayVariants = cva("fixed inset-0 bg-scrim", {
+  variants: {
+    frame: {
+      default:
+        "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0 z-50",
+      modal:
+        "z-20 data-[state=closed]:animate-[modal-fade-out_var(--motion-panel-close)_var(--easing-exit)_forwards] data-[state=open]:animate-[modal-fade-in_var(--motion-panel-open)_var(--easing-enter)_both]",
+    },
+  },
+  defaultVariants: { frame: "default" },
+});
+
+const alertDialogContentVariants = cva("group/alert-dialog-content", {
+  variants: {
+    frame: {
+      default:
+        "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-xl border bg-sidebar px-4 py-6 shadow-lg duration-(--motion-panel-open) data-[size=sm]:max-w-xs data-[size=default]:sm:max-w-lg",
+      modal:
+        "pointer-events-auto flex w-120 max-w-[calc(100vw-32px)] flex-col gap-0 rounded-xl border bg-(--surface-column) p-0 shadow-lg data-[state=closed]:animate-[modal-out_var(--motion-panel-close)_var(--easing-exit)_forwards] data-[state=open]:animate-[modal-in_var(--motion-panel-open)_var(--easing-enter)_both]",
+    },
+  },
+  defaultVariants: { frame: "default" },
+});
+
+const alertDialogLayerClass =
+  "pointer-events-none fixed inset-0 z-21 flex items-center justify-center p-4 has-[>[data-slot=alert-dialog-content][data-state=closed]]:animate-[modal-layer-hold_var(--motion-panel-close)_linear]";
+
 function AlertDialogOverlay({
   className,
+  frame,
   ...props
-}: React.ComponentProps<typeof AlertDialogPrimitive.Overlay>) {
+}: React.ComponentProps<typeof AlertDialogPrimitive.Overlay> &
+  VariantProps<typeof alertDialogOverlayVariants>) {
   return (
     <AlertDialogPrimitive.Overlay
       data-slot="alert-dialog-overlay"
-      className={cn(
-        "data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0 fixed inset-0 z-50 bg-scrim",
-        className,
-      )}
+      className={cn(alertDialogOverlayVariants({ frame }), className)}
       {...props}
     />
   );
@@ -45,22 +72,30 @@ function AlertDialogOverlay({
 function AlertDialogContent({
   className,
   size = "default",
+  frame,
   ...props
-}: React.ComponentProps<typeof AlertDialogPrimitive.Content> & {
-  size?: "default" | "sm";
-}) {
+}: React.ComponentProps<typeof AlertDialogPrimitive.Content> &
+  VariantProps<typeof alertDialogContentVariants> & {
+    size?: "default" | "sm";
+  }) {
+  const content = (
+    <AlertDialogPrimitive.Content
+      data-slot="alert-dialog-content"
+      data-size={size}
+      className={cn(alertDialogContentVariants({ frame }), className)}
+      {...props}
+    />
+  );
   return (
     <AlertDialogPortal>
-      <AlertDialogOverlay />
-      <AlertDialogPrimitive.Content
-        data-slot="alert-dialog-content"
-        data-size={size}
-        className={cn(
-          "group/alert-dialog-content data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 fixed top-[50%] left-[50%] z-50 grid w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 rounded-xl border bg-sidebar px-4 py-6 shadow-lg duration-(--motion-panel-open) data-[size=sm]:max-w-xs data-[size=default]:sm:max-w-lg",
-          className,
-        )}
-        {...props}
-      />
+      <AlertDialogOverlay frame={frame} />
+      {frame === "modal" ? (
+        <div data-slot="alert-dialog-layer" className={alertDialogLayerClass}>
+          {content}
+        </div>
+      ) : (
+        content
+      )}
     </AlertDialogPortal>
   );
 }

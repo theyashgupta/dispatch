@@ -1,5 +1,5 @@
 import { useMutation, type UseMutationOptions } from "@tanstack/react-query";
-import type { Card, SettableItemState } from "../../shared/types.js";
+import type { BoardKey, Card, SettableItemState } from "../../shared/types.js";
 import { promoteItem, setItemState, snoozeItem } from "./item-actions-api.js";
 
 type Callbacks<TData, TVars> = Pick<
@@ -9,10 +9,12 @@ type Callbacks<TData, TVars> = Pick<
 
 type SnoozeVars = { itemId: string; until: string };
 
-export const promoteItemMutationOptions = {
-  mutationFn: (vars: { itemId: string; context?: string }) =>
-    promoteItem(vars.itemId, vars.context),
-};
+export function promoteItemMutationOptions(board: BoardKey) {
+  return {
+    mutationFn: (vars: { itemId: string; context?: string }) =>
+      promoteItem(board, vars.itemId, vars.context),
+  };
+}
 
 export const setItemStateMutationOptions = {
   mutationFn: (vars: { itemId: string; state: SettableItemState }) =>
@@ -31,9 +33,10 @@ export const snoozeItemMutationOptions = {
  * unmounts, which callbacks passed to `mutate()` do not.
  */
 export function usePromoteItemMutation(
+  board: BoardKey,
   callbacks?: Callbacks<{ card: Card }, { itemId: string; context?: string }>,
 ) {
-  return useMutation({ ...promoteItemMutationOptions, ...callbacks });
+  return useMutation({ ...promoteItemMutationOptions(board), ...callbacks });
 }
 
 /** Set an item's state. A refusal rejects with the server's reason. */

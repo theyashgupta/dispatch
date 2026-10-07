@@ -9,6 +9,7 @@ import {
   screenshotsSection,
 } from "../services/infra/attachments.js";
 import { ITEM_DESCRIPTION_MAX, ITEM_TITLE_MAX } from "../store/items.js";
+import { accountOrDefaultIdSchema } from "./accounts-schemas.js";
 import {
   MARKER_ERROR,
   booleanFilter,
@@ -135,6 +136,21 @@ export const sessionBodySchema = z.object(
   },
   "invalid sessionId",
 );
+
+export const sessionAccountBodySchema = z.object(
+  {
+    accountId: accountOrDefaultIdSchema,
+    sessionId: z
+      .string("invalid sessionId")
+      .refine((id) => id !== "", "invalid sessionId")
+      .optional(),
+  },
+  "invalid-id",
+);
+
+export const sessionPinBodySchema = sessionBodySchema.extend({
+  pinned: z.boolean("invalid-pinned"),
+});
 
 export const openEditorBodySchema = z.object(
   { editor: z.enum(["code", "cursor"], EDITOR_CODE) },

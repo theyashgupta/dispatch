@@ -1,0 +1,10 @@
+---
+active: true
+iteration: 19
+session_id: 5d0ffb16-12fc-4bfa-836b-d2ed56a0bf08
+max_iterations: 67
+completion_promise: "ROADMAP COMPLETE g14-backend"
+started_at: "2026-09-29T23:07:47Z"
+---
+
+Execute the roadmap at /Users/yash/dispatch-workspaces/GROUP-11/ROADMAP.md per the roadmap-loop skill, slug g14-backend. Read .roadmap/g14-backend/progress.md, take the lowest incomplete unit, and continue from its recorded position. When a unit phase waits on a GROUP-10 branch, poll every 15 minutes with ScheduleWakeup and do independent phases first. When and only when every unit's status in progress.md is committed, the trailing test/g14-backend-specs branch exists with the specs committed, and the roadmap's every unit row says built, awaiting /ship, output the phrase ROADMAP COMPLETE g14-backend wrapped in promise tags. At a human stop, end with DISPATCH_STATUS: NEEDS_INPUT - reason; at the finish, end with DISPATCH_STATUS: DONE - summary.

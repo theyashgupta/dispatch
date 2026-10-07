@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { cn } from "@/lib/utils";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -70,7 +71,7 @@ export function ConfirmDialog({
         aria-labelledby={undefined}
       >
         <AlertDialogHeader className="place-items-start text-left">
-          <AlertDialogTitle className={titleClassName}>
+          <AlertDialogTitle className={cn("wrap-anywhere", titleClassName)}>
             {title}
           </AlertDialogTitle>
           <AlertDialogDescription className={descriptionClassName}>

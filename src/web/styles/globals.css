@@ -56,6 +56,10 @@
     background-color: transparent;
     border-radius: 0;
   }
+  a[data-slot] {
+    color: inherit;
+    text-decoration: none;
+  }
   ul[data-slot],
   ol[data-slot] {
     list-style: none;
@@ -115,6 +119,10 @@
   --shadow-*: initial;
   --shadow-md: var(--shadow-float);
   --shadow-lg: var(--shadow-float);
+  --shadow-card-attention: var(--shadow-ring-attention);
+  --shadow-card-multi: var(--shadow-ring-multi);
+  --shadow-card-attention-float: var(--shadow-ring-attention-float);
+  --shadow-card-multi-float: var(--shadow-ring-multi-float);
   --default-transition-duration: var(--motion-hover);
   --default-transition-timing-function: var(--easing-enter);
 }

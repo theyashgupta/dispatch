@@ -1,10 +1,4 @@
-import type { CSSProperties, SVGProps } from "react";
-
-export const wordmarkStyle: CSSProperties = {
-  fontSize: "var(--font-display)",
-  fontWeight: "var(--weight-semibold)",
-  letterSpacing: "0.18em",
-};
+import type { SVGProps } from "react";
 
 interface GlyphProps extends Omit<SVGProps<SVGSVGElement>, "title"> {
   size?: number;
