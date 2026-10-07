@@ -21,6 +21,7 @@ import {
   type SessionFilter,
   type SessionRow as SessionRowModel,
 } from "../../../../shared/sessions.js";
+import { sessionAccountView } from "../../../../shared/session-account-view.js";
 import {
   SESSIONS_SHORTCUTS,
   bindShortcuts,
@@ -29,8 +30,10 @@ import type { BoardSnapshot } from "../../../../shared/types.js";
 import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
 import { useShortcuts } from "@/components/ui/hooks/use-shortcuts";
 import { useAppStore } from "@/components/ui/hooks/use-app-store";
+import { useAccountsQuery } from "@/queries/accounts-queries";
 import { actionServices } from "@/queries/action-services";
 import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
+import { useSessionAccountMove } from "@/queries/session-account-queries";
 import { BulkConfirmModal } from "@/modules/sessions/components/BulkConfirmModal";
 import { SessionRow } from "@/modules/sessions/components/SessionRow";
 import { SessionsBulkBar } from "@/modules/sessions/components/SessionsBulkBar";
@@ -117,6 +120,8 @@ function SessionsPage({
   } | null>(null);
   const [cursorKey, setCursorKey] = useState<string | null>(null);
   const [lastCursorIndex, setLastCursorIndex] = useState(0);
+  const { data: accountsData } = useAccountsQuery();
+  const accountMove = useSessionAccountMove();
   useEffect(() => {
     const timer = setInterval(() => setNow(nowMs()), ELAPSED_TICK_MS);
     return () => clearInterval(timer);
@@ -165,6 +170,14 @@ function SessionsPage({
         open();
       });
   };
+
+  const handleRestart = (row: SessionRowModel, accountId: string) =>
+    accountMove.move(
+      row.sessionId,
+      "restart",
+      { cardId: row.cardId, accountId, sessionId: row.sessionId },
+      "Restarted",
+    );
 
   const handleMoveCursor = (step: number) => {
     const next = Math.max(
@@ -234,21 +247,37 @@ function SessionsPage({
               label={entry.section}
               count={entry.rows.length}
             >
-              {entry.rows.map((row) => (
-                <SessionRow
-                  key={row.key}
-                  row={row}
-                  now={now}
-                  selected={
-                    row.key === cursorRow?.key ||
-                    (row.active && row.cardId === selectedCardId)
-                  }
-                  checked={checked.has(row.key)}
-                  narrow={narrow}
-                  onSelect={handleSelect}
-                  onToggleChecked={handleToggleChecked}
-                />
-              ))}
+              {entry.rows.map((row) => {
+                const account = sessionAccountView({
+                  sessionId: row.sessionId,
+                  accountId: row.account,
+                  accounts: accountsData?.accounts,
+                  sessions: accountsData?.sessions,
+                });
+                return (
+                  <SessionRow
+                    key={row.key}
+                    row={row}
+                    account={account}
+                    pending={accountMove.pending?.key === row.sessionId}
+                    disabled={accountMove.pending !== null}
+                    note={accountMove.notes[row.sessionId]}
+                    onRestart={() => {
+                      if (account != null)
+                        handleRestart(row, account.accountId);
+                    }}
+                    now={now}
+                    selected={
+                      row.key === cursorRow?.key ||
+                      (row.active && row.cardId === selectedCardId)
+                    }
+                    checked={checked.has(row.key)}
+                    narrow={narrow}
+                    onSelect={handleSelect}
+                    onToggleChecked={handleToggleChecked}
+                  />
+                );
+              })}
             </SessionsSection>
           ))
         )}
