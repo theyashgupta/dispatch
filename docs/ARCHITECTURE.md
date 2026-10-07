@@ -103,7 +103,7 @@ and roles only, it does not restate the layering policy.
 | Markers             | `adapters/markers/parse.ts`, `adapters/markers/scan-decision.ts`, `adapters/markers/pane-view.ts`, `adapters/markers/watcher.ts`                                                                                                                                                                                                                | Pure marker parser, the pure per-tick decision core, the pane-view helpers, and the I/O-shell pane watcher applying one card decision per tick.                                                                                                                                                                      |
 | Adapters            | `adapters/exec.ts`, `adapters/git.ts`, `adapters/tmux.ts`, `adapters/ttyd.ts`, `adapters/claude-trust.ts`, `adapters/editors.ts`, `adapters/resolve-binary.ts`                                                                                                                                                                                  | The argv-only subprocess chokepoint, the git / tmux / ttyd / claude-trust adapters over it, editor launch, and binary-path resolution.                                                                                                                                                                               |
 | Shared              | `shared/types.ts`                                                                                                                                                                                                                                                                                                                               | Pure cross-half contracts; `BoardSnapshot` is both the SSE payload and the on-disk board file.                                                                                                                                                                                                                       |
-| Frontend            | `web/App.tsx`, `web/modules/board/views/BoardView.tsx`, `web/modules/board/containers/BoardContainer.tsx`, `web/features/detail/DetailPanel.tsx`, plus hooks, dialogs, and the sidebar (`web/modules/shell/components/AppSidebar.tsx`)                                                                                                          | React board: optimistic drag-and-drop, the detail slide-over with the terminal iframe, SSE hooks.                                                                                                                                                                                                                    |
+| Frontend            | `web/App.tsx`, `web/modules/board/views/BoardView.tsx`, `web/modules/board/containers/BoardContainer.tsx`, `web/modules/detail/containers/DetailPanelContainer.tsx`, plus hooks, dialogs, and the sidebar (`web/modules/shell/components/AppSidebar.tsx`)                                                                                       | React board: optimistic drag-and-drop, the detail slide-over with the terminal iframe, SSE hooks.                                                                                                                                                                                                                    |
 
 ## Cross-Module Invariants
 
@@ -586,8 +586,8 @@ because a phase that changes a projection must consult both halves, and a list p
 while omitting half the readers is worse than no list at all. Nine files under `src/web` and `src/shared` hold read
 expressions against the six flat fields on the wire `Card`: `src/web/App.tsx`,
 `src/web/modules/board/components/CardView.tsx`, `src/web/modules/board/domain/board-keys.ts`, `src/web/modules/board/containers/BoardContainer.tsx`,
-`src/web/features/detail/DetailPanel.tsx`, `src/web/features/detail/PanelHeader.tsx`,
-`src/web/features/detail/SessionLostSection.tsx`, `src/web/features/detail/TerminalRegion.tsx`, and
+`src/web/modules/detail/containers/DetailPanelContainer.tsx`, `src/web/modules/detail/components/PanelHeader.tsx`,
+`src/web/modules/detail/components/SessionLostSection.tsx`, `src/web/modules/detail/components/TerminalRegion.tsx`, and
 `src/shared/card-badges.ts`. One file is deliberately excluded and named so the exclusion is a
 decision rather than an omission: `src/web/lib/api.ts` mentions two of the field names in JSDoc
 prose with no read expression at all.
@@ -601,10 +601,10 @@ single-writer queue, so no interleaving can ever expose a half-state.
 phase, `TerminalRegion.tsx` rendered the terminal `<iframe>` on a deliberately separate, nested
 per-session wire projection, a Phase 90 canary designed so a wire-shape regression showed up on
 screen (a permanent "Connecting to terminal…") instead of hiding in the store, while
-`DetailPanel.tsx`'s "a terminal already exists, do not spawn" gate read the SAME nested projection
+`DetailPanelContainer.tsx`'s "a terminal already exists, do not spawn" gate read the SAME nested projection
 rather than the flat `card.ttydPort` it sits beside — two independently-writable wire
 representations of the same fact, which could disagree. Phase 102 deleted that separate projection outright:
-`TerminalRegion.tsx` and `DetailPanel.tsx` both now read `card.ttydPort` directly, the identical flat
+`TerminalRegion.tsx` and `DetailPanelContainer.tsx` both now read `card.ttydPort` directly, the identical flat
 field, so the two gates can no longer disagree with each other, there is only one value to read. The
 board-payload weight that separate projection cost (`F-96-F`, `96-11`'s partial fix, this phase's
 full removal) is recorded in `docs/BASELINES.md`. This does not change store-side downgrade safety:
@@ -1095,7 +1095,7 @@ later divergence re-baselines forward and stamps the card's `outputChangedAt`. I
 divergence with NO debounce (the flip-back's 2-tick debounce exists only because a false flip-back is
 destructive; a false dot is cosmetic). The dot works in ANY column (including Done) because it is
 orthogonal to the marker/flip-back decision. The `.tsx` consumer sites (`DraggableCard.tsx`, `BoardDragOverlay.tsx`,
-`DetailPanel.tsx`, `useUnseenActivity.ts`) are homed by this section, not by JSDoc; the panel-side
+`DetailPanelContainer.tsx`, `useUnseenActivity.ts`) are homed by this section, not by JSDoc; the panel-side
 `lastOpened` stamping discipline (open/close stamps plus the deferred re-stamp that absorbs the ttyd
 detach reflow) is homed in [Panel Iframe Identity](#panel-iframe-identity).
 
@@ -1658,10 +1658,10 @@ exact.
 
 ### Panel Iframe Identity
 
-The `DetailPanel` (`web/features/detail/DetailPanel.tsx`) embeds the live terminal as a ttyd `<iframe>` whose
+The `DetailPanelContainer` (`web/modules/detail/containers/DetailPanelContainer.tsx`) embeds the live terminal as a ttyd `<iframe>` whose
 identity across every panel interaction is load-bearing: any remount of that iframe drops its ttyd
 WebSocket and detaches the tmux client, killing the visible terminal mid-session. The whole panel is
-engineered around never remounting that one element. `DetailPanel.tsx` is one of the four
+engineered around never remounting that one element. `DetailPanelContainer.tsx` is one of the four
 invariant-dense files; its rules live here so a Phase 12/13 restructure — and the docked-mode
 re-derivation below — can preserve them without reading the original body comments.
 
@@ -1677,10 +1677,11 @@ identity-stable across four separate mutations:
   region stays a byte-identical sibling at the SAME index regardless, so toggling Details never
   reorders the tree and never remounts the iframe. Any refactor that moves the iframe's position
   (or wraps it conditionally) reintroduces the remount.
-- **Fullscreen is a STYLE-ONLY change, never a remount.** Fullscreen toggles ONLY the enclosing
-  `<aside>`'s `width` (`480px`↔`100vw`) and `borderLeft`; `top`/`right`/`height`/`transform` and the
-  `transition` list (which names transform ONLY) stay constant, so the width/border change snaps
-  instantly and the iframe reflows exactly ONCE with no unmount and no WebSocket reconnect. Fullscreen
+- **Fullscreen is a STYLE-ONLY change, never a remount.** Fullscreen swaps ONLY the width and left
+  border classes of the enclosing `<aside>` in `PanelFrame.tsx` (`w-screen`, or the
+  `--panel-live-width` width with `border-l`); `top`, `right`, `height`, the `translate-x-*` class and
+  the `transition-[translate]` list (which names translate ONLY) stay constant, so the width and border
+  change snaps instantly and the iframe reflows exactly ONCE with no unmount and no WebSocket reconnect. Fullscreen
   is per-open React state, never persisted.
 - **The iframe is NEVER keyed, and reset-on-open is done in render, not by remount.** A `key=` on
   the panel or a remount to reset per-open state (Details collapsed, fullscreen off) is deliberately
@@ -1710,9 +1711,9 @@ identity-stable across four separate mutations:
   live, 5/5-reproduced defect (headless and headed Chrome) showed `pointerup` never reaching
   `window` at all when the release happened to land over the iframe's rendered area — the drag
   would silently abandon mid-resize, leaving `document.body.style.cursor` stuck and the orphaned
-  listeners hijacking the next unrelated click with stale coordinates. `handleResizePointerDown`
-  now appends a transparent, full-viewport `position: fixed` div at `document.body` (max `zIndex`,
-  `cursor: col-resize`) for the drag's duration only — mounted imperatively on `pointerdown`,
+  listeners hijacking the next unrelated click with stale coordinates. `onPointerDown` in
+  `use-panel-resize.ts` now appends a transparent, full-viewport `fixed` div at `document.body` (max
+  `z-index`, `col-resize` cursor) for the drag's duration only, mounted imperatively on `pointerdown`,
   always removed by a single idempotent `teardown()` shared across `pointerup`, `pointercancel`,
   mid-drag Escape (which cancels the drag and restores the pre-drag width instead of closing the
   panel underneath an active drag), and unmount — so the pointer's hit-test target never leaves
@@ -1721,10 +1722,10 @@ identity-stable across four separate mutations:
   inside the `<aside>` or the iframe subtree, and never persists once the drag ends (PANEL-03
   untouched: no key/re-parent/position change on the panel itself). Because the overlay is only
   ever removed by a delivered end event, the drag must NEVER start for a non-primary button
-  (`e.button !== 0` guard, first statement): a secondary click opens the native context menu,
+  (`startsResizeDrag` guard from `panel-width.ts`, first statement): a secondary click opens the native context menu,
   Chrome then delivers neither `pointerup` nor `pointercancel` for that pointer, and the max-z
   overlay would strand permanently — shielding every element in the app until a full reload. The
-  handle itself is not rendered in fullscreen (mirroring the board's `resizeDisabled` guard): a
+  handle itself is not rendered in fullscreen (`DetailPanelContainer` renders it only under `!docked && !effectiveFullscreen`): a
   fullscreen drag would visibly shrink the `100vw` panel then snap back while persisting an
   invisible width, and its absence means a drag can never span a fullscreen transition — the
   pointerup width write is always the plain `clamp()` form.
@@ -1742,7 +1743,7 @@ identity-stable across four separate mutations:
   `touch-action`, which was the actual bug: with the default `auto`, the browser is free to decide
   mid-gesture that a finger's perpendicular jitter on an 8px target is an attempted page pan, take
   the gesture over, and fire `pointercancel` on the handle — which `handlePointerCancel` correctly
-  treats as an abort and restores `preDragStyleWidth`, producing a silent snap-back that reads as
+  treats as an abort and restores `preDragWidth`, producing a silent snap-back that reads as
   "touch just does not work here." The fix is `touch-action: none` on the handle — that is the
   load-bearing declaration, because the browser resolves a pointer's effective touch-action once,
   at contact, from the hit-tested element's ancestor chain; the overlay does not exist yet at that
@@ -1750,8 +1751,8 @@ identity-stable across four separate mutations:
   any case, so its own `touch-action: none` cannot affect the in-flight drag — that pointer's
   events stay addressed to the handle via `setPointerCapture` regardless of where the finger
   travels. The overlay's `touch-action: none` is defence for a SECOND pointer landing on it
-  mid-drag; `handleResizePointerDown`'s re-entrancy guard (`cleanupDragRef.current != null`, first
-  statement) now rejects that second pointer outright, so this is belt-and-braces, not
+  mid-drag; the re-entrancy guard in `onPointerDown` (`cleanupDragRef.current != null`, right after
+  the button guard) now rejects that second pointer outright, so this is belt-and-braces, not
   load-bearing. It is deliberately NOT `touchstart`/`touchmove` plus `preventDefault()`, which
   would run a second event pipeline competing with the existing Pointer Events one for the same
   physical gesture. Once `touch-action: none` is declared, `pointercancel` reverts to meaning a
@@ -1771,8 +1772,8 @@ identity-stable across four separate mutations:
   The TAP-THRESHOLD branch does NOT use `(pointer: coarse)` — unlike the styling above, an
   8px-vs-3px threshold that fires on the wrong pointer type is not harmless (it would silently
   raise the threshold for a mouse drag on the same hybrid hardware), so
-  `handleResizePointerDown` reads `e.pointerType` once at `pointerdown` and captures it as
-  `coarseGesture` for that drag's closures. This is per-drag capture, not the per-`pointermove`
+  `onPointerDown` in `use-panel-resize.ts` reads `e.pointerType` once at `pointerdown` and captures it as
+  `pointerType` for that drag's closures (`isTapGesture` in `panel-width.ts` takes it). This is per-drag capture, not the per-`pointermove`
   `pointerType` sniffing this section warns against elsewhere — the value is fixed for the whole
   gesture, exactly like `isCoarsePointer` is fixed for the whole render.
 
@@ -1815,15 +1816,15 @@ forces the panel to `100vw`, so there is no width left to trade — a deliberate
 to close.
 
 **Docked (Orca) mode is a SECOND style-only derivation of the same `<aside>`, re-deriving `PANEL-03`
-for a second surface.** `position` stays `fixed` in BOTH modes — only `top`/`left`/`width`/`height`/
-`borderLeft`/`transform`/`transition` branch on the `docked` prop, the exact same category of change
+for a second surface.** `position` stays `fixed` in BOTH modes; only the `top`, `left`, `width`, `height`,
+`border-l`, `translate` and `transition` classes branch on the `docked` prop, the exact same category of change
 the fullscreen precedent above already proved remount-free; a `position` mode switch was deliberately
 rejected as a larger reflow than adjusting `top`/`left`/`width` in place. The backdrop `<div>`, the
 close `X`, and the fullscreen toggle are conditionally UNMOUNTED when docked — safe because all three
 are stateless, decorative siblings outside the iframe subtree, never the terminal itself; the
 docked-and-empty-selection state (centered "Select a ticket" copy) renders only when
 `docked && card == null`, so the card-present subtree — and the terminal's position in it — is
-identical in both modes. The Orca side nav (`web/features/orca/`) never renders a terminal: it holds
+identical in both modes. The Orca side nav (`web/modules/workspace/`) never renders a terminal: it holds
 zero imports of `TerminalRegion` or `<iframe>` (grep-enforced), is pure navigation chrome, and drives
 the SAME `selectedCardId` the board/inbox views already write to. The ensure-terminal spawn guard
 below stays a single ref BY CONSTRUCTION: one `selectedCardId`, one hoisted panel, means "the same
@@ -1893,7 +1894,7 @@ not touch.
 
 ### Terminal Toolbar
 
-`TerminalRegion` (`web/features/detail/TerminalRegion.tsx`) renders one toolbar row above the
+`TerminalRegion` (`web/modules/detail/components/TerminalRegion.tsx`) renders one toolbar row above the
 terminal iframe with a single secondary button, "Run Claude" (`SHELL-01`). `src/web/**/*.tsx`
 forbids all comments, so this section is the component's only home for its rationale.
 
@@ -1914,7 +1915,7 @@ only the pane's foreground process changes.
 
 ### Second Session Affordance
 
-`StartAnotherSessionButton` (`web/features/detail/StartAnotherSessionButton.tsx`) renders "Start
+`StartAnotherSessionButton` (`web/modules/detail/components/StartAnotherSessionButton.tsx`) renders "Start
 another session" inside the panel's session row, alongside `SessionSwitcher`. `src/web/**/*.tsx`
 forbids all comments, including JSDoc, so this section is the component's only home for the
 rationale behind its five deliberate choices.
@@ -3717,10 +3718,10 @@ to prevent.
 not a consumer cap: `RETIRED_PATTERNS`'s literal scan over `src/**/*.{ts,tsx}` catches the retired
 `0 6px 16px rgba(0,0,0,0.45)` value reappearing anywhere outside `tokens.css`, which is what makes
 "one definition" mechanical. Measured today it is consumed at seven call sites — the card drag
-overlay (`CardView.tsx:171`), the floating selection bar (`FloatBar.tsx`), the search results
+overlay (`CardView.tsx:171`), the floating selection bar (`SessionsBulkBar.tsx`), the search results
 listbox (`SearchBox.tsx:321`), the carousel search overlay (`SearchBox.tsx:400`), the move-to
 picker (`MoveToPicker.tsx:97`), the multi-select dropdown (`MultiSelect.tsx:248`), and the modal
-(`Modal.tsx:110`). Cards and columns carry no shadow at rest; a second, independently-defined
+(the legacy `Modal`, deleted in LOCAL-76). Cards and columns carry no shadow at rest; a second, independently-defined
 shadow value is the regression the gate catches, not an additional consumer of the one token.
 
 Since 2026-09-29 (G9 Unit 1) the light block of `tokens.css` declares `--shadow-float` a second time, with a lighter value for the light theme (decision U1-07). The invariant does not change: the token keeps one name and one definition for each theme, and no file outside `tokens.css` holds a shadow literal.
@@ -3741,7 +3742,7 @@ a custom-property declaration, never a `var(--line-body)` _read_. `var(--line-bo
 at the global 1.5 is expressly permitted: the contract itself specifies `--line-body` as the card
 title's own line height, so barring consumption would force a card-height change, which criterion
 2 forbids outright. The check is directory-scoped to `src/web/modules/board/` (every layer folder, walked recursively) rather than global
-because `.reading-surface` is legitimately used elsewhere (`Modal.tsx`, `DetailPanel.tsx`).
+because `.reading-surface` is legitimately used elsewhere (`ModalBody.tsx`, `PanelFrame.tsx`).
 `src/web/**/*.tsx` carries zero comments by this repo's comment standard, so this section — not a
 JSDoc pointer on any board component — is the durable home the invariant-audit gate reads for
 `NEW-19`.
@@ -3749,7 +3750,7 @@ JSDoc pointer on any board component — is the durable home the invariant-audit
 **The embedded terminal client is fenced out of Phase 87's diff (`NEW-20`).** The two paths
 `src/web/terminal-main.ts` and `src/web/terminal.html` are the entire embedded terminal client —
 there is no terminal-client directory on disk, so the fence names these two paths directly rather
-than a glob. `src/web/features/detail/TerminalRegion.tsx`, which renders the panel's `<iframe>`
+than a glob. `src/web/modules/detail/components/TerminalRegion.tsx`, which renders the panel's `<iframe>`
 around that client, is a DIFFERENT file and is NOT fenced: the panel container may change this
 phase, the terminal client itself may not. **Enforcement is SPLIT into two halves, and neither
 half alone is the whole guarantee.** The mechanical half — `checkTerminalFence` in
@@ -3781,7 +3782,7 @@ coincidental hue reuse, not by status semantics). A global `src/**` scan would b
 the retired strip cascade check and `NEW-19` already record above: this check's subject is `src/web` specifically. The
 literal half alone is not the whole guarantee, so the check also fences the MECHANISM: the single
 definition of "which colour a column renders" is `COLUMN_ACCENT` in
-`src/web/components/badges/column-accent.ts` (consumed by `ColumnHeader.tsx`, `SearchField.tsx` and
+`src/shared/column-accent.ts` (re-exported by `src/web/components/badges/column-accent.ts`; consumed by `ColumnHeader.tsx`, `SearchField.tsx` and
 `StatusPillSwitcher.tsx`), and the single definition of "which colour a priority renders" is
 `PRIORITY_DOT` in `src/web/components/badges/priority-dot.ts`, and the single definition of "which colour
 a source renders" is `SOURCE_ACCENT` in `src/web/components/badges/source-accent.ts` (consumed by
@@ -3873,7 +3874,7 @@ seven `--src-*` source colors and the "active sidebar row" accent job are ratifi
 sets `--nav-current` (the live sidebar width: `var(--nav-width)`, `var(--nav-width-collapsed)`, or `0px`
 when the sidebar becomes a phone sheet) with classes on its root element. The hook
 `hooks/use-chrome-top.ts` sets `--chrome-top` (the measured height of the top bar, banner and
-page header) on the same element with `style.setProperty`. The docked (Orca) `DetailPanel.tsx` reads
+page header) on the same element with `style.setProperty`. The docked (Orca) `PanelFrame.tsx` reads
 both: `top: var(--chrome-top)`, `left: calc(var(--nav-current, 0px) + var(--orca-nav-width))` and
 `width: calc(100% - var(--nav-current, 0px) - var(--orca-nav-width))`, so collapsing the sidebar
 shifts the docked panel by style values alone and never remounts the terminal iframe. Measured at
@@ -3964,7 +3965,9 @@ stage.
 
 ### Modal Focus Containment
 
-`Modal.tsx` traps `Tab`/`Shift+Tab` inside the TOPMOST dialog only, mirroring the discipline its
+The legacy `Modal` primitive was deleted in LOCAL-76. The Radix Dialog and AlertDialog primitives now own focus containment, and the shortcut gate matches their `data-slot` attributes. The text below records the legacy design.
+
+The legacy `Modal` traps `Tab`/`Shift+Tab` inside the TOPMOST dialog only, mirroring the discipline its
 own pre-existing `Escape` handler already used: a module-level `modalStack` records mount order,
 and the keydown handler no-ops unless the dialog it belongs to is the last entry — so a modal
 opened from inside another modal (`SettingsModal` → `PlaybookEditorModal`/`PlaybookDeleteConfirm`,
@@ -3981,13 +3984,13 @@ below), the handler treats that the same as a boundary hit and sends focus to th
 focusable element rather than doing nothing, so containment self-recovers on the very next
 keystroke instead of requiring a correctly-landed starting point.
 
-This closes `KEEP-06`'s `F-96-D` finding: `Modal.tsx` shipped with no `Tab` containment at all
+This closes `KEEP-06`'s `F-96-D` finding: `Modal` shipped with no `Tab` containment at all
 since it was introduced, byte-identical from `v2.9.0` through Phase 96's own audit (96-11 confirmed
 via `git show v2.9.0:src/web/primitives/Modal.tsx`) — pre-existing debt paid down here, not a v3.0
 regression. `scripts/panel-96.mjs`'s `CleanupModal` a11y leg is the instrument that caught it and
 is what now asserts containment on every run.
 
-**Residual, not closed by this fix:** `Modal.tsx` has no focus-RESTORATION on close (nothing
+**Residual, not closed by this fix:** `Modal` has no focus-RESTORATION on close (nothing
 returns focus to whatever triggered the modal, or to a parent modal once a nested one unmounts) and
 `SettingsModal`'s `initialFocusRef` targets a button that only mounts once its async Linear-filters
 fetch resolves — the mount-time-only focus effect (`useEffect(() => { initialFocusRef?.current?.
@@ -4096,7 +4099,7 @@ table records the security invariants that ride on it, not the rule itself.
 | -------- | ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | T-01-03  | Information Disclosure                            | `adapters/poller.ts`                                                                                                                                                                                             | `config.linearApiKey` is sent only as the raw `Authorization` header value (T-01-03a) — it is never logged, never echoed into any error body, and never reaches the routes layer.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | T-01-04  | Tampering (XSS) / DoS                             | `web/modules/board/components/CardView.tsx`, `web/queries/board-snapshot-queries.ts`                                                                                                                             | Linear title/identifier are rendered as plain React children (React auto-escapes), never injected as raw inner HTML (XSS mitigation T-01-04a); and the SSE stream core disposes EVERYTHING (EventSource, pending reconnect, watchdog) on unmount so a StrictMode double-mount never leaves two live connections or an orphan timer (DoS mitigation T-01-04c).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| T-01-05  | Tampering (XSS) / Elevation                       | `web/features/detail/DetailPanel.tsx`                                                                                                                                                                            | The Linear-sourced description renders as plain React children (auto-escaped), never as raw inner HTML (T-01-05a); the panel is a PLAIN element with NO focus trap so keystrokes pass through to the live `claude` session — EoP accepted on a single-user loopback-only host with no adversarial keystroke concern (T-01-05c).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| T-01-05  | Tampering (XSS) / Elevation                       | `web/modules/detail/containers/DetailPanelContainer.tsx`                                                                                                                                                         | The Linear-sourced description renders as plain React children (auto-escaped), never as raw inner HTML (T-01-05a); the panel is a PLAIN element with NO focus trap so keystrokes pass through to the live `claude` session; EoP accepted on a single-user loopback-only host with no adversarial keystroke concern (T-01-05c).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | T-02-04  | Tampering                                         | `adapters/claude-trust.ts`                                                                                                                                                                                       | `~/.claude.json` is concurrently rewritten by every live Claude session; all `preSeedTrust` calls serialize through a single in-process async lock, keep the re-read→merge-one-entry→write span tight (no awaits between), and parse in try/catch — never writing a file that could not be parsed.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | T-02-05  | Tampering                                         | `adapters/claude-trust.ts`                                                                                                                                                                                       | Same lost-update defense as T-02-04: `write-file-atomic` prevents torn files but not a stale snapshot clobbering a concurrent writer's live auth state, so the in-process lock + tight RMW span + parse-guard is the mitigation an in-process actor can offer.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | T-02-12  | Tampering (XSS)                                   | `web/modules/card-actions/components/StartDialog.tsx`                                                                                                                                                            | The Linear-sourced identifier renders as a plain React child (auto-escaped), never injected as raw inner HTML.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -4460,7 +4463,7 @@ question; none of them read prose for truth.
   both directions: an independent computation does not reference the helper, so it was invisible,
   while a correct new consumer turned the build red — the same wrong-subject shape as `NEW-21`
   before it. Conjunctions that narrow ONE attention field with unrelated state (`src/shared/card-badges.ts`'s
-  activity dot, `DetailPanel.tsx`'s liveness, `App.tsx`'s start-eligibility) are different claims
+  activity dot, `DetailPanelContainer.tsx`'s liveness, `App.tsx`'s start-eligibility) are different claims
   and are deliberately not fenced; a ternary-chain or table-driven duplication is a recorded
   residue the parse cannot see. A third leg is `checkCleanupMirrorChokepoint`, reported as
   `CLEANUP MIRROR CHOKEPOINT (NEW-23)`: the same two-tier shape as `NEW-21`, fencing the three

@@ -579,13 +579,8 @@ const feWebBoundaryPolicies = {
 
 /**
  * ENF-01 error-flip: frontend import-direction + feature entry-point rules
- * enforced at error for every `src/web/**` file. The 3 Phase-57 gap edges
- * (`lib/card-badges.ts` -> `hooks/useUnseenActivity`; `primitives/ActivityItem.tsx`
- * -> `lib/event-copy`, `lib/format-age`) that used to warrant a warn-severity
- * carve-out are gone — those files were relocated/hoisted per
- * docs/standards/architecture.md's "Triage-derived layering-violation fixes"
- * gap-list entry, so this is the only frontend `boundaries/dependencies`
- * block; there is no trailing carve-out to keep in sync.
+ * enforced at error for every `src/web/**` file. This is the only frontend
+ * `boundaries/dependencies` block; there is no trailing carve-out to keep in sync.
  *
  * The `watcher -> ttyd -> store` edge produces no boundaries violation and
  * needs no allow-rule: `watcher` and `ttyd` both classify as the general
@@ -649,6 +644,25 @@ const copyGuardSelectors = copyNodePrefixes.map((prefix) => ({
   message:
     "No em dashes, spaced en dashes, or double hyphens in copy. Use a comma, period, colon, or rephrase.",
 }));
+const panelIdentityBan = [
+  {
+    selector:
+      "JSXOpeningElement[name.name='iframe'] > JSXAttribute[name.name='key']",
+    message: "PANEL-03: never key the terminal iframe (docs/ARCHITECTURE.md).",
+  },
+  {
+    selector:
+      "JSXOpeningElement[name.name=/^(DetailPanelView|DetailPanelContainer|PanelFrame|TerminalRegion)$/] > JSXAttribute[name.name='key']",
+    message:
+      "PANEL-03: a key on the panel ancestry remounts the terminal iframe.",
+  },
+  {
+    selector:
+      "JSXOpeningElement[name.name='iframe']:not(:has(JSXAttribute[name.name='sandbox'][value.value='allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox']))",
+    message: "PANEL-03: the terminal iframe sandbox value is locked (U3-07).",
+  },
+];
+const globalSyntax = [...copyGuardSelectors, ...panelIdentityBan];
 const styleBan = [
   {
     selector: 'JSXAttribute[name.name="style"]',
@@ -887,14 +901,14 @@ export default tseslint.config(
   {
     files: ["src/**/*.{ts,tsx}"],
     rules: {
-      "no-restricted-syntax": ["error", ...copyGuardSelectors],
+      "no-restricted-syntax": ["error", ...globalSyntax],
     },
   },
 
   ...newTreeZones.map(({ files, syntax, imports }) => ({
     files,
     rules: {
-      "no-restricted-syntax": ["error", ...copyGuardSelectors, ...syntax],
+      "no-restricted-syntax": ["error", ...globalSyntax, ...syntax],
       "no-restricted-imports": ["error", { patterns: imports }],
     },
   })),

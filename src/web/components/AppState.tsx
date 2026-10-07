@@ -1,11 +1,11 @@
 import { createContext, useContext, type ComponentProps } from "react";
 import type { BoardView } from "@/modules/board";
-import type { OrcaView } from "@/features/orca";
+import type { WorkspaceView } from "@/modules/workspace";
 import type { TodayView } from "@/modules/today";
 import type { InboxView } from "@/modules/inbox";
 import type { TicketsView } from "@/modules/tickets";
 import type { ActivityView } from "@/modules/activity";
-import type { SessionsPage } from "@/features/sessions";
+import type { SessionsView } from "@/modules/sessions";
 import type { VaultView } from "@/modules/vault";
 import type { CalendarView } from "@/modules/calendar";
 import type { PullRequestsView } from "@/modules/pull-requests";
@@ -22,7 +22,7 @@ import type { WorkspacesView } from "@/modules/workspaces";
 import type { Page } from "../../shared/route.js";
 
 export interface AppPages extends Record<Page, object> {
-  workspace: ComponentProps<typeof OrcaView>;
+  workspace: ComponentProps<typeof WorkspaceView>;
   "pull-requests": Omit<ComponentProps<typeof PullRequestsView>, "selectedKey">;
   errors: Omit<ComponentProps<typeof ErrorsView>, "selectedKey">;
   today: ComponentProps<typeof TodayView>;
@@ -32,7 +32,7 @@ export interface AppPages extends Record<Page, object> {
   settings: Omit<ComponentProps<typeof SettingsView>, "tabId" | "connections"> &
     ComponentProps<typeof ConnectionsView>;
   activity: ComponentProps<typeof ActivityView>;
-  sessions: ComponentProps<typeof SessionsPage>;
+  sessions: ComponentProps<typeof SessionsView>;
   archive: ComponentProps<typeof ArchiveView>;
   playbooks: ComponentProps<typeof PlaybooksView>;
   vault: ComponentProps<typeof VaultView>;

@@ -82,13 +82,7 @@ const BASELINE_PATH = join("scripts", "invariant-baseline.txt");
 const TOKENS_PATH = join("src", "web", "styles", "tokens.css");
 const BOARD_DIR = join("src", "web", "modules", "board");
 const WEB_DIR = join("src", "web");
-const COLUMN_META_PATH = join(
-  "src",
-  "web",
-  "components",
-  "badges",
-  "column-accent.ts",
-);
+const COLUMN_META_PATH = join("src", "shared", "column-accent.ts");
 const PRIORITY_DOT_PATH = join(
   "src",
   "web",
@@ -389,6 +383,139 @@ function checkTerminalFence() {
           `${full}: retired pattern NEW-20 — a new embedded-terminal-client file appeared outside the fenced set`,
         );
       }
+    }
+  }
+  return violations;
+}
+
+const PANEL_DIR = join("src", "web", "modules", "detail");
+const PANEL_CONTRACT = [
+  [
+    join(PANEL_DIR, "components", "TerminalRegion.tsx"),
+    'sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"',
+  ],
+  [
+    join(PANEL_DIR, "components", "TerminalRegion.tsx"),
+    "src={`/sessions/${c.activeSessionId}/terminal/`}",
+  ],
+  [
+    join(PANEL_DIR, "components", "PanelFrame.tsx"),
+    'aria-label="Ticket detail"',
+  ],
+  [
+    join(PANEL_DIR, "components", "PanelFrame.tsx"),
+    'data-docked={docked ? "true" : undefined}',
+  ],
+  [join(PANEL_DIR, "components", "PanelFrame.tsx"), "inert={!docked && !open}"],
+  [
+    join(PANEL_DIR, "components", "PanelHeader.tsx"),
+    '"Exit fullscreen" : "Enter fullscreen"',
+  ],
+  [
+    join(PANEL_DIR, "components", "PanelHeader.tsx"),
+    '"Back to board" : "Close panel"',
+  ],
+  [
+    join(PANEL_DIR, "components", "PanelResizeHandle.tsx"),
+    'aria-label="Resize panel"',
+  ],
+  [
+    join(PANEL_DIR, "components", "SessionSwitcher.tsx"),
+    'aria-label="Sessions"',
+  ],
+  [
+    join(PANEL_DIR, "containers", "DetailPanelContainer.tsx"),
+    "setTimeout(() => setShown(null), 200)",
+  ],
+  [
+    join(PANEL_DIR, "containers", "DetailPanelContainer.tsx"),
+    "useFocusReturn(open)",
+  ],
+  [join(PANEL_DIR, "hooks", "use-panel-resize.ts"), '"dsp.panel.width"'],
+  [
+    join(PANEL_DIR, "queries", "detail-queries.ts"),
+    "previousQuery?.queryKey[2] === id ? previous : []",
+  ],
+  [
+    join(
+      "src",
+      "web",
+      "modules",
+      "workspace",
+      "components",
+      "WorkspaceNav.tsx",
+    ),
+    'aria-label="Tickets"',
+  ],
+  [
+    join(
+      "src",
+      "web",
+      "modules",
+      "workspace",
+      "domain",
+      "workspace-choices.ts",
+    ),
+    'key: "dsp.workspaceGroup", allowed: ["workspace"], fallback: "status",',
+  ],
+  [
+    join(
+      "src",
+      "web",
+      "modules",
+      "workspace",
+      "domain",
+      "workspace-choices.ts",
+    ),
+    'key: "dsp.workspaceSubgroup", allowed: ["status", "workspace"], fallback: "none",',
+  ],
+  [
+    join(
+      "src",
+      "web",
+      "modules",
+      "workspace",
+      "domain",
+      "workspace-choices.ts",
+    ),
+    'key: "dsp.workspaceSort", allowed: ["title"], fallback: "id",',
+  ],
+  [
+    join("src", "web", "components", "ui", "hooks", "use-shortcuts.ts"),
+    '[role="checkbox"]',
+  ],
+  [join("src", "web", "hooks", "useShortcuts.ts"), '[role="checkbox"]'],
+  [
+    join("src", "web", "components", "ui", "dialog.tsx"),
+    'data-slot="dialog-content"',
+  ],
+  [
+    join("src", "web", "components", "ui", "alert-dialog.tsx"),
+    'data-slot="alert-dialog-content"',
+  ],
+];
+
+/**
+ * Report every detail panel, Workspace and shortcut contract literal that is missing from its file.
+ *
+ * @remarks PANEL-03 and the Unit 3 parity contracts (iframe sandbox and src, the selectors that
+ * `scripts/panel-mount-92.mjs` reads, stored choice keys, the shortcut gates, the 200 ms clear)
+ * have no other committed guard. Whitespace is collapsed before the match, so a prettier reflow
+ * never trips it.
+ * @returns One line per missing file or missing literal.
+ */
+function checkPanelContract() {
+  const squash = (text) => text.replace(/\s+/g, " ");
+  const violations = [];
+  for (const [path, literal] of PANEL_CONTRACT) {
+    if (!existsSync(path)) {
+      violations.push(
+        `${path}: file not found, PANEL-03 contract subject is missing or renamed`,
+      );
+      continue;
+    }
+    if (!squash(readFileSync(path, "utf8")).includes(squash(literal))) {
+      violations.push(`${path}: PANEL-03 contract literal missing: ${literal}`);
     }
   }
   return violations;
@@ -1301,7 +1428,7 @@ function generateBaseline() {
  * JSDoc for their respective two-tier fence/slice split and missing-subject
  * sentinels.
  * @returns Nothing; exits 0 iff MISSING, ORPHAN, EXTRA, RETIRED,
- * BOARD READING RHYTHM, TERMINAL FENCE, SESSION PROJECTION
+ * BOARD READING RHYTHM, TERMINAL FENCE, PANEL CONTRACT, SESSION PROJECTION
  * CHOKEPOINT, ATTENTION SINGLE SOURCE, LAUNCHCTL READ-ONLY, and STATUS COLOR
  * SINGLE SOURCE are all empty.
  */
@@ -1324,6 +1451,7 @@ function run() {
   const retired = checkRetiredPatterns();
   const boardReadingRhythm = checkBoardReadingRhythm();
   const terminalFence = checkTerminalFence();
+  const panelContract = checkPanelContract();
   const sessionChokepoint = checkSessionProjectionChokepoint();
   const cleanupMirrorChokepoint = checkCleanupMirrorChokepoint();
   const attentionSingleSource = checkAttentionSingleSource();
@@ -1336,6 +1464,7 @@ function run() {
   report("RETIRED (design literals that came back)", retired);
   report("BOARD READING RHYTHM (NEW-19)", boardReadingRhythm);
   report("TERMINAL FENCE (NEW-20)", terminalFence);
+  report("PANEL CONTRACT (PANEL-03)", panelContract);
   report("SESSION PROJECTION CHOKEPOINT (NEW-21)", sessionChokepoint);
   report("CLEANUP MIRROR CHOKEPOINT (NEW-23)", cleanupMirrorChokepoint);
   report("ATTENTION SINGLE SOURCE (NEW-22)", attentionSingleSource);
@@ -1349,6 +1478,7 @@ function run() {
     retired.length +
     boardReadingRhythm.length +
     terminalFence.length +
+    panelContract.length +
     sessionChokepoint.length +
     cleanupMirrorChokepoint.length +
     attentionSingleSource.length +
@@ -1368,6 +1498,9 @@ function run() {
         : "") +
       (terminalFence.length
         ? ` (${terminalFence.length} terminal-fence regression(s))`
+        : "") +
+      (panelContract.length
+        ? ` (${panelContract.length} panel-contract regression(s))`
         : "") +
       (sessionChokepoint.length
         ? ` (${sessionChokepoint.length} session-projection-chokepoint violation(s))`

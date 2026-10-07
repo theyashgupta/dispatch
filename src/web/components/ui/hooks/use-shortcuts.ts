@@ -5,7 +5,7 @@ import {
 } from "../../../../shared/shortcuts.js";
 
 const EDITABLE_SELECTOR =
-  '[role="combobox"], [role="listbox"], [contenteditable="true"]';
+  '[role="combobox"], [role="listbox"], [role="checkbox"], [contenteditable="true"]';
 
 export const MODAL_SELECTOR =
   '[aria-modal="true"], [data-slot="dialog-content"], [data-slot="alert-dialog-content"]';
@@ -13,7 +13,7 @@ export const MODAL_SELECTOR =
 /**
  * Fire key bindings from one window listener, gated by the pure resolver.
  *
- * @remarks The bindings live in a ref, written in a layout effect so a press right after a render sees the new rows. A modal is any legacy Modal or Radix Dialog or AlertDialog found in the DOM, so a dialog in its exit animation still blocks keys; a Sheet does not count. `scopeId` names the element focus must sit in, body included.
+ * @remarks The bindings live in a ref, written in a layout effect so a press right after a render sees the new rows. A modal is any `aria-modal` element or Radix Dialog or AlertDialog found in the DOM, so a dialog in its exit animation still blocks keys; a Sheet does not count. `scopeId` names the element focus must sit in, body included.
  */
 export function useShortcuts(
   bindings: readonly ShortcutBinding[],

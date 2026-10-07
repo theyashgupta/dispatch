@@ -202,8 +202,8 @@ floor; a graphic token takes 3:1. The column tokens are graphic tokens in both t
 column token is below the 4.5:1 floor (2.90:1 to 3.66:1 on its tint on the light Board), so a
 consumer that renders a column colour as text (the column count chip, the status pills, the
 search result chip, the merged and closed PR chips, the Workspace rail counts) takes the rule of
-the state chip through `dataInk` in `src/web/primitives/data-ink.ts`: 35 percent of the token
-mixed with `--text`. On the 16 percent tint of the same token that text measures 7.16:1 or more
+the state chip through a `text-[color-mix(in_srgb,var(--badge-state)_35%,var(--text))]` class (as
+in `src/web/modules/board/components/ColumnHeader.tsx`): 35 percent of the token mixed with `--text`. On the 16 percent tint of the same token that text measures 7.16:1 or more
 in light and 7.35:1 or more in dark over the five background tiers. A colour that comes from
 Linear is not a token; the record under `## Linear state colors` holds its rule. A placeholder
 reads `--text-muted` through one `::placeholder` rule. The destructive fill keeps its hex in the

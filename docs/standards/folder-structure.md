@@ -59,22 +59,22 @@ Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md`. The new t
 | --------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
 | `main.tsx`, `App.tsx`                                                                                                                         | web root (entry + shell)           |
 | `BoardView.tsx`, `BoardContainer.tsx`, `CardView.tsx`, `EmptyState.tsx`                                                                       | `modules/board/`                   |
-| `DetailPanel.tsx`, `PanelHeader.tsx`, `ReferenceBlocks.tsx`, `SessionLostSection.tsx`, `TerminalRegion.tsx`                                   | `features/detail/`                 |
+| `DetailPanelView.tsx`, `DetailPanelContainer.tsx`, `PanelHeader.tsx`, `ReferenceBlocks.tsx`, `SessionLostSection.tsx`, `TerminalRegion.tsx`   | `modules/detail/`                  |
 | `AppSidebar.tsx`, `NavIcon.tsx`, `SyncStatus.tsx`, `PageHeader.tsx`, `TopBar.tsx`                                                             | `modules/shell/components/`        |
 | `StartDialog.tsx`, `GroupStartDialog.tsx`, `CleanupDialog.tsx`                                                                                | `modules/card-actions/components/` |
 | `MultiSelect.tsx`, `MemberRow.tsx`, `WorkspaceAdd.tsx`                                                                                        | `components/` (shared tier)        |
 | `SettingsView.tsx`, `PlaybookEditorDialog.tsx`                                                                                                | `modules/{settings,playbooks}/`    |
 | `GoneBadge.tsx`, `PlanReadyBadge.tsx`, `SourceBadge.tsx`                                                                                      | `components/badges/` (shared tier) |
-| `SessionsPage.tsx`, `SessionRow.tsx`                                                                                                          | `features/sessions/`               |
+| `SessionsView.tsx`, `SessionsContainer.tsx`, `SessionRow.tsx`                                                                                 | `modules/sessions/`                |
 | `PullRequestsView.tsx`, `PrList.tsx`, `PrDetail.tsx`                                                                                          | `modules/pull-requests/`           |
 | `ErrorsView.tsx`, `ErrorList.tsx`, `ErrorDetail.tsx`, `error-rows.ts`                                                                         | `modules/errors/`                  |
-| `TodayPage.tsx`, `P0Card.tsx`, `CountChips.tsx`, `TodayList.tsx`, `Agenda.tsx`, `EntryRow.tsx`, `today-view.ts`                               | `features/today/`                  |
+| `TodayView.tsx`, `P0Card.tsx`, `CountChips.tsx`, `TodayList.tsx`, `Agenda.tsx`, `EntryRow.tsx`, `today-view.ts`                               | `modules/today/`                   |
 | `SlackView.tsx`, `SlackList.tsx`, `SlackDetail.tsx`, `SlackThread.tsx`                                                                        | `modules/slack/`                   |
 | `MeetingNotesView.tsx`, `MeetingsView.tsx`, `MeetingList.tsx`, `MeetingDetail.tsx`                                                            | `modules/meetings/`                |
 | `CalendarView.tsx`, `TicketsView.tsx`                                                                                                         | `modules/{calendar,tickets}/`      |
 | `WorkspacesView.tsx`, `WorktreeRow.tsx`, `WorkspaceFolders.tsx`, `WorkspaceRepos.tsx`                                                         | `modules/workspaces/`              |
-| `AskPage.tsx`, `AskComposer.tsx`, `AskMessage.tsx`                                                                                            | `features/ask/`                    |
-| `FlowPage.tsx`, `FlowToolbar.tsx`, `FlowDiagram.tsx`, `FlowNarrow.tsx`, `flow-model.ts`                                                       | `features/flow/`                   |
+| `AskView.tsx`, `AskComposer.tsx`, `AskMessage.tsx`                                                                                            | `modules/ask/`                     |
+| `FlowView.tsx`, `FlowToolbar.tsx`, `FlowDiagram.tsx`, `FlowNarrow.tsx`, `flow-model.ts`                                                       | `modules/flow/`                    |
 | `useUnseenActivity.ts`, `useTransitionNotifications.ts`, `useResumeFeedback.ts`, `useMediaQuery.ts`                                           | `hooks/`                           |
 | `api.ts`, `format-age.ts`, `meetings.ts`, `calendar.ts`                                                                                       | `lib/`                             |
 | `card-badges.ts`, `resume-feedback.ts`, `start-request.ts`                                                                                    | `src/shared/`                      |

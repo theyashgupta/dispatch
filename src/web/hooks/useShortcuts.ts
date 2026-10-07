@@ -3,10 +3,9 @@ import {
   resolveShortcut,
   type ShortcutBinding,
 } from "../../shared/shortcuts.js";
-import { modalDepth } from "../primitives/Modal.js";
 
 const EDITABLE_SELECTOR =
-  '[role="combobox"], [role="listbox"], [contenteditable="true"]';
+  '[role="combobox"], [role="listbox"], [role="checkbox"], [contenteditable="true"]';
 
 const RADIX_MODAL_SELECTOR =
   '[data-slot="dialog-content"], [data-slot="alert-dialog-content"]';
@@ -17,7 +16,7 @@ const RADIX_MODAL_SELECTOR =
  * @remarks The bindings live in a ref (written in a layout effect so a press right after a render
  * sees the new rows) and the listener is attached once per menu change; the pure resolver decides
  * whether a press counts, and `scopeId` names the element focus must sit in, body included. A modal
- * is a legacy Modal or a Radix Dialog or AlertDialog still mounted, so a dialog in its exit animation blocks keys; a Sheet does not count.
+ * is a Radix Dialog or AlertDialog still mounted, so a dialog in its exit animation blocks keys; a Sheet does not count.
  */
 export function useShortcuts(
   bindings: readonly ShortcutBinding[],
@@ -55,9 +54,7 @@ export function useShortcuts(
         },
         bindingsRef.current,
         {
-          modalOpen:
-            modalDepth() > 0 ||
-            document.querySelector(RADIX_MODAL_SELECTOR) != null,
+          modalOpen: document.querySelector(RADIX_MODAL_SELECTOR) != null,
           menuOpen,
           inScope,
         },

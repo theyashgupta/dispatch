@@ -9,7 +9,7 @@ import {
 import type { BoardSnapshot, Card, Column } from "../../../../shared/types.js";
 import { boardSnapshotKeys } from "@/queries/board-snapshot-queries";
 import { moveCard } from "@/queries/cards-api";
-import { getCard, getCardComments } from "./board-api.js";
+import { getCard } from "./board-api.js";
 import type { FailedMoveEvent } from "@/modules/board/domain/failed-move-notice";
 import {
   applyMoves,
@@ -22,20 +22,12 @@ import {
 export const boardKeys = {
   all: ["board"] as const,
   detail: (id: string) => ["board", "card", id] as const,
-  comments: (id: string) => ["board", "card", id, "comments"] as const,
 };
 
 export function cardQueryOptions(id: string) {
   return queryOptions({
     queryKey: boardKeys.detail(id),
     queryFn: () => getCard(id),
-  });
-}
-
-export function cardCommentsQueryOptions(id: string) {
-  return queryOptions({
-    queryKey: boardKeys.comments(id),
-    queryFn: () => getCardComments(id),
   });
 }
 

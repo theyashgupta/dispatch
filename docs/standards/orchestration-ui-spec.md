@@ -398,7 +398,7 @@ The board parts of today stay as they are, in their legacy files. The UI ticket 
 | Column empty text                                           | `src/web/features/board/EmptyState.tsx`                                    |
 | Card face: priority dot, identifier, title and session chip | `src/web/features/board/CardView.tsx`                                      |
 | Selection bar for multi-select                              | `src/web/features/board/SelectionBar.tsx`                                  |
-| Detail panel with its own resize handle                     | `src/web/features/detail/DetailPanel.tsx`                                  |
+| Detail panel with its own resize handle                     | `src/web/modules/detail/views/DetailPanelView.tsx`                         |
 | Sidebar header with the glyph and the wordmark              | `src/web/modules/shell/components/AppSidebar.tsx`                          |
 
 ### States
