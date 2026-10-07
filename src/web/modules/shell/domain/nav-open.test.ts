@@ -54,7 +54,7 @@ test("767 and 768 are carousel widths, as the phone breakpoint sits inside the c
 
 test("the carousel width matches the legacy CAROUSEL_QUERY media query text", () => {
   const source = readFileSync(
-    new URL("../../../hooks/useMediaQuery.ts", import.meta.url),
+    new URL("../../../../shared/media-queries.ts", import.meta.url),
     "utf8",
   );
   assert.ok(
@@ -82,7 +82,7 @@ test("the generated phone breakpoint and the legacy NARROW_QUERY switch at the s
   const mobile = read("../../../components/ui/hooks/use-mobile.ts").match(
     /const MOBILE_BREAKPOINT = (\d+);/,
   );
-  const narrow = read("../../../hooks/useMediaQuery.ts").match(
+  const narrow = read("../../../../shared/media-queries.ts").match(
     /export const NARROW_QUERY = "\(max-width: (\d+)px\)";/,
   );
   assert.ok(mobile && narrow);

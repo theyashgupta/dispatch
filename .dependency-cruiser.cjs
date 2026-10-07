@@ -1,7 +1,4 @@
-const legacyCycleFiles = [
-  "^src/web/features/board/(index\\.ts|Board\\.tsx)$",
-  "^src/web/features/modals/(index\\.ts|GroupStartModal\\.tsx)$",
-];
+const legacyCycleFiles = ["^src/web/features/board/(index\\.ts|Board\\.tsx)$"];
 
 const serviceDirection = (name, from, to) => ({
   name,

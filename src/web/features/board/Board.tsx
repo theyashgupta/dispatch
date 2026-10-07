@@ -36,7 +36,7 @@ import { SearchBox } from "./SearchBox.js";
 import { StatusPillSwitcher } from "./StatusPillSwitcher.js";
 import { SelectionBar } from "./SelectionBar.js";
 import { membersOf } from "./group-members.js";
-import { GroupStartModal } from "../modals/index.js";
+import { GroupStartView } from "../../modules/card-actions/index.js";
 import type { StartRequest } from "../../lib/start-request.js";
 import { useLastOpened } from "../../hooks/useUnseenActivity.js";
 import {
@@ -176,7 +176,14 @@ export function Board({
           if (id == null) return;
           performMove(id, column);
           requestAnimationFrame(() => {
-            if (modalDepth() === 0) focusCard(id);
+            if (
+              modalDepth() === 0 &&
+              document.querySelector(
+                '[data-slot="dialog-content"], [data-slot="alert-dialog-content"]',
+              ) == null
+            ) {
+              focusCard(id);
+            }
           });
         },
       ]),
@@ -753,7 +760,7 @@ export function Board({
         </div>
       )}
       {groupModalMembers != null && (
-        <GroupStartModal
+        <GroupStartView
           members={groupModalMembers}
           onClose={() => setGroupModalMembers(null)}
           onStarted={() => setSelectedIds(new Set())}

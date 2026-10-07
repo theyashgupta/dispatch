@@ -1,5 +1,6 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { InboxView } from "@/features/inbox";
+import { SlackThreadView } from "@/modules/slack";
+import { InboxView } from "@/modules/inbox";
 import { useAppState } from "@/components/AppState";
 
 export const Route = createLazyFileRoute("/inbox/{-$id}")({
@@ -8,5 +9,10 @@ export const Route = createLazyFileRoute("/inbox/{-$id}")({
 
 function InboxRoute() {
   const props = useAppState().inbox;
-  return <InboxView {...props} />;
+  return (
+    <InboxView
+      {...props}
+      renderSlackThread={(args) => <SlackThreadView {...args} />}
+    />
+  );
 }

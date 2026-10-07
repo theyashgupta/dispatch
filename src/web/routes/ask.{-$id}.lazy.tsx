@@ -1,5 +1,5 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { AskPage } from "@/features/ask";
+import { AskView } from "@/modules/ask";
 import { useAppState } from "@/components/AppState";
 
 export const Route = createLazyFileRoute("/ask/{-$id}")({
@@ -9,5 +9,5 @@ export const Route = createLazyFileRoute("/ask/{-$id}")({
 function AskRoute() {
   const props = useAppState().ask;
   const { id } = Route.useParams();
-  return <AskPage {...props} prefill={id} />;
+  return <AskView {...props} prefill={id} />;
 }

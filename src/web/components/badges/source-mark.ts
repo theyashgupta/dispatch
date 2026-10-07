@@ -1,5 +1,5 @@
 import { Bot, FileText, Layers, Tag } from "lucide-react";
-import type { ComponentType, CSSProperties } from "react";
+import type { ComponentType } from "react";
 import { CalendarMark } from "@/components/icons/brands/CalendarMark";
 import { GitHubMark } from "@/components/icons/brands/GitHubMark";
 import { GranolaMark } from "@/components/icons/brands/GranolaMark";
@@ -19,11 +19,6 @@ export const SOURCE_MARK: Record<string, SourceMark> = {
   agent: Bot,
   local: FileText,
   group: Layers,
-};
-
-export const markSlotStyle: CSSProperties = {
-  display: "inline-flex",
-  flex: "0 0 auto",
 };
 
 /**

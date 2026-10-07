@@ -4,6 +4,7 @@ import remarkGfm from "remark-gfm";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ImageWithFallback } from "@/components/icons/ImageWithFallback";
 import { cn } from "@/lib/utils";
+import { isHttpSrc } from "@/components/markdown/web-src";
 import { markdownImageSource } from "../../../shared/markdown-image-source.js";
 import { isWebUrl } from "../../../shared/web-url.js";
 
@@ -98,7 +99,7 @@ const components: Components = {
       <a href={href} className={ANCHOR}>
         {children}
       </a>
-    ) : href != null && /^https?:\/\//i.test(href) ? (
+    ) : href != null && isHttpSrc(href) ? (
       <a
         href={href}
         target="_blank"

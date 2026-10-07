@@ -379,6 +379,9 @@ const boundariesConfig = {
  * Exception R-14, dated 2026-09-30: route files (which include the `__root.tsx` import of
  * src/web/styles/*) can import the legacy tree, and src/web/components/AppState.tsx can
  * import the legacy pages and module barrels (for the page prop types). Ticket 16 removes both allows.
+ *
+ * Exception for the legacy hooks/useUnseenActivity.ts: it re-exports the one last-opened store from
+ * components/ui/hooks, so it can import that file until the legacy tree is gone.
  */
 const feWebBoundaryPolicies = {
   default: "allow",
@@ -562,6 +565,14 @@ const feWebBoundaryPolicies = {
         element: { type: "shared-component", fileInternalPath: "AppState.tsx" },
       },
       allow: { element: { type: [...legacyWebTypes, "module"] } },
+    },
+    {
+      from: {
+        element: { type: "hooks", fileInternalPath: "useUnseenActivity.ts" },
+      },
+      allow: {
+        element: { type: "ui", fileInternalPath: "hooks/use-last-opened.ts" },
+      },
     },
   ],
 };

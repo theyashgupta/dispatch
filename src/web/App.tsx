@@ -6,6 +6,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type ComponentProps,
   type ReactNode,
   type CSSProperties,
   useMemo,
@@ -23,6 +24,10 @@ import {
   useLastOpened,
 } from "./hooks/useUnseenActivity.js";
 import { useTransitionNotifications } from "./hooks/useTransitionNotifications.js";
+import {
+  AskHeaderView,
+  askConversationQueryOptions,
+} from "./modules/ask/index.js";
 import { ShellView } from "./modules/shell/index.js";
 import {
   NAV_ITEMS,
@@ -59,17 +64,16 @@ import {
 } from "./features/board/index.js";
 import { DetailPanel } from "./features/detail/index.js";
 import {
-  ActivityList,
-  type ActivityFilter,
-} from "./features/activity/index.js";
+  ActivityFilterView,
+  ActivityListView,
+} from "./modules/activity/index.js";
 import {
-  StartModal,
-  CleanupModal,
-  ResetModal,
-  SyncToLinearModal,
-  CreateTicketModal,
-  MultiSelect,
-} from "./features/modals/index.js";
+  CleanupView,
+  CreateTicketView,
+  ResetView,
+  StartView,
+  SyncToLinearView,
+} from "./modules/card-actions/index.js";
 import { SetupWizardView } from "./modules/setup/index.js";
 import { SetupConnectionsView } from "./modules/connections/index.js";
 import { Spinner } from "./primitives/Spinner.js";
@@ -104,7 +108,6 @@ import { feedItems, isListedError } from "../shared/feed-items.js";
 import { slackRows } from "./modules/slack/domain/slack-rows.js";
 import { nowMs } from "../shared/format-age.js";
 import { flattenSessions } from "./lib/sessions.js";
-import { useAsk } from "./hooks/useAsk.js";
 import { askAboutQuestion } from "./lib/ask.js";
 import type { UnwindDestination } from "../shared/types.js";
 import {
@@ -139,6 +142,8 @@ import { DONE_PAGE_SIZE } from "../shared/done-limit.js";
 
 import { isTicketCard } from "../shared/linear-state.js";
 
+type ActivityFilter = ComponentProps<typeof ActivityFilterView>["filter"];
+
 const MeetingNotesView = lazy(() =>
   import("./modules/meetings/index.js").then((m) => ({
     default: m.MeetingNotesView,
@@ -166,17 +171,6 @@ const headerNoteStyle: CSSProperties = {
   fontSize: "var(--font-label)",
   color: "var(--text-muted)",
   whiteSpace: "nowrap",
-};
-
-const activitySelectStyle: CSSProperties = {
-  height: "28px",
-  padding: "0 var(--space-sm)",
-  background: "var(--surface-card)",
-  border: "1px solid var(--border)",
-  borderRadius: "var(--radius)",
-  color: "var(--text)",
-  fontFamily: "var(--font-ui)",
-  fontSize: "var(--font-label)",
 };
 
 class PageErrorBoundary extends Component<
@@ -290,7 +284,7 @@ export function App() {
   const { data: activityData } = useQuery(activityFeedQueryOptions());
   const events = activityData ?? [];
   const { data: claudeAccounts } = useQuery(accountsQueryOptions());
-  const ask = useAsk();
+  const { data: askConversation } = useQuery(askConversationQueryOptions());
   const router = useRouter();
   const route = useCommittedRoute();
   const currentPage = route.page;
@@ -547,17 +541,6 @@ export function App() {
   for (const card of board?.cards ?? []) {
     cardIdentifiers[card.id] = card.identifier;
   }
-  const activityCardIds = new Set(
-    events.map((e) => e.cardId).filter((id): id is string => id != null),
-  );
-  if (activityFilter.cardId != null) activityCardIds.add(activityFilter.cardId);
-  const activityCardOptions = [...activityCardIds].map((id) => ({
-    id,
-    label: cardIdentifiers[id] ?? id,
-  }));
-  const activityTypeOptions = [
-    ...new Set([...events.map((e) => e.type), ...activityFilter.types]),
-  ].map((type) => ({ id: type, label: type.replace(/_/g, " ") }));
 
   const undoToast = useUndoToast();
   const items = useItems(board);
@@ -841,7 +824,7 @@ export function App() {
     meetings: { title: "Meetings", count: meetingItems.length },
     calendar: { title: "Calendar" },
     workspaces: { title: "Workspaces", count: workspacesSummary?.count },
-    ask: { title: "Ask", count: ask.turns.length },
+    ask: { title: "Ask", count: askConversation.turns.length },
     flow: { title: "Flow" },
   };
   const pageTitle = pageMeta[route.page].title;
@@ -994,41 +977,12 @@ export function App() {
         From meeting notes
       </Button>
     ) : currentPage === "activity" ? (
-      <>
-        <select
-          aria-label="Filter by card"
-          value={activityFilter.cardId ?? ""}
-          onChange={(event) =>
-            setActivityFilter((f) => ({
-              ...f,
-              cardId: event.target.value === "" ? null : event.target.value,
-            }))
-          }
-          style={activitySelectStyle}
-        >
-          <option value="">All cards</option>
-          {activityCardOptions.map((option) => (
-            <option key={option.id} value={option.id}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-        <MultiSelect
-          label="Event types"
-          placeholder="All types"
-          options={activityTypeOptions}
-          selected={activityFilter.types}
-          loading={false}
-          loadError={false}
-          emptyText="No events yet"
-          onChange={(next) =>
-            setActivityFilter((f) => ({
-              ...f,
-              types: next as ActivityFilter["types"],
-            }))
-          }
-        />
-      </>
+      <ActivityFilterView
+        events={events}
+        identifiers={cardIdentifiers}
+        filter={activityFilter}
+        onFilterChange={setActivityFilter}
+      />
     ) : currentPage === "workspaces" && workspacesSummary ? (
       <span style={headerNoteStyle}>
         {`${formatSize(workspacesSummary.totalKb)} on disk`}
@@ -1037,12 +991,7 @@ export function App() {
           : ""}
       </span>
     ) : currentPage === "ask" ? (
-      <Button
-        disabled={ask.turns.length === 0 && ask.pending === null}
-        onClick={ask.clear}
-      >
-        Clear
-      </Button>
+      <AskHeaderView />
     ) : undefined;
 
   const paletteCommands = buildCommands(
@@ -1105,7 +1054,7 @@ export function App() {
         activityOpen={activityOpen}
         onCloseActivity={() => setActivityOpen(false)}
         activityList={
-          <ActivityList
+          <ActivityListView
             events={events}
             identifiers={cardIdentifiers}
             onSelectCard={(id) => {
@@ -1170,7 +1119,7 @@ export function App() {
         }
       >
         {startCard && startRequest && (
-          <StartModal
+          <StartView
             key={`${startRequest.cardId}:${startRequest.newSession === true ? "new" : "start"}`}
             card={startCard}
             newSession={startRequest.newSession === true}
@@ -1183,7 +1132,7 @@ export function App() {
           />
         )}
         {cleanupCard && (
-          <CleanupModal
+          <CleanupView
             key={cleanupCardId}
             card={cleanupCard}
             onConfirm={requestCleanup}
@@ -1191,7 +1140,7 @@ export function App() {
           />
         )}
         {resetCard && (
-          <ResetModal
+          <ResetView
             key={resetCardId}
             card={resetCard}
             onConfirm={requestReset}
@@ -1199,7 +1148,7 @@ export function App() {
           />
         )}
         {cardToSync && (
-          <SyncToLinearModal
+          <SyncToLinearView
             key={syncCardId}
             card={cardToSync}
             cards={board?.cards ?? []}
@@ -1207,7 +1156,7 @@ export function App() {
           />
         )}
         {createTicketOpen && (
-          <CreateTicketModal
+          <CreateTicketView
             onClose={closeOverlay(setCreateTicketOpen)}
             onFromMeetingNotes={() => {
               overlayReturnRef.current?.focus();

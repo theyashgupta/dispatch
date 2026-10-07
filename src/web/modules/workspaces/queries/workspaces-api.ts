@@ -1,7 +1,4 @@
-import type {
-  DiscoveredRepo,
-  WorkspacesInventory,
-} from "../../../../shared/types.js";
+import type { WorkspacesInventory } from "../../../../shared/types.js";
 import { http, httpError } from "@/lib/http";
 
 const WORKSPACES_TIMEOUT_MS = 60_000;
@@ -16,25 +13,6 @@ export async function getWorkspaces(
   );
   if (!result.ok) {
     throw httpError("getWorkspaces", result);
-  }
-  return result.data;
-}
-
-/**
- * Re-discover an already-registered folder: GET /api/workspace-folders/discover?path=.
- *
- * @remarks
- * A registered folder whose directory was deleted returns `{ repos: [] }` with a 200, which
- * renders the empty-checklist notice. Any non-2xx throws.
- */
-export async function discoverFolder(
-  path: string,
-): Promise<{ repos: DiscoveredRepo[] }> {
-  const result = await http<{ repos: DiscoveredRepo[] }>(
-    `/api/workspace-folders/discover?path=${encodeURIComponent(path)}`,
-  );
-  if (!result.ok) {
-    throw httpError("discoverFolder", result);
   }
   return result.data;
 }

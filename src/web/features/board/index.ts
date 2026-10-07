@@ -1,6 +1,6 @@
 export { Board } from "./Board.js";
 export { attentionTitle, errorCopy, needsAttention } from "./card-attention.js";
-export { PRIORITY_DOT } from "./CardView.js";
+export { PRIORITY_DOT } from "../../components/badges/priority-dot.js";
 export { COLUMN_ACCENT, COLUMN_LABELS } from "./column-meta.js";
 export { SINGLE_LINE_COPY } from "./EmptyState.js";
 export { membersOf } from "./group-members.js";

@@ -89,7 +89,13 @@ const COLUMN_META_PATH = join(
   "board",
   "column-meta.ts",
 );
-const CARD_VIEW_PATH = join("src", "web", "features", "board", "CardView.tsx");
+const PRIORITY_DOT_PATH = join(
+  "src",
+  "web",
+  "components",
+  "badges",
+  "priority-dot.ts",
+);
 const SOURCE_ACCENT_PATH = join(
   "src",
   "web",
@@ -970,7 +976,7 @@ function readStatusColorPalette() {
 
 /**
  * The mechanism half of `NEW-24`: `COLUMN_ACCENT` ({@link COLUMN_META_PATH}) and `PRIORITY_DOT`
- * ({@link CARD_VIEW_PATH}) are each fenced as the single definition of "which colour a column or
+ * ({@link PRIORITY_DOT_PATH}) are each fenced as the single definition of "which colour a column or
  * priority renders", asserted still exported and still holding only `var(--col-*)`/`var(--accent)`
  * or `var(--prio-*)` string values. A missing/renamed export is a sentinel violation, not a silent
  * pass: a literal-only fence would pass unchanged against a build that deleted either map and
@@ -1013,16 +1019,16 @@ function checkStatusColorMechanism() {
     }
   }
 
-  if (!existsSync(CARD_VIEW_PATH)) {
+  if (!existsSync(PRIORITY_DOT_PATH)) {
     violations.push(
-      `${CARD_VIEW_PATH}: file not found, NEW-24's PRIORITY_DOT subject is missing or renamed`,
+      `${PRIORITY_DOT_PATH}: file not found, NEW-24's PRIORITY_DOT subject is missing or renamed`,
     );
   } else {
-    const content = readFileSync(CARD_VIEW_PATH, "utf8");
+    const content = readFileSync(PRIORITY_DOT_PATH, "utf8");
     const priorityDotMatch = /export const PRIORITY_DOT\b/.exec(content);
     if (!priorityDotMatch) {
       violations.push(
-        `${CARD_VIEW_PATH}: export const PRIORITY_DOT not found, NEW-24's single-source mechanism is missing or renamed`,
+        `${PRIORITY_DOT_PATH}: export const PRIORITY_DOT not found, NEW-24's single-source mechanism is missing or renamed`,
       );
     } else {
       const tail = content.slice(priorityDotMatch.index);
@@ -1030,13 +1036,13 @@ function checkStatusColorMechanism() {
       const values = [...body.matchAll(/color:\s*"([^"]*)"/g)].map((m) => m[1]);
       if (values.length === 0) {
         violations.push(
-          `${CARD_VIEW_PATH}: PRIORITY_DOT holds no color values, NEW-24's single-source mechanism is malformed`,
+          `${PRIORITY_DOT_PATH}: PRIORITY_DOT holds no color values, NEW-24's single-source mechanism is malformed`,
         );
       }
       for (const value of values) {
         if (!/^var\(-{2}prio-[a-z-]+\)$/.test(value)) {
           violations.push(
-            `${CARD_VIEW_PATH}: PRIORITY_DOT color "${value}" is not a var(--prio-*) reference, NEW-24's single-source mechanism is broken`,
+            `${PRIORITY_DOT_PATH}: PRIORITY_DOT color "${value}" is not a var(--prio-*) reference, NEW-24's single-source mechanism is broken`,
           );
         }
       }
@@ -1108,7 +1114,7 @@ function checkSourceAccentMechanism() {
  * denylist derived from {@link TOKENS_PATH} at run time, not a fixed literal list.
  * @remarks Asserts the MECHANISM as well as the literal, the same discipline `NEW-22`'s own
  * JSDoc argues for: `COLUMN_ACCENT` (`column-meta.ts`) and `PRIORITY_DOT`
- * (`CardView.tsx`) are each the single definition of "which colour a column or priority renders",
+ * (`priority-dot.ts`) are each the single definition of "which colour a column or priority renders",
  * consumed by `Column.tsx`, `SearchBox.tsx` and `StatusPillSwitcher.tsx` (columns) and `CardView.tsx`
  * itself (priority). A gate that only fenced literals would pass unchanged against a build that
  * deleted either map and inlined its `var()` strings by hand.

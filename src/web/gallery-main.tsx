@@ -157,6 +157,8 @@ const BUTTON_VARIANTS = [
   "destructive",
   "outline",
   "secondary",
+  "secondary-bordered",
+  "surface",
   "ghost",
   "link",
 ] as const;
@@ -170,6 +172,7 @@ const BUTTON_SIZES = [
   "icon-sm",
   "icon",
   "icon-lg",
+  "icon-compact",
 ] as const;
 
 const BADGE_TONES = [
@@ -299,10 +302,22 @@ function Gallery() {
             <div className="flex flex-col gap-2">
               <Label htmlFor="gallery-name">Name</Label>
               <Input id="gallery-name" placeholder="Ada Lovelace" />
+              <Input
+                aria-label="Surface input"
+                variant="surface"
+                placeholder="Surface variant"
+              />
             </div>
           </Demo>
           <Demo title="Textarea">
-            <Textarea aria-label="Notes" placeholder="Write a note" />
+            <div className="flex flex-col gap-2">
+              <Textarea aria-label="Notes" placeholder="Write a note" />
+              <Textarea
+                aria-label="Surface notes"
+                variant="surface"
+                placeholder="Surface variant"
+              />
+            </div>
           </Demo>
           <Demo title="Field">
             <Field>
@@ -332,6 +347,18 @@ function Gallery() {
                 <SelectItem value="apple">Apple</SelectItem>
                 <SelectItem value="banana">Banana</SelectItem>
                 <SelectItem value="cherry">Cherry</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select defaultValue="apple">
+              <SelectTrigger
+                aria-label="Surface fruit"
+                variant="surface"
+                className="w-full"
+              >
+                <SelectValue placeholder="Pick a fruit" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="apple">Apple</SelectItem>
               </SelectContent>
             </Select>
           </Demo>
@@ -576,6 +603,12 @@ function Gallery() {
               <ItemContent>
                 <ItemTitle>Item title</ItemTitle>
                 <ItemDescription>Item description.</ItemDescription>
+              </ItemContent>
+            </Item>
+            <Item selected>
+              <ItemContent>
+                <ItemTitle>Selected item</ItemTitle>
+                <ItemDescription>Selected variant.</ItemDescription>
               </ItemContent>
             </Item>
           </Demo>
