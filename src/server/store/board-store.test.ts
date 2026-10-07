@@ -10,6 +10,7 @@ const { redactCard } = await import("./board.store.js");
 function card(sessions: Card["sessions"], activeSessionId?: string): Card {
   return {
     id: "c1",
+    boardKey: DEFAULT_BOARD_KEY,
     issueId: "c1",
     identifier: "LOCAL-1",
     title: "t",

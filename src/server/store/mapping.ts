@@ -1,4 +1,6 @@
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 import type {
+  BoardKey,
   Card,
   ReconcileResult,
   SourceIssue,
@@ -6,9 +8,14 @@ import type {
 } from "../../shared/types.js";
 
 /** Build a fresh Inbox card for a newly-seen source issue, stamped with its origin source. */
-function newInboxCard(issue: SourceIssue, sourceId: string): Card {
+function newInboxCard(
+  issue: SourceIssue,
+  sourceId: string,
+  boardKey: BoardKey,
+): Card {
   return {
     id: issue.id,
+    boardKey,
     issueId: issue.id,
     column: "inbox",
     ...issueFields(issue),
@@ -155,6 +162,7 @@ export function reconcile(
   tracked?: TrackedRefresh,
   now: number = Date.now(),
   pushingIds: ReadonlySet<string> = new Set(),
+  boardForNewCard: (identifier: string) => BoardKey = () => DEFAULT_BOARD_KEY,
 ): ReconcileResult {
   const seen = new Set(issues.map((i) => i.id));
   const trackedById = new Map(
@@ -174,7 +182,9 @@ export function reconcile(
   for (const issue of issues) {
     const existing = current.get(issue.id);
     if (!existing) {
-      upserts.push(newInboxCard(issue, sourceId));
+      upserts.push(
+        newInboxCard(issue, sourceId, boardForNewCard(issue.identifier)),
+      );
       continue;
     }
     if (existing.groupId != null || !isPastTodo(existing)) {

@@ -1,3 +1,4 @@
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -20,6 +21,7 @@ void test("archive rows round-trip across a reopen, newest first, and delete rep
     destination: "todo",
     card: {
       id,
+      boardKey: DEFAULT_BOARD_KEY,
       issueId: id,
       identifier: id,
       title: "t",
@@ -401,6 +403,7 @@ void test("persist writes the board key column and the boardKey field for each c
   const { cards, meta } = db.readAll();
   const card = {
     id: "LOCAL-900",
+    boardKey: DEFAULT_BOARD_KEY,
     issueId: "LOCAL-900",
     identifier: "LOCAL-900",
     title: "t",

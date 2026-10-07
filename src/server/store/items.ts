@@ -1,4 +1,5 @@
 import type {
+  BoardKey,
   Card,
   Item,
   SettableItemState,
@@ -130,6 +131,7 @@ export const ITEM_DESCRIPTION_MAX = 20000;
  */
 export function buildPromotedCard(
   item: Item,
+  boardKey: BoardKey,
   identifier: string,
   now: string,
   context?: string,
@@ -148,6 +150,7 @@ export function buildPromotedCard(
   ).replace(/DISPATCH_STATUS:/gi, "DISPATCH-STATUS:");
   return {
     id: identifier,
+    boardKey,
     issueId: item.id,
     identifier,
     title: item.title.trim().slice(0, ITEM_TITLE_MAX),

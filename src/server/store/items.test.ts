@@ -1,3 +1,4 @@
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Item } from "../../shared/types.js";
@@ -247,6 +248,7 @@ test("buildPromotedCard builds a local Inbox card with the snippet, source link 
       url: "https://example.test/pr/42",
       meta: { repo: "acme/app", author: "sam" },
     }),
+    DEFAULT_BOARD_KEY,
     "LOCAL-7",
     NOW,
   );
@@ -266,6 +268,7 @@ test("buildPromotedCard builds a local Inbox card with the snippet, source link 
 test("buildPromotedCard caps the title and description and drops an empty description", () => {
   const long = buildPromotedCard(
     item("a", { title: "t".repeat(400), snippet: "s".repeat(30000), meta: {} }),
+    DEFAULT_BOARD_KEY,
     "LOCAL-8",
     NOW,
   );
@@ -273,6 +276,7 @@ test("buildPromotedCard caps the title and description and drops an empty descri
   assert.equal(long.description?.length, ITEM_DESCRIPTION_MAX);
   const bare = buildPromotedCard(
     item("b", { snippet: "  ", meta: {} }),
+    DEFAULT_BOARD_KEY,
     "LOCAL-9",
     NOW,
   );

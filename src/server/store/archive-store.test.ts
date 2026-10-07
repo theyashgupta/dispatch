@@ -150,6 +150,7 @@ void test("restoreGroup refuses when a member moved, joined another group, or st
 void test("restoreBlocker is null only when every member is exactly where unwind left it", () => {
   const member = (over: Partial<Card>): Card => ({
     id: "LOCAL-9",
+    boardKey: DEFAULT_BOARD_KEY,
     issueId: "LOCAL-9",
     identifier: "LOCAL-9",
     title: "m",
