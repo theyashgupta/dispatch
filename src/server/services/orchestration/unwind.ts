@@ -12,7 +12,7 @@ export type UnwindOutcome =
 /**
  * Unwind a group (LOCAL-17): kill its sessions, then archive, unlink and move in one store mutation.
  * @remarks Resolves the group from the group card or any member and refuses while a start, resume
- * or cleanup saga holds it. Kills happen before the mutation so the snapshot never claims a live
+ * or cleanup saga or a ship flow holds it. Kills happen before the mutation so the snapshot never claims a live
  * tmux name; a kill that finds nothing is a no-op, so a half-dead group unwinds the same way.
  * The kill window is bracketed by the card-scoped cleanup guard, so a resume, cleanup or second
  * unwind cannot interleave with it, and the store mutator re-checks the start guard itself.
@@ -33,6 +33,9 @@ export async function unwindGroup(
         : undefined;
   if (!group || group.source !== "group") {
     return { ok: false, status: 409, error: "only a group can be unwound" };
+  }
+  if (group.shipFlow?.state === "running") {
+    return { ok: false, status: 409, error: "ship-running" };
   }
   if (store.isStarting(group.id)) {
     return {
