@@ -81,13 +81,13 @@ describe("dispatch mcp", () => {
     await new Promise<void>((resolve) => fake.close(() => resolve()));
   });
 
-  it("lists the 23 tools", async () => {
+  it("lists the 25 tools", async () => {
     const { tools } = await client.listTools();
     assert.deepEqual(
       tools.map((t) => t.name).sort(),
       MCP_TOOLS.map((t) => t.name).sort(),
     );
-    assert.equal(tools.length, 23);
+    assert.equal(tools.length, 25);
   });
 
   it("sends get_card as a GET with the token header", async () => {
@@ -215,7 +215,7 @@ describe("dispatch mcp", () => {
     const cancel = new AbortController();
     const call = client
       .callTool(
-        { name: "wait_for_event", arguments: { since: 0, timeoutSeconds: 60 } },
+        { name: "wait_for_event", arguments: { since: 0, timeoutSeconds: 55 } },
         undefined,
         { signal: cancel.signal },
       )

@@ -79,19 +79,20 @@ void test("the read query schemas", () => {
   ]);
 });
 
-void test("createTicketBodySchema trims and refuses a marker or a bound", () => {
-  assert.deepEqual(
-    s.createTicketBodySchema.parse({ title: " t ", description: " d " }),
-    { title: "t", fullDescription: "d" },
-  );
+void test("createTicketBodySchema takes a proposal id and an index only", () => {
+  const ok = { proposalItemId: "7f8e-41", index: 0 };
+  assert.deepEqual(s.createTicketBodySchema.parse(ok), ok);
   refuses(s.createTicketBodySchema, [
-    [{ title: "", description: "d" }, "invalid-title"],
-    [{ title: "t".repeat(301), description: "d" }, "invalid-title"],
-    [{ title: MARKER, description: "d" }, MARKER_CODE],
-    [{ title: "t", description: "" }, "invalid-description"],
-    [{ title: "t", description: "d".repeat(20001) }, "invalid-description"],
-    [{ title: "t", description: MARKER }, MARKER_CODE],
-    [null, "invalid-title"],
+    [{ index: 0 }, "invalid-proposal-item"],
+    [{ proposalItemId: "bad id!", index: 0 }, "invalid-proposal-item"],
+    [{ proposalItemId: "a".repeat(41), index: 0 }, "invalid-proposal-item"],
+    [{ proposalItemId: "a" }, "invalid-index"],
+    [{ ...ok, index: -1 }, "invalid-index"],
+    [{ ...ok, index: 1.5 }, "invalid-index"],
+    [{ ...ok, index: "0" }, "invalid-index"],
+    [{ ...ok, title: "t" }, "unknown-field"],
+    [{ ...ok, description: "d" }, "unknown-field"],
+    [null, "invalid-body"],
   ]);
 });
 
@@ -208,6 +209,37 @@ void test("createDecisionBodySchema", () => {
       "invalid-options",
     ],
     [{ ...ok, recommendedOptionId: "A!" }, "invalid-recommended-option"],
+    [{ ...ok, tickets: [{ title: "t", description: "d" }] }, "invalid-tickets"],
+  ]);
+});
+
+void test("createDecisionBodySchema needs tickets for a ticket_proposal and bounds them", () => {
+  const base = {
+    kind: "ticket_proposal",
+    question: "q",
+    options: [
+      { id: "a", label: "A" },
+      { id: "b", label: "B" },
+    ],
+  };
+  const ticket = { title: "t", description: "d" };
+  assert.equal(
+    s.createDecisionBodySchema.safeParse({ ...base, tickets: [ticket] })
+      .success,
+    true,
+  );
+  refuses(s.createDecisionBodySchema, [
+    [base, "invalid-tickets"],
+    [{ ...base, tickets: [] }, "invalid-tickets"],
+    [{ ...base, tickets: Array(21).fill(ticket) }, "invalid-tickets"],
+    [{ ...base, tickets: ["t"] }, "invalid-tickets"],
+    [{ ...base, tickets: [{ ...ticket, title: "" }] }, "invalid-title"],
+    [{ ...base, tickets: [{ ...ticket, title: MARKER }] }, MARKER_CODE],
+    [
+      { ...base, tickets: [{ ...ticket, description: "" }] },
+      "invalid-description",
+    ],
+    [{ ...base, tickets: [{ ...ticket, description: MARKER }] }, MARKER_CODE],
   ]);
 });
 

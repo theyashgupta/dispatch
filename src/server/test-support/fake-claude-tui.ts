@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const FAKE_CLAUDE_SCRIPT = String.raw`import fs from "node:fs";
+import { spawn } from "node:child_process";
 
 const scenarioPath = process.env.FAKE_CLAUDE_SCENARIO;
 const startedAt = Date.now();
@@ -14,6 +15,14 @@ let lastWarm = null;
 let droppedEnters = 0;
 let transcriptFile = null;
 let clearedAt = 0;
+let statusOverride = null;
+let replayStage = 0;
+let wasCleared = false;
+let replayChain = Promise.resolve();
+let replayStopped = false;
+let replayStep = 0;
+let mcp = null;
+const saved = {};
 
 function loadScenario() {
   let text = "";
@@ -45,7 +54,7 @@ function isWarming() {
 }
 
 function render() {
-  const status = [...(scenario.statusRows ?? [])];
+  const status = [...(statusOverride ?? scenario.statusRows ?? [])];
   if (isWarming()) status[0] = "warming up";
   const lines = [...(scenario.transcript ?? []), ...shown];
   if (dialog) {
@@ -91,7 +100,10 @@ function writeEngineSessionId() {
 function submit() {
   const text = input;
   if (text === "") return;
-  if (text === "/clear") return clearConversation();
+  if (text === "/clear") {
+    wasCleared = true;
+    return clearConversation();
+  }
   const reply = scenario.reply ?? "ok";
   const file = transcriptFile ?? scenario.transcriptPath;
   if (file) {
@@ -116,6 +128,222 @@ function submit() {
     clearedAt = 2;
     writeEngineSessionId();
   }
+  triggerReplay();
+}
+
+function mcpConfigArg() {
+  const at = process.argv.indexOf("--mcp-config");
+  return at === -1 ? undefined : process.argv[at + 1];
+}
+
+function triggerReplay() {
+  const replay = scenario.replay;
+  if (!replay || typeof replay !== "object" || !mcpConfigArg()) return;
+  if (replayStage === 0) {
+    replayStage = 1;
+    queueSteps("onStart", replay.onStart);
+  } else if (replayStage === 1 && wasCleared) {
+    replayStage = 2;
+    queueSteps("afterClear", replay.afterClear);
+  }
+}
+
+function queueSteps(phase, steps) {
+  if (!Array.isArray(steps) || steps.length === 0) return;
+  replayChain = replayChain.then(() => runSteps(phase, steps));
+}
+
+function replayLog(entry) {
+  if (!scenario.replayLogPath) return;
+  const row = { ...entry, at: new Date().toISOString() };
+  fs.appendFileSync(scenario.replayLogPath, JSON.stringify(row) + "\n");
+}
+
+function lookup(ref) {
+  const [name, ...path] = ref.split(".");
+  if (name === "env") return process.env["REPLAY_" + path.join(".")];
+  let value = saved[name];
+  for (const seg of path) {
+    if (value === null || typeof value !== "object") return undefined;
+    value = value[seg];
+  }
+  return value;
+}
+
+const REF = /\$([A-Za-z_]\w*(?:\.\w+)+)/g;
+
+function expand(value) {
+  if (typeof value === "string") {
+    const whole = value.match(/^\$([A-Za-z_]\w*(?:\.\w+)+)$/);
+    const need = (ref) => {
+      const found = lookup(ref);
+      if (found === undefined) throw new Error("unresolved reference $" + ref);
+      return found;
+    };
+    if (whole) return need(whole[1]);
+    return value.replace(REF, (_, ref) => String(need(ref)));
+  }
+  if (Array.isArray(value)) return value.map(expand);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([k, v]) => [k, expand(v)]),
+    );
+  }
+  return value;
+}
+
+function mcpSend(client, method, params, timeoutMs) {
+  const id = client.nextId++;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      client.pending.delete(id);
+      reject(new Error(method + " timed out after " + timeoutMs + " ms"));
+    }, timeoutMs);
+    client.pending.set(id, { resolve, reject, timer });
+    client.child.stdin.write(
+      JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n",
+    );
+  });
+}
+
+function openMcp() {
+  if (mcp) return mcp;
+  mcp = (async () => {
+    const config = JSON.parse(fs.readFileSync(mcpConfigArg(), "utf8"));
+    const server = config.mcpServers.dispatch;
+    const child = spawn(server.command, server.args ?? [], {
+      env: process.env,
+      cwd: scenario.replay.cwd ?? process.cwd(),
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+    const client = { child, nextId: 1, pending: new Map() };
+    let buffer = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => {
+      buffer += chunk;
+      let at;
+      while ((at = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, at);
+        buffer = buffer.slice(at + 1);
+        let message;
+        try {
+          message = JSON.parse(line);
+        } catch {
+          continue;
+        }
+        const waiting = client.pending.get(message.id);
+        if (!waiting) continue;
+        client.pending.delete(message.id);
+        clearTimeout(waiting.timer);
+        if (message.error) waiting.reject(new Error(message.error.message));
+        else waiting.resolve(message.result);
+      }
+    });
+    child.on("exit", () => {
+      for (const waiting of client.pending.values()) {
+        clearTimeout(waiting.timer);
+        waiting.reject(new Error("mcp server exited"));
+      }
+      client.pending.clear();
+    });
+    child.stdin.on("error", () => undefined);
+    process.on("exit", () => child.kill());
+    await mcpSend(
+      client,
+      "initialize",
+      {
+        protocolVersion: "2025-06-18",
+        capabilities: {},
+        clientInfo: { name: "fake-claude", version: "1" },
+      },
+      scenario.replay.initTimeoutMs ?? 30000,
+    );
+    child.stdin.write(
+      JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) +
+        "\n",
+    );
+    return client;
+  })();
+  return mcp;
+}
+
+function expectationMet(expect, isError, text) {
+  const want = expect?.isError ?? false;
+  if (isError !== want) return false;
+  return expect?.contains === undefined || text.includes(expect.contains);
+}
+
+async function callStep(step) {
+  const n = ++replayStep;
+  const entry = { step: n, tool: step.tool };
+  let text = "";
+  try {
+    const args = expand(step.args ?? {});
+    const expect = step.expect ? expand(step.expect) : undefined;
+    const client = await openMcp();
+    const result = await mcpSend(
+      client,
+      "tools/call",
+      { name: step.tool, arguments: args },
+      step.timeoutMs ?? 70000,
+    );
+    text = result.content?.find((c) => c.type === "text")?.text ?? "";
+    const isError = result.isError === true;
+    let met = expectationMet(expect, isError, text);
+    let reason = met ? "" : "expectation not met";
+    if (met && step.saveAs) {
+      try {
+        saved[step.saveAs] = JSON.parse(text);
+      } catch {
+        met = false;
+        reason = "saveAs needs a JSON result";
+      }
+    }
+    replayLog({
+      ...entry,
+      ok: true,
+      isError,
+      expectMet: met,
+      excerpt: text.slice(0, 300),
+    });
+    shown.push("⏺ " + step.tool + (met ? " ok" : " FAILED " + reason));
+    return met;
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    replayLog({
+      ...entry,
+      ok: false,
+      isError: true,
+      expectMet: false,
+      excerpt: reason.slice(0, 300),
+    });
+    shown.push("⏺ " + step.tool + " FAILED " + reason);
+    return false;
+  }
+}
+
+async function runSteps(phase, steps) {
+  if (replayStopped) return;
+  for (const step of steps) {
+    if (step.tool) {
+      const met = await callStep(step);
+      render();
+      if (!met) {
+        replayStopped = true;
+        replayLog({ done: true, phase, stopped: true });
+        return;
+      }
+    } else if (typeof step.print === "string") {
+      shown.push(step.print);
+      render();
+    } else if (Array.isArray(step.statusRows)) {
+      statusOverride = step.statusRows;
+      render();
+    } else if (typeof step.sleepMs === "number") {
+      await new Promise((r) => setTimeout(r, step.sleepMs));
+    }
+  }
+  replayLog({ done: true, phase });
 }
 
 function handleKey(key) {

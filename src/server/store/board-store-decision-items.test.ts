@@ -109,3 +109,30 @@ void test("an answered item is used once, and an open or unknown item is never u
   assert.equal(store.consumeDecisionItem("dec-1"), false);
   assert.equal(store.getDecisionItem("dec-1")?.consumedAt, used.consumedAt);
 });
+
+void test("a proposal index is used once by one guarded write and can be freed", () => {
+  const proposal = {
+    tickets: [
+      { title: "a", description: "a" },
+      { title: "b", description: "b" },
+    ],
+    usedIndexes: [],
+  };
+  store.insertDecisionItem(
+    item("prop-1", ACME, { kind: "ticket_proposal", proposal }),
+  );
+  assert.equal(store.useProposalIndex("prop-1", 0), false);
+  store.answerDecisionItem("prop-1", { optionId: "approve", note: null });
+  assert.equal(store.useProposalIndex("prop-1", 1), true);
+  assert.equal(store.useProposalIndex("prop-1", 1), false);
+  assert.equal(store.useProposalIndex("prop-1", 0), true);
+  assert.deepEqual(
+    store.getDecisionItem("prop-1")?.proposal?.usedIndexes,
+    [1, 0],
+  );
+  store.releaseProposalIndex("prop-1", 1);
+  assert.deepEqual(store.getDecisionItem("prop-1")?.proposal?.usedIndexes, [0]);
+  assert.equal(store.useProposalIndex("prop-1", 1), true);
+  assert.equal(store.useProposalIndex("dec-404", 0), false);
+  assert.equal(store.useProposalIndex("dec-3", 0), false);
+});

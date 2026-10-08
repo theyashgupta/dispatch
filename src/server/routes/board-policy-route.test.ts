@@ -50,7 +50,7 @@ async function put(route: string, body: unknown): Promise<Reply> {
 const VALID: BoardPolicy = {
   roadmapApproval: "rules",
   concurrencyCap: 5,
-  loopModel: "sonnet",
+  loopModel: "claude-sonnet-5-5:high",
   orchestratorModel: "opus",
   handoffPercent: 40,
   handoffHardPercent: 70,
@@ -134,4 +134,39 @@ test("an unknown board key answers 404", async () => {
   const got = await put("/boards/NOPE/policy", VALID);
   assert.equal(got.status, 404, got.text);
   assert.equal(got.body.error, "unknown-board");
+});
+
+test("an unknown orchestratorModel answers 400 and writes nothing", async () => {
+  await expectRefusal(
+    { ...VALID, orchestratorModel: "gpt-9" },
+    400,
+    "invalid-orchestratorModel",
+  );
+  await expectRefusal(
+    { ...VALID, orchestratorModel: "" },
+    400,
+    "invalid-orchestratorModel",
+  );
+});
+
+test("an unknown loopModel answers 400 and writes nothing", async () => {
+  for (const loopModel of [
+    "sonnet",
+    "claude-opus-5-5",
+    "claude-opus-5-5:low",
+  ]) {
+    await expectRefusal({ ...VALID, loopModel }, 400, "invalid-loopModel");
+  }
+});
+
+test("the listed models are accepted, with the legacy name opus and a null loop model", async () => {
+  for (const body of [
+    { ...VALID, orchestratorModel: "claude-fable-5-1", loopModel: null },
+    { ...VALID, orchestratorModel: "claude-sonnet-5-5" },
+    { ...VALID, orchestratorModel: "opus", loopModel: "claude-opus-5-5:max" },
+  ]) {
+    const got = await put("/boards/PLC/policy", body);
+    assert.equal(got.status, 200, got.text);
+    assert.deepEqual(stored(), body);
+  }
 });

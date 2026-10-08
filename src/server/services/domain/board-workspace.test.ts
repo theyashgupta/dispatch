@@ -17,6 +17,7 @@ function board(key: BoardKey, overrides: Partial<Board> = {}): Board {
     linearTeamKeys: [],
     lastUsedFolder: null,
     policy: defaultBoardPolicy(key),
+    orchestrators: [],
     createdAt: "2026-10-06T00:00:00.000Z",
     archived: false,
     ...overrides,

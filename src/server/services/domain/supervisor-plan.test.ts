@@ -242,3 +242,17 @@ void test("the reset time comes from the pane in local time", () => {
   assert.equal(parseResetAt("resets soon", now), null);
   assert.equal(parseResetAt("no limit here", now), null);
 });
+
+void test("an idle orchestrator gets no restart nudge, but its handoff still runs", () => {
+  const orchestrator = {
+    engineActive: true,
+    handoffPending: true,
+    unitPhase: "orchestrator",
+    orchestrator: true,
+  };
+  assert.deepEqual(plan({ loop: orchestrator }).actions, []);
+  assert.deepEqual(plan({ from: "idle", loop: orchestrator }).actions, []);
+  assert.deepEqual(plan({ to: "handoff_ready", loop: orchestrator }).actions, [
+    { kind: "handoff" },
+  ]);
+});

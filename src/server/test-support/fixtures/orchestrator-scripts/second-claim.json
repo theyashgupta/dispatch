@@ -1,0 +1,9 @@
+{
+  "onStart": [
+    {
+      "tool": "start_group",
+      "args": { "id": "$env.GROUP_ID" },
+      "expect": { "isError": true, "contains": "other-owner" }
+    }
+  ]
+}

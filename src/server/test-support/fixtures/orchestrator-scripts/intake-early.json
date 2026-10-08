@@ -1,0 +1,27 @@
+{
+  "onStart": [
+    {
+      "tool": "create_decision_item",
+      "args": {
+        "kind": "ticket_proposal",
+        "question": "Create this ticket from the intake?",
+        "options": [
+          { "id": "approve", "label": "Create this ticket" },
+          { "id": "reject", "label": "Do not create" }
+        ],
+        "tickets": [
+          {
+            "title": "Early ticket",
+            "description": "A ticket that must not exist before the user answers."
+          }
+        ]
+      },
+      "saveAs": "proposal"
+    },
+    {
+      "tool": "create_ticket",
+      "args": { "proposalItemId": "$proposal.item.id", "index": 0 },
+      "expect": { "isError": true, "contains": "proposal-open" }
+    }
+  ]
+}
