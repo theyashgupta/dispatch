@@ -1,3 +1,4 @@
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { Card, Item, Session } from "../../../shared/types.js";
@@ -12,6 +13,7 @@ const NOW = new Date("2026-09-25T10:00:00.000Z");
 function card(id: string, extra: Partial<Card> = {}): Card {
   return {
     id,
+    boardKey: DEFAULT_BOARD_KEY,
     issueId: id,
     identifier: id,
     title: `Title ${id}`,

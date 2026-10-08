@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, mock, test } from "node:test";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import { DEFAULT_BOARD_KEY as LOCAL } from "../../shared/board-key.js";
 import type {
   ActivityEvent,
+  BoardKey,
   BoardSnapshot,
   TunnelState,
 } from "../../shared/types.js";
@@ -16,6 +18,8 @@ import {
   boardSnapshotQueryOptions,
   connectBoardStream,
   latestBoard,
+  newestBoardSnapshot,
+  sameBoard,
   shouldPrefetchBoard,
   tunnelKeys,
   type ConnectBoardStreamOptions,
@@ -63,7 +67,7 @@ class FakeEventSource {
 }
 
 function snap(n: number): BoardSnapshot {
-  return { cards: [], syncedAt: String(n) };
+  return { cards: [], syncedAt: String(n), boardKey: LOCAL };
 }
 
 function ev(id: number, reason: string | null = null): ActivityEvent {
@@ -103,6 +107,7 @@ function start(overrides: Partial<ConnectBoardStreamOptions> = {}) {
   const queryClient = newClient();
   let snapshotCalls = 0;
   const dispose = connectBoardStream({
+    board: LOCAL,
     doneLimit: 50,
     queryClient,
     eventSource: FakeEventSource,
@@ -122,7 +127,11 @@ function start(overrides: Partial<ConnectBoardStreamOptions> = {}) {
 
 test("boardSnapshotKeys and tunnelKeys have the documented shapes", () => {
   assert.deepEqual(boardSnapshotKeys.all, ["board-snapshot"]);
-  assert.deepEqual(boardSnapshotKeys.detail(50), ["board-snapshot", 50]);
+  assert.deepEqual(boardSnapshotKeys.detail(LOCAL, 50), [
+    "board-snapshot",
+    "LOCAL",
+    50,
+  ]);
   assert.deepEqual(tunnelKeys.state, ["tunnel"]);
 });
 
@@ -132,8 +141,8 @@ test("boardSnapshotQueryOptions has the snapshot key and requests the done limit
     urls.push(typeof url === "string" ? url : "other");
     return Promise.resolve(new Response(JSON.stringify(snap(1))));
   };
-  const options = boardSnapshotQueryOptions(75);
-  assert.deepEqual(options.queryKey, ["board-snapshot", 75]);
+  const options = boardSnapshotQueryOptions(LOCAL, 75);
+  assert.deepEqual(options.queryKey, ["board-snapshot", "LOCAL", 75]);
   assert.deepEqual(await newClient().fetchQuery(options), snap(1));
   assert.deepEqual(urls, ["/api/board?doneLimit=75"]);
 });
@@ -141,7 +150,7 @@ test("boardSnapshotQueryOptions has the snapshot key and requests the done limit
 test("boardSnapshotQueryOptions rejects a failure status so the query errors", async () => {
   globalThis.fetch = () => Promise.resolve(new Response("{}", { status: 503 }));
   await assert.rejects(
-    newClient().fetchQuery(boardSnapshotQueryOptions(50)),
+    newClient().fetchQuery(boardSnapshotQueryOptions(LOCAL, 50)),
     /board snapshot failed: 503/,
   );
 });
@@ -150,43 +159,55 @@ test("boardSnapshotQueryOptions rejects a 200 with a garbled body instead of cac
   globalThis.fetch = () => Promise.resolve(new Response("not json"));
   const client = newClient();
   await assert.rejects(
-    client.fetchQuery(boardSnapshotQueryOptions(50)),
+    client.fetchQuery(boardSnapshotQueryOptions(LOCAL, 50)),
     /board snapshot failed: 200/,
   );
-  assert.equal(client.getQueryData(boardSnapshotKeys.detail(50)), undefined);
+  assert.equal(
+    client.getQueryData(boardSnapshotKeys.detail(LOCAL, 50)),
+    undefined,
+  );
 });
 
 test("boardSnapshotQueryOptions rejects a 200 with a null body instead of caching null", async () => {
   globalThis.fetch = () => Promise.resolve(new Response("null"));
   const client = newClient();
   await assert.rejects(
-    client.fetchQuery(boardSnapshotQueryOptions(50)),
+    client.fetchQuery(boardSnapshotQueryOptions(LOCAL, 50)),
     /board snapshot failed: unreadable body/,
   );
-  assert.equal(client.getQueryData(boardSnapshotKeys.detail(50)), undefined);
+  assert.equal(
+    client.getQueryData(boardSnapshotKeys.detail(LOCAL, 50)),
+    undefined,
+  );
 });
 
 test("fetchBoardSnapshot rejects a 200 with a non-object body", async () => {
   globalThis.fetch = () => Promise.resolve(new Response("7"));
   await assert.rejects(
-    fetchBoardSnapshot(50),
+    fetchBoardSnapshot(LOCAL, 50),
     new Error("board snapshot failed: unreadable body"),
   );
 });
 
 test("applyBoardSnapshot writes under the key for its done limit only", () => {
   const client = newClient();
-  applyBoardSnapshot(client, 50, snap(1));
-  assert.deepEqual(client.getQueryData(boardSnapshotKeys.detail(50)), snap(1));
-  assert.equal(client.getQueryData(boardSnapshotKeys.detail(100)), undefined);
+  applyBoardSnapshot(client, LOCAL, 50, snap(1));
+  assert.deepEqual(
+    client.getQueryData(boardSnapshotKeys.detail(LOCAL, 50)),
+    snap(1),
+  );
+  assert.equal(
+    client.getQueryData(boardSnapshotKeys.detail(LOCAL, 100)),
+    undefined,
+  );
 });
 
 test("applyActivityEvent merges into an existing feed, newest id first", () => {
   const client = newClient();
-  client.setQueryData(activityKeys.feed, [ev(3), ev(1)]);
-  applyActivityEvent(client, ev(2));
-  applyActivityEvent(client, ev(3, "replayed"));
-  assert.deepEqual(client.getQueryData(activityKeys.feed), [
+  client.setQueryData(activityKeys.feed(LOCAL), [ev(3), ev(1)]);
+  applyActivityEvent(client, LOCAL, ev(2));
+  applyActivityEvent(client, LOCAL, ev(3, "replayed"));
+  assert.deepEqual(client.getQueryData(activityKeys.feed(LOCAL)), [
     ev(3),
     ev(2),
     ev(1),
@@ -195,14 +216,15 @@ test("applyActivityEvent merges into an existing feed, newest id first", () => {
 
 test("applyActivityEvent creates the feed entry when missing", () => {
   const client = newClient();
-  applyActivityEvent(client, ev(7));
-  assert.deepEqual(client.getQueryData(activityKeys.feed), [ev(7)]);
+  applyActivityEvent(client, LOCAL, ev(7));
+  assert.deepEqual(client.getQueryData(activityKeys.feed(LOCAL)), [ev(7)]);
 });
 
 test("applyActivityEvent drops the oldest event at the 201st", () => {
   const client = newClient();
-  for (let id = 1; id <= 201; id++) applyActivityEvent(client, ev(id));
-  const feed = client.getQueryData<ActivityEvent[]>(activityKeys.feed) ?? [];
+  for (let id = 1; id <= 201; id++) applyActivityEvent(client, LOCAL, ev(id));
+  const feed =
+    client.getQueryData<ActivityEvent[]>(activityKeys.feed(LOCAL)) ?? [];
   assert.equal(feed.length, 200);
   assert.equal(feed[0]?.id, 201);
   assert.equal(feed.at(-1)?.id, 2);
@@ -220,14 +242,16 @@ test("a default message reaches onBoardUpdate before the cache, then the cache",
   const holder: { client?: QueryClient } = {};
   const h = start({
     onBoardUpdate: () => {
-      seen.push(holder.client?.getQueryData(boardSnapshotKeys.detail(50)));
+      seen.push(
+        holder.client?.getQueryData(boardSnapshotKeys.detail(LOCAL, 50)),
+      );
     },
   });
   holder.client = h.queryClient;
   h.source().emitMessage(snap(9));
   assert.deepEqual(seen, [undefined]);
   assert.deepEqual(
-    h.queryClient.getQueryData(boardSnapshotKeys.detail(50)),
+    h.queryClient.getQueryData(boardSnapshotKeys.detail(LOCAL, 50)),
     snap(9),
   );
   h.dispose();
@@ -244,7 +268,9 @@ test("activity and tunnel frames route to their callbacks and cache keys", () =>
   h.source().emitNamed("tunnel", { status: "off" });
   assert.deepEqual(activity, [ev(4)]);
   assert.deepEqual(tunnels, [{ status: "off" }]);
-  assert.deepEqual(h.queryClient.getQueryData(activityKeys.feed), [ev(4)]);
+  assert.deepEqual(h.queryClient.getQueryData(activityKeys.feed(LOCAL)), [
+    ev(4),
+  ]);
   assert.deepEqual(h.queryClient.getQueryData(tunnelKeys.state), {
     status: "off",
   });
@@ -267,7 +293,7 @@ test("a reopen does not refetch an observed board query and the next frame write
   const h = start();
   let fetches = 0;
   const observer = new QueryObserver(h.queryClient, {
-    ...boardSnapshotQueryOptions(50),
+    ...boardSnapshotQueryOptions(LOCAL, 50),
     queryFn: () => {
       fetches++;
       return Promise.resolve(snap(1));
@@ -285,7 +311,7 @@ test("a reopen does not refetch an observed board query and the next frame write
   assert.equal(fetches, 1);
   h.source().emitMessage(snap(7));
   assert.deepEqual(
-    h.queryClient.getQueryData(boardSnapshotKeys.detail(50)),
+    h.queryClient.getQueryData(boardSnapshotKeys.detail(LOCAL, 50)),
     snap(7),
   );
   unsubscribe();
@@ -300,13 +326,16 @@ test("a stream frame written during the fetch survives an older GET result", asy
     new Promise<Response>((resolve) => {
       resolveGet = resolve;
     });
-  const pending = client.fetchQuery(boardSnapshotQueryOptions(50));
+  const pending = client.fetchQuery(boardSnapshotQueryOptions(LOCAL, 50));
   mock.timers.tick(10);
-  applyBoardSnapshot(client, 50, snap(9));
+  applyBoardSnapshot(client, LOCAL, 50, snap(9));
   mock.timers.tick(10);
   resolveGet(new Response(JSON.stringify(snap(1))));
   assert.deepEqual(await pending, snap(9));
-  assert.deepEqual(client.getQueryData(boardSnapshotKeys.detail(50)), snap(9));
+  assert.deepEqual(
+    client.getQueryData(boardSnapshotKeys.detail(LOCAL, 50)),
+    snap(9),
+  );
 });
 
 test("connectBoardStream reuses a fresh cached snapshot for its first fetch and forces the poll fallback", async () => {
@@ -319,8 +348,9 @@ test("connectBoardStream reuses a fresh cached snapshot for its first fetch and 
     gets++;
     return Promise.resolve(new Response(JSON.stringify(snap(gets))));
   };
-  await client.prefetchQuery(boardSnapshotQueryOptions(50));
+  await client.prefetchQuery(boardSnapshotQueryOptions(LOCAL, 50));
   const dispose = connectBoardStream({
+    board: LOCAL,
     doneLimit: 50,
     queryClient: client,
     eventSource: FakeEventSource,
@@ -331,7 +361,10 @@ test("connectBoardStream reuses a fresh cached snapshot for its first fetch and 
   await flush();
   assert.equal(gets, 2);
   await new Promise((resolve) => setImmediate(resolve));
-  assert.deepEqual(client.getQueryData(boardSnapshotKeys.detail(50)), snap(2));
+  assert.deepEqual(
+    client.getQueryData(boardSnapshotKeys.detail(LOCAL, 50)),
+    snap(2),
+  );
   dispose();
 });
 
@@ -378,7 +411,7 @@ test("the idle timer starts polling through fetchSnapshot and feeds the cache", 
   await flush();
   assert.equal(h.snapshotCalls(), 2);
   assert.deepEqual(
-    h.queryClient.getQueryData(boardSnapshotKeys.detail(50)),
+    h.queryClient.getQueryData(boardSnapshotKeys.detail(LOCAL, 50)),
     snap(102),
   );
   assert.deepEqual(updates, [snap(101), snap(102)]);
@@ -393,7 +426,7 @@ test("a stream message stops polling and discards an older polled snapshot", asy
   await flush();
   assert.equal(h.snapshotCalls(), 1);
   assert.deepEqual(
-    h.queryClient.getQueryData(boardSnapshotKeys.detail(50)),
+    h.queryClient.getQueryData(boardSnapshotKeys.detail(LOCAL, 50)),
     snap(9),
   );
   h.dispose();
@@ -419,7 +452,7 @@ test("a poll that resolves after a stream frame and a later error does not overw
   resolvers[1]?.(snap(2));
   await flush();
   assert.deepEqual(
-    h.queryClient.getQueryData(boardSnapshotKeys.detail(50)),
+    h.queryClient.getQueryData(boardSnapshotKeys.detail(LOCAL, 50)),
     snap(9),
   );
   h.dispose();
@@ -459,7 +492,7 @@ test("dispose during the initial snapshot fetch leaves the callback and the cach
   assert.deepEqual(statuses, []);
   assert.equal(h.queryClient.getQueryCache().getAll().length, 0);
   assert.equal(
-    h.queryClient.getQueryData(boardSnapshotKeys.detail(50)),
+    h.queryClient.getQueryData(boardSnapshotKeys.detail(LOCAL, 50)),
     undefined,
   );
 });
@@ -544,7 +577,7 @@ test("onerror starts polling without waiting for the 7 second idle timer", async
   await flush();
   assert.equal(h.snapshotCalls(), 2);
   assert.deepEqual(
-    h.queryClient.getQueryData(boardSnapshotKeys.detail(50)),
+    h.queryClient.getQueryData(boardSnapshotKeys.detail(LOCAL, 50)),
     snap(102),
   );
   h.dispose();
@@ -592,14 +625,269 @@ test("shouldPrefetchBoard is true for an idle pending query without data", () =>
 test("latestBoard prefers the current snapshot", () => {
   const current = { cards: [] } as unknown as BoardSnapshot;
   const previous = { cards: [] } as unknown as BoardSnapshot;
-  assert.equal(latestBoard(current, previous), current);
+  assert.equal(latestBoard(current, previous, LOCAL), current);
 });
 
 test("latestBoard keeps the previous snapshot when current is undefined", () => {
   const previous = { cards: [] } as unknown as BoardSnapshot;
-  assert.equal(latestBoard(undefined, previous), previous);
+  assert.equal(latestBoard(undefined, previous, LOCAL), previous);
 });
 
 test("latestBoard is null when both are empty", () => {
-  assert.equal(latestBoard(undefined, null), null);
+  assert.equal(latestBoard(undefined, null, LOCAL), null);
+});
+
+test("newestBoardSnapshot picks the most recently updated board at any done limit", () => {
+  const client = newClient();
+  assert.equal(newestBoardSnapshot(client, LOCAL), undefined);
+  client.setQueryData(boardSnapshotKeys.detail(LOCAL, 50), snap(1), {
+    updatedAt: 10,
+  });
+  client.setQueryData(boardSnapshotKeys.detail(LOCAL, 100), snap(2), {
+    updatedAt: 20,
+  });
+  client.setQueryData(boardSnapshotKeys.detail(LOCAL, 150), snap(3), {
+    updatedAt: 5,
+  });
+  assert.equal(newestBoardSnapshot(client, LOCAL)?.syncedAt, "2");
+});
+
+const ACME = "ACME" as BoardKey;
+
+function boardSnap(board: BoardKey | undefined, n: number): BoardSnapshot {
+  return { cards: [], syncedAt: String(n), boardKey: board as BoardKey };
+}
+
+function recordUrls(): string[] {
+  const urls: string[] = [];
+  globalThis.fetch = (url: string | URL | Request) => {
+    urls.push(typeof url === "string" ? url : "other");
+    return Promise.resolve(new Response(JSON.stringify(snap(1))));
+  };
+  return urls;
+}
+
+test("the detail and board keys carry the board", () => {
+  assert.deepEqual(boardSnapshotKeys.board(ACME), ["board-snapshot", "ACME"]);
+  assert.deepEqual(boardSnapshotKeys.detail(ACME, 50), [
+    "board-snapshot",
+    "ACME",
+    50,
+  ]);
+  assert.notDeepEqual(
+    boardSnapshotKeys.detail(ACME, 50),
+    boardSnapshotKeys.detail(LOCAL, 50),
+  );
+});
+
+test("fetchBoardSnapshot for LOCAL requests the legacy URL with no board parameter", async () => {
+  const urls = recordUrls();
+  await fetchBoardSnapshot(LOCAL, 50);
+  assert.deepEqual(urls, ["/api/board?doneLimit=50"]);
+});
+
+test("fetchBoardSnapshot for ACME appends the board parameter", async () => {
+  const urls = recordUrls();
+  await fetchBoardSnapshot(ACME, 50);
+  assert.deepEqual(urls, ["/api/board?doneLimit=50&board=ACME"]);
+});
+
+test("applyBoardSnapshot for ACME writes under the ACME key and not the LOCAL key", () => {
+  const client = newClient();
+  applyBoardSnapshot(client, ACME, 50, snap(1));
+  assert.deepEqual(
+    client.getQueryData(boardSnapshotKeys.detail(ACME, 50)),
+    snap(1),
+  );
+  assert.equal(
+    client.getQueryData(boardSnapshotKeys.detail(LOCAL, 50)),
+    undefined,
+  );
+});
+
+test("the stream URL for LOCAL has no board parameter", () => {
+  const h = start();
+  assert.equal(h.source().url, "/api/stream?doneLimit=50");
+  h.dispose();
+});
+
+test("the stream URL for ACME ends with the board parameter", () => {
+  const h = start({ board: ACME });
+  assert.equal(h.source().url, "/api/stream?doneLimit=50&board=ACME");
+  h.dispose();
+});
+
+test("a stream frame for ACME is written under the ACME key", () => {
+  const h = start({ board: ACME });
+  h.source().emitMessage(boardSnap(ACME, 9));
+  assert.deepEqual(
+    h.queryClient.getQueryData(boardSnapshotKeys.detail(ACME, 50)),
+    boardSnap(ACME, 9),
+  );
+  assert.equal(
+    h.queryClient.getQueryData(boardSnapshotKeys.detail(LOCAL, 50)),
+    undefined,
+  );
+  h.dispose();
+});
+
+test("an activity frame of an ACME stream lands in the ACME feed only", () => {
+  const h = start({ board: ACME });
+  h.source().emitNamed("activity", { ...ev(5), boardKey: ACME });
+  assert.deepEqual(h.queryClient.getQueryData(activityKeys.feed(ACME)), [
+    { ...ev(5), boardKey: ACME },
+  ]);
+  assert.equal(h.queryClient.getQueryData(activityKeys.feed(LOCAL)), undefined);
+  h.dispose();
+});
+
+test("a snapshot frame of another board changes no cache entry, callback or connection state", async () => {
+  const updates: string[] = [];
+  const statuses: string[] = [];
+  const h = start({
+    board: ACME,
+    fetchSnapshot: () => Promise.resolve(boardSnap(ACME, 1)),
+    onBoardUpdate: (s) => updates.push(s.syncedAt ?? ""),
+    onConnection: (status) => statuses.push(status),
+  });
+  await flush();
+  assert.deepEqual(statuses, ["connected"]);
+  h.source().emitMessage(boardSnap(LOCAL, 7));
+  h.source().emitMessage(snap(8));
+  assert.deepEqual(statuses, ["connected"]);
+  assert.deepEqual(updates, ["1"]);
+  assert.equal(
+    h.queryClient.getQueryData<BoardSnapshot>(
+      boardSnapshotKeys.detail(ACME, 50),
+    )?.syncedAt,
+    "1",
+  );
+  h.dispose();
+});
+
+test("a foreign frame leaves the poll fallback running", async () => {
+  const h = start({ board: ACME });
+  mock.timers.tick(7_000);
+  await flush();
+  const calls = h.snapshotCalls();
+  h.source().emitMessage(boardSnap(LOCAL, 7));
+  mock.timers.tick(4_000);
+  await flush();
+  assert.ok(h.snapshotCalls() > calls);
+  h.dispose();
+});
+
+test("a polled snapshot of the selected board still reaches the cache and onBoardUpdate after a foreign frame", async () => {
+  const updates: string[] = [];
+  let call = 0;
+  const h = start({
+    board: ACME,
+    fetchSnapshot: () => Promise.resolve(boardSnap(ACME, 100 + ++call)),
+    onBoardUpdate: (s) => updates.push(s.syncedAt ?? ""),
+  });
+  await flush();
+  h.source().emitMessage(boardSnap(LOCAL, 7));
+  mock.timers.tick(7_000);
+  await flush();
+  mock.timers.tick(4_000);
+  await flush();
+  assert.ok(updates.length >= 2);
+  const latest = updates.at(-1);
+  assert.notEqual(latest, "1");
+  assert.equal(
+    h.queryClient.getQueryData<BoardSnapshot>(
+      boardSnapshotKeys.detail(ACME, 50),
+    )?.syncedAt,
+    latest,
+  );
+  h.dispose();
+});
+
+test("an activity frame of another board changes no feed and calls no callback", () => {
+  const seen: number[] = [];
+  const h = start({ board: ACME, onActivity: (e) => seen.push(e.id) });
+  h.source().emitNamed("activity", ev(5));
+  h.source().emitNamed("activity", { ...ev(6), boardKey: LOCAL });
+  assert.deepEqual(seen, []);
+  assert.equal(h.queryClient.getQueryData(activityKeys.feed(ACME)), undefined);
+  h.dispose();
+});
+
+test("a LOCAL stream accepts an activity frame with no boardKey", () => {
+  const h = start();
+  h.source().emitNamed("activity", ev(5));
+  assert.deepEqual(h.queryClient.getQueryData(activityKeys.feed(LOCAL)), [
+    ev(5),
+  ]);
+  h.dispose();
+});
+
+test("applyActivityEvent writes into the feed of the board it is given", () => {
+  const client = newClient();
+  applyActivityEvent(client, ACME, ev(1));
+  assert.deepEqual(client.getQueryData(activityKeys.feed(ACME)), [ev(1)]);
+  assert.equal(client.getQueryData(activityKeys.feed(LOCAL)), undefined);
+});
+
+test("newestBoardSnapshot ignores a newer snapshot of another board", () => {
+  const client = newClient();
+  client.setQueryData(boardSnapshotKeys.detail(LOCAL, 50), snap(1), {
+    updatedAt: 10,
+  });
+  client.setQueryData(boardSnapshotKeys.detail(ACME, 50), snap(2), {
+    updatedAt: 20,
+  });
+  assert.equal(newestBoardSnapshot(client, LOCAL)?.syncedAt, "1");
+  assert.equal(newestBoardSnapshot(client, ACME)?.syncedAt, "2");
+});
+
+test("newestBoardSnapshot is undefined for a board with no cached snapshot", () => {
+  const client = newClient();
+  client.setQueryData(boardSnapshotKeys.detail(LOCAL, 50), snap(1));
+  assert.equal(newestBoardSnapshot(client, ACME), undefined);
+});
+
+test("latestBoard keeps a previous snapshot of the same board", () => {
+  const previous = boardSnap(ACME, 1);
+  assert.equal(latestBoard(undefined, previous, ACME), previous);
+});
+
+test("latestBoard returns null for a previous snapshot of another board", () => {
+  assert.equal(latestBoard(undefined, boardSnap(LOCAL, 1), ACME), null);
+  assert.equal(latestBoard(undefined, boardSnap(ACME, 1), LOCAL), null);
+});
+
+test("latestBoard ignores a current snapshot of another board", () => {
+  const previous = boardSnap(ACME, 1);
+  assert.equal(latestBoard(boardSnap(LOCAL, 2), previous, ACME), previous);
+  assert.equal(latestBoard(boardSnap(LOCAL, 2), null, ACME), null);
+});
+
+test("latestBoard prefers the current snapshot over a previous one of another board", () => {
+  const current = boardSnap(ACME, 2);
+  assert.equal(latestBoard(current, boardSnap(LOCAL, 1), ACME), current);
+});
+
+test("sameBoard treats a snapshot with no boardKey as LOCAL", () => {
+  assert.equal(sameBoard(boardSnap(undefined, 1), LOCAL), true);
+  assert.equal(sameBoard(boardSnap(undefined, 1), ACME), false);
+  assert.equal(sameBoard(boardSnap(ACME, 1), ACME), true);
+  assert.equal(sameBoard(boardSnap(ACME, 1), LOCAL), false);
+  assert.equal(sameBoard(undefined, LOCAL), false);
+});
+
+test("onBoardUpdate marks the initial cache-backed read as not fresh and each stream frame as fresh", async () => {
+  const updates: [string | null, boolean][] = [];
+  const h = start({
+    fetchSnapshot: () => Promise.resolve(snap(1)),
+    onBoardUpdate: (s, fresh) => updates.push([s.syncedAt, fresh]),
+  });
+  await flush();
+  FakeEventSource.instances.at(-1)?.emitMessage(snap(2));
+  await flush();
+  h.dispose();
+  assert.deepEqual(updates, [
+    ["1", false],
+    ["2", true],
+  ]);
 });

@@ -6,7 +6,7 @@ import type {
 import { ChainPanel } from "@/modules/accounts/components/ChainPanel";
 import { moveChainOrder } from "@/modules/accounts/domain/chain-order";
 import { parseThreshold } from "@/modules/accounts/domain/chain-settings";
-import { accountName } from "@/modules/accounts/domain/running-sessions";
+import { accountName } from "../../../../shared/session-account-view.js";
 import { useNow } from "@/modules/accounts/hooks/use-now";
 import {
   useSetChainOrderMutation,

@@ -5,6 +5,11 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    # One PR for every action bump, so codeql-action init and analyze move together
+    # (separate PRs ran mismatched versions and failed CodeQL).
+    groups:
+      actions:
+        patterns: ["*"]
     commit-message:
       prefix: ci
 

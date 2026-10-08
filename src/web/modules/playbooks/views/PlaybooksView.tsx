@@ -1,21 +1,10 @@
 import { PageColumn } from "@/components/PageColumn";
 import { PlaybooksContainer } from "@/modules/playbooks/containers/PlaybooksContainer";
 
-interface PlaybooksViewProps {
-  createRequest: number;
-  onCountChange: (count: number | undefined) => void;
-}
-
-export function PlaybooksView({
-  createRequest,
-  onCountChange,
-}: PlaybooksViewProps) {
+export function PlaybooksView() {
   return (
     <PageColumn>
-      <PlaybooksContainer
-        createRequest={createRequest}
-        onCountChange={onCountChange}
-      />
+      <PlaybooksContainer />
     </PageColumn>
   );
 }

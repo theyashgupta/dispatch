@@ -1,3 +1,4 @@
+import { NAV_ITEMS } from "../../../../shared/nav-items.js";
 import type { Page } from "../../../../shared/route.js";
 import {
   Archive,
@@ -19,8 +20,9 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { SETTINGS_PAGE_LINKS } from "@/modules/settings/domain/settings-links";
 import type { SettingsTab } from "@/modules/settings/domain/settings-tab";
+
+const PAGE_LINKS = NAV_ITEMS.filter((item) => item.group === "System");
 
 export const SETTINGS_SECTIONS: {
   id: SettingsTab;
@@ -73,7 +75,7 @@ export function SettingsSidebar({ onOpenPage }: SettingsSidebarProps) {
         <div className="px-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
           Pages
         </div>
-        {SETTINGS_PAGE_LINKS.map(({ page, label }) => {
+        {PAGE_LINKS.map(({ page, label }) => {
           const Icon = PAGE_ICON[page];
           return (
             <Button

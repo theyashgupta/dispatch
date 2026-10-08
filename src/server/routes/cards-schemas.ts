@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { COLUMNS, type Column } from "../../shared/types.js";
+import { MOVABLE_COLUMNS } from "../../shared/orchestrator-limits.js";
 import { validateCommentBody } from "../../shared/comment-body.js";
 import { hasDispatchMarker } from "../services/infra/playbooks.js";
 import {
@@ -12,6 +12,7 @@ import { ITEM_DESCRIPTION_MAX, ITEM_TITLE_MAX } from "../store/items.js";
 import { accountOrDefaultIdSchema } from "./accounts-schemas.js";
 import {
   MARKER_ERROR,
+  booleanFilter,
   boundedText,
   fieldsOf,
   fromResult,
@@ -21,7 +22,6 @@ const MAX_DIRECTION_LEN = 10000;
 const MAX_GROUP_TITLE_MEMBERS = 50;
 const STATE_ID_CODE = "stateId must be a string of 1 to 200 characters";
 const MEMBER_IDS_CODE = "memberIds must be an array of >=2 distinct card ids";
-const MOVABLE_COLUMNS: readonly Column[] = [...COLUMNS, "inbox"];
 const COLUMN_CODE = `invalid column; must be one of: ${MOVABLE_COLUMNS.join(", ")}`;
 const EDITOR_CODE = "invalid editor; must be one of: code, cursor";
 
@@ -34,7 +34,7 @@ const optionalNonEmpty = z
   .catch(undefined);
 
 /** At least two distinct string ids, and at most `max`, with `code` as the issue. */
-const distinctIds = (max: number, code: string) =>
+export const distinctIds = (max: number, code: string) =>
   z
     .array(z.string(code), code)
     .refine(
@@ -261,3 +261,18 @@ export const syncBodySchema = z
       ? undefined
       : { teamId, ...(stateId === undefined ? {} : { stateId }) },
   );
+
+/**
+ * The `GET /cards` filters, each optional; a repeated or unknown value fails with its own code.
+ *
+ * @remarks The `board` parameter is parsed apart by `parseBoardParam`. A `source` is any text, so
+ * an unknown source returns an empty list rather than an error.
+ */
+export const cardListQuerySchema = z.object(
+  {
+    column: z.enum(MOVABLE_COLUMNS, COLUMN_CODE).optional(),
+    source: z.string("invalid source").min(1, "invalid source").optional(),
+    hasSession: booleanFilter("invalid hasSession").optional(),
+  },
+  COLUMN_CODE,
+);

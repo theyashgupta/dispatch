@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { Item } from "../../shared/types.js";
 import { isolateEnv } from "../test-support/fixtures.js";
 import { fakeItem as item } from "../test-support/fake-source.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("../store/board.store.js");
@@ -138,13 +139,14 @@ test("POST /items/:id/promote creates once, then returns the same card, and hide
   });
   assert.equal(snoozePromoted.status, 409);
   assert.deepEqual(await listIds("?state=done"), ["fake:high"]);
-  const snapshotItems = store.snapshot().items ?? [];
+  const snapshotItems = store.snapshot(DEFAULT_BOARD_KEY).items ?? [];
   assert.equal(
     snapshotItems.some((i) => i.id === "fake:high"),
     false,
   );
   assert.equal(
-    store.snapshot().cards.filter((c) => c.id === created.id).length,
+    store.snapshot(DEFAULT_BOARD_KEY).cards.filter((c) => c.id === created.id)
+      .length,
     1,
   );
 });

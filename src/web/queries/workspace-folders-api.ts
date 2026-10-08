@@ -1,4 +1,9 @@
-import type { DirListing, DiscoveredRepo } from "../../shared/types.js";
+import { withBoard } from "../../shared/board-select.js";
+import type {
+  BoardKey,
+  DirListing,
+  DiscoveredRepo,
+} from "../../shared/types.js";
 import { http, httpError } from "@/lib/http";
 
 /**
@@ -8,12 +13,12 @@ import { http, httpError } from "@/lib/http";
  * Read on modal open for the authoritative registry and the last-used folder to preselect. Throws
  * on any non-2xx so the caller can surface a load failure.
  */
-export async function getWorkspaceFolders(): Promise<{
+export async function getWorkspaceFolders(board: BoardKey): Promise<{
   folders: string[];
   lastUsed: string | null;
 }> {
   const result = await http<{ folders: string[]; lastUsed: string | null }>(
-    "/api/workspace-folders",
+    withBoard("/api/workspace-folders", board),
   );
   if (!result.ok) {
     throw httpError("getWorkspaceFolders", result);
@@ -30,12 +35,13 @@ export async function getWorkspaceFolders(): Promise<{
  * the parsed body for the modal to show verbatim, and anything else throws.
  */
 export async function addWorkspaceFolder(
+  board: BoardKey,
   path: string,
 ): Promise<
   { ok: true; repos: DiscoveredRepo[] } | { ok: false; error: string }
 > {
   const result = await http<{ repos: DiscoveredRepo[] }>(
-    "/api/workspace-folders",
+    withBoard("/api/workspace-folders", board),
     {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -74,8 +80,11 @@ export async function browseDirectory(path?: string): Promise<DirListing> {
  * The endpoint is idempotent, so a double remove is harmless. Throws on any non-2xx so the caller
  * can log, and the SSE snapshot reconciles.
  */
-export async function removeWorkspaceFolder(path: string): Promise<void> {
-  const result = await http("/api/workspace-folders", {
+export async function removeWorkspaceFolder(
+  board: BoardKey,
+  path: string,
+): Promise<void> {
+  const result = await http(withBoard("/api/workspace-folders", board), {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path }),
@@ -83,4 +92,26 @@ export async function removeWorkspaceFolder(path: string): Promise<void> {
   if (!result.ok) {
     throw httpError("removeWorkspaceFolder", result);
   }
+}
+
+/**
+ * Re-discover the repos of a registered folder: GET /api/workspace-folders/discover?path=.
+ *
+ * @remarks
+ * A registered folder whose directory was deleted returns `{ repos: [] }` with a 200. Any non-2xx throws.
+ */
+export async function discoverWorkspaceFolder(
+  board: BoardKey,
+  path: string,
+): Promise<{ repos: DiscoveredRepo[] }> {
+  const result = await http<{ repos: DiscoveredRepo[] }>(
+    withBoard(
+      `/api/workspace-folders/discover?path=${encodeURIComponent(path)}`,
+      board,
+    ),
+  );
+  if (!result.ok) {
+    throw httpError("discoverWorkspaceFolder", result);
+  }
+  return result.data;
 }

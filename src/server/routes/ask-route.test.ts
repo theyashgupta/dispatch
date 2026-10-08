@@ -5,6 +5,7 @@ import path from "node:path";
 import type { Server } from "node:http";
 import { isolateEnv } from "../test-support/fixtures.js";
 import { writeStubClaude } from "../test-support/stub-claude.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 const env = isolateEnv();
 writeStubClaude(env.binDir);
@@ -22,7 +23,7 @@ const { askClaude, AskError } =
   await import("../services/orchestration/ask.js");
 
 await store.load();
-await store.createLocalCard("Fix the flaky login test", "");
+await store.createLocalCard(DEFAULT_BOARD_KEY, "Fix the flaky login test", "");
 const app = express();
 app.use("/api", express.json({ limit: "5mb" }), askRouter);
 const server: Server = await new Promise((resolve) => {

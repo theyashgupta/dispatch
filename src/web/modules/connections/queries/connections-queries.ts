@@ -36,7 +36,6 @@ import {
   checkCalendarAccess,
   getLinearFilters,
   getLinearOptions,
-  getLinearWorkflow,
   getLinearStateMap,
   getSavedSlackChannels,
   listCalendars,
@@ -59,7 +58,6 @@ export const connectionsKeys = {
   linearOptions: (dimension: LinearOptionDimension) =>
     ["connections", "linear", "options", dimension] as const,
   linearStateMap: ["settings", "linear-state-map"] as const,
-  linearWorkflow: ["connections", "linear", "workflow"] as const,
   savedSlackChannels: ["connections", "slack", "saved-channels"] as const,
   slackChannels: ["connections", "slack", "channels"] as const,
 };
@@ -83,20 +81,6 @@ export function linearStateMapQueryOptions() {
   return queryOptions({
     queryKey: connectionsKeys.linearStateMap,
     queryFn: getLinearStateMap,
-  });
-}
-
-/**
- * Read the Linear workflow once per page load.
- *
- * @remarks A failed read stays stale, so the next mount retries, as the legacy shared promise did.
- */
-export function linearWorkflowQueryOptions() {
-  return queryOptions({
-    queryKey: connectionsKeys.linearWorkflow,
-    queryFn: getLinearWorkflow,
-    staleTime: (query) => (query.state.data?.ok ? Infinity : 0),
-    gcTime: Infinity,
   });
 }
 
@@ -184,10 +168,7 @@ export function useLinearPreviewQuery(filters: SourceFilters | null) {
  * keep the old account's count.
  */
 export function refreshLinearFilters(queryClient: QueryClient): Promise<void> {
-  return queryClient.invalidateQueries({
-    queryKey: ["connections", "linear"],
-    predicate: (query) => query.queryKey[2] !== "workflow",
-  });
+  return queryClient.invalidateQueries({ queryKey: ["connections", "linear"] });
 }
 
 export function useRefreshLinearFilters() {
@@ -222,10 +203,6 @@ export function saveLinearFiltersMutationOptions(queryClient: QueryClient) {
 export function useSaveLinearFiltersMutation() {
   const queryClient = useQueryClient();
   return useMutation(saveLinearFiltersMutationOptions(queryClient));
-}
-
-export function useLinearWorkflowQuery() {
-  return useQuery(linearWorkflowQueryOptions());
 }
 
 export function useLinearStateMapQuery() {

@@ -1,0 +1,9 @@
+  add/browse/remove, and the 5s board-change gap.
+⏺ API Error: The response stopped arriving. The response above may be incomplete.
+✻ Waiting for 1 background agent to finish
+❯ 
+  Opus 5.5 · high  │  ████░░░░░░   37%  368k/1.0M                                                                                              ✔ Update installed · Restart to update
+  dispatch  │  feat/LOCAL-72-unit-2-system-pages  │  thinking  │  Attention-kind  │  5h 81%  │  7d 32%  │  41m  │  +1419/-2  │  $12.65
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents
+  ⏺ main
+  ◯ general-purpose  Checking ConnectionCard and archive-queries mutation tests                                                                               4m 12s · ↓ 99.4k tokens

@@ -18,6 +18,7 @@ import {
 } from "./session-account-move.js";
 import { liveTurnState } from "./session-turn.js";
 import { SHELL_SESSION_ENV } from "./steps.js";
+import { ALL_BOARDS } from "../../../shared/board-key.js";
 
 const PENDING_SWEEP_MS = 30_000;
 
@@ -38,7 +39,7 @@ async function isKnownAccount(accountId: string): Promise<boolean> {
 
 async function planSessions(): Promise<PlanSession[]> {
   return Promise.all(
-    store.sessionsWithTmux().map(async ({ card, session }) => {
+    store.sessionsWithTmux(ALL_BOARDS).map(async ({ card, session }) => {
       const target = `=${session.tmuxSession}`;
       const alive = await hasSession(target);
       return {
@@ -130,7 +131,7 @@ async function retargetPendingMoves(
   targetId: string,
 ): Promise<SessionRef[]> {
   const retargeted: SessionRef[] = [];
-  for (const { card, session } of store.sessionsWithTmux()) {
+  for (const { card, session } of store.sessionsWithTmux(ALL_BOARDS)) {
     if (
       session.pendingClaudeAccountId !== fromId ||
       session.accountPinned === true
@@ -316,7 +317,7 @@ function pendingOf(cardId: string, sessionId: string): string | undefined {
  * Run the queued move of every live session that has one.
  */
 export async function sweepPendingMoves(): Promise<void> {
-  for (const { card, session } of store.sessionsWithTmux()) {
+  for (const { card, session } of store.sessionsWithTmux(ALL_BOARDS)) {
     if (session.pendingClaudeAccountId === undefined) continue;
     await runPendingMove(card.id, session.id).catch((err: unknown) => {
       console.warn(

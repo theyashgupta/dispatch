@@ -26,10 +26,12 @@ void test(
       { CLAUDE_CONFIG_DIR: configDir },
     );
     try {
-      for (let i = 0; i < 50 && !fs.existsSync(out); i++) {
+      let seen = "";
+      for (let i = 0; i < 50 && seen === ""; i++) {
         await new Promise((r) => setTimeout(r, 100));
+        seen = fs.existsSync(out) ? fs.readFileSync(out, "utf8").trim() : "";
       }
-      assert.equal(fs.readFileSync(out, "utf8").trim(), configDir);
+      assert.equal(seen, configDir);
       assert.equal(await tmux.hasSession(name), true);
     } finally {
       await tmux.killSession(`=${name}`);

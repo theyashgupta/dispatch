@@ -1,5 +1,7 @@
 import { useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { useRouteContext } from "@tanstack/react-router";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import {
   snoozeUntil,
   SNOOZE_LABELS,
@@ -17,7 +19,7 @@ import {
   slackActions,
   type SlackActionId,
 } from "@/modules/slack/domain/slack-actions";
-import type { SlackRow } from "@/modules/slack/domain/slack-rows";
+import type { SlackRow } from "../../../../shared/slack-rows.js";
 import { useDraftSlackReplyMutation } from "@/modules/slack/queries/slack-queries";
 
 interface SlackDetailContainerProps {
@@ -42,7 +44,9 @@ export function SlackDetailContainer({
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
-  const promote = usePromoteItemMutation();
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const board = useAppStore(appStore, (s) => s.board);
+  const promote = usePromoteItemMutation(board);
   const setState = useSetItemStateMutation();
   const snooze = useSnoozeItemMutation();
   const draftReply = useDraftSlackReplyMutation();

@@ -6,7 +6,6 @@ import type {
   FilterCapabilities,
   FilterOption,
   LinearStateMap,
-  LinearWorkflow,
   SlackChannel,
   SlackChannelOption,
   SourceFilters,
@@ -16,28 +15,6 @@ import type { SlackSetupFailure } from "@/modules/connections/domain/slack-chann
 import { slackSavePayload } from "@/modules/connections/domain/slack-save-payload";
 
 export type LinearOptionDimension = "assignees" | "projects" | "teams";
-
-/**
- * Ask the server to poll one source now: POST /api/sources/:id/poll.
- *
- * @remarks
- * Throws on any non-2xx so Sync now can report a refused source; the poll result arrives
- * over SSE like any scheduled poll. The error message is the server's own reason (source disabled,
- * unknown source) or "server unreachable", so the Flow page can show it as is.
- */
-export async function pollSource(id: string): Promise<void> {
-  let result: ApiResult<unknown>;
-  try {
-    result = await http(`/api/sources/${encodeURIComponent(id)}/poll`, {
-      method: "POST",
-    });
-  } catch {
-    throw new Error("server unreachable");
-  }
-  if (!result.ok) {
-    throw new Error(result.error ?? `poll failed (${result.status})`);
-  }
-}
 
 /**
  * Read the Linear source's persisted filters plus its capability descriptor: GET /api/sources/linear/filters.
@@ -134,21 +111,6 @@ export async function saveLinearFilters(
     return { ok: false, error: result.error ?? "Couldn't save filters." };
   }
   throw httpError("saveLinearFilters", result);
-}
-
-/** The viewer and the Linear teams with their states: GET /api/sources/linear/workflow. */
-export async function getLinearWorkflow(): Promise<
-  { ok: true; workflow: LinearWorkflow } | { ok: false; error: string }
-> {
-  try {
-    const result = await http<LinearWorkflow>("/api/sources/linear/workflow");
-    if (result.ok) {
-      return { ok: true, workflow: result.data };
-    }
-    return { ok: false, error: result.error ?? "Could not load Linear teams." };
-  } catch {
-    return { ok: false, error: "Could not reach Dispatch. Try again." };
-  }
 }
 
 /**

@@ -9,6 +9,7 @@ import {
   pinPaneBorderOff,
   pinStatusOff,
 } from "../../adapters/tmux.js";
+import { ALL_BOARDS } from "../../../shared/board-key.js";
 
 /**
  * Ensure a ttyd terminal for a card's `session` and record its port — the SINGLE TERM-01
@@ -66,7 +67,7 @@ export async function sessionScrollback(
   limit: number,
 ): Promise<string | null> {
   const pair = store
-    .sessionsWithTmux()
+    .sessionsWithTmux(ALL_BOARDS)
     .find((entry) => entry.session.id === sessionId);
   if (!pair) return null;
   return captureHistory(pair.session.tmuxSession, limit);
@@ -86,7 +87,7 @@ export async function sessionMarkdownPath(
   relPath: string,
 ): Promise<string | null> {
   const pair = store
-    .sessionsWithTmux()
+    .sessionsWithTmux(ALL_BOARDS)
     .find((entry) => entry.session.id === sessionId);
   const root = pair?.session.workspacePath;
   if (!root || !/\.(md|markdown)$/i.test(relPath)) return null;

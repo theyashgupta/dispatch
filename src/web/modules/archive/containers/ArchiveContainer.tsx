@@ -1,6 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useRouteContext } from "@tanstack/react-router";
 import { ARCHIVE_RETENTION_MAX_DAYS } from "../../../../shared/types.js";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { NumberSettingSection } from "@/components/NumberSettingSection";
+import { PageHeaderCount } from "@/components/PageHeaderCount";
 import { ArchiveSection } from "@/modules/archive/components/ArchiveSection";
 import {
   IDLE_ROW,
@@ -13,21 +16,13 @@ import {
 } from "@/modules/archive/queries/archive-queries";
 import { useArchiveRetentionDraft } from "@/queries/archive-retention-queries";
 
-interface ArchiveContainerProps {
-  onCountChange: (count: number | undefined) => void;
-}
-
-export function ArchiveContainer({ onCountChange }: ArchiveContainerProps) {
-  const archive = useArchiveQuery();
+export function ArchiveContainer() {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const archive = useArchiveQuery(useAppStore(appStore, (s) => s.board));
   const restore = useRestoreArchivedMutation();
   const remove = useDeleteArchivedMutation();
   const retention = useArchiveRetentionDraft();
   const [rowState, setRowState] = useState<Record<string, ArchiveRowState>>({});
-
-  const count = archive.data?.length;
-  useEffect(() => {
-    onCountChange(count);
-  }, [count, onCountChange]);
 
   const patchRow = (id: string, patch: Partial<ArchiveRowState>) =>
     setRowState((prev) => {
@@ -87,4 +82,11 @@ export function ArchiveContainer({ onCountChange }: ArchiveContainerProps) {
       />
     </ArchiveSection>
   );
+}
+
+export function ArchiveHeaderContainer() {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const count = useArchiveQuery(useAppStore(appStore, (s) => s.board)).data
+    ?.length;
+  return count != null ? <PageHeaderCount count={count} /> : null;
 }

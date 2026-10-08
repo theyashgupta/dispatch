@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { VaultKeySummary } from "../../../../shared/types.js";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ErrorAlert } from "@/components/ErrorAlert";
+import { PageHeaderCount } from "@/components/PageHeaderCount";
 import { VaultKeyList } from "@/modules/vault/components/VaultKeyList";
 import { VaultLayout } from "@/modules/vault/components/VaultLayout";
 import { VaultLoading } from "@/modules/vault/components/VaultLoading";
@@ -13,11 +14,7 @@ import { VaultImportContainer } from "./VaultImportContainer";
 import { VaultKeyRowContainer } from "./VaultKeyRowContainer";
 import { useVaultKeysQuery } from "@/modules/vault/queries/vault-queries";
 
-interface VaultContainerProps {
-  onCountChange: (count: number | undefined) => void;
-}
-
-export function VaultContainer({ onCountChange }: VaultContainerProps) {
+export function VaultContainer() {
   const list = useVaultKeysQuery();
   const [editing, setEditing] = useState<{
     name: string;
@@ -32,11 +29,6 @@ export function VaultContainer({ onCountChange }: VaultContainerProps) {
     list.data && !list.isError
       ? [...list.data.keys].sort((a, b) => a.name.localeCompare(b.name))
       : null;
-  const count = keys?.length;
-  useEffect(() => {
-    onCountChange(count);
-  }, [count, onCountChange]);
-
   const query = search.trim().toLowerCase();
   const visible =
     keys === null || query === ""
@@ -112,4 +104,10 @@ export function VaultContainer({ onCountChange }: VaultContainerProps) {
       )}
     </VaultLayout>
   );
+}
+
+export function VaultHeaderContainer() {
+  const list = useVaultKeysQuery();
+  const count = list.data && !list.isError ? list.data.keys.length : undefined;
+  return count != null ? <PageHeaderCount count={count} /> : null;
 }

@@ -19,6 +19,7 @@ export const PAGES = [
   "workspaces",
   "ask",
   "flow",
+  "boards",
 ] as const;
 
 export type Page = (typeof PAGES)[number];
@@ -71,8 +72,9 @@ export function routeHash(route: Route): string {
 }
 
 /**
- * Decides the hash the app should show on first load: the current hash wins, then the remembered
- * route, then the legacy workspace view, then the board.
+ * Decides the hash the app should show on first load: the current hash wins with its query, then
+ * the remembered route, then the legacy workspace view, then the board.
+ *
  * @remarks Every stored value is re-parsed and re-serialized, so a stale or corrupt entry can
  * only ever redirect to a page that exists.
  */
@@ -82,7 +84,11 @@ export function initialHash(
   legacyView: string | null,
 ): string {
   if (currentHash !== "" && currentHash !== "#" && currentHash !== "#/") {
-    return routeHash(parseRoute(currentHash));
+    const query = currentHash.indexOf("?");
+    return query === -1
+      ? routeHash(parseRoute(currentHash))
+      : routeHash(parseRoute(currentHash.slice(0, query))) +
+          currentHash.slice(query);
   }
   if (storedRoute != null && storedRoute !== "") {
     return routeHash(parseRoute(storedRoute));

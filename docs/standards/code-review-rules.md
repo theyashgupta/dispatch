@@ -1,6 +1,6 @@
 # Code Review Rules (per layer)
 
-The review-agent standard: a per-layer checklist for anything checking a diff against Dispatch's architecture, extracted from the already-ratified standards (`backend-design.md`, `folder-structure.md`, `frontend-design-system.md`, `comments.md`) and the as-landed `eslint.config.ts`. Every line below is an objectively checkable assertion, not a restatement of rationale — see the linked doc for the WHY.
+The review-agent standard: a per-layer checklist for anything checking a diff against Dispatch's architecture, extracted from the already-ratified standards (`backend-design.md`, `folder-structure.md`, `frontend-architecture.md`, `comments.md`) and the as-landed `eslint.config.ts`. Every line below is an objectively checkable assertion, not a restatement of rationale. The linked doc gives the WHY.
 
 ## The three enforcement layers
 
@@ -58,41 +58,6 @@ Scope: this doc exists for what layer 1 cannot express — a route file with zer
 - [ ] Composition-root only: wiring, config holder, binary preflight, boot reconcile. No business logic lives here — if a bootstrap file grows business rules, that's a domain-layer extraction, not a bootstrap concern.
 - [ ] The named `bootstrap/` exec carve-out (`cli.ts`) keeps its direct `node:child_process` import narrowly scoped to the ruled behavior (a detached fire-and-forget browser opener) — do not widen it beyond its ruled shape.
 
-## Frontend: `primitives/`
-
-Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new code. Until ticket 16, this checklist applies only to the legacy tree that the new standard names in "Status and scope".
-
-- [ ] Props in, no data fetching: zero imports from `hooks/`, `lib/`, `feature`, or `web` (lint-enforced at error; this is the intent check — a primitive that reaches into `lib/` for formatting is a layering violation, e.g. the one Phase 57 fixed in `ActivityItem.tsx` by hoisting the formatting calls to its callers).
-- [ ] Purely presentational; a props type is declared immediately above the component (`docs/standards/frontend-design-system.md` anatomy checklist).
-
-## Frontend: `hooks/`
-
-Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new code. Until ticket 16, this checklist applies only to the legacy tree that the new standard names in "Status and scope".
-
-- [ ] May import `lib/` (data hooks legitimately sit on `lib/api`), but never `feature` or `web` — import direction is `primitives -> hooks/lib -> features -> App`.
-- [ ] Filename is `useX.ts` camelCase (`docs/standards/folder-structure.md` naming convention).
-
-## Frontend: `lib/`
-
-Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new code. Until ticket 16, this checklist applies only to the legacy tree that the new standard names in "Status and scope".
-
-- [ ] Never imports React or `react-dom` (lint-enforced at error via `no-restricted-imports` scoped to `src/web/lib/**/*.ts`) — `lib` is the pure-helper floor of the tier.
-- [ ] Never imports `primitives/`, `hooks/`, `feature`, or `web` — the asymmetric rule: `hooks` may import `lib`, `lib` never imports upward into `hooks`.
-
-## Frontend: `features/`
-
-Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new code. Until ticket 16, this checklist applies only to the legacy tree that the new standard names in "Status and scope".
-
-- [ ] Cross-feature imports go through the target feature's `index.ts` barrel only — a deep import into a sibling feature's internals is a violation (lint-enforced at error).
-- [ ] The badges live in the shared tier `src/web/components/badges/` (moved from `features/badges/` in G11 Unit 3), so there is no cross-feature exception to flag.
-
-## Frontend: web root (`App.tsx`, `main.tsx`)
-
-Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new code. Until ticket 16, this checklist applies only to the legacy tree that the new standard names in "Status and scope".
-
-- [ ] Composes features through their `index.ts` barrel only — no reach-in past a feature's public entry point.
-- [ ] Zero `createContext`/`useContext` usage anywhere in `src/web`, except the files `frontend-architecture.md` (Providers) names. Plain props over Context is the standing decision (`docs/standards/frontend-design-system.md`). One dated exception: `src/web/components/AppState.tsx` (R-15, transitional, ticket 16 removes it).
-
 ## Frontend module: route (`src/web/routes/`)
 
 - [ ] The file renders exactly one view, or one shared layout component that gets module views as children. The root route `__root.tsx` is exempt from this section (`docs/standards/frontend-architecture.md`, Layer definitions, Route).
@@ -138,7 +103,7 @@ Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new co
 
 ## Frontend modules, every layer folder
 
-- [ ] No file imports a sibling module or the legacy tree (`docs/standards/frontend-architecture.md`, Import matrix, Global bans).
+- [ ] No file imports a sibling module (`docs/standards/frontend-architecture.md`, Import matrix, Global bans).
 - [ ] The module `index.ts` exports only views and `queryOptions` factories.
 
 ## Frontend shared: `src/web/components/ui/`
@@ -148,7 +113,7 @@ Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new co
 
 ## Frontend shared: `src/web/components/`
 
-- [ ] The file serves two or more modules, or it is the layout where a route composes two modules. It can also be in `icons/`, `markdown/`, `AppState.tsx` or `ThemeProvider.tsx` (`docs/standards/frontend-architecture.md`, Shared tiers, Shared components).
+- [ ] The file serves two or more modules, or it is the layout where a route composes two modules. It can also be in `icons/`, `markdown/` or `splash/`, or be `ThemeProvider.tsx` (`docs/standards/frontend-architecture.md`, Shared tiers, Shared components).
 - [ ] The file imports no file of a module.
 
 ## Frontend shared: `src/web/queries/`
@@ -157,7 +122,7 @@ Superseded on 2026-09-30 by `docs/standards/frontend-architecture.md` for new co
 
 ## Frontend shared: `src/web/lib/`
 
-- [ ] A new file is `http.ts`, `query-client.ts` or `utils.ts`. It imports no module or component and holds no React state. Legacy helpers keep their legacy rules (`docs/standards/frontend-architecture.md`, Shared tiers, Configured clients).
+- [ ] The file is `app-store.ts`, `http.ts`, `query-client.ts` or `utils.ts`, or `md-links.ts` (read only by the fenced terminal client). It imports no module or component and holds no React state (`docs/standards/frontend-architecture.md`, Shared tiers, Configured clients).
 
 ## Frontend shared: `src/web/styles/`
 
@@ -169,7 +134,7 @@ Every exception below is a named, narrow allow-rule that survives the error-leve
 
 - **The 4-file `node:child_process` allow-list.** Only `adapters/exec.ts` (the chokepoint itself), `adapters/ttyd.ts`, `adapters/cloudflared.ts`, and `bootstrap/cli.ts` may import `node:child_process` directly — the AUDIT-01 ruling (`ttyd.ts`, `cli.ts`) plus the Phase-74 `cloudflared.ts` extension (`docs/standards/architecture.md` exec-chokepoint rulings). Any other file importing it directly is a real violation, not a review judgment call.
 - **The image-proxy `adapters-config-consumer` carve-out.** `adapters/image-proxy.ts` is a named file-mode element (`adapters-config-consumer`) allowed to import `services` — the one adapter that reads orchestration config directly from `services/infra/config-holder.ts` instead of receiving it as an injected parameter. Never widen `adapters -> services` generally from this precedent.
-- **The one shell surface, `SHELL-01`.** The ticket tmux session runs a login shell and the claude launch line is typed into it with `adapters/tmux.ts#sendLiteral` (`send-keys -l`) after `services/domain/claude-launch.ts#shellQuote` single-quotes every token. The argv chokepoint still holds (tmux itself is spawned argv-only); the typed line is the only text a shell parses, its tokens are server-derived, and `docs/ARCHITECTURE.md#tmux-invocations` records the boundary and its measured limits. Do not flag `sendLiteral` or `shellQuote` as a rule-2 violation, and do not add a second typed surface without extending that section. The `/cards/:id/run-claude` route awaits its service call (a few tmux round trips) because the 409 is the only feedback a refused relaunch has; that await is the named exception to the fire-and-forget rule. `POST /cards/:id/unwind` and `DELETE /archive/:id` (LOCAL-17) await their services for the same reason: archive rows never ride the SSE snapshot, so the response body is the only channel that can carry the archive summary, the restore blocker, or the recorded delete reason to the client. `GET /workspaces` (LOCAL-53) awaits `buildInventory` for the same reason: the inventory never rides the SSE snapshot, and its `du` and `git log` probes are async, bounded and cached, so the wait delays only that response. `POST /ask` (LOCAL-51) awaits its headless `claude -p` run for the same reason: the answer never rides the SSE snapshot, and the run is single-flight, time-limited and abortable on disconnect.
+- **The one shell surface, `SHELL-01`.** The ticket tmux session runs a login shell and the claude launch line is typed into it with `adapters/tmux.ts#sendLiteral` (`send-keys -l`) after `services/domain/claude-launch.ts#shellQuote` single-quotes every token. The argv chokepoint still holds (tmux itself is spawned argv-only); the typed line is the only text a shell parses, its tokens are server-derived, and `docs/ARCHITECTURE.md#tmux-invocations` records the boundary and its measured limits. Do not flag `sendLiteral` or `shellQuote` as a rule-2 violation, and do not add a second typed surface without extending that section. The supervisor types into a running Claude session only through `services/orchestration/supervisor-send.ts#sendConfirmed` (LOCAL-89), which is part of this surface; the fixed `/clear` of the handoff is typed after the same ready check. The `/cards/:id/run-claude` route awaits its service call (a few tmux round trips) because the 409 is the only feedback a refused relaunch has; that await is the named exception to the fire-and-forget rule. `POST /cards/:id/unwind` and `DELETE /archive/:id` (LOCAL-17) await their services for the same reason: archive rows never ride the SSE snapshot, so the response body is the only channel that can carry the archive summary, the restore blocker, or the recorded delete reason to the client. `GET /workspaces` (LOCAL-53) awaits `buildInventory` for the same reason: the inventory never rides the SSE snapshot, and its `du` and `git log` probes are async, bounded and cached, so the wait delays only that response. `POST /ask` (LOCAL-51) awaits its headless `claude -p` run for the same reason: the answer never rides the SSE snapshot, and the run is single-flight, time-limited and abortable on disconnect.
 - **Live provider checks on the connection routes.** `GET /api/sources/:source/connection`, `PUT /api/sources/:source/key` (LOCAL-32) and `POST /api/sources/:source/connect` (LOCAL-45) await one provider round trip, as `POST /api/setup` does: the response body is the only channel for connected, rejected or unreachable, and nothing is written when the check fails. The pull request routes (LOCAL-45) `GET /api/github/pr/:owner/:repo/:number`, `POST .../review` and `POST .../merge` await GitHub for the same reason: the body is the only channel for the detail, a refused review or a refused merge. The Sentry issue routes (LOCAL-46) `GET /api/sentry/issue/:id` and `POST /api/sentry/issue/:id/resolve` await Sentry for the same reason, and the resolve route marks the item done only after Sentry answers success. The Slack setup routes (LOCAL-27) `GET /api/slack/channels` (up to 5 Slack calls, one per page) and `POST /api/slack/channels/resolve` (one call) await Slack because the body is the only channel for the channel list or the resolved name, and `GET /api/slack/thread/:itemId` (LOCAL-29) awaits one `conversations.replies` call plus at most 20 `users.info` lookups because the body is the only channel for the thread (a 10 minute cache answers repeats without Slack). The calendar routes (LOCAL-50) are the same kind: `PUT /api/calendar/settings` waits for one test read (osascript or the iCal fetch, up to 30 s) when the result is enabled, and `POST /api/calendar/calendars` waits for one osascript calendar list (up to 30 s), because the response body is the only channel for the read's error code and nothing is written when the read fails. `GET /api/calendar/status` (LOCAL-81) waits on a cache miss (the cache lasts 60 s) for one permission read (up to 30 s) plus one calendar list (up to 30 s), and `PUT /api/calendar/settings` waits up to 125 s for the macOS prompt when Connect turns the connection on at `not-asked`, because the response body is the only channel for the permission state and the read's error code. That await is a named exception to the fire-and-forget rule; do not add other provider calls to a request path without extending this entry.
 - **The Linear write routes await Linear.** `POST /cards/:id/comment`, `POST /cards/:id/assign-me` and `POST /cards/:id/linear-state` await their `services/orchestration/linear-outbound.ts` call because the response is the only channel for the outcome the panel shows: the 400 for a state outside the card's team needs the cached workflow, and a 502 carries the fixed copy the card notice also records. Board moves still push fire-and-forget (`pushColumnChanges`). These routes also skip `groupedMemberError`: they write only the ticket's Linear-side fields (a comment, the assignee, the Linear state) and never its column, session or workspace, which is what the grouped-member guard protects.
 - **Held-open draft generation routes.** `POST /api/cards/draft` and `POST /api/cards/draft-many` (LOCAL-30) keep the request open for the headless `claude -p` run (up to 150 s) because the response body is the only channel that carries the drafts back to the modal. Each route has its own single-flight flag and aborts the run on `res.on("close")`. That wait is a named exception to the fire-and-forget rule.
@@ -178,8 +143,8 @@ Every exception below is a named, narrow allow-rule that survives the error-leve
 - **Switch now route (LOCAL-94).** `POST /api/accounts/chain/switch-now` awaits `services/orchestration/account-chain.ts#requestFailover`, which waits for the controller queue and then moves the sessions of the account in use through `session-account-apply.ts#applyAutomaticMove`, because the response body is the only channel for the target account and the `moved`, `queued` and `skipped` sessions, and for the 409 `no-eligible-account` refusal. Like the LOCAL-80 move routes, it answers only after the moves settle.
 - **Calendar access check route (LOCAL-81).** `POST /api/calendar/access/check` waits up to 125 s for the macOS prompt answer because the response body is the only channel for the permission result; it shares one single flight with the Connect request.
 - **The `watcher -> ttyd -> store` edge.** Both `watcher` and `ttyd` classify as the general `adapters` element; `adapters -> store` is an already-allowed edge. This is a documented architecture invariant (`docs/ARCHITECTURE.md#preserved-import-edges`), not an unenforced gap — no allow-rule was needed to encode it, and none should be added.
-- **Exception R-05: the two lib barrels.** `src/web/lib/api.ts` and `src/web/lib/push.ts` re-export query files. One allow rule in `eslint.config.ts` allows only these two files to import a query file or a shared query file. No other lib file may import a query file. The rule starts on 2026-09-30. Ticket 16 removes both barrels and this rule. Do not flag these two imports.
-- **Exception R-14: router transitional imports.** Route files under `src/web/routes/` may import the legacy tree, to render legacy pages, and `__root.tsx` may import `src/web/styles/*`. `src/web/components/AppState.tsx` may type-import the legacy pages, and the `@/modules/settings` and `@/modules/connections` barrels for the settings page props. Route file names under `src/web/routes/` are exempt from the filename case rule. No other file gets these allows: a module file still may not import the legacy tree. The rules start on 2026-09-30. Ticket 16 removes them. Do not flag these imports.
+- **Exception U4-13: the viewer.** `src/web/viewer/` and `src/web/viewer-main.tsx` keep their style constants and their file fetch. One dated block in `eslint.config.ts` (2026-10-01) allows them. Do not flag these.
+- **Record, 2026-10-07 (LOCAL-77).** The exceptions R-05 (the two lib barrels) and R-14 (router transitional imports) are removed with the legacy tree. Route file names follow the lint pattern in `docs/standards/frontend-architecture.md` (Naming).
 
 ## Comments (all layers)
 

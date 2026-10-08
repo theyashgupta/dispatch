@@ -1,3 +1,4 @@
+import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import { SettingsPanelLayout } from "@/components/SettingsPanelLayout";
 import { WorkspacesSection } from "@/modules/settings/components/WorkspacesSection";
 import {
@@ -8,9 +9,9 @@ import {
 } from "@/queries/workspace-folders-queries";
 
 export function WorkspacesContainer() {
-  const query = useWorkspaceFoldersQuery();
-  const add = useAddWorkspaceFolderMutation();
-  const remove = useRemoveWorkspaceFolderMutation();
+  const query = useWorkspaceFoldersQuery(DEFAULT_BOARD_KEY);
+  const add = useAddWorkspaceFolderMutation(DEFAULT_BOARD_KEY);
+  const remove = useRemoveWorkspaceFolderMutation(DEFAULT_BOARD_KEY);
   const browser = useFolderBrowser();
 
   const addFolder = async (path: string): Promise<string | null> => {

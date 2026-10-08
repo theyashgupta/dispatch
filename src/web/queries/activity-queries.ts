@@ -1,10 +1,10 @@
-import { queryOptions } from "@tanstack/react-query";
-import type { ActivityEvent } from "../../shared/types.js";
+import { queryOptions, useQuery } from "@tanstack/react-query";
+import type { ActivityEvent, BoardKey } from "../../shared/types.js";
 import { fetchEvents } from "./activity-api.js";
 
 export const activityKeys = {
   all: ["activity"] as const,
-  feed: ["activity", "feed"] as const,
+  feed: (board: BoardKey) => ["activity", "feed", board] as const,
 };
 
 const BUFFER_CAP = 200;
@@ -26,14 +26,26 @@ export function mergeActivity(
   return [...byId.values()].sort((x, y) => y.id - x.id).slice(0, BUFFER_CAP);
 }
 
-export function activityFeedQueryOptions() {
+export function activityFeedQueryOptions(board: BoardKey) {
   return queryOptions({
-    queryKey: activityKeys.feed,
+    queryKey: activityKeys.feed(board),
     queryFn: async ({ client }) =>
       mergeActivity(
-        await fetchEvents(),
-        client.getQueryData<ActivityEvent[]>(activityKeys.feed) ?? [],
+        await fetchEvents(board),
+        client.getQueryData<ActivityEvent[]>(activityKeys.feed(board)) ?? [],
       ),
     staleTime: 0,
   });
+}
+
+/**
+ * Read the activity feed of a board.
+ *
+ * @remarks A reader that mounts beside the always-mounted shell reader passes `refetchOnMount: false`, so it adds no request.
+ */
+export function useActivityFeedQuery(
+  board: BoardKey,
+  options?: { refetchOnMount?: boolean },
+) {
+  return useQuery({ ...activityFeedQueryOptions(board), ...options });
 }

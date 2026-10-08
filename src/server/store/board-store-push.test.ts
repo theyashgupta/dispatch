@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { isolateEnv } from "../test-support/fixtures.js";
 import { issue } from "../test-support/fake-source.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("./board.store.js");
@@ -21,7 +22,9 @@ async function linearCard(id: string): Promise<void> {
 }
 
 const pushed = (id: string) =>
-  store.listEvents(id, 20).filter((e) => e.type === "linear_state_pushed");
+  store
+    .listEvents(DEFAULT_BOARD_KEY, id, 20)
+    .filter((e) => e.type === "linear_state_pushed");
 
 test("a recorded success sets the state and its hold, clears the notice, and writes one event", async () => {
   await linearCard("s1");

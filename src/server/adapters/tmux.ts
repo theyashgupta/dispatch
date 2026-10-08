@@ -23,6 +23,8 @@ export const TMUX_SERVER_ARGS: readonly string[] = (() => {
   return ["-L", `dsp-${id}`];
 })();
 
+const END_OF_OPTIONS = "-".repeat(2);
+
 /**
  * Run tmux against this instance's server.
  *
@@ -550,15 +552,16 @@ export async function sendKeys(target: string, keys: string[]): Promise<void> {
 }
 
 /**
- * Type `text` into a target verbatim (`send-keys -l -t <target> <text>`), never as key names.
+ * Type `text` into a target verbatim with `send-keys -l`, never as key names or flags.
  *
- * @remarks Without `-l` tmux would interpret a token that happens to spell a key name (`Enter`,
- * `Space`, `C-c`) as that key. The claude launch line is typed with this call and submitted with
- * a separate {@link sendKeys} `Enter`, mirroring the kickoff paste-then-submit shape.
+ * @remarks Without `-l` tmux would read a token that spells a key name (`Enter`, `C-c`) as that key,
+ * and without the end of options separator a leading hyphen would be read as flags. tmux reads a
+ * trailing semicolon as a command separator, so a backslash goes before it and tmux removes it.
  * @see docs/ARCHITECTURE.md#tmux-invocations
  */
 export async function sendLiteral(target: string, text: string): Promise<void> {
-  await tmux(["send-keys", "-l", "-t", target, text]);
+  const typed = text.endsWith(";") ? `${text.slice(0, -1)}\\;` : text;
+  await tmux(["send-keys", "-l", "-t", target, END_OF_OPTIONS, typed]);
 }
 
 /**

@@ -1,0 +1,9 @@
+phase 1 Fault reproduction, login fixes, activity kinds, fake REPL and measurements GREEN 2026-10-05T18:23:59Z gate=pass
+phase 4 Default identity watch and stale mark GREEN 2026-10-05T20:02:45Z gate=pass
+phase 5 Limit surfaces and the continue action GREEN 2026-10-05T20:33:25Z gate=pass
+phase 6 Web: switch dialog, running sessions list, shared pieces and empty registry copy GREEN 2026-10-05T20:58:28Z gate=pass
+phase 7 Architecture record GREEN 2026-10-05T21:19:47Z gate=pass
+phase 8 Gap Analysis GREEN 2026-10-05T22:23:11Z gate=pass
+phase 9 Test Suite + Real E2E Workflows GREEN 2026-10-05T23:30:43Z gate=pass
+phase 2 Turn state, move service and tmux environment GREEN 2026-10-05T23:43:21Z gate=pass
+phase 3 Routes, apply choice and pending moves GREEN 2026-10-05T23:44:19Z gate=pass

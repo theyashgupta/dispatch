@@ -2,6 +2,7 @@ import { store } from "../store/board.store.js";
 import { listSessions } from "../adapters/tmux.js";
 import { adoptAndSweep } from "../adapters/ttyd.js";
 import { registerHookToken } from "../services/orchestration/hook-tokens.js";
+import { ALL_BOARDS } from "../../shared/board-key.js";
 
 /**
  * Reconcile persisted card state against live tmux reality once at boot: mark every SESSION a
@@ -50,7 +51,7 @@ export async function reconcileSessions(): Promise<void> {
     cardId: string;
     sessionId: string;
   }[] = [];
-  for (const { card, session } of store.sessionsWithTmux()) {
+  for (const { card, session } of store.sessionsWithTmux(ALL_BOARDS)) {
     const sessionName = session.tmuxSession;
     if (!live.has(sessionName)) {
       if (card.column !== "todo") {

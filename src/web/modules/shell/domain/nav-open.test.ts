@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { CAROUSEL_MAX_WIDTH } from "../../../../shared/media-queries.js";
 import {
-  CAROUSEL_MAX_WIDTH,
   parseNavPreference,
   sidebarOpen,
   viewportNav,
@@ -52,39 +51,7 @@ test("767 and 768 are carousel widths, as the phone breakpoint sits inside the c
   assert.equal(viewportNav(768).carousel, true);
 });
 
-test("the carousel width matches the legacy CAROUSEL_QUERY media query text", () => {
-  const source = readFileSync(
-    new URL("../../../hooks/useMediaQuery.ts", import.meta.url),
-    "utf8",
-  );
-  assert.ok(
-    source.includes(
-      `export const CAROUSEL_QUERY = "(max-width: ${CAROUSEL_MAX_WIDTH}px)";`,
-    ),
-  );
-});
-
-test("the carousel width matches the CAROUSEL_QUERY the modules import", () => {
-  const source = readFileSync(
-    new URL("../../../components/ui/hooks/use-media-query.ts", import.meta.url),
-    "utf8",
-  );
-  assert.ok(
-    source.includes(
-      `export const CAROUSEL_QUERY = "(max-width: ${CAROUSEL_MAX_WIDTH}px)";`,
-    ),
-  );
-});
-
-test("the generated phone breakpoint and the legacy NARROW_QUERY switch at the same width", () => {
-  const read = (path: string) =>
-    readFileSync(new URL(path, import.meta.url), "utf8");
-  const mobile = read("../../../components/ui/hooks/use-mobile.ts").match(
-    /const MOBILE_BREAKPOINT = (\d+);/,
-  );
-  const narrow = read("../../../hooks/useMediaQuery.ts").match(
-    /export const NARROW_QUERY = "\(max-width: (\d+)px\)";/,
-  );
-  assert.ok(mobile && narrow);
-  assert.equal(Number(mobile[1]) - 1, Number(narrow[1]));
+test("the carousel band ends at the shared CAROUSEL_MAX_WIDTH", () => {
+  assert.equal(viewportNav(CAROUSEL_MAX_WIDTH).carousel, true);
+  assert.equal(viewportNav(CAROUSEL_MAX_WIDTH + 1).carousel, false);
 });

@@ -86,7 +86,7 @@
  *     Dropping the blocked branch fell through to the default branch's dead-button-free "Enable
  *     push notifications" control, exactly the failure the requirement bans. The RESTORE leg
  *     re-ran clean and `git diff --quiet` confirmed a byte-identical restore.
- *   - `push-prompt-on-click-only` proven able to fail (Plan 05): rewriting `push.ts`'s load-time
+ *   - `push-prompt-on-click-only` proven able to fail (Plan 05): rewriting `push-api.ts`'s load-time
  *     refresh guard clause `Notification.permission !== "granted"` to `false`, rebuilding, and
  *     re-running the same check against a real booted sandbox server and real headless Chrome
  *     produced, verbatim:
@@ -94,14 +94,14 @@
  *     stale marker with non-granted permission, got ["register","requestPermission","subscribe"]`
  *     A stale "on" marker with permission still "prompt" now called `register` and `subscribe` on
  *     page load, exactly the drift the guard exists to prevent. The RESTORE leg re-ran clean
- *     (`--break push-prompt-on-click-only RESTORE leg: PASS`) and `git diff --quiet` on `push.ts`
+ *     (`--break push-prompt-on-click-only RESTORE leg: PASS`) and `git diff --quiet` on `push-api.ts`
  *     confirmed a byte-identical restore. NOTE: legA and legC deliberately assert only the
  *     absence of "register"/"subscribe", not a blanket "requestPermission never recorded": the
  *     pre-existing, unrelated `useTransitionNotifications` hook (ATTN-01, v0.2 phase 08) also
  *     calls `Notification.requestPermission()` once, unconditionally, on every mount, for desktop
  *     notifications. legB instead compares that call's COUNT immediately before vs. after the
  *     dispatched click, proving the click-driven subscribe path itself adds zero new calls.
- *   - `ios-guidance-branch` proven able to fail (Plan 06): neutering `isIOSDevice` in `push.ts` to
+ *   - `ios-guidance-branch` proven able to fail (Plan 06): neutering `isIOSDevice` in `settings-api.ts` to
  *     unconditionally `return false`, rebuilding, and re-running the same check against a real
  *     booted sandbox server and real headless Chrome produced, verbatim:
  *     `ios-guidance-branch: leg1 (iPhone) expected labelText exactly "Add to your Home Screen to
@@ -118,7 +118,7 @@
  *     Under-detecting BOTH the real iPhone UA and the iPadOS desktop-UA masquerade fell through to
  *     the normal enable control on a device that cannot actually subscribe, exactly the silent
  *     failure PUSH-07 forbids. The RESTORE leg re-ran clean (`--break ios-guidance-branch RESTORE
- *     leg: PASS`) and `git diff --quiet` on `push.ts` confirmed a byte-identical restore. NOTE:
+ *     leg: PASS`) and `git diff --quiet` on `push-api.ts` confirmed a byte-identical restore. NOTE:
  *     legs 1 and 2 assert only the absence of "register"/"subscribe" from `window.__pushCalls`,
  *     not "requestPermission", for the identical `useTransitionNotifications` reason noted above
  *     for `push-prompt-on-click-only`. NOTE: leg 3's standalone state is seeded by stubbing
@@ -1669,13 +1669,13 @@ async function checkPushPromptOnClickOnly(violations) {
   }
 }
 
-/** `--break push-prompt-on-click-only`: mutates `push.ts`'s load-time refresh guard clause
+/** `--break push-prompt-on-click-only`: mutates `push-api.ts`'s load-time refresh guard clause
  * (`Notification.permission !== "granted"` -> `false`), rebuilds via `resetBuildCache()`, and
  * requires leg C's violation by name (calls recorded on a load with a stale marker but no live
  * permission). Restores the captured bytes in a `finally` unconditionally. */
 async function runBreakPushPromptOnClickOnly() {
   assertBuilt();
-  const pushTsPath = join(REPO_ROOT, "src/web/lib/push.ts");
+  const pushTsPath = join(REPO_ROOT, "src/web/queries/push-api.ts");
   const TARGET = 'Notification.permission !== "granted"';
   const REPLACEMENT = "false";
   const original = readFileSync(pushTsPath, "utf8");
@@ -1987,19 +1987,16 @@ async function checkSubscribeRoundTrip(violations) {
   }
 }
 
-/** `--break subscribe-round-trip`: captures `push.ts` and redirects the subscribe POST literal
- * `enablePush` uses to a sentinel path that 404s. The anchor includes `enablePush`'s
- * `const res = ` assignment deliberately: the bare literal `"/api/push/subscribe"` occurs TWICE
- * in this file (`enablePush` and `refreshPushSubscription` both call it, since Plan 03 added the
- * second call site after Plan 02's verify asserted the literal unique), and only `enablePush`'s
- * occurrence carries this assignment prefix. Rebuilds via `resetBuildCache()` and requires the
+/** `--break subscribe-round-trip`: captures `push-api.ts` and redirects the subscribe POST literal
+ * `postPushSubscription` uses to a sentinel path that 404s. Both `enablePush` and
+ * `refreshPushSubscription` call that one helper, so the literal `http("/api/push/subscribe", {`
+ * occurs exactly once in the file. Rebuilds via `resetBuildCache()` and requires the
  * missing-row violation by name. Restores the captured bytes in a `finally` unconditionally. */
 async function runBreakSubscribeRoundTrip() {
   assertBuilt();
-  const pushTsPath = join(REPO_ROOT, "src/web/lib/push.ts");
-  const TARGET = 'const res = await fetch("/api/push/subscribe", {';
-  const REPLACEMENT =
-    'const res = await fetch("/api/push/subscribe-panel-109-sentinel", {';
+  const pushTsPath = join(REPO_ROOT, "src/web/queries/push-api.ts");
+  const TARGET = 'http("/api/push/subscribe", {';
+  const REPLACEMENT = 'http("/api/push/subscribe-panel-109-sentinel", {';
   const original = readFileSync(pushTsPath, "utf8");
   const occurrences = original.split(TARGET).length - 1;
   if (occurrences !== 1) {
@@ -2240,7 +2237,10 @@ async function checkIosGuidanceBranch(violations) {
  * a `finally` unconditionally. */
 async function runBreakIosGuidanceBranch() {
   assertBuilt();
-  const pushTsPath = join(REPO_ROOT, "src/web/lib/push.ts");
+  const pushTsPath = join(
+    REPO_ROOT,
+    "src/web/modules/settings/queries/settings-api.ts",
+  );
   const TARGET = `export function isIOSDevice(): boolean {
   const ua = navigator.userAgent;
   if (/iPad|iPhone|iPod/.test(ua)) return true;
@@ -2329,7 +2329,7 @@ const BREAKS = {
 
 /** Runs inside the sandboxed page via `evalAsyncValue`. Registers `/sw.js`, awaits
  * `navigator.serviceWorker.ready`, fetches the real VAPID public key, converts it with the same
- * padding and character swap `push.ts` uses, then races `pushManager.subscribe()` against a 30
+ * padding and character swap `push-api.ts` uses, then races `pushManager.subscribe()` against a 30
  * second timeout. The resulting subscription is unsubscribed before this resolves, so the probe
  * leaves no live registration behind. */
 const FCM_EGRESS_PAGE_EXPRESSION = `

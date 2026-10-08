@@ -11876,7 +11876,7 @@ async function checkParityRow7Resume(built) {
  * Kill the card's own bare-named tmux session then POST `/cards/:id/start` with NO `newSession`
  * flag — the exact request {@link SessionLostSection}'s "Restart" button sends
  * (`startCard(card.id, card.extraDirection ?? "")`,
- * `src/web/features/detail/SessionLostSection.tsx`). With `reserved` staying `null`
+ * `src/web/modules/detail/components/SessionLostSection.tsx`). With `reserved` staying `null`
  * (`start-session.ts`'s own `if (wantsNewSession)` guard), the saga re-runs against the card's
  * EXISTING session id rather than minting a sibling — the property rows 8 and 12 both measure,
  * each from state it captures ITSELF via its own call to this function. Pre-killing tmux (rather

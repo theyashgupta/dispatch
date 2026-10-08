@@ -1,21 +1,21 @@
 import { useRef, useState } from "react";
+import { useRouter } from "@tanstack/react-router";
+import { routeHash } from "../../../../shared/route.js";
 import type { ClaudeAccountSummary } from "../../../../shared/types.js";
+import { PageHeaderCount } from "@/components/PageHeaderCount";
+import { useSidebar } from "@/components/ui/sidebar";
 import { AccountSwitchContainer } from "./AccountSwitchContainer";
+import { AccountChipFrame } from "@/modules/accounts/components/AccountChipFrame";
 import { AccountPopover } from "@/modules/accounts/components/AccountPopover";
 import { UsageChip } from "@/modules/accounts/components/UsageChip";
 import { chipState } from "@/modules/accounts/domain/usage-format";
-import {
-  useAccountsQuery,
-  useRefreshAccountUsageMutation,
-} from "@/modules/accounts/queries/accounts-queries";
+import { useRefreshAccountUsageMutation } from "@/modules/accounts/queries/accounts-queries";
+import { useAccountsQuery } from "@/queries/accounts-queries";
 
-interface AccountChipContainerProps {
-  onOpenSettings: () => void;
-}
-
-export function AccountChipContainer({
-  onOpenSettings,
-}: AccountChipContainerProps) {
+export function AccountChipContainer() {
+  const router = useRouter();
+  const { isMobile, state } = useSidebar();
+  const collapsed = state === "collapsed" && !isMobile;
   const { data } = useAccountsQuery();
   const refreshUsage = useRefreshAccountUsageMutation();
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -46,7 +46,7 @@ export function AccountChipContainer({
   };
 
   return (
-    <>
+    <AccountChipFrame collapsed={collapsed}>
       <UsageChip
         email={active.email}
         summary={chip.summary}
@@ -76,7 +76,9 @@ export function AccountChipContainer({
           }}
           onOpenSettings={() => {
             setOpen(false);
-            onOpenSettings();
+            void router.navigate({
+              href: routeHash({ page: "accounts" }).slice(1),
+            });
           }}
           onCloseAutoFocus={(event) => {
             event.preventDefault();
@@ -97,6 +99,12 @@ export function AccountChipContainer({
           }}
         />
       )}
-    </>
+    </AccountChipFrame>
   );
+}
+
+export function AccountsHeaderContainer() {
+  const { data } = useAccountsQuery();
+  const count = data?.accounts.length;
+  return count != null ? <PageHeaderCount count={count} /> : null;
 }

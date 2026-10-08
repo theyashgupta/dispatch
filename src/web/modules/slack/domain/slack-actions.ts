@@ -1,5 +1,5 @@
 import { isWebUrl } from "../../../../shared/web-url.js";
-import type { SlackRow } from "./slack-rows.js";
+import type { SlackRow } from "../../../../shared/slack-rows.js";
 
 export type SlackActionId =
   "draftReply" | "promote" | "snooze" | "done" | "copyLink";

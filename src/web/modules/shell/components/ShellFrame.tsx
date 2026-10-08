@@ -3,14 +3,15 @@ import type { Page, Route } from "../../../../shared/route.js";
 import { useSidebar } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 import { AppSidebar } from "@/modules/shell/components/AppSidebar";
+import type { BoardSwitcherData } from "./BoardSwitcher";
 import { PageHeader } from "@/modules/shell/components/PageHeader";
 import { TopBar } from "@/modules/shell/components/TopBar";
-import type { NavCounts, NavItem } from "@/modules/shell/domain/nav-items";
+import type { NavCounts, NavItem } from "../../../../shared/nav-items.js";
 import type { SyncSnapshot } from "@/modules/shell/domain/sync-status";
 import { useChromeTop } from "@/modules/shell/hooks/use-chrome-top";
 import { useMenuFocusReturn } from "@/modules/shell/hooks/use-menu-focus-return";
 
-export interface ShellFrameProps {
+interface ShellFrameProps {
   route: Route;
   onNavigate: (page: Page) => void;
   navItems: readonly NavItem[];
@@ -22,9 +23,10 @@ export interface ShellFrameProps {
   activityUnseen: boolean;
   activityOpen: boolean;
   carousel: boolean;
+  switcher?: BoardSwitcherData;
   pageTitle: string;
   pageCount?: number;
-  headerActions?: ReactNode;
+  headerView?: ReactNode;
   banner: ReactNode;
   content: ReactNode;
   detail: ReactNode;
@@ -42,9 +44,10 @@ export function ShellFrame({
   activityUnseen,
   activityOpen,
   carousel,
+  switcher,
   pageTitle,
   pageCount,
-  headerActions,
+  headerView,
   banner,
   content,
   detail,
@@ -63,6 +66,10 @@ export function ShellFrame({
   useEffect(() => {
     if (!isMobile) setOpenMobile(false);
   }, [isMobile, setOpenMobile]);
+  const switcherOpen = switcher?.open === true;
+  useEffect(() => {
+    if (isMobile && switcherOpen) setOpenMobile(true);
+  }, [isMobile, switcherOpen, setOpenMobile]);
   useEffect(() => {
     onMobileOpenChange?.(phoneSheetOpen);
   }, [phoneSheetOpen, onMobileOpenChange]);
@@ -88,6 +95,19 @@ export function ShellFrame({
         activityUnseen={activityUnseen}
         activityOpen={activityOpen}
         carousel={carousel}
+        switcher={
+          switcher && {
+            ...switcher,
+            onSelect: (key) => {
+              switcher.onSelect(key);
+              setOpenMobile(false);
+            },
+            onManage: () => {
+              switcher.onManage();
+              setOpenMobile(false);
+            },
+          }
+        }
         onNavigate={(page) => {
           onNavigate(page);
           setOpenMobile(false);
@@ -110,11 +130,9 @@ export function ShellFrame({
         <div ref={setChrome} className="shrink-0">
           {isMobile ? <TopBar title={pageTitle} /> : null}
           {banner}
-          <PageHeader
-            title={pageTitle}
-            count={pageCount}
-            actions={headerActions}
-          />
+          <PageHeader title={pageTitle} count={pageCount}>
+            {headerView}
+          </PageHeader>
         </div>
         {content}
       </div>

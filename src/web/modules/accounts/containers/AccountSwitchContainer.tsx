@@ -4,8 +4,8 @@ import type {
   ApplyChoice,
   ClaudeAccountSummary,
 } from "../../../../shared/types.js";
+import { accountName } from "../../../../shared/session-account-view.js";
 import { AccountSwitchDialog } from "@/modules/accounts/components/AccountSwitchDialog";
-import { accountName } from "@/modules/accounts/domain/running-sessions";
 import {
   DEFAULT_APPLY_CHOICE,
   resultNotice,

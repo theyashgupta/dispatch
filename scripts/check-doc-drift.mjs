@@ -201,18 +201,51 @@ const JSDOC_EXEMPT_PATTERNS = [
   { name: "Phase <number>", re: /\bphase\s+\d+\b/i },
 ];
 
+const LOOP_FORMAT_FILES = [
+  /^src\/server\/services\/domain\/loop-progress(\.test)?\.ts$/,
+  /^src\/server\/services\/domain\/supervisor-state(\.test)?\.ts$/,
+  /^src\/server\/services\/orchestration\/supervisor-actions\.test\.ts$/,
+  /^src\/server\/services\/orchestration\/loop-progress-reader(\.test)?\.ts$/,
+  /^src\/server\/services\/orchestration\/loop-progress-model\.test\.ts$/,
+  /^src\/server\/test-support\/loop-fixtures\.ts$/,
+];
+const LOOP_FORMAT_PATTERNS = new Set([
+  "ROADMAP",
+  ".planning/",
+  "Phase <number>",
+]);
+const ROADMAP_TOOL_FILES = [
+  /^src\/server\/routes\/orchestrator\.route\.ts$/,
+  /^src\/server\/routes\/orchestrator-sessions-route\.test\.ts$/,
+  /^src\/server\/routes\/orchestrator-route-auth\.test\.ts$/,
+  /^src\/server\/routes\/orchestrator-route-table\.test\.ts$/,
+  /^src\/server\/services\/orchestration\/orchestrator-sessions\.test\.ts$/,
+  /^src\/server\/services\/orchestration\/orchestrator-sessions\.ts$/,
+  /^src\/server\/bootstrap\/mcp-tools\.ts$/,
+  /^src\/server\/bootstrap\/mcp-tools\.test\.ts$/,
+  /^src\/server\/services\/orchestration\/decision-items\.ts$/,
+  /^src\/server\/routes\/decisions-route\.test\.ts$/,
+];
+
 /**
  * Class 2 — scan every src/**\/*.{ts,tsx} line for planning-process vocabulary.
+ * @remarks Files in `LOOP_FORMAT_FILES` parse roadmap loop files, so `.planning/`, ROADMAP and phase lines are their input format and skip those patterns only.
+ * Files in `ROADMAP_TOOL_FILES` serve the orchestrator's roadmap approval tool, whose route and texts name the roadmap, so they skip ROADMAP only.
  * @returns Violation report lines.
  */
 function checkPlanningVocabulary() {
   const violations = [];
   for (const file of walkTsFiles(SRC_DIR)) {
     const lines = readFileSync(file, "utf8").split("\n");
+    const loopFormat = LOOP_FORMAT_FILES.some((re) => re.test(file));
+    const roadmapTool = ROADMAP_TOOL_FILES.some((re) => re.test(file));
+    const applies = ({ name }) =>
+      !(loopFormat && LOOP_FORMAT_PATTERNS.has(name)) &&
+      !(roadmapTool && name === "ROADMAP");
     let inDoc = false;
     lines.forEach((line, i) => {
       if (line.includes("/**")) inDoc = true;
-      for (const { name, re } of ALWAYS_PATTERNS) {
+      for (const { name, re } of ALWAYS_PATTERNS.filter(applies)) {
         if (re.test(line)) {
           violations.push(
             `${file}:${i + 1}: planning vocabulary "${name}" — ${line.trim()}`,
@@ -220,7 +253,7 @@ function checkPlanningVocabulary() {
         }
       }
       if (!inDoc) {
-        for (const { name, re } of JSDOC_EXEMPT_PATTERNS) {
+        for (const { name, re } of JSDOC_EXEMPT_PATTERNS.filter(applies)) {
           if (re.test(line)) {
             violations.push(
               `${file}:${i + 1}: planning vocabulary "${name}" — ${line.trim()}`,

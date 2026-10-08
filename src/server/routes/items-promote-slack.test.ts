@@ -2,6 +2,7 @@ import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import type { Card, Item } from "../../shared/types.js";
 import { isolateEnv } from "../test-support/fixtures.js";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("../store/board.store.js");
@@ -47,7 +48,9 @@ test("promoting a Slack mention creates a card whose description holds the messa
   );
   assert.equal(res.status, 201);
   const { card } = (await res.json()) as { card: Card };
-  const stored = store.snapshot().cards.find((c) => c.id === card.id);
+  const stored = store
+    .snapshot(DEFAULT_BOARD_KEY)
+    .cards.find((c) => c.id === card.id);
   const description = stored?.description ?? "";
   assert.ok(description.includes(mention.snippet), description);
   assert.ok(description.includes("channelName: eng-platform"), description);

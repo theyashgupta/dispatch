@@ -61,6 +61,7 @@ export interface ActivityEvent {
   reason: string | null;
   source: string | null;
   ts: string;
+  boardKey?: BoardKey;
 }
 
 /**
@@ -200,6 +201,7 @@ export interface Item {
 export interface Card {
   /** Internal card id (can equal issueId in Phase 1). */
   id: string;
+  boardKey: BoardKey;
   /** Linear issue id — the upsert key for the poller. */
   issueId: string;
   /** Human-readable Linear identifier, e.g. "PROP-123". */
@@ -335,6 +337,18 @@ export interface Card {
    * from the session record so the detail panel can name the account. Never stored on the card.
    */
   claudeAccountId?: string;
+  contextPercent?: number | null;
+  model?: string | null;
+  cost?: number | null;
+  usage?: SessionMeters["usage"];
+  state?: SupervisorState;
+  stateReason?: SupervisorStateReason;
+  stateSince?: string;
+  transcriptPath?: string;
+  dependsOn?: string[];
+  startQueued?: boolean;
+  createdByOrchestrator?: string;
+  launch?: { playbook?: string; direction: string };
   /**
    * The id of this card's ACTIVE session within `sessions` — the one the six flat fields mirror.
    * Paired 1:1 with `sessions` being present; absent on a card that has never carried session
@@ -375,6 +389,8 @@ export interface Card {
    * @see docs/ARCHITECTURE.md#session-projection-chokepoint
    */
   sessionSummaries?: SessionSummary[];
+  loopProgress?: LoopProgress;
+  shipFlow?: ShipFlow;
   /**
    * Set when the card's `dsp-<identifier>` tmux session is gone — by boot reconcile (session
    * absent from the live `list-sessions` set after a reboot) AND by the Plan-02 watcher's
@@ -658,6 +674,15 @@ export interface Session {
    * @see docs/ARCHITECTURE.md#session-inheritance
    */
   builtFrom?: string;
+  contextPercent?: number | null;
+  model?: string | null;
+  cost?: number | null;
+  usage?: SessionMeters["usage"];
+  metersAt?: string;
+  state?: SupervisorState;
+  stateReason?: SupervisorStateReason;
+  stateSince?: string;
+  transcriptPath?: string;
 }
 
 export interface ClaudeSession {
@@ -728,6 +753,14 @@ export interface SessionSummary {
    * @see docs/ARCHITECTURE.md#session-inheritance
    */
   parentOrdinal?: number;
+  contextPercent?: number | null;
+  model?: string | null;
+  cost?: number | null;
+  usage?: SessionMeters["usage"];
+  state?: SupervisorState;
+  stateReason?: SupervisorStateReason;
+  stateSince?: string;
+  transcriptPath?: string;
 }
 
 /**
@@ -786,6 +819,7 @@ export interface SessionFields {
  */
 export interface BoardSnapshot {
   cards: Card[];
+  boardKey: BoardKey;
   syncedAt: string | null;
   /** Non-fatal sync problem from the last poll cycle (e.g. truncated pull); null when healthy. */
   syncWarning?: string | null;
@@ -1357,13 +1391,15 @@ export interface SessionRef {
   sessionId: string;
 }
 
+export type ContinueAction = "available" | "usage-unknown";
+
 export interface AccountSessionEntry extends SessionRef {
   cardTitle: string;
   accountId: string;
   turn: SessionTurnState;
   stale: boolean;
   pendingAccountId?: string;
-  continueAction?: "available" | "usage-unknown";
+  continueAction?: ContinueAction;
   pinned: boolean;
 }
 
@@ -1635,6 +1671,7 @@ export interface ArchivedGroup {
   card: Card;
   members: { id: string; identifier: string }[];
   deleteBlocked?: string;
+  boardKey?: BoardKey;
 }
 
 /** The wire shape of an archived group: no card snapshot, no session records, no secrets. */
@@ -1687,6 +1724,77 @@ export interface SentryIssueDetail {
   platform: string | null;
 }
 
+export type BoardKey = string & { readonly __brand: "BoardKey" };
+
+export type BoardScope = BoardKey | "*";
+
+export interface BoardWorkspaceRepo {
+  path: string;
+  baseBranch: string | null;
+  checkCommand: string;
+}
+
+export interface BoardPolicy {
+  roadmapApproval: "ask" | "rules" | "all";
+  concurrencyCap: number;
+  loopModel: string | null;
+  orchestratorModel: string;
+  handoffPercent: number;
+  handoffHardPercent: number;
+  usageLimit: "wait" | "stop";
+  shipRights: "none" | "open_prs" | "merge";
+  budgetPerGroup: number | null;
+  supervisor: "on" | "off";
+}
+
+export interface Board {
+  key: BoardKey;
+  name: string;
+  workspaceRoot: string | null;
+  repositories: BoardWorkspaceRepo[];
+  linearTeamKeys: string[];
+  lastUsedFolder: string | null;
+  policy: BoardPolicy;
+  createdAt: string;
+  archived: boolean;
+}
+
+export type NewBoard = Pick<
+  Board,
+  "key" | "name" | "workspaceRoot" | "repositories" | "linearTeamKeys"
+>;
+
+export type BoardPatch = Partial<
+  Pick<Board, "name" | "workspaceRoot" | "repositories" | "linearTeamKeys">
+>;
+
+export interface BoardList {
+  boards: Board[];
+  knownLinearTeamKeys: string[];
+}
+
+export interface BoardCount {
+  key: BoardKey;
+  running: number;
+  openGroups: number;
+  attention: number;
+}
+
+export interface BoardCounts {
+  counts: BoardCount[];
+  at: string;
+}
+
+export type CreateBoardResult =
+  | { ok: true; board: Board }
+  | { ok: false; reason: "invalid-key" | "reserved-key" }
+  | { ok: false; reason: "duplicate-key"; boardName: string }
+  | { ok: false; reason: "key-in-use"; source: string };
+
+export type ArchiveBoardResult =
+  | { ok: true; board: Board }
+  | { ok: false; reason: "default-board" | "unknown-board" };
+
 export type AccountEventType =
   | "account_moved"
   | "account_login_changed"
@@ -1698,3 +1806,181 @@ export type AccountEventType =
 export type AccountActivityEvent = Omit<ActivityEvent, "type"> & {
   type: AccountEventType;
 };
+
+export type LoopUnitStatus =
+  | "not started"
+  | "in progress"
+  | "built, awaiting /ship"
+  | "shipped"
+  | "blocked"
+  | "unknown";
+
+export interface LoopPhase {
+  number: number;
+  name: string;
+  gate: "pass" | "fail" | "pending";
+  attempts: number;
+  passedAt: string | null;
+}
+
+export interface LoopUnit {
+  number: number;
+  ticket: string | null;
+  title: string;
+  status: LoopUnitStatus;
+  statusText: string;
+  branch: string | null;
+  commit: string | null;
+  prdPath: string | null;
+  phaseTotal: number | null;
+  phases: LoopPhase[];
+}
+
+export interface LoopEngine {
+  active: boolean;
+  iteration: number | null;
+  sessionId: string | null;
+  handoffPending: boolean;
+  startedAt: string | null;
+  closed: boolean;
+}
+
+export interface LoopGate {
+  unit: number;
+  phase: number;
+  result: "pass" | "fail";
+  at: string;
+}
+
+export interface LoopSummary {
+  unitsDone: number;
+  unitsTotal: number;
+  currentUnit: number | null;
+  currentPhase: { number: number; name: string } | null;
+  lastGate: LoopGate | null;
+}
+
+export interface LoopProgress {
+  slug: string;
+  roadmapFile: string;
+  units: LoopUnit[];
+  engine: LoopEngine | null;
+  completion: "not_started" | "running" | "complete";
+  summary: LoopSummary;
+  warnings: string[];
+  readAt: string;
+}
+
+export type ShipBranchState =
+  | "queued"
+  | "merging_main"
+  | "checking"
+  | "pushing"
+  | "waiting_checks"
+  | "waiting_merge"
+  | "merging"
+  | "verifying"
+  | "merged"
+  | "failed";
+
+export interface ShipBranch {
+  name: string;
+  title: string;
+  body: string;
+  state: ShipBranchState;
+  pr: number | null;
+  checks: "pending" | "passed" | "failed" | null;
+  identity: "passed" | "failed" | null;
+  admin: boolean;
+  tip: string | null;
+  checked: string | null;
+}
+
+export interface ShipFlow {
+  state: "running" | "stopped" | "done";
+  rights: "open_prs" | "merge";
+  repository: string;
+  repo: string | null;
+  orchestratorId: string;
+  identity: { name: string; email: string };
+  branches: ShipBranch[];
+  failedStep: ShipBranchState | null;
+  reason: string | null;
+  decisionId: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export const ORCHESTRATION_EVENT_KINDS = [
+  "loop_gate",
+  "supervisor_state",
+  "supervisor_action",
+  "pr_state",
+  "machine_wake",
+  "tool_call",
+  "decision_raised",
+  "decision_answered",
+] as const;
+
+export type OrchestrationEventKind = (typeof ORCHESTRATION_EVENT_KINDS)[number];
+
+export type SupervisorState =
+  | "working"
+  | "idle"
+  | "needs_input"
+  | "permission_prompt"
+  | "handoff_ready"
+  | "roadmap_complete"
+  | "usage_limit_dialog"
+  | "usage_limit_wait"
+  | "api_error"
+  | "stale"
+  | "lost"
+  | "shell_prompt";
+
+export type SupervisorStateReason =
+  | "usage_stop"
+  | "budget"
+  | "stop_session"
+  | "supervisor_gave_up"
+  | "resume_failed";
+
+export interface OrchestrationEvent {
+  id: number;
+  boardKey: BoardKey;
+  cardId: string | null;
+  sessionId: string | null;
+  kind: OrchestrationEventKind;
+  data: Record<string, unknown>;
+  ts: string;
+}
+
+export const DECISION_KINDS = [
+  "roadmap_approval",
+  "ruling",
+  "ship_failure",
+  "other",
+] as const;
+
+export interface DecisionItem {
+  id: string;
+  boardKey: BoardKey;
+  cardId: string | null;
+  orchestratorId: string;
+  kind: (typeof DECISION_KINDS)[number];
+  question: string;
+  options: { id: string; label: string }[];
+  recommendedOptionId: string | null;
+  state: "open" | "answered";
+  answer: { optionId: string; note: string | null } | null;
+  createdAt: string;
+  answeredAt: string | null;
+  consumedAt?: string;
+}
+
+export interface SessionMeters {
+  contextPercent: number | null;
+  model: string | null;
+  cost: number | null;
+  usage: { fiveHourPercent: number | null; sevenDayPercent: number | null };
+}

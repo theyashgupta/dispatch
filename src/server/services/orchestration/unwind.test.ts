@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { startedGroup } from "../../test-support/group-fixtures.js";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
+import type { ShipFlow } from "../../../shared/types.js";
 
 isolateEnv();
 const { store } = await import("../../store/board.store.js");
@@ -26,7 +28,7 @@ void test("unwindGroup refuses an unknown card, a plain ticket, and a group with
     status: 404,
     error: "unknown card id: LOCAL-none",
   });
-  const plain = await store.createLocalCard("plain", "");
+  const plain = await store.createLocalCard(DEFAULT_BOARD_KEY, "plain", "");
   assert.deepEqual(await unwindGroup(plain.id, "todo"), {
     ok: false,
     status: 409,
@@ -49,4 +51,31 @@ void test("unwindGroup refuses an unknown card, a plain ticket, and a group with
   } finally {
     store.endCleanup(g.id);
   }
+});
+
+void test("unwindGroup refuses a group whose ship flow runs with 409 ship-running", async () => {
+  const { g, a } = await startedGroup(store);
+  const flow: ShipFlow = {
+    state: "running",
+    rights: "merge",
+    repository: "/tmp/repo",
+    repo: null,
+    orchestratorId: "orc-a",
+    identity: { name: "a", email: "a@example.com" },
+    branches: [],
+    failedStep: null,
+    reason: null,
+    decisionId: null,
+    startedAt: new Date().toISOString(),
+    finishedAt: null,
+  };
+  await store.setShipFlow(g.id, flow);
+  assert.deepEqual(await unwindGroup(a.id, "todo"), {
+    ok: false,
+    status: 409,
+    error: "ship-running",
+  });
+  assert.equal(store.getCard(a.id)?.groupId, g.id);
+  await store.setShipFlow(g.id, { ...flow, state: "stopped" });
+  assert.equal((await unwindGroup(g.id, "todo")).ok, true);
 });

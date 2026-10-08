@@ -1,9 +1,16 @@
+import {
+  ITEM_DESCRIPTION_MAX,
+  ITEM_TITLE_MAX,
+} from "../../shared/orchestrator-limits.js";
 import type {
+  BoardKey,
   Card,
   Item,
   SettableItemState,
   SourceKind,
 } from "../../shared/types.js";
+
+export { ITEM_DESCRIPTION_MAX, ITEM_TITLE_MAX };
 
 export interface ItemUpsertOptions {
   source: string;
@@ -116,9 +123,6 @@ export function redactItem(item: Item): Item {
   };
 }
 
-export const ITEM_TITLE_MAX = 300;
-export const ITEM_DESCRIPTION_MAX = 20000;
-
 /**
  * Build the local Inbox card a promoted item becomes.
  *
@@ -130,6 +134,7 @@ export const ITEM_DESCRIPTION_MAX = 20000;
  */
 export function buildPromotedCard(
   item: Item,
+  boardKey: BoardKey,
   identifier: string,
   now: string,
   context?: string,
@@ -148,6 +153,7 @@ export function buildPromotedCard(
   ).replace(/DISPATCH_STATUS:/gi, "DISPATCH-STATUS:");
   return {
     id: identifier,
+    boardKey,
     issueId: item.id,
     identifier,
     title: item.title.trim().slice(0, ITEM_TITLE_MAX),

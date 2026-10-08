@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useRouteContext } from "@tanstack/react-router";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { sentryFixPrompt } from "../../../../shared/agent-prompt.js";
 import {
   SNOOZE_LABELS,
@@ -41,7 +43,9 @@ export function ErrorDetailContainer({
   const loadError =
     result && !result.ok ? sentryFailureText(result.error) : null;
 
-  const promote = usePromoteItemMutation({
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const board = useAppStore(appStore, (s) => s.board);
+  const promote = usePromoteItemMutation(board, {
     onSuccess: ({ card }) => onNotice(`Created ${card.identifier}`),
     onError: () => setError("Couldn't create the ticket. Try again."),
   });

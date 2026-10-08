@@ -7,6 +7,7 @@ import {
   type ClaudeUsageSnapshot,
 } from "../../../shared/types.js";
 import { SWITCH_NOW_REASON } from "../../../shared/account-chain.js";
+import { ALL_BOARDS } from "../../../shared/board-key.js";
 import { readClaudeIdentity } from "../../adapters/claude-cli.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import {
@@ -132,7 +133,7 @@ export function runInChainQueue<T>(task: () => Promise<T>): Promise<T> {
 /**
  * Resolve once every queued controller task has finished.
  *
- * @internal Tests use it to observe the controller.
+ * @public The account chain specs are the callers.
  */
 export async function whenChainIdle(): Promise<void> {
   let seen: Promise<unknown>;
@@ -145,7 +146,7 @@ export async function whenChainIdle(): Promise<void> {
 /**
  * List the pending controller timers by key (`return:<id>` or `exhausted`) with their due time.
  *
- * @internal Tests use it to observe the controller.
+ * @public The account chain specs are the callers.
  */
 export function chainTimers(): { key: string; at: string }[] {
   return [...timers].map(([key, t]) => ({
@@ -530,7 +531,7 @@ async function checkExhausted(): Promise<void> {
     await moveOrOffer("failover", inUse, selection.id, "reset");
     return;
   }
-  for (const { card, session } of store.sessionsWithTmux()) {
+  for (const { card, session } of store.sessionsWithTmux(ALL_BOARDS)) {
     if (accountOf(session) === inUse)
       await continueAtLimit(card.id, session.id);
   }
@@ -586,7 +587,7 @@ export function requestFailover(reason: string): Promise<FailoverResult> {
  */
 async function scanInUseSessions(): Promise<void> {
   const inUse = getActiveAccountId();
-  for (const { card, session } of store.sessionsWithTmux()) {
+  for (const { card, session } of store.sessionsWithTmux(ALL_BOARDS)) {
     if (accountOf(session) !== inUse) continue;
     await liveTurnState(card.id, session.id, session.tmuxSession);
   }

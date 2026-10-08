@@ -1,8 +1,18 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { useRouteContext } from "@tanstack/react-router";
+import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import { LINEAR_CONNECTION } from "../../../../shared/connection-meta.js";
 import {
   nextStep,
   previousStep,
+  shouldMarkOnboardingDone,
+  shouldOpenSetupWizard,
   skipConnection,
   type SetupStep,
 } from "../../../../shared/setup-wizard.js";
@@ -21,6 +31,8 @@ import {
   startInstall,
   type RowInstalls,
 } from "@/modules/setup/domain/prerequisite-install";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
+import { markOnboardingDone } from "@/modules/setup/queries/setup-api";
 import { useRunPrerequisiteInstallMutation } from "@/modules/setup/queries/setup-queries";
 import { useSourceConnectionQuery } from "@/queries/source-connection-queries";
 import {
@@ -45,7 +57,7 @@ export function SetupWizardContainer({
   const [installState, setInstallState] = useState<RowInstalls>({});
   const linear = useSourceConnectionQuery(LINEAR_CONNECTION.source);
   const install = useRunPrerequisiteInstallMutation();
-  const addFolder = useAddWorkspaceFolderMutation();
+  const addFolder = useAddWorkspaceFolderMutation(DEFAULT_BOARD_KEY);
   const browser = useFolderBrowser();
   const linearSeenRef = useRef<LinearSeen>({ baseline: null, latest: null });
   const closedRef = useRef(false);
@@ -119,5 +131,45 @@ export function SetupWizardContainer({
         browser={browser}
       />
     </SetupDialog>
+  );
+}
+
+function finishOnboarding(): void {
+  void markOnboardingDone().catch((err: unknown) => {
+    console.error("markOnboardingDone failed", err);
+  });
+}
+
+export function SetupWizardRequestContainer({
+  connections,
+}: {
+  connections: ReactNode;
+}) {
+  const { appStore, setup } = useRouteContext({ from: "__root__" });
+  const checks = useAppStore(appStore, (s) => s.setupWizard);
+  const seeded = useRef(false);
+
+  useLayoutEffect(() => {
+    if (seeded.current) return;
+    seeded.current = true;
+    if (setup != null && shouldOpenSetupWizard(setup)) {
+      appStore.openSetupWizard(setup);
+    }
+  }, [appStore, setup]);
+
+  useEffect(() => {
+    if (setup != null && shouldMarkOnboardingDone(setup)) finishOnboarding();
+  }, [setup]);
+
+  if (checks == null) return null;
+  return (
+    <SetupWizardContainer
+      {...checks}
+      onClose={(linearChanged) => {
+        appStore.closeSetupWizard(linearChanged);
+        finishOnboarding();
+      }}
+      connections={connections}
+    />
   );
 }

@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
+import { DEFAULT_BOARD_KEY as LOCAL } from "../../shared/board-key.js";
+import type { BoardKey } from "../../shared/types.js";
 import {
   promoteItemMutationOptions,
   setItemStateMutationOptions,
   snoozeItemMutationOptions,
 } from "./item-actions-queries.js";
 
+const ACME = "ACME" as BoardKey;
 const realFetch = globalThis.fetch;
 const calls: { url: string; init?: RequestInit }[] = [];
 
@@ -30,7 +33,7 @@ afterEach(() => {
 test("promoteItemMutationOptions posts to the promote route and resolves the card", async () => {
   reply(200, { card: { id: "c1", identifier: "DSP-1" } });
   assert.deepEqual(
-    await promoteItemMutationOptions.mutationFn({ itemId: "slack:1" }),
+    await promoteItemMutationOptions(LOCAL).mutationFn({ itemId: "slack:1" }),
     { card: { id: "c1", identifier: "DSP-1" } },
   );
   assert.equal(calls[0]?.url, "/api/items/slack%3A1/promote");
@@ -38,9 +41,15 @@ test("promoteItemMutationOptions posts to the promote route and resolves the car
   assert.equal(calls[0]?.init?.body, undefined);
 });
 
+test("promoteItemMutationOptions for ACME adds the board parameter", async () => {
+  reply(200, { card: { id: "c1", identifier: "DSP-1" } });
+  await promoteItemMutationOptions(ACME).mutationFn({ itemId: "slack:1" });
+  assert.equal(calls[0]?.url, "/api/items/slack%3A1/promote?board=ACME");
+});
+
 test("promoteItemMutationOptions posts the context when given", async () => {
   reply(200, { card: { id: "c1", identifier: "DSP-1" } });
-  await promoteItemMutationOptions.mutationFn({
+  await promoteItemMutationOptions(LOCAL).mutationFn({
     itemId: "sentry:1",
     context: "ctx",
   });
@@ -51,7 +60,7 @@ test("promoteItemMutationOptions posts the context when given", async () => {
 test("promoteItemMutationOptions rejects with the server reason on a refusal", async () => {
   reply(404, { error: "unknown item" });
   await assert.rejects(
-    promoteItemMutationOptions.mutationFn({ itemId: "x" }),
+    promoteItemMutationOptions(LOCAL).mutationFn({ itemId: "x" }),
     new Error("unknown item"),
   );
 });

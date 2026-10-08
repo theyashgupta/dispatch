@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { startedGroup } from "../../test-support/group-fixtures.js";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 
 isolateEnv();
 const { store } = await import("../../store/board.store.js");
@@ -62,8 +63,9 @@ void test("two concurrent deletes of the same row report deleted exactly once", 
   assert.deepEqual(outcomes.sort(), ["busy", "deleted"]);
   assert.equal(fs.existsSync(ws), false);
   assert.equal(
-    store.listEvents(g.id, 10).filter((e) => e.type === "archive_deleted")
-      .length,
+    store
+      .listEvents(DEFAULT_BOARD_KEY, g.id, 10)
+      .filter((e) => e.type === "archive_deleted").length,
     1,
   );
 });

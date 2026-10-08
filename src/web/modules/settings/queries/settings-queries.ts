@@ -20,13 +20,13 @@ import {
   getProfile,
   getTerminalAppearance,
   isIOSDevice,
-  isPushSupported,
   readPushSubscription,
   saveClaudeArgs,
   saveCleanupDelay,
   saveProfile,
   saveTerminalAppearance,
 } from "./settings-api.js";
+import { isPushSupported } from "@/queries/push-api";
 
 export const settingsKeys = {
   all: ["settings"] as const,

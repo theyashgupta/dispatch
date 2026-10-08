@@ -7,7 +7,7 @@ import { AccountSwitchContainer } from "./AccountSwitchContainer";
 import { AddAccountContainer } from "./AddAccountContainer";
 import { RemoveAccountContainer } from "./RemoveAccountContainer";
 import { RunningSessionsContainer } from "./RunningSessionsContainer";
-import { useAccountsQuery } from "@/modules/accounts/queries/accounts-queries";
+import { useAccountsQuery } from "@/queries/accounts-queries";
 
 export function AccountsContainer() {
   const accounts = useAccountsQuery();
