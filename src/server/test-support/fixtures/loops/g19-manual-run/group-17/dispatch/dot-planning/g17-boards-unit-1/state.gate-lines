@@ -1,0 +1,6 @@
+phase 1 Shared board types and the boards migration GREEN 2026-10-05T23:11:00Z gate=pass
+phase 2 Board catalog in the store and the workspace resolver GREEN 2026-10-05T23:28:07Z gate=pass
+phase 3 Store scoping, id minting per board and call sites GREEN 2026-10-05T23:55:44Z gate=pass
+phase 4 Architecture document GREEN 2026-10-05T23:58:10Z gate=pass
+phase 5 Gap Analysis GREEN 2026-10-06T00:32:39Z gate=pass
+phase 6 Test Suite and Real E2E Workflows GREEN 2026-10-06T01:02:34Z gate=pass
