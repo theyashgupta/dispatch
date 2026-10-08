@@ -7,6 +7,7 @@ import type {
   ArchivedGroup,
   Board,
   BoardPolicy,
+  OrchestratorRecord,
   BoardKey,
   BoardPatch,
   BoardScope,
@@ -113,6 +114,10 @@ export interface BoardRepository {
     sinceId: number,
     limit: number,
   ): OrchestrationEvent[];
+  listLatestOrchestrationEvents(
+    board: BoardKey,
+    limit: number,
+  ): OrchestrationEvent[];
   replaceOrchestratorToken(
     tokenHash: string,
     boardKey: BoardKey,
@@ -131,6 +136,8 @@ export interface BoardRepository {
     answer: NonNullable<DecisionItem["answer"]>,
   ): DecisionItem | null;
   consumeDecisionItem(id: string): boolean;
+  useProposalIndex(id: string, index: number): boolean;
+  releaseProposalIndex(id: string, index: number): void;
   addPushSubscription(sub: PushSubscriptionRow): boolean;
   removePushSubscription(endpoint: string): boolean;
   listPushSubscriptions(): PushSubscriptionRow[];
@@ -285,6 +292,7 @@ export interface BoardRepository {
   clearLastMarker(id: string, sessionId: string | undefined): Promise<void>;
   flipBack(id: string, sessionId: string | undefined): Promise<boolean>;
   listCards(scope: BoardScope): Card[];
+  listAllCards(scope: BoardScope): Card[];
   sessionsWithTmux(scope: BoardScope): {
     card: Card;
     session: Session & { tmuxSession: string };
@@ -347,13 +355,20 @@ export interface BoardRepository {
     key: BoardKey,
     policy: BoardPolicy,
   ): Promise<Board | undefined>;
+  setBoardOrchestrators(
+    key: BoardKey,
+    orchestrators: OrchestratorRecord[],
+  ): Promise<Board | undefined>;
   setGroupQueue(
     id: string,
     queue: { startQueued: boolean; dependsOn?: string[] },
   ): Promise<void>;
   setOrchestratorFields(
     id: string,
-    fields: Pick<Card, "createdByOrchestrator" | "launch">,
+    fields: Pick<
+      Card,
+      "createdByOrchestrator" | "ownerOrchestrator" | "launch"
+    >,
   ): Promise<void>;
   setShipFlow(id: string, flow: ShipFlow): Promise<void>;
   updateLocalCardText(
@@ -365,6 +380,11 @@ export interface BoardRepository {
     board: BoardKey,
     title: string,
     description: string,
+  ): Promise<Card>;
+  createOrchestratorCard(
+    board: BoardKey,
+    title: string,
+    orchestratorId: string,
   ): Promise<Card>;
   createGroupCard(
     board: BoardKey,

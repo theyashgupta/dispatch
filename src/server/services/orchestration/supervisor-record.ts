@@ -1,14 +1,51 @@
 import path from "node:path";
+import { isHiddenCard } from "../../../shared/hidden-card.js";
 import type {
+  BoardPolicy,
   Card,
   OrchestrationEventKind,
+  OrchestratorRecord,
   Session,
   SupervisorStateReason,
 } from "../../../shared/types.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import { loopFilePath } from "../domain/loop-progress.js";
+import { effectivePolicy } from "../domain/orchestrator-rules.js";
 import type { ContinueDuty } from "../domain/supervisor-plan.js";
+import { scopeTargetOf } from "./boards.js";
+
+/**
+ * The orchestrator record that owns a hidden card on its board, or undefined for any other card.
+ *
+ * @remarks
+ * The record must also name the card, so an id that was removed and added again does not
+ * adopt the hidden card of the old record.
+ */
+export function orchestratorOf(card: Card): OrchestratorRecord | undefined {
+  if (!isHiddenCard(card)) return undefined;
+  return store
+    .getBoard(card.boardKey ?? DEFAULT_BOARD_KEY)
+    ?.orchestrators.find(
+      (r) => r.id === card.ownerOrchestrator && r.cardId === card.id,
+    );
+}
+
+/**
+ * The policy a card works under: its board policy narrowed by the override of its owner orchestrator.
+ *
+ * @remarks
+ * A hidden card works under its own orchestrator; any other card under the owner the scope
+ * check gives it. Undefined when the board is gone.
+ */
+export function ownerPolicy(card: Card): BoardPolicy | undefined {
+  const board = store.getBoard(card.boardKey ?? DEFAULT_BOARD_KEY);
+  if (!board) return undefined;
+  const owner = isHiddenCard(card)
+    ? orchestratorOf(card)
+    : board.orchestrators.find((r) => r.id === scopeTargetOf(card).owner);
+  return effectivePolicy(board.policy, owner);
+}
 
 /** Append one supervisor event for a session, a `supervisor_action` row unless another kind is given. */
 export function record(

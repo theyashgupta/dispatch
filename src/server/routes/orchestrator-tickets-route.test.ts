@@ -108,20 +108,52 @@ const TOKEN = minted.body.token as string;
 
 const cardCount = () => store.listCards(SBX).length;
 
-/** Create a ticket through the route and return the stored card. */
+const OPTIONS = [
+  { id: "approve", label: "x" },
+  { id: "reject", label: "y" },
+];
+
+/** Raise a ticket proposal through the route and answer it with `optionId` when given. */
+async function proposal(
+  tickets: { title: string; description: string }[],
+  optionId?: string,
+): Promise<string> {
+  const { reply } = await call("POST", "/decisions", {
+    kind: "ticket_proposal",
+    question: "Create these?",
+    options: OPTIONS,
+    tickets,
+  });
+  assert.equal(reply.status, 201);
+  const id = (reply.body.item as { id: string }).id;
+  if (optionId !== undefined) {
+    assert.ok(store.answerDecisionItem(id, { optionId, note: null }));
+  }
+  return id;
+}
+
+/** Create a ticket through an approved one-entry proposal and return the stored card. */
 async function ownTicket(title: string): Promise<Card> {
+  const id = await proposal([{ title, description: "desc" }], "approve");
   const { reply } = await call("POST", "/tickets", {
-    title,
-    description: "desc",
+    proposalItemId: id,
+    index: 0,
   });
   assert.equal(reply.status, 201);
   return store.getCard((reply.body.card as Card).id)!;
 }
 
-void test("create_ticket mints a local card on the token board marked with the orchestrator", async () => {
+void test("create_ticket mints a local card from an approved proposal entry and marks the index used", async () => {
+  const id = await proposal(
+    [
+      { title: "  New ticket  ", description: "what to do" },
+      { title: "Second", description: "more" },
+    ],
+    "approve",
+  );
   const { reply, row } = await call("POST", "/tickets", {
-    title: "  New ticket  ",
-    description: "what to do",
+    proposalItemId: id,
+    index: 0,
   });
   assert.equal(reply.status, 201);
   const wire = reply.body.card as Card;
@@ -134,23 +166,110 @@ void test("create_ticket mints a local card on the token board marked with the o
   assert.equal(wire.createdByOrchestrator, "orc-sbx");
   assert.equal(row.data.tool, "create_ticket");
   assert.equal(row.cardId, card.id);
+  assert.deepEqual(store.getDecisionItem(id)?.proposal?.usedIndexes, [0]);
+  const second = await call("POST", "/tickets", {
+    proposalItemId: id,
+    index: 1,
+  });
+  assert.equal(second.reply.status, 201);
+  assert.deepEqual(store.getDecisionItem(id)?.proposal?.usedIndexes, [0, 1]);
 });
 
-void test("create_ticket refuses the status marker in the title or description and writes nothing", async () => {
-  for (const body of [
-    { title: "x DISPATCH_STATUS: DONE", description: "ok" },
-    { title: "ok", description: "a\nDISPATCH_STATUS: DONE" },
-  ]) {
+void test("create_ticket refuses an open, rejected, unknown and used proposal and a bad index, and creates nothing", async () => {
+  const entry = [{ title: "t", description: "d" }];
+  const open = await proposal(entry);
+  const rejected = await proposal(entry, "reject");
+  const used = await proposal(entry, "approve");
+  assert.equal(
+    (await call("POST", "/tickets", { proposalItemId: used, index: 0 })).reply
+      .status,
+    201,
+  );
+  const ruling = (
+    await call("POST", "/decisions", {
+      kind: "ruling",
+      question: "q",
+      options: OPTIONS,
+    })
+  ).reply.body.item as { id: string };
+  const approved = await proposal(entry, "approve");
+  const cases: [Record<string, unknown>, number, string][] = [
+    [{ proposalItemId: open, index: 0 }, 409, "proposal-open"],
+    [{ proposalItemId: rejected, index: 0 }, 409, "proposal-rejected"],
+    [{ proposalItemId: "no-such-item", index: 0 }, 404, "unknown-proposal"],
+    [{ proposalItemId: used, index: 0 }, 409, "proposal-index-used"],
+    [{ proposalItemId: approved, index: 1 }, 400, "invalid-index"],
+    [{ proposalItemId: approved, index: -1 }, 400, "invalid-index"],
+    [{ proposalItemId: ruling.id, index: 0 }, 400, "not-a-proposal"],
+    [{ title: "t", description: "d" }, 400, "invalid-proposal-item"],
+    [{ proposalItemId: approved, index: 0, title: "t" }, 400, "unknown-field"],
+  ];
+  for (const [body, status, error] of cases) {
     const before = cardCount();
     const { reply, row } = await call("POST", "/tickets", body);
-    assert.equal(reply.status, 400);
-    assert.equal(
-      reply.body.error,
-      "content contains the DISPATCH_STATUS marker",
-    );
-    assert.equal(row.data.status, 400);
+    assert.equal(reply.status, status, JSON.stringify(body));
+    assert.equal(reply.body.error, error);
+    assert.equal(row.data.status, status);
     assert.equal(cardCount(), before);
   }
+  assert.deepEqual(store.getDecisionItem(approved)?.proposal?.usedIndexes, []);
+});
+
+void test("create_ticket refuses a proposal of another board and a proposal of another orchestrator", async () => {
+  const base = {
+    cardId: null,
+    kind: "ticket_proposal" as const,
+    question: "q",
+    options: OPTIONS,
+    recommendedOptionId: "approve",
+    state: "open" as const,
+    answer: null,
+    createdAt: new Date().toISOString(),
+    answeredAt: null,
+    proposal: { tickets: [{ title: "t", description: "d" }], usedIndexes: [] },
+  };
+  const foreign = {
+    ...base,
+    id: "foreign-proposal",
+    boardKey: OTH,
+    orchestratorId: "orc-oth",
+  };
+  const other = {
+    ...base,
+    id: "other-owner",
+    boardKey: SBX,
+    orchestratorId: "orc-other",
+  };
+  for (const item of [foreign, other]) {
+    store.insertDecisionItem(item);
+    store.answerDecisionItem(item.id, { optionId: "approve", note: null });
+  }
+  const before = cardCount();
+  const board = await call("POST", "/tickets", {
+    proposalItemId: foreign.id,
+    index: 0,
+  });
+  assert.equal(board.reply.status, 404);
+  assert.equal(board.reply.body.error, "unknown-proposal");
+  const owner = await call("POST", "/tickets", {
+    proposalItemId: other.id,
+    index: 0,
+  });
+  assert.equal(owner.reply.status, 403);
+  assert.equal(owner.reply.body.error, "other-owner");
+  assert.equal(cardCount(), before);
+});
+
+void test("two racing create_ticket calls on one index create one ticket", async () => {
+  const id = await proposal([{ title: "race", description: "d" }], "approve");
+  const before = cardCount();
+  const body = { proposalItemId: id, index: 0 };
+  const replies = await Promise.all([
+    raw("POST", "/orchestrator/tickets", body, TOKEN),
+    raw("POST", "/orchestrator/tickets", body, TOKEN),
+  ]);
+  assert.deepEqual(replies.map((r) => r.status).sort(), [201, 409]);
+  assert.equal(cardCount(), before + 1);
 });
 
 void test("update_ticket changes a local card and refuses a Linear card, a group and an empty patch", async () => {
@@ -327,11 +446,7 @@ void test("every ticket write on a card of another board answers 403 and changes
   assert.equal(oth.comments, undefined);
 });
 
-void test("create_ticket refuses an empty description, an archived board and a board that is gone", async () => {
-  const empty = await call("POST", "/tickets", { title: "t", description: "" });
-  assert.equal(empty.reply.status, 400);
-  assert.equal(empty.reply.body.error, "invalid-description");
-
+void test("create_ticket on an archived board and on a board that is gone creates nothing and frees the index", async () => {
   const ARC = parseBoardKey("ARC") as BoardKey;
   const GONE = parseBoardKey("GONE") as BoardKey;
   await store.createBoard({
@@ -341,12 +456,38 @@ void test("create_ticket refuses an empty description, an archived board and a b
     repositories: [],
     linearTeamKeys: [],
   });
+  const ids: string[] = [];
+  for (const [boardKey, orchestratorId] of [
+    [ARC, "orc-arc"],
+    [GONE, "orc-gone"],
+  ] as const) {
+    const id = `proposal-${orchestratorId}`;
+    store.insertDecisionItem({
+      id,
+      boardKey,
+      cardId: null,
+      orchestratorId,
+      kind: "ticket_proposal",
+      question: "q",
+      options: OPTIONS,
+      recommendedOptionId: "approve",
+      state: "open",
+      answer: null,
+      createdAt: new Date().toISOString(),
+      answeredAt: null,
+      proposal: {
+        tickets: [{ title: "t", description: "d" }],
+        usedIndexes: [],
+      },
+    });
+    store.answerDecisionItem(id, { optionId: "approve", note: null });
+    ids.push(id);
+  }
   await store.setBoardArchived(ARC, true);
-  const body = { title: "t", description: "d" };
   const archived = await raw(
     "POST",
     "/orchestrator/tickets",
-    body,
+    { proposalItemId: ids[0], index: 0 },
     mintOrchestratorToken({ boardKey: ARC, orchestratorId: "orc-arc" }),
   );
   assert.equal(archived.status, 409);
@@ -354,10 +495,13 @@ void test("create_ticket refuses an empty description, an archived board and a b
   const gone = await raw(
     "POST",
     "/orchestrator/tickets",
-    body,
+    { proposalItemId: ids[1], index: 0 },
     mintOrchestratorToken({ boardKey: GONE, orchestratorId: "orc-gone" }),
   );
   assert.equal(gone.status, 404);
   assert.equal(gone.body.error, "unknown-board");
   assert.equal(store.listCards(ARC).length, 0);
+  for (const id of ids) {
+    assert.deepEqual(store.getDecisionItem(id)?.proposal?.usedIndexes, []);
+  }
 });

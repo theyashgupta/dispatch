@@ -1,0 +1,5 @@
+phase 1 RED attempt 1 2026-10-06T14:09:58Z (QA: 47 of 52 fixture files git-ignored; no warning for malformed rows, empty files, binary text, engine fences with no fields)
+phase 7 RED attempt 1 2026-10-06T16:06:24Z (gate: knip -production flags parseRoadmapUnits and parsePrdPhases as exports used only by tests)
+phase 8 RED attempt 1 2026-10-06T16:15:03Z (gap tests: SLUG_HINT captures a trailing period, so 'slug g13-modules-b.' never matches its folder)
+phase 8 RED attempt 2 2026-10-06T16:16:24Z (full check: format:check failed on 31 recorded fixture files; added both fixture folders to .prettierignore)
+phase 8 RED attempt 3 2026-10-06T16:19:18Z (full check: board-store.test.ts pins the exact session summary shape and lacked the four U1-14 meter keys; S-03 extra round 1)

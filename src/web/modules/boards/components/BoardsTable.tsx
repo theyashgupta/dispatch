@@ -14,6 +14,7 @@ import {
 } from "@/modules/boards/domain/board-counts";
 import type { BoardRow } from "@/modules/boards/domain/board-rows";
 import { BoardCountBadge } from "./BoardCountBadge";
+import { BoardLoopsBadge } from "./BoardLoopsBadge";
 import { BoardNameMarks } from "./BoardNameMarks";
 import { BoardRowMenu } from "./BoardRowMenu";
 
@@ -41,7 +42,8 @@ export function BoardsTable({
             <TableHead scope="col">Running</TableHead>
             <TableHead scope="col">Open groups</TableHead>
             <TableHead scope="col">Attention</TableHead>
-            <TableHead scope="col">
+            <TableHead scope="col">Loops</TableHead>
+            <TableHead scope="col" className="sticky right-0 bg-card">
               <span className="sr-only">Actions</span>
             </TableHead>
           </TableRow>
@@ -50,7 +52,7 @@ export function BoardsTable({
           {rows.map((row) => (
             <TableRow key={row.board.key}>
               <TableCell>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <span className="max-w-48 truncate" title={row.board.name}>
                     {row.board.name}
                   </span>
@@ -64,13 +66,7 @@ export function BoardsTable({
                 {row.board.key}
               </TableCell>
               <TableCell>
-                <span
-                  className="hidden max-w-40 truncate xl:block"
-                  title={repositoryNames(row.board.repositories)}
-                >
-                  {repositoryNames(row.board.repositories)}
-                </span>
-                <span className="xl:hidden">
+                <span title={repositoryNames(row.board.repositories)}>
                   {repositoryCountLabel(row.board.repositories.length)}
                 </span>
               </TableCell>
@@ -92,7 +88,13 @@ export function BoardsTable({
                   count={row.counts?.attention ?? null}
                 />
               </TableCell>
-              <TableCell className="text-right">
+              <TableCell>
+                <BoardLoopsBadge
+                  loops={row.counts?.loops ?? null}
+                  variant="lines"
+                />
+              </TableCell>
+              <TableCell className="sticky right-0 bg-card text-right">
                 <BoardRowMenu
                   archive={row.archive}
                   onOpen={() => onOpen(row.board)}

@@ -7,6 +7,7 @@ import {
   fieldsOf,
   forceBodySchema,
   fromResult,
+  unknownFieldError,
 } from "./schema-primitives.js";
 
 function firstCode(schema: z.ZodType, input: unknown): string | undefined {
@@ -58,4 +59,18 @@ test("fromResult returns the parser value or its error as the issue", () => {
   assert.equal(schema.parse("ok"), 42);
   assert.equal(firstCode(schema, "no"), "bad no");
   assert.equal(firstCode(z.object({ f: schema }), {}), "bad undefined");
+});
+
+test("unknownFieldError names an extra key unknown-field and any other issue the fallback", () => {
+  const body = z.strictObject(
+    { a: z.string() },
+    { error: unknownFieldError() },
+  );
+  assert.equal(firstCode(body, { a: "x", b: 1 }), "unknown-field");
+  assert.equal(firstCode(body, 5), "invalid-body");
+  const policy = z.strictObject(
+    { a: z.string() },
+    { error: unknownFieldError("invalid-policy") },
+  );
+  assert.equal(firstCode(policy, "x"), "invalid-policy");
 });

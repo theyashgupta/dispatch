@@ -150,6 +150,7 @@ const PAGE_TITLES: Record<Page, string> = {
   ask: "Ask",
   flow: "Flow",
   boards: "Boards",
+  dashboard: "Dashboard",
 };
 
 const NO_EVENTS: ActivityEvent[] = [];
@@ -236,6 +237,9 @@ export function ShellContainer({
       if (fresh) setLiveBoard(snapshot);
     },
   });
+  useEffect(() => {
+    appStore.setConnection(connection);
+  }, [appStore, connection]);
   const boardQuery = useBoardSnapshotQuery(boardKey, doneLimit);
   const [lastBoard, setLastBoard] = useState<BoardSnapshot | null>(null);
   const current = latestBoard(boardQuery.data, lastBoard, boardKey);
@@ -327,9 +331,13 @@ export function ShellContainer({
     [items, errorsInFeeds, enabledSources],
   );
   const slack = useMemo(() => slackRows(inboxItems), [inboxItems]);
+  const hasMainOrchestrator =
+    boardList?.boards
+      .find((b) => b.key === boardKey)
+      ?.orchestrators.some((r) => r.role === "main") ?? false;
   const navItems = useMemo(
-    () => visibleNavItems(NAV_ITEMS, enabledSources ?? []),
-    [enabledSources],
+    () => visibleNavItems(NAV_ITEMS, enabledSources ?? [], hasMainOrchestrator),
+    [enabledSources, hasMainOrchestrator],
   );
   const inboxRows = useMemo(
     () => inboxItems.filter((item) => item.source !== "calendar"),

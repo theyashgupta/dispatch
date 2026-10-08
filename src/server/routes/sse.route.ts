@@ -4,6 +4,7 @@ import type {
   ActivityEvent,
   BoardKey,
   BoardSnapshot,
+  OrchestrationEvent,
   TunnelState,
 } from "../../shared/types.js";
 import { DONE_PAGE_SIZE, parseDoneLimit } from "../../shared/done-limit.js";
@@ -39,6 +40,11 @@ function frame(snapshot: BoardSnapshot): string {
 /** Serialize one durably-inserted event into a NAMED `activity` SSE frame, distinct from the board `data:` frame. */
 function activityFrame(event: ActivityEvent): string {
   return `event: activity\ndata: ${JSON.stringify(event)}\n\n`;
+}
+
+/** Serialize an orchestration event into a NAMED `orchestration` SSE frame that holds only the board key and the event id. */
+function orchestrationFrame(event: OrchestrationEvent): string {
+  return `event: orchestration\ndata: ${JSON.stringify({ boardKey: event.boardKey, lastEventId: event.id })}\n\n`;
 }
 
 /** Serialize a tunnel status transition into a NAMED `tunnel` SSE frame. */
@@ -141,6 +147,14 @@ store.on("activity", (event: ActivityEvent) => {
   const board = event.boardKey ?? DEFAULT_BOARD_KEY;
   for (const [client, window] of clients) {
     if (window.board !== board) continue;
+    if (!safeWrite(client, payload)) clients.delete(client);
+  }
+});
+
+store.on("orchestration", (event: OrchestrationEvent) => {
+  const payload = orchestrationFrame(event);
+  for (const [client, window] of clients) {
+    if (window.board !== event.boardKey) continue;
     if (!safeWrite(client, payload)) clients.delete(client);
   }
 });

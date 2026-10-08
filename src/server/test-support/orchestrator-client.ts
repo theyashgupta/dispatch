@@ -229,10 +229,34 @@ const confirmed = (body: { result?: string }) =>
 
 async function createGroup(s: Script): Promise<string | undefined> {
   const ticketIds: string[] = [];
+  const proposal = await callTool<{ item?: DecisionItem }>(
+    s,
+    "0.1",
+    "create_decision_item",
+    {
+      kind: "ticket_proposal",
+      question: "Create the three scripted client tickets?",
+      options: [
+        { id: "approve", label: "Create these tickets" },
+        { id: "reject", label: "Do not create" },
+      ],
+      tickets: [1, 2, 3].map((n) => ({
+        title: `Scripted client ticket ${n}`,
+        description: `Ticket ${n} of the scripted client run.`,
+      })),
+    },
+    (body) => (body.item?.id ? null : "no item id"),
+  );
+  const proposalId = proposal.body.item?.id;
+  if (!proposalId) return undefined;
+  const status = await userRoute(s, "POST", `/decisions/${proposalId}/answer`, {
+    optionId: "approve",
+  });
+  record(s, "0.2", "POST decision answer", status === 200, `status ${status}`);
   for (const n of [1, 2, 3]) {
     const out = await callTool<CardBody>(s, "1." + n, "create_ticket", {
-      title: `Scripted client ticket ${n}`,
-      description: `Ticket ${n} of the scripted client run.`,
+      proposalItemId: proposalId,
+      index: n - 1,
     });
     if (out.body.card) ticketIds.push(out.body.card.id);
   }

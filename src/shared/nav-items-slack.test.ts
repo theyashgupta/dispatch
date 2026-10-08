@@ -19,9 +19,9 @@ test("the Slack row shows only while Slack is enabled, as the last Sources row",
 });
 
 test("rows without a source never drop, whatever is enabled", () => {
-  const unsourced = NAV_ITEMS.filter((item) => item.source === undefined).map(
-    (item) => item.page,
-  );
+  const unsourced = NAV_ITEMS.filter(
+    (item) => item.source === undefined && !item.needsMainOrchestrator,
+  ).map((item) => item.page);
   assert.deepEqual(pages([]), unsourced);
   assert.deepEqual(
     pages(["slack"]).filter((page) => page !== "slack"),

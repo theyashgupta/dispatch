@@ -1,0 +1,59 @@
+{
+  "onStart": [
+    { "tool": "read_state", "args": {} },
+    {
+      "tool": "list_events",
+      "args": { "since": 0, "limit": 200 },
+      "expect": { "contains": "intake_submitted" },
+      "saveAs": "events"
+    },
+    {
+      "tool": "create_decision_item",
+      "args": {
+        "kind": "ticket_proposal",
+        "question": "Create these two tickets from the intake?",
+        "options": [
+          { "id": "approve", "label": "Create these tickets" },
+          { "id": "reject", "label": "Do not create" }
+        ],
+        "tickets": [
+          {
+            "title": "Replay ticket one",
+            "description": "First ticket proposed by the scripted orchestrator."
+          },
+          {
+            "title": "Replay ticket two",
+            "description": "Second ticket proposed by the scripted orchestrator."
+          }
+        ]
+      },
+      "saveAs": "proposal"
+    },
+    {
+      "tool": "wait_for_event",
+      "args": {
+        "since": "$events.cursor",
+        "kinds": ["decision_answered"],
+        "timeoutSeconds": 55
+      },
+      "expect": { "contains": "decision_answered" },
+      "saveAs": "answer"
+    },
+    {
+      "tool": "create_ticket",
+      "args": { "proposalItemId": "$proposal.item.id", "index": 0 },
+      "expect": { "contains": "Replay ticket one" }
+    },
+    {
+      "tool": "create_ticket",
+      "args": { "proposalItemId": "$proposal.item.id", "index": 1 },
+      "expect": { "contains": "Replay ticket two" }
+    },
+    {
+      "tool": "write_state",
+      "args": {
+        "markdown": "# Intake replay\n\nBoth proposed tickets were created."
+      }
+    }
+  ]
+}

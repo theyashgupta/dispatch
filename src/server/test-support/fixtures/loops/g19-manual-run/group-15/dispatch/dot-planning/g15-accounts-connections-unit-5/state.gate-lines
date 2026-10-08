@@ -1,0 +1,5 @@
+phase 1 Start gate and G13 merge GREEN 2026-10-07T12:03:29Z gate=pass
+phase 2 Shared account query GREEN 2026-10-07T12:27:30Z gate=pass
+phase 3 Mounts on the session row and the detail header GREEN 2026-10-07T12:56:59Z gate=pass
+phase 4 Gap Analysis GREEN 2026-10-07T13:06:59Z gate=pass
+phase 5 Test Suite + Real E2E Workflows GREEN 2026-10-07T14:42:17Z gate=pass

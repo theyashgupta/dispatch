@@ -1,9 +1,14 @@
 import { Router } from "express";
 import { z } from "zod";
+import {
+  isLoopModel,
+  isOrchestratorModel,
+} from "../../shared/orchestrator-models.js";
 import { setBoardPolicy } from "../services/orchestration/boards.js";
 import { parseBoardKeyParam } from "./boards-schemas.js";
 import { httpErrorHandler } from "./error-handler.js";
 import { parseOrThrow } from "./parse-input.js";
+import { unknownFieldError } from "./schema-primitives.js";
 
 export const boardPolicyRouter = Router({ caseSensitive: true });
 
@@ -15,15 +20,12 @@ const whole = (field: string, min: number, max: number) =>
     .min(min, `invalid-${field}`)
     .max(max, `invalid-${field}`);
 
-/** A model name: 1 to 100 characters after trimming, refused with `invalid-<field>`. */
-const modelName = (field: string) =>
-  z
-    .string(`invalid-${field}`)
-    .trim()
-    .min(1, `invalid-${field}`)
-    .max(100, `invalid-${field}`);
-
-/** The D-6 board policy fields, all required; the D-3 fixed supervisor values are not settings. */
+/**
+ * The board policy fields, all required; the fixed supervisor values are not settings.
+ *
+ * @remarks
+ * The two models are checked against the shared list, and `opus` stays valid as the legacy name of Opus 5.5.
+ */
 const policyBodySchema = z
   .strictObject(
     {
@@ -32,8 +34,13 @@ const policyBodySchema = z
         "invalid-roadmapApproval",
       ),
       concurrencyCap: whole("concurrencyCap", 1, 20),
-      loopModel: modelName("loopModel").nullable(),
-      orchestratorModel: modelName("orchestratorModel"),
+      loopModel: z
+        .string("invalid-loopModel")
+        .refine(isLoopModel, "invalid-loopModel")
+        .nullable(),
+      orchestratorModel: z
+        .string("invalid-orchestratorModel")
+        .refine(isOrchestratorModel, "invalid-orchestratorModel"),
       handoffPercent: whole("handoffPercent", 1, 100),
       handoffHardPercent: whole("handoffHardPercent", 1, 100),
       usageLimit: z.enum(["wait", "stop"], "invalid-usageLimit"),
@@ -45,10 +52,7 @@ const policyBodySchema = z
         .nullable(),
       supervisor: z.enum(["on", "off"], "invalid-supervisor"),
     },
-    {
-      error: (issue) =>
-        issue.code === "unrecognized_keys" ? "unknown-field" : "invalid-policy",
-    },
+    { error: unknownFieldError("invalid-policy") },
   )
   .refine((p) => p.handoffHardPercent >= p.handoffPercent, {
     message: "hard-below-handoff",

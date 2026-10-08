@@ -1,3 +1,4 @@
+import { isHiddenCard } from "../../../shared/hidden-card.js";
 import type { Card } from "../../../shared/types.js";
 import { fenceUntrusted } from "../../../shared/untrusted.js";
 import { attachmentLinks, withAbsoluteAttachments } from "./attachments.js";
@@ -10,6 +11,9 @@ import { VAULT_RUN_PATH, VAULT_SCHEMA_PATH } from "./paths.js";
  */
 function workspaceOrientation(repoNames: string[], identifier: string): string {
   const folders = repoNames.map((n) => `${n}/`);
+  if (folders.length === 0) {
+    return `This folder is the session root for ${identifier}. It holds no repository checkout.`;
+  }
   if (folders.length === 1) {
     return (
       `This folder contains a git worktree for the repo ${folders[0]}, ` +
@@ -271,6 +275,8 @@ export function buildKickoff(
     opts.playbookBody !== undefined
       ? substitutePlaybookBody(opts.playbookBody, extra)
       : null;
+
+  if (isHiddenCard(card)) return substituted ?? extra;
 
   return [
     ...(url ? [`Linear ticket: ${url}`, ``] : []),

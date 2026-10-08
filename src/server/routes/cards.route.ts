@@ -26,6 +26,7 @@ import { cleanupWorkspace } from "../services/orchestration/cleanup.js";
 import {
   actionableCard,
   groupedMemberError,
+  launchableCard,
   moveCard,
 } from "../services/orchestration/card-move.js";
 import { unwindGroup } from "../services/orchestration/unwind.js";
@@ -179,7 +180,7 @@ cardsRouter.post("/cards/:id/start", async (req, res) => {
   const { extraDirection, playbook, newSession, inheritFrom, workspace } =
     parseOrThrow(startBodySchema, req.body);
 
-  const card = actionableCard(id);
+  const card = launchableCard(id);
 
   if (card.column === "done") {
     throw new ConflictError("cannot start a session for a Done card");
@@ -293,7 +294,7 @@ cardsRouter.post("/cards/:id/terminal", (req, res) => {
 cardsRouter.post("/cards/:id/run-claude", async (req, res) => {
   const { id } = req.params;
 
-  const card = actionableCard(id);
+  const card = launchableCard(id);
 
   if (!card.tmuxSession || !card.activeSessionId) {
     throw new ValidationError("card has no live session");

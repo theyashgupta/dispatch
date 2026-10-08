@@ -14,6 +14,10 @@ export const DECISION_OPTION_ID_RE = /^[a-z0-9_-]{1,40}$/;
 export const DECISION_ID_RE = /^[A-Za-z0-9-]{1,40}$/;
 export const SHIP_TITLE_MAX = 200;
 export const SHIP_BODY_MAX = 20000;
+export const ORCHESTRATOR_STATE_MAX_BYTES = 65536;
+export const INTAKE_GOAL_MAX = 2000;
+export const INTAKE_REQUIREMENTS_MAX_BYTES = 65536;
+export const STALE_MINUTES = 15;
 
 const SHIP_BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$/;
 

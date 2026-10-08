@@ -31,6 +31,7 @@ import {
   listSessionsHandler,
   moveCardHandler,
   readPaneTailHandler,
+  readStateHandler,
   requestHandoffHandler,
   resumeLoopHandler,
   sendInputHandler,
@@ -39,6 +40,7 @@ import {
   stopSessionHandler,
   updateTicketHandler,
   waitForEventHandler,
+  writeStateHandler,
   type ToolCall,
   type ToolHandler,
 } from "./orchestrator.handlers.js";
@@ -276,5 +278,7 @@ orchestratorRouter.get(
   "/groups/:cardId/ship",
   tool("get_ship_state", getShipStateHandler),
 );
+orchestratorRouter.get("/state", tool("read_state", readStateHandler));
+orchestratorRouter.put("/state", tool("write_state", writeStateHandler));
 
 orchestratorRouter.use(httpErrorHandler);

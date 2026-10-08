@@ -54,8 +54,18 @@ const PAGE_HEADER_VIEWS: Partial<Record<Page, ComponentType>> = {
     import("@/modules/archive").then((m) => ({ default: m.ArchiveHeaderView })),
   ),
   ask: AskHeaderView,
+  board: lazy(() =>
+    import("@/modules/orchestrator").then((m) => ({
+      default: m.OrchestratorEntryView,
+    })),
+  ),
   boards: lazy(() =>
     import("@/modules/boards").then((m) => ({ default: m.BoardsHeaderView })),
+  ),
+  dashboard: lazy(() =>
+    import("@/modules/dashboard").then((m) => ({
+      default: m.DashboardHeaderView,
+    })),
   ),
   meetings: lazy(() =>
     import("@/modules/meetings").then((m) => ({

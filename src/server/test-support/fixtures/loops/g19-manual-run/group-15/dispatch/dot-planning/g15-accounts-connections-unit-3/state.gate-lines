@@ -1,0 +1,7 @@
+phase 1 Diagnosis on this Mac GREEN 2026-10-06T15:49:32Z gate=pass
+phase 2 Helper spike and the A or B decision GREEN 2026-10-06T15:49:32Z gate=pass
+phase 3 Helper app, build script and adapter GREEN 2026-10-06T16:06:00Z gate=pass
+phase 4 Status codes, service and routes GREEN 2026-10-06T16:25:50Z gate=pass
+phase 5 Calendar card GREEN 2026-10-06T16:48:54Z gate=pass
+phase 7 Architecture record GREEN 2026-10-06T19:33:04Z gate=pass
+phase 8 Gap Analysis GREEN 2026-10-06T19:36:47Z gate=pass

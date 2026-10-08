@@ -7,6 +7,7 @@ import type {
   BoardPolicy,
   LoopGate,
   OrchestrationEventKind,
+  OrchestratorPolicyOverride,
   PrInfo,
 } from "../../../shared/types.js";
 
@@ -442,4 +443,91 @@ test("a pass drops the watcher of a session that is gone or on an unsupervised b
   assert.ok(!names.includes(unsupervised));
   assert.ok(!names.includes(gone));
   for (const name of [live, unsupervised, gone]) dropWatcher(name);
+});
+
+/** Put `groupIds` in the scope of extra `extra-1` with `override`, beside a main. */
+async function extraOwns(
+  board: BoardKey,
+  groupIds: string[],
+  override: OrchestratorPolicyOverride,
+) {
+  const base = {
+    policyOverride: {},
+    cardId: null,
+    state: "stopped" as const,
+    createdAt: "2026-10-08T00:00:00.000Z",
+  };
+  await store.setBoardOrchestrators(board, [
+    {
+      ...base,
+      id: "main",
+      name: "Main",
+      role: "main",
+      scope: { groupIds: [], ticketIds: [] },
+    },
+    {
+      ...base,
+      id: "extra-1",
+      name: "Extra 1",
+      role: "extra",
+      scope: { groupIds, ticketIds: [] },
+      policyOverride: override,
+    },
+  ]);
+}
+
+test("a group of an extra stops at the extra's narrower budget, not the board budget", async () => {
+  const board = await newBoard({ budgetPerGroup: 100 });
+  const card = await groupCard(board, "extra-budget");
+  await extraOwns(board, [card.id], { budgetPerGroup: 10 });
+  const tmux = await startCard(card.id);
+  await store.setSessionMetersIfSession(card.id, tmux, {
+    contextPercent: 10,
+    model: "Opus 5.5",
+    cost: 12,
+    usage: { fiveHourPercent: 1, sevenDayPercent: 1 },
+  });
+  await setGate(card.id, null);
+  const h = harness();
+  await h.pass();
+  await setGate(card.id, GATE);
+  await h.pass();
+  const live = store.getCard(card.id)!;
+  const session = live.sessions!.find((s) => s.id === live.activeSessionId)!;
+  assert.equal(session.stateReason, "budget");
+});
+
+test("a held group of an extra stays queued at the extra's narrower cap while the board has room", async () => {
+  const board = await newBoard({ concurrencyCap: 5 });
+  const dep = await doneGroup(board, "dep");
+  const busy = await groupCard(board, "busy");
+  await startCard(busy.id);
+  const queued = await queuedGroup(board, "held", [dep.id]);
+  await extraOwns(board, [queued.id], { concurrencyCap: 1 });
+  const h = harness();
+  await h.pass();
+  assert.deepEqual(h.started, []);
+  assert.equal(store.getCard(queued.id)?.startQueued, true);
+});
+
+test("a held group of an extra with no cap override follows the board cap", async () => {
+  const roomy = await newBoard({ concurrencyCap: 5 });
+  const roomyDep = await doneGroup(roomy, "dep");
+  await startCard((await groupCard(roomy, "busy")).id);
+  const free = await queuedGroup(roomy, "held", [roomyDep.id]);
+  await extraOwns(roomy, [free.id], {});
+  const h = harness();
+  await h.pass();
+  assert.deepEqual(h.started, [free.id]);
+  await silenceBoards();
+
+  const full = await newBoard({ concurrencyCap: 1 });
+  const fullDep = await doneGroup(full, "dep");
+  await startCard((await groupCard(full, "busy")).id);
+  const held = await queuedGroup(full, "held", [fullDep.id]);
+  await extraOwns(full, [held.id], {});
+  const second = harness();
+  await second.pass();
+  assert.deepEqual(second.started, []);
+  assert.equal(store.getCard(held.id)?.startQueued, true);
 });

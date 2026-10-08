@@ -68,9 +68,11 @@ async function groupCard(title: string) {
 /**
  * Start the fake claude in a private tmux session and give it a started card on `SBX`.
  *
- * @remarks Waits until the fake has drawn its pane, since node start-up can pass 500 ms under
+ * @remarks
+ * Waits until the fake has drawn its pane, since node start-up can pass 500 ms under
  * load. A loop fixture, when named, fills the session root and the loop progress is read from it;
- * otherwise the card gets `LOOP_PROGRESS`.
+ * otherwise the card gets `LOOP_PROGRESS`. An `orchestrator` id makes the card the hidden card of a
+ * `running` orchestrator record of that id, with no loop progress.
  */
 export async function startSupervised(opts: {
   tmpRoot: string;
@@ -78,6 +80,7 @@ export async function startSupervised(opts: {
   scenario?: Record<string, unknown>;
   group?: boolean;
   fixture?: string;
+  orchestrator?: string;
 }) {
   const { title } = opts;
   const root =
@@ -109,9 +112,12 @@ export async function startSupervised(opts: {
     "40",
     `FAKE_CLAUDE_SCENARIO='${scenarioFile}' '${bin}'`,
   ]);
-  const created = opts.group
-    ? await groupCard(title)
-    : await store.createLocalCard(SBX, title, "");
+  const created =
+    opts.orchestrator !== undefined
+      ? await store.createOrchestratorCard(SBX, title, opts.orchestrator)
+      : opts.group
+        ? await groupCard(title)
+        : await store.createLocalCard(SBX, title, "");
   await store.completeStart(created.id, undefined, {
     workspacePath: root,
     tmuxSession: name,
@@ -119,8 +125,22 @@ export async function startSupervised(opts: {
   });
   const sessionId = store.getCard(created.id)!.activeSessionId!;
   await store.setTranscriptPath(created.id, sessionId, transcript);
-  if (opts.fixture === undefined)
+  if (opts.orchestrator !== undefined) {
+    await store.setBoardOrchestrators(SBX, [
+      {
+        id: opts.orchestrator,
+        name: opts.orchestrator,
+        role: "main",
+        scope: { groupIds: [], ticketIds: [] },
+        policyOverride: {},
+        cardId: created.id,
+        state: "running",
+        createdAt: "2026-10-08T00:00:00.000Z",
+      },
+    ]);
+  } else if (opts.fixture === undefined) {
     await store.setLoopProgress(created.id, LOOP_PROGRESS);
+  }
   const pane = () => capturePane(`=${name}:`);
   const deadline = Date.now() + 10_000;
   while ((await pane()).trim() === "" && Date.now() < deadline)

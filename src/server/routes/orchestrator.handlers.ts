@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { isHiddenCard } from "../../shared/hidden-card.js";
 import type { Card } from "../../shared/types.js";
 import { ForbiddenError, NotFoundError } from "../services/domain/errors.js";
 import {
@@ -9,6 +10,7 @@ import {
 import {
   listBoardCards,
   listBoardSessions,
+  scopeTargetOf,
 } from "../services/orchestration/boards.js";
 import {
   cardWithMembers,
@@ -30,6 +32,10 @@ import {
   createOrchestratorGroup,
   startOrchestratorGroup,
 } from "../services/orchestration/orchestrator-groups.js";
+import {
+  readState,
+  writeState,
+} from "../services/orchestration/orchestrator-session.js";
 import {
   approveGroupPlan,
   requestHandoff,
@@ -58,6 +64,7 @@ import {
   shipBodySchema,
   updateTicketBodySchema,
   waitBodySchema,
+  writeStateBodySchema,
 } from "./orchestrator-schemas.js";
 import { parseOrThrow } from "./parse-input.js";
 
@@ -87,19 +94,26 @@ function assertInScope(
 }
 
 /**
- * Load a card by id and check it is on the caller's board.
+ * Load a card by id and check it is on the caller's board and, unless told not to, owned by it.
  *
- * @remarks The id goes on the call first, so a refused or unknown card still shows in the record.
+ * @remarks
+ * The id goes on the call first, so a refused or unknown card still shows in the record.
+ * The ship routes skip the owner check because the main ships the groups of every extra. An
+ * orchestrator session card is unknown to every tool, so no orchestrator steers another one.
  */
 function scopedCard(
   caller: OrchestratorIdentity,
   call: ToolCall,
   id: string,
+  ownerCheck = true,
 ): Card {
   call.cardId = id;
   const card = boardRepository.getCard(id);
-  if (!card) throw new NotFoundError("unknown-card");
-  assertInScope(caller, card);
+  if (!card || isHiddenCard(card)) throw new NotFoundError("unknown-card");
+  assertInScope(
+    caller,
+    ownerCheck ? scopeTargetOf(card) : { boardKey: card.boardKey },
+  );
   return card;
 }
 
@@ -167,7 +181,7 @@ export const listEventsHandler: ToolHandler = (req, res, caller, call) => {
 
 /** Answer the board policy with its running loop count and group costs. */
 export const getPolicyHandler: ToolHandler = (_req, res, caller, call) => {
-  const summary = policySummary(caller.boardKey);
+  const summary = policySummary(caller);
   call.result = `${summary.runningLoops} running`;
   res.status(200).json(summary);
 };
@@ -380,7 +394,11 @@ export const waitForEventHandler: ToolHandler = async (
 export const startShipHandler: ToolHandler = async (req, res, caller, call) => {
   const { cardId } = parseOrThrow(sessionCardParamsSchema, req.params);
   const input = parseOrThrow(shipBodySchema, req.body);
-  const flow = await startShip(caller, scopedCard(caller, call, cardId), input);
+  const flow = await startShip(
+    caller,
+    scopedCard(caller, call, cardId, false),
+    input,
+  );
   call.result = flow.state;
   res.status(202).json({ flow });
 };
@@ -388,8 +406,33 @@ export const startShipHandler: ToolHandler = async (req, res, caller, call) => {
 /** Answer the stored ship flow of a group card. */
 export const getShipStateHandler: ToolHandler = (req, res, caller, call) => {
   const { cardId } = parseOrThrow(sessionCardParamsSchema, req.params);
-  const flow = scopedCard(caller, call, cardId).shipFlow;
+  const flow = scopedCard(caller, call, cardId, false).shipFlow;
   if (!flow) throw new NotFoundError("no-ship-flow");
   call.result = flow.state;
   res.status(200).json({ flow });
+};
+
+/** Answer the saved state of the calling orchestrator. */
+export const readStateHandler: ToolHandler = (_req, res, caller, call) => {
+  const state = readState(caller);
+  call.result = `${Buffer.byteLength(state.markdown)} bytes`;
+  res.status(200).json(state);
+};
+
+/** Replace the saved state of the calling orchestrator. */
+export const writeStateHandler: ToolHandler = async (
+  req,
+  res,
+  caller,
+  call,
+) => {
+  const { markdown, handoffReady = false } = parseOrThrow(
+    writeStateBodySchema,
+    req.body,
+  );
+  const state = await writeState(caller, markdown, handoffReady);
+  call.result = `${Buffer.byteLength(markdown)} bytes`;
+  res
+    .status(200)
+    .json({ updatedAt: state.updatedAt, handoffReady: state.handoffReady });
 };

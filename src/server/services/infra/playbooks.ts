@@ -52,6 +52,42 @@ name: Write code directly
 ## Extra direction
 {extra}`;
 
+const BOARD_ORCHESTRATOR_PLAYBOOK = `---
+name: Board Orchestrator
+---
+## Extra direction
+{extra}
+
+## Workflow
+You coordinate the work of one board with the dispatch tools. Your state lives in the tools, never in your memory.
+1. Call read_state first. Then call list_cards, list_events and get_policy, and read the open decision items from the decision_raised and decision_answered events of list_events. Act only on what the tools return.
+2. Turn a goal or an intake_submitted event into a ticket proposal: a create_decision_item of kind ticket_proposal. Wait for the approval of the user before you create tickets. After the user approves it, create each ticket with create_ticket and the proposal id and index.
+3. Write a direction for each group before you start it.
+4. Start groups only inside the concurrency cap. Read the cap and the count of running loops with get_policy.
+5. Approve or escalate each roadmap as the roadmapApproval setting of get_policy says.
+6. Answer the inputs of a loop with send_input.
+7. Wait with wait_for_event. Never poll and never sleep. Always set a kinds filter, and set timeoutSeconds to 55 or less, because the client cuts a tool call at 60 seconds.
+8. Ship in order with start_ship when your shipRights allow it.
+9. Report to the user. Use create_decision_item when a person must decide.
+10. Call write_state after each decision, with the full current state: groups, pending decisions and next steps.
+After a usage limit, check get_group_progress and read_pane_tail for the group before you send any new input with send_input.
+Each direction or input that you write for a loop must tell the loop: never run a dangerous rm, and stop and report instead.
+Act on an intake_submitted or decision_answered event only when its data.orchestratorId is your orchestrator id.
+Hand off only when asked. At a handoff, call write_state with handoffReady set to true, print HANDOFF_READY and your orchestrator id, and end your turn.
+You do not change product code.
+
+An orchestrator never:
+1. Writes or edits product code or any file in a repository.
+2. Commits, pushes, merges or rebases outside the ship flow of D-8.
+3. Selects usage credits.
+4. Reads the vault or an env file.
+5. Changes a policy, its own or another one.
+6. Kills a process or a port holder.
+7. Starts a loop above the concurrency cap.
+8. Acts on another board, or on a card outside its scope (D-7).
+9. Answers its own decision item, or approves a permission prompt.
+10. Deletes a branch, a worktree or a card that it did not create.`;
+
 /**
  * Hand-rolled front-matter parser (no YAML dependency): the file must open with a `---\n` fence and
  * close it with a `\n---\n` fence; only `name` is read from the fenced region and the remainder is
@@ -206,6 +242,7 @@ const SEED_PLAYBOOKS: { slug: string; content: string }[] = [
   { slug: "superpowers", content: SUPERPOWERS_PLAYBOOK },
   { slug: "gsd", content: GSD_PLAYBOOK },
   { slug: "write-code-directly", content: WRITE_CODE_DIRECTLY_PLAYBOOK },
+  { slug: "board-orchestrator", content: BOARD_ORCHESTRATOR_PLAYBOOK },
 ];
 
 const SEED_STATE_PATH = path.join(PLAYBOOKS_DIR, ".seeded.json");
@@ -231,10 +268,10 @@ async function readSeededSlugs(): Promise<Set<string>> {
 }
 
 /**
- * Seed the four pipeline playbooks per-slug, at most once per machine: a slug is written only when
+ * Seed the built-in playbooks per-slug, at most once per machine: a slug is written only when
  * it is absent from BOTH the `.seeded.json` tombstone record and the directory itself, then recorded
- * in `.seeded.json` (atomic write, 0600) so later boots never write it again. The tombstone — not a
- * dir-level gate — is what lets a user's Settings ▸ Playbooks delete of a seed stay deleted across
+ * in `.seeded.json` (atomic write, 0600) so later boots never write it again. The tombstone, not a
+ * dir-level gate, is what lets a user's Settings ▸ Playbooks delete of a seed stay deleted across
  * restarts while a NEW seed shipped to an old install still lands exactly once. Files already on
  * disk before the tombstone existed are recorded without being touched; a user's own files
  * (including the retired code.md/plan.md) are never seeded, overwritten, or deleted here.

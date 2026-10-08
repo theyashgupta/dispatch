@@ -28,3 +28,26 @@ void test("a target with no board is treated as the default board", () => {
     reason: "other-board",
   });
 });
+
+void test("a target owned by another orchestrator is refused as other-owner", () => {
+  assert.deepEqual(checkScope(sbxToken, { boardKey: SBX, owner: "infra" }), {
+    ok: false,
+    reason: "other-owner",
+  });
+});
+
+void test("a target owned by the caller, or with no owner, is in scope", () => {
+  assert.deepEqual(checkScope(sbxToken, { boardKey: SBX, owner: "orc-1" }), {
+    ok: true,
+  });
+  assert.deepEqual(checkScope(sbxToken, { boardKey: SBX, owner: null }), {
+    ok: true,
+  });
+});
+
+void test("the board check runs before the owner check", () => {
+  assert.deepEqual(checkScope(sbxToken, { boardKey: OTH, owner: "orc-1" }), {
+    ok: false,
+    reason: "other-board",
+  });
+});

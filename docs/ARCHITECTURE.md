@@ -62,6 +62,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
   - [Loop Progress](#loop-progress)
   - [Session Supervisor](#session-supervisor)
   - [Orchestrator Control Surface](#orchestrator-control-surface)
+  - [Orchestrator Session](#orchestrator-session)
 
 ## System Overview
 
@@ -110,6 +111,7 @@ and roles only, it does not restate the layering policy.
 | Frontend entry      | `web/main.tsx`, `web/lib/app-store.ts`, `web/lib/query-client.ts`, `web/lib/http.ts`                                                                                                                                                                                                                                                            | The provider stack (QueryClientProvider, ThemeProvider, RouterProvider and the splash), the app store for cross-module UI state, the query client, and the HTTP client that returns 4xx and 5xx responses as typed data.                                                                                             |
 | Frontend routes     | `web/routes/__root.tsx`, `web/routes/board.{-$id}.lazy.tsx`, `web/modules/shell/containers/ShellContainer.tsx`                                                                                                                                                                                                                                  | Hash routes own the URL and its params. The router context gives the query client and the app store to every container. The root route renders the shell view with module views in its slots: the page, the detail panel and the card action dialogs.                                                                |
 | Frontend modules    | `web/modules/board/views/BoardView.tsx`, `web/modules/board/containers/BoardContainer.tsx`, `web/modules/detail/containers/DetailPanelContainer.tsx`, `web/modules/shell/components/AppSidebar.tsx`                                                                                                                                             | One folder per feature under `web/modules/`, with the layers views, containers, components, hooks, domain and queries. A module never imports a sibling module. [frontend-architecture.md](standards/frontend-architecture.md) has the layer rules.                                                                  |
+| Frontend dashboard  | `web/routes/dashboard.{-$id}.lazy.tsx`, `web/modules/dashboard/views/DashboardView.tsx`, `web/modules/dashboard/views/DashboardHeaderView.tsx`, `web/modules/dashboard/containers/use-dashboard-data.ts`                                                                                                                                        | The `/dashboard` page of the selected board. Each section container reads its inputs through `use-dashboard-data.ts` and shows its own loading, error and empty state. The shell page header shows the title and the stale badge.                                                                                    |
 | Frontend shared     | `web/components/ui/button.tsx`, `web/components/ui/hooks/use-app-store.ts`, `web/components/ThemeProvider.tsx`, `web/queries/board-snapshot-queries.ts`                                                                                                                                                                                         | The shadcn primitives and app-wide hooks, the shared components, the queries that two or more modules read (the board snapshot and its SSE stream), and the design tokens in `web/styles/tokens.css`.                                                                                                                |
 
 ## Cross-Module Invariants
@@ -176,8 +178,10 @@ A board groups cards under one key. The default board has the key `LOCAL`. The b
 puts each existing card, event and archive row on `LOCAL`.
 
 **Tables.** The `boards` table holds one row for each board: `key` (the primary key), `name`,
-`workspace_root`, `repositories`, `linear_team_keys`, `last_used_folder`, `policy`, `created_at` and
-`archived`. The `cards`, `events` and `archive` tables each have a `board_key` column with the
+`workspace_root`, `repositories`, `linear_team_keys`, `last_used_folder`, `policy`, `orchestrators`,
+`created_at` and `archived`. The `orchestrators` column is JSON text with the default `'[]'`; an
+`ALTER TABLE` adds it when it is absent, with no schema version change (see
+[Orchestrator Session](#orchestrator-session)). The `cards`, `events` and `archive` tables each have a `board_key` column with the
 default `LOCAL` and an index. The JSON blobs of cards and archive rows also hold `boardKey`. The
 `items` table has no board key. Items stay global and each snapshot holds all items, because an
 inbox item has no board until the user promotes it.
@@ -239,9 +243,12 @@ a `workspaceRoot` that equals the current one. `DELETE /api/workspace-folders?bo
 remove the last repository of a board other than `LOCAL`.
 
 **Counts route.** `GET /api/boards/counts` returns
-`{ counts: [{ key, running, openGroups, attention }], at }` for each board, archived boards
+`{ counts: [{ key, running, openGroups, attention, loops }], at }` for each board, archived boards
 included. `running` counts the cards that show the Live session chip. `openGroups` counts the group
-cards that are not in Done. `attention` counts the cards in Needs input.
+cards that are not in Done. `attention` is the length of the attention queue of the board, built by
+`buildAttentionQueue` in `src/shared/attention-queue.ts` from the cards and the open decisions of
+that board. `loops` lists `{ groupId, percent }` for each group card of the board whose loop
+progress is `running`, sorted by `groupId`.
 
 **List routes.** `GET /api/cards?board=&column=&source=&hasSession=` returns `{ cards, total }`
 with the snapshot redaction. `GET /api/sessions?board=&live=` returns `{ sessions }`, and each
@@ -4298,6 +4305,14 @@ is a behavior change, not a refactor.
    `transcriptPath` (LOCAL-89, see [Session Supervisor](#session-supervisor)); `redactCard`
    copies them from the active session onto the wire card. A group card stores `dependsOn` and
    `startQueued`.
+   `Board.orchestrators` (an `OrchestratorRecord[]`, LOCAL-91, see
+   [Orchestrator Session](#orchestrator-session)) holds `id`, `name`, `role` (`main` or `extra`),
+   `scope` (`groupIds` and `ticketIds`), `policyOverride`, `cardId`, `state` (`stopped`, `starting`,
+   `running` or `stopping`), `createdAt` and the state fields `stateMarkdown`, `stateUpdatedAt` and
+   `handoffReady`. A group card that an orchestrator creates stores `ownerOrchestrator` as provenance only (the
+   scopes decide the owner), and the hidden card of an orchestrator session has `source: "orchestrator"`
+   and the id of its orchestrator in `ownerOrchestrator`.
+   A `DecisionItem` of kind `ticket_proposal` stores `proposal` (`tickets` and `usedIndexes`).
 2. **SSE frame format.** `data: ${JSON.stringify(BoardSnapshot)}\n\n`; named heartbeat
    `event: ping\ndata: 1\n\n`; headers incl. `X-Accel-Buffering: no`; **server `KEEPALIVE_MS` (15s)
    must stay in lockstep with client `HEARTBEAT_MS`** (watchdog trips at 3×). No compression on
@@ -4341,6 +4356,25 @@ real membership directly, independent of windowing` below for the full envelope 
    `201` for `POST /tickets`, `POST /tickets/:id/comments`, `POST /base-branches`,
    `POST /groups` and `POST /decisions`; `202` for `POST /groups/:id/start`,
    `POST /sessions/:cardId/handoff` and `POST /groups/:cardId/ship`.
+   `GET /state` and `PUT /state` (`read_state` and `write_state`) answer `200`; `PUT /state` answers
+   `400` `state-too-large` for a markdown text of more than 65536 bytes, and both answer `404`
+   `unknown-orchestrator` for a token with no record. `POST /tickets` takes `{ proposalItemId, index }`
+   only and answers `201`; the refusals are in the Tool reference.
+   The user routes of the orchestrator record (LOCAL-91) sit under `/api/boards/:key/`:
+   `GET /orchestrators` answers `200` with `{ orchestrators }`, and each entry holds its `session`
+   view and no `stateMarkdown`; `POST /orchestrators` answers `201` with `{ orchestrator }`;
+   `PATCH /orchestrators/:id` answers `200`; `DELETE /orchestrators/:id` answers `204`;
+   `POST /orchestrators/:id/start`, `/stop` and `/resume` answer `202` with the transitional record;
+   `POST /intake` answers `202` with `{ eventId }`. A refusal is `400` (a body outside the strict
+   schema, `wider-override`, `extra-needs-scope`, `ticket-owned`), `404` `unknown-orchestrator` or
+   `unknown-board`, or `409` (`main-exists`, `duplicate-id`, `group-owned`, `orchestrator-running`,
+   `orchestrator-not-running`, `orchestrator-not-resumable`, `orchestrator-session-live`,
+   `no-main-orchestrator`); a start or resume with `supervisor: off` is refused as a policy refusal, and
+   an unexpected start or resume failure answers `500` `orchestrator-start-failed` or
+   `orchestrator-resume-failed`.
+   `POST /api/sessions/:cardId/input` and `POST /api/sessions/:cardId/resume-loop` answer `200` with
+   `{ result }` (`confirmed` or `unconfirmed`), `400` `invalid-text`, `404` `unknown-card`, or `409`
+   (`session-state-refused`, `no-live-session`, `session-busy`, `not-resumable`).
    `GET /api/decisions` answers `200` with `{ items }`, and the optional `?state=` is `open` or
    `answered`. `POST /api/decisions/:id/answer` takes `{ optionId, note? }` and answers `200` with
    `{ item }`, `400` for an unknown option or a bad body, `404` for an unknown item and `409`
@@ -5225,11 +5259,13 @@ so there is one live token for each orchestrator. Only the user routes
 resolves, so its refused call is recorded on its board.
 
 **Board scope.** Each call acts on the board of its token. `checkScope` in
-`services/domain/orchestrator-scope.ts` refuses a card of another board with 403 `other-board`.
+`services/domain/orchestrator-scope.ts` refuses a card of another board with 403 `other-board`, and a card that another orchestrator owns with
+403 `other-owner` (see [Orchestrator Session](#orchestrator-session)).
 `refuseOrchestratorTokenOnUserRoute` is mounted first on the API router and answers 403
 `orchestrator-token-on-user-route` for an orchestrator token on any state changing user route,
 the token mint route included. The `/sessions` terminal proxy lies outside `/api` and is not
-covered; the tool allowlist of Unit 4 closes that path.
+covered; the launch limits of the [Orchestrator Session](#orchestrator-session) close that path,
+because the session has no `Bash` tool.
 
 **Policy.** `services/domain/orchestrator-policy.ts` holds the pure checks: `checkCap` (running
 loops against `concurrencyCap`), `checkBudget` (group cost against `budgetPerGroup`) and
@@ -5268,6 +5304,25 @@ then listens to the store `orchestration` event until a match or the time limit,
 540 seconds. A `tool_call` row never ends a wait unless `kinds` names it, because every call,
 the wait call included, writes one. An aborted request ends the wait and leaves no listener.
 
+**Dashboard reads.** Two user routes serve the dashboard. Both take a board key and answer 400
+`invalid-board` for a bad key and 404 `unknown-board` for a key with no board or an archived
+board. `GET /api/boards/:key/orchestration` returns
+`{ concurrencyCap, runningLoops, groups }`. A group is
+`{ cardId, groupId, cost, budget, budgetSource, ownerName }` for each group card outside Done that
+has loop progress or a session. `groupId` is the identifier of the card. `cost` is `groupCost`.
+`budget` is `budgetPerGroup` of the board policy narrowed by the override of the owner orchestrator of the group (the rule of the supervisor budget stop), or null. A
+lower override sets `budgetSource` to `override` and `ownerName` to the name of the owner; a higher
+override is ignored, and then `budgetSource` is `board` and `ownerName` is null. `GET /api/boards/:key/orchestration/events?since=&limit=` returns `{ events }`.
+`limit` is 1 to 1000 and defaults to 200. Without `since`, the answer is the newest `limit` events,
+newest first. With `since`, the answer is the events after that id, oldest first. A bad `limit`
+answers 400 `invalid-limit` and a bad `since` answers 400 `invalid-since`.
+
+**Orchestration frame.** On every store `orchestration` event, `routes/sse.route.ts` writes
+`event: orchestration` with the data `{"boardKey":"<key>","lastEventId":<id>}`. Only the clients
+whose window board equals the event board get the frame. The frame holds no event data. The browser
+reacts with an invalidation of the query prefix `["orchestration", boardKey]` and then reads the
+routes above.
+
 **Ship flow.** `ship-flow.ts` runs the D-8 steps for the branches of a finished group in stack
 order. The branch states are `queued`, `merging_main`, `checking`, `pushing`, `waiting_checks`,
 `waiting_merge` (with `open_prs`) or `merging` (with `merge`), `verifying`, `merged` and `failed`.
@@ -5295,7 +5350,7 @@ the new `origin/main` tip with the `git config` identity that the flow read at i
 runs on a board at a time. A flow in the state `running` is started again at boot by
 `resumeShipFlows`, and a stopped flow is replaced by a new `start_ship` call.
 
-**MCP server.** `dispatch mcp` serves the 23 tools over stdio. `bootstrap/cli.ts` reads and checks
+**MCP server.** `dispatch mcp` serves the 25 tools over stdio. `bootstrap/cli.ts` reads and checks
 `DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and
 `bootstrap/mcp-tools.ts` holds the zod input and the description of each tool. The dependency
 cruiser rule `mcp-server-isolated` refuses an import of `routes`, `services`, `store`, `adapters`
@@ -5303,3 +5358,161 @@ or `sources` in both files, so they never import the app they call. The server u
 timeout, because `wait_for_event` can hold a response for 540 seconds before any header, and a
 cancelled tool call aborts its request. `src/server/test-support/orchestrator-client.ts` is a
 scripted client that starts this server and replays a manual run on a sandbox.
+
+### Orchestrator Session
+
+LOCAL-91 gives a board an orchestrator record and runs its Claude session (decision records D-3,
+D-7 and D-9). The route and tool reference is `docs/standards/orchestration-design.md`; this section
+holds the parts that span files.
+
+**Record.** `Board.orchestrators` is an array of `OrchestratorRecord` in the JSON column
+`orchestrators` of the `boards` table (default `'[]'`, added at open, no schema version change).
+A board has at most one `main` record and any number of `extra` records. The main has an empty scope
+and no override and owns every group and ticket that no extra holds. An extra needs a main and a scope
+with at least one group or ticket. `services/domain/orchestrator-rules.ts` (pure) holds the checks and
+`checkRecords` runs them on every add, edit and remove:
+
+- Ids are distinct, and an id matches `[a-z][a-z0-9-]{1,20}`.
+- A group or ticket is in the scope of one extra only. A user scope edit that takes a group another
+  extra holds is refused with 409 `group-owned` and the owner, and one that takes a ticket with 400
+  `ticket-owned`. An orchestrator claim of a group that another holds (for example `start_group`) is
+  refused earlier by the owner scope check with 403 `other-owner`.
+- An override can only narrow. It has five fields (`roadmapApproval`, `concurrencyCap`, `usageLimit`,
+  `shipRights`, `budgetPerGroup`), and a value wider than the board policy is refused with 400
+  `wider-override` and the field. A `PATCH` checks the narrowing only when it sends `policyOverride`, so
+  a stored override that a later board policy change made wider does not block a name or scope edit.
+  `effectivePolicy` takes the narrower value of each field at read time, so a board policy that narrows
+  later still wins. `callerPolicy` and `policySummary` use it, so every
+  cap, budget, approval and ship check of an orchestrator call reads the effective policy, and
+  `get_policy` returns it.
+- Only the user changes a scope or an override, through the user routes. An orchestrator token is refused
+  on them. A record can be removed only when it is `stopped`, and not while the tmux session of its
+  hidden card is open (see Lifecycle).
+
+`groupOwner` gives the owner of a group: the extra that lists it, else the main. The scopes are the one
+ownership source, and `Card.ownerOrchestrator` is provenance only, so a group the user moves to the main
+follows the move. A group or ticket that an extra creates (`create_group`, `create_ticket`) joins that
+extra's scope through `appendToExtraScope`, a queued append that runs no scope or override check, so the
+card write never fails on a stale scope. `create_group` refuses a member outside the scope of the caller
+with 403 `other-owner`, and any hidden orchestrator card as an ineligible member (409). A member follows
+its group, and a loose ticket follows `scope.ticketIds`, else the main. `scopeTargetOf` in `boards.ts` passes that owner to `checkScope`,
+so a call on a card of another orchestrator answers 403 `other-owner`. A board with no records has no
+owner, and only the board is checked. The ship routes skip the owner check and `mayShip` lets only the
+main start a ship flow (403 `main-only`). The concurrency cap counts the running loops of the whole
+board, whoever owns them. A `ticket_proposal` or other decision item about a card goes to the owner of
+that card.
+
+**Session.** The orchestrator runs as a hidden card, so the start saga, the terminal, the hooks and the
+supervisor are the machinery of a card session with no copy. `createOrchestratorCard` mints it on the
+first start (title `Orchestrator: <name>`, column To Do, `source: "orchestrator"`,
+`ownerOrchestrator: <id>`) and the record keeps its id in `cardId`. It has no repository, so the saga
+creates no worktree and the session root is a folder with no checkout. `isHiddenCard`
+(`shared/hidden-card.ts`) is the one test. `listCards`, `snapshot` and `searchCards` leave the hidden
+card out, so no board column, count or search shows it. `listAllCards` keeps it for
+`activeSessionCount`, so a board with a running orchestrator still refuses to archive (the hidden card of a
+`stopped` orchestrator does not count, because stop leaves its shell open), and
+`sessionsWithTmux` still returns it, so the pane watcher and the supervisor watch it. Its kickoff is the
+playbook body with the extra direction and nothing else (no ticket framing, workspace notes, vault
+notes or status protocol), and an orchestrator start does not change the remembered picker playbook.
+
+**Lifecycle.** `orchestrator-session.ts` holds the lifecycle, and `routes/orchestrators.route.ts` the user
+routes. `start`, `stop` and `resume` answer 202 with the transitional record (`starting` or `stopping`)
+and finish in the background; the record then holds `running` or `stopped`. A per record lock in
+server memory answers a second call with 409 `orchestrator-running`. Start and resume are refused when
+the board has `supervisor: off`. Start writes the MCP config file, creates the hidden card on the first
+start and runs the start saga with the playbook `Board Orchestrator`. When the tmux session of the
+hidden card is still open, start answers 409 `orchestrator-session-live` and resume relaunches claude in
+that session through `runClaude`, with `--resume` of the recorded conversation, and otherwise runs the
+start saga again. Resume accepts a `stopped` record and a `running` record whose session is `lost` or at
+`shell_prompt`; any other record answers 409 `orchestrator-not-resumable`. The config check runs before
+the first record write. A launch that throws leaves the record `stopped`, and a launch that settles
+`stopped` (a throw or a start error) revokes its token. A resume whose in place relaunch answers `busy`
+(another launch of the session is in flight, or claude already holds the pane) yields: the record goes
+back to the state it had and keeps its token. A failed MCP config write sets the start error of the
+hidden card, links the card to the record, leaves the record `stopped` and answers 500
+`orchestrator-start-failed` as JSON. The playbook is a built-in
+seed (`board-orchestrator` in `playbooks.ts`) that holds the duties, the ten rules of D-9 and the two
+rules of F13 and F18. It tells the session to act on an `intake_submitted` or `decision_answered` event
+only when `data.orchestratorId` names its own id, so an extra ignores the intake of the main.
+
+**Remove and boot.** Remove revokes the token. It is refused with 409 `orchestrator-running` unless the
+record is `stopped`, and with 409 `orchestrator-session-live` while the tmux session of the hidden card is
+open. At boot `settleTransientRecords` moves each `starting` or `stopping` record to `running` while its
+hidden tmux session is open (the supervisor then classifies the session), else to `stopped` with its
+token revoked. The session is probed by `card.tmuxSession`, else by the name the start saga gives it
+(`dsp-<branch or identifier>`), because a first start writes `tmuxSession` only once claude is ready. The supervisor applies the effective policy of the owner (`ownerPolicy`) to each loop:
+the budget per group, the cap on running loops and the usage limit.
+
+**Launch limits.** When the card is hidden, `buildLaunch` in `steps.ts` adds the arguments of
+`orchestratorLaunchArgs` in `services/domain/orchestrator-launch.ts`:
+`--model <orchestratorModel of the policy>`, `--mcp-config <file>`, `--strict-mcp-config`,
+`--tools Read Glob Grep`, `--allowedTools mcp__dispatch` (the board tools run without a permission
+dialog), `--permission-mode manual` (a user `defaultMode` cannot widen it) and
+`--disallowedTools Bash Write Edit NotebookEdit`. The `--tools` list is an allowlist of the built-in
+tools, so a code running tool such as `Monitor` is out, which a deny list alone misses. The configured Settings arguments lose every `--model`,
+`--permission-mode`, `--mcp-config`, tool list and bypass flag first, so the policy values win and no
+bypass flag can reach the session. The orchestrator has the MCP tools and the read-only file tools; it
+cannot run a shell or write a file, so it cannot reach a user route. The MCP config file
+(`<data dir>/orchestrators/<board>-<id>.mcp.json`, directory `0700`, file `0600`) names the `dispatch mcp`
+command and holds no token. The token (`DISPATCH_ORCHESTRATOR_TOKEN`) and `DISPATCH_PORT` go into the
+environment of the new tmux session, through `-e`, and nowhere else: not the argv, the config file or
+the pane. Each mint revokes the earlier token of the orchestrator. A resume in a live shell cannot use
+`tmux set-environment`, which does not reach a running shell, so `primeOrchestratorShell` writes a `0600`
+file that the shell sources and that is removed once the prompt is back. The typed line names the
+file, never the token.
+
+**Stop.** `stop` presses `Escape` once, types `/exit` through the confirmed send, waits up to 30 s for
+the shell prompt, revokes the token and sets the record `stopped`. Nothing is killed, and the tmux
+session stays, so a later resume relaunches claude in it. The session is then at `shell_prompt`. When
+the prompt does not return while the tmux session is open, claude may still run, so the record returns
+to `running` with its token and the user can stop again.
+
+**State tools.** `read_state` (`GET /api/orchestrator/state`) and `write_state` (`PUT
+/api/orchestrator/state`) keep the state of an orchestrator on its record, because it has no file
+write tool. `write_state` replaces `stateMarkdown` (64 KiB at most, in UTF-8; a larger text is
+refused with 400 `state-too-large` and the stored state stays), sets `stateUpdatedAt`, and sets
+`handoffReady` to the given value, `false` when absent. The user route list leaves `stateMarkdown` out.
+
+**Handoff.** For a hidden card the supervisor reads the record instead of a loop engine file.
+`handoffReady: true` is the second source of the `handoff_ready` state, and `orchestratorHandoffRequestText`
+asks for `write_state` with the flag and the line `HANDOFF_READY <id>` at `handoffPercent` and at
+`handoffHardPercent`. At `handoff_ready` the fresh session path (`runFreshSession`) types `/clear` and
+the resume prompt, which tells the orchestrator to call `read_state` before any action. A confirmed
+prompt clears `handoffReady`. An orchestrator has no loop engine, so it gets no restart prompt, and
+a lost session or a shell prompt resumes only while the record is `running`.
+
+**Intake gate.** `POST /api/boards/:key/intake` takes `{ goal, requirements? }` (`goal` up to 2000
+characters, `requirements` up to 64 KiB) and appends one `intake_submitted` event for the main
+orchestrator (`intake.ts`). It creates no ticket, and 409 `no-main-orchestrator` answers a board with
+no main. The orchestrator turns the event into a `create_decision_item` of kind `ticket_proposal`
+(1 to 20 tickets; the server sets the options `approve` and `reject`). Only the user answers it. Then
+`create_ticket` takes `{ proposalItemId, index }` and creates the ticket from that entry. It refuses an
+item that is not a proposal, an item of another orchestrator, an open or rejected proposal and an
+index that is out of range or used. The index is marked used in one guarded write before the create, so
+two racing calls make one ticket, and a failed create frees the index. No tool creates a ticket from free
+text.
+
+**User session routes.** `routes/session-input.route.ts` holds `POST /api/sessions/:cardId/input` and
+`POST /api/sessions/:cardId/resume-loop` for the panel. They use the same send and state checks as
+`send_input` and `resume_loop`, but a user may reply to a loop that stopped on `budget` or `usage_stop`,
+and `resume-loop` runs no cap or budget check. They are state changing user routes, so
+`refuseOrchestratorTokenOnUserRoute` refuses an orchestrator token on them.
+
+**Panel.** The `orchestrator` web module (`web/modules/orchestrator/`) adds the panel to Screen 3. The route
+`/board/{-$id}` takes the search value `panel=orchestrator`, and `SidePanelLayout` shows the panel
+beside the board as a resizable pane, or as a sheet on a narrow screen. The entry button is in the
+page header (Screen 5): "Add orchestrator" on a board with no record and "Orchestrator" with one, and
+it reads only the `Board` that the board list holds. The panel has four tabs:
+
+- Terminal: the ttyd frame of the hidden card of the main (`/sessions/<session id>/terminal/`), and the
+  header with the state badge and one control. The control is Start, Stop, or Resume (only at `lost` and
+  `shell_prompt`), and it calls the lifecycle routes. Every control is off while the board stream is down.
+- `Decisions (n)`: open decision items with their options, and the loops at `needs_input` or
+  `permission_prompt`. A reply goes through the user session routes, and an answer through
+  `POST /api/decisions/:id/answer`. The "Other answer" field shows on no `roadmap_approval` or
+  `ticket_proposal` item (a gate: approve or reject only); on other kinds it sends the typed text as
+  `note` with the recommended option id, else the first option id.
+- Policy: the board policy form, saved through `PUT /api/boards/:key/policy`. The model lists are in
+  `shared/orchestrator-models.ts`, and the route refuses any other model with 400.
+- `Orchestrators (n)`: the main and the extras, with the form to add an extra, edit its override and move
+  groups.

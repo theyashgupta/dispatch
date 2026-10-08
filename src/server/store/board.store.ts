@@ -26,6 +26,7 @@ import type {
   ArchiveBoardResult,
   Board,
   BoardPolicy,
+  OrchestratorRecord,
   BoardKey,
   BoardPatch,
   BoardScope,
@@ -82,6 +83,7 @@ import {
 } from "../../shared/column-transitions.js";
 import { NEEDS_INPUT_MARKER_PREFIX } from "../../shared/marker-key.js";
 import { isDemoteEligible } from "../../shared/demote-eligibility.js";
+import { isHiddenCard } from "../../shared/hidden-card.js";
 import { DEFAULT_ARCHIVE_RETENTION_DAYS } from "../../shared/types.js";
 import { LINEAR_PUSH_FAILED_PREFIX } from "../../shared/linear-state-map.js";
 import {
@@ -1259,7 +1261,7 @@ class BoardStore extends EventEmitter {
     const { folders, lastUsed } = this.getWorkspaceFolders(board);
     const snap = {
       ...all,
-      cards: all.cards.filter((c) => boardOf(c) === board),
+      cards: all.cards.filter((c) => boardOf(c) === board && !isHiddenCard(c)),
       workspaceFolders: folders,
       lastUsed,
     };
@@ -1512,6 +1514,7 @@ class BoardStore extends EventEmitter {
       (c) =>
         boardOf(c) === board &&
         c.groupId == null &&
+        !isHiddenCard(c) &&
         (c.identifier.toLowerCase().includes(q) ||
           c.title.toLowerCase().includes(q)),
     );
@@ -1600,6 +1603,14 @@ class BoardStore extends EventEmitter {
     return this.db.listOrchestrationEvents(board, sinceId, limit);
   }
 
+  /** The newest `limit` orchestration events of one board, newest first. */
+  listLatestOrchestrationEvents(
+    board: BoardKey,
+    limit: number,
+  ): OrchestrationEvent[] {
+    return this.db.listLatestOrchestrationEvents(board, limit);
+  }
+
   /** Store a token hash as the only live token of one orchestrator, revoking any earlier one. */
   replaceOrchestratorToken(
     tokenHash: string,
@@ -1657,6 +1668,16 @@ class BoardStore extends EventEmitter {
   /** Mark one answered decision item used; false when it is unknown, open or already used. */
   consumeDecisionItem(id: string): boolean {
     return this.db.consumeDecisionItem(id, new Date().toISOString());
+  }
+
+  /** Mark one index of an answered proposal used in one guarded write; false when it is already used or the item has no proposal. */
+  useProposalIndex(id: string, index: number): boolean {
+    return this.db.useProposalIndex(id, index);
+  }
+
+  /** Free a used proposal index again, after the ticket create failed. */
+  releaseProposalIndex(id: string, index: number): void {
+    this.db.releaseProposalIndex(id, index);
   }
 
   /**
@@ -3110,6 +3131,7 @@ class BoardStore extends EventEmitter {
       const consumed = MARKER_CONSUMED_SOURCES.includes(from);
       if (!consumed) {
         c.column = column;
+        if (from !== column) c.columnSince = new Date().toISOString();
         this.mirrorMemberColumn(c, column);
         c.statusReason = statusReason;
       }
@@ -3232,6 +3254,7 @@ class BoardStore extends EventEmitter {
       moved = true;
       const target = "in_progress";
       c.column = target;
+      c.columnSince = new Date().toISOString();
       this.mirrorMemberColumn(c, target);
       c.statusReason = undefined;
       if (FLIP_BACK_CLEARS_LAST_MARKER.includes(from)) {
@@ -3266,12 +3289,19 @@ class BoardStore extends EventEmitter {
   }
 
   /**
-   * Synchronous read of every card, unwindowed and unredacted.
+   * Synchronous read of every card a board shows, unwindowed and unredacted.
    *
-   * @remarks Returns live Map entries like getCard; callers must not mutate them and must redact
-   * before anything leaves the process.
+   * @remarks
+   * Returns live Map entries like getCard; callers must not mutate them and must redact
+   * before anything leaves the process. An orchestrator session card is left out; `listAllCards`
+   * holds it.
    */
   listCards(scope: BoardScope): Card[] {
+    return this.listAllCards(scope).filter((c) => !isHiddenCard(c));
+  }
+
+  /** Synchronous read of every card including the hidden orchestrator session cards. */
+  listAllCards(scope: BoardScope): Card[] {
     return [...this.cards.values()].filter((c) => inScope(c, scope));
   }
 
@@ -3455,6 +3485,7 @@ class BoardStore extends EventEmitter {
         .filter((card): card is Card => card != null)
         .map((card) => ({ card, fromCol: card.column }));
       c.column = column;
+      if (from !== column) c.columnSince = new Date().toISOString();
       this.mirrorMemberColumn(c, column);
       changes = moved
         .filter(({ card, fromCol }) => card.column !== fromCol)
@@ -4302,6 +4333,7 @@ class BoardStore extends EventEmitter {
         linearTeamKeys: [...input.linearTeamKeys],
         lastUsedFolder: null,
         policy: defaultBoardPolicy(input.key),
+        orchestrators: [],
         createdAt: new Date().toISOString(),
         archived: false,
       };
@@ -4384,6 +4416,22 @@ class BoardStore extends EventEmitter {
     }).then(() => updated);
   }
 
+  /** Replace the orchestrator records of one board; resolves undefined for an unknown board. */
+  setBoardOrchestrators(
+    key: BoardKey,
+    orchestrators: OrchestratorRecord[],
+  ): Promise<Board | undefined> {
+    let updated: Board | undefined;
+    return this.enqueue(() => {
+      const board = this.boards.get(key);
+      if (board) {
+        board.orchestrators = orchestrators.map((o) => structuredClone(o));
+        updated = board;
+      }
+      return [];
+    }).then(() => updated);
+  }
+
   /** Set the start hold of a group card and, when given, the groups it waits on. */
   setGroupQueue(
     id: string,
@@ -4401,13 +4449,19 @@ class BoardStore extends EventEmitter {
   /** Store the orchestrator that created a card and the launch values of a held group start. */
   setOrchestratorFields(
     id: string,
-    fields: Pick<Card, "createdByOrchestrator" | "launch">,
+    fields: Pick<
+      Card,
+      "createdByOrchestrator" | "ownerOrchestrator" | "launch"
+    >,
   ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (!card) return [];
       if (fields.createdByOrchestrator !== undefined) {
         card.createdByOrchestrator = fields.createdByOrchestrator;
+      }
+      if (fields.ownerOrchestrator !== undefined) {
+        card.ownerOrchestrator = fields.ownerOrchestrator;
       }
       if (fields.launch !== undefined) card.launch = { ...fields.launch };
       return [];
@@ -4520,6 +4574,51 @@ class BoardStore extends EventEmitter {
           cardId: created.id,
           toCol: "todo",
           source: "local",
+        }),
+      ];
+    }).then(() => {
+      if (!created) throw new BoardUnavailableError(board);
+      return created;
+    });
+  }
+
+  /**
+   * Mint the hidden session card of one orchestrator, in To Do and owned by that orchestrator.
+   *
+   * @remarks
+   * The card has no workspace repository, so the start saga creates no worktree for it, and
+   * every board read leaves it out (`isHiddenCard`).
+   */
+  createOrchestratorCard(
+    board: BoardKey,
+    title: string,
+    orchestratorId: string,
+  ): Promise<Card> {
+    let created: Card | undefined;
+    return this.enqueue(() => {
+      if (!this.isOpenBoard(board)) return [];
+      const identifier = this.nextIdentifier(board);
+      const now = new Date().toISOString();
+      created = {
+        id: identifier,
+        issueId: identifier,
+        identifier,
+        title,
+        description: "",
+        priority: 0,
+        column: "todo",
+        updatedAt: now,
+        promotedAt: now,
+        source: "orchestrator",
+        boardKey: board,
+        ownerOrchestrator: orchestratorId,
+      };
+      this.cards.set(created.id, created);
+      return [
+        this.event("local_created", {
+          cardId: created.id,
+          toCol: "todo",
+          source: "orchestrator",
         }),
       ];
     }).then(() => {
