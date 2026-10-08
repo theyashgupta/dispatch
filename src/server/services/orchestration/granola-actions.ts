@@ -1,11 +1,6 @@
 import type { SourceCursor } from "../../../shared/types.js";
 import type { ActionDraft } from "./meeting-actions.js";
 
-export type GranolaCheck =
-  | { state: "connected"; server: string }
-  | { state: "needs-auth" | "failed"; server: string }
-  | { state: "not-found" };
-
 export interface MeetingGroup {
   meeting: string;
   meetingDate: string;
@@ -18,34 +13,6 @@ const HOUR_MS = 60 * 60 * 1000;
 export const RUN_INTERVAL_MS = HOUR_MS;
 const CURSOR_OVERLAP_MS = 30 * 60 * 1000;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-
-/**
- * Find the Granola server in `claude mcp list` output and read its connection state.
- *
- * @remarks Only the name before the first ": " is matched, so a command line that mentions
- * Granola in its arguments never counts as the connector.
- */
-export function parseMcpList(stdout: string): GranolaCheck {
-  for (const line of stdout.split("\n")) {
-    const sep = line.indexOf(": ");
-    if (sep < 0) continue;
-    const server = line.slice(0, sep).trim();
-    if (!/granola/i.test(server)) continue;
-    if (/✔\s*Connected/.test(line)) return { state: "connected", server };
-    if (line.includes("Needs authentication")) {
-      return { state: "needs-auth", server };
-    }
-    return { state: "failed", server };
-  }
-  return { state: "not-found" };
-}
-
-/**
- * The `--allowedTools` entry that allows every tool of one MCP server.
- */
-export function granolaToolName(server: string): string {
-  return `mcp__${server.replace(/[^A-Za-z0-9_-]/g, "_")}`;
-}
 
 /**
  * Build the Granola round prompt for meetings between `since` and `until`.
@@ -90,13 +57,17 @@ export function roundSince(
 }
 
 /**
- * Milliseconds until the next hourly round is due, 0 when it is due now.
+ * Milliseconds until the next round is due, 0 when it is due now; the interval defaults to one hour.
  */
-export function nextRunDelay(polledAt: string | undefined, now: Date): number {
+export function nextRunDelay(
+  polledAt: string | undefined,
+  now: Date,
+  intervalMs = RUN_INTERVAL_MS,
+): number {
   if (polledAt === undefined) return 0;
   const last = Date.parse(polledAt);
   if (Number.isNaN(last)) return 0;
-  return Math.max(0, last + RUN_INTERVAL_MS - now.getTime());
+  return Math.max(0, last + intervalMs - now.getTime());
 }
 
 /**

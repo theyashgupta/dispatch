@@ -14,8 +14,15 @@ import {
   SourceRateLimited,
 } from "../../adapters/source-gateway.js";
 import { boardRepository as store } from "../../store/board-repository.js";
-import { getOrchestrationConfig } from "../infra/config-holder.js";
+import { slackMode } from "../infra/config-holder.js";
 import { resolveSlackToken } from "../infra/slack-token.js";
+import {
+  cachedSlackChannelName,
+  listSlackChannelsMcp,
+  readSlackThreadMcp,
+  slackConnector,
+  slackEnabled,
+} from "./slack-round.js";
 
 const NAME_FALLBACK_CODES = new Set([
   "missing_scope",
@@ -38,7 +45,7 @@ const AUTH_CODES = new Set([
 type SlackCodeKind = "rejected" | "missing-scope" | "unreachable";
 
 export type SlackRefusal =
-  | { error: "disabled" | "no-credential" | "not-a-channel" }
+  | { error: "disabled" | "no-credential" | "not-a-channel" | "not-connected" }
   | { error: SlackCodeKind; code: string };
 
 /**
@@ -78,17 +85,37 @@ function classifySlackCode(code: string): SlackRefusal {
 async function setupToken(): Promise<
   string | { error: "disabled" | "no-credential" }
 > {
-  if (getOrchestrationConfig()?.sources?.slack?.enabled !== true) {
+  if (!slackEnabled()) {
     return { error: "disabled" };
   }
   const credential = await resolveSlackToken();
   return credential ? credential.token : { error: "no-credential" };
 }
 
-/** List the channels the Slack user can pick, or the reason Dispatch did not ask Slack. */
+/**
+ * Whether a connector call may run: Slack is on and the connector is connected.
+ */
+async function connectorGate(): Promise<{
+  error: "disabled" | "not-connected";
+} | null> {
+  if (!slackEnabled()) {
+    return { error: "disabled" };
+  }
+  const read = await slackConnector();
+  return read.state === "connected" ? null : { error: "not-connected" };
+}
+
+/**
+ * List the channels the Slack user can pick, or the reason Dispatch did not ask Slack.
+ *
+ * @remarks In `mcp` mode the list comes from one cached connector call, and a failed call throws.
+ */
 export async function slackChannelOptions(): Promise<
   { channels: SlackChannelOption[]; truncated: boolean } | SlackRefusal
 > {
+  if ((await slackMode()) === "mcp") {
+    return (await connectorGate()) ?? (await listSlackChannelsMcp());
+  }
   const auth = await setupToken();
   if (typeof auth !== "string") return auth;
   const list = await listSlackChannels(auth);
@@ -108,6 +135,12 @@ export async function resolveSlackChannel(
 ): Promise<(SlackChannel & { providerError?: string }) | SlackRefusal> {
   const id = parseSlackChannelRef(input);
   if (!id) return { error: "not-a-channel" };
+  if ((await slackMode()) === "mcp") {
+    if (!slackEnabled()) {
+      return { error: "disabled" };
+    }
+    return { id, name: cachedSlackChannelName(id) ?? id };
+  }
   const auth = await setupToken();
   if (typeof auth !== "string") return auth;
   const info = await slackChannelInfo(auth, id);
@@ -123,6 +156,7 @@ export type SlackThreadRefusal =
   | {
       error:
         | "not-found"
+        | "not-connected"
         | "disabled"
         | "no-credential"
         | "rate-limited"
@@ -149,6 +183,16 @@ export async function slackThread(
   const threadTs = item?.meta.threadTs;
   if (!item || item.source !== "slack" || !channel || !threadTs) {
     return { error: "not-found" };
+  }
+  if ((await slackMode()) === "mcp") {
+    const refusal = await connectorGate();
+    if (refusal !== null) return refusal;
+    const key = `mcp:${channel}:${threadTs}`;
+    const cached = threadCache.get(key);
+    if (cached) return cached;
+    const thread = await readSlackThreadMcp(channel, threadTs);
+    threadCache.set(key, thread);
+    return thread;
   }
   const auth = await setupToken();
   if (typeof auth !== "string") return auth;

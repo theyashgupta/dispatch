@@ -308,7 +308,15 @@ function readNestedSourceSettings(
  */
 function readSlackSettings(parsed: Record<string, unknown>): SlackSourceConfig {
   const settings: SlackSourceConfig = readNestedSourceSettings(parsed, "slack");
-  const channels = nestedSource(parsed, "slack")?.channels;
+  const slack = nestedSource(parsed, "slack");
+  if (slack?.mode === "mcp" || slack?.mode === "token") {
+    settings.mode = slack.mode;
+  }
+  const minutes = slack?.mcpIntervalMinutes;
+  if (typeof minutes === "number" && Number.isInteger(minutes) && minutes > 0) {
+    settings.mcpIntervalMinutes = minutes;
+  }
+  const channels = slack?.channels;
   if (Array.isArray(channels)) {
     settings.channels = normalizeSlackChannels(
       channels.filter(isSlackChannel),

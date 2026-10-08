@@ -11,6 +11,8 @@ import type {
   CalendarStatus,
   LinearStateMap,
   SlackChannel,
+  SlackMcpStatus,
+  SlackMode,
   SourceFilters,
   SourceKeyError,
 } from "../../../../shared/types.js";
@@ -38,11 +40,14 @@ import {
   getLinearOptions,
   getLinearStateMap,
   getSavedSlackChannels,
+  getSlackMcp,
   listCalendars,
   listSlackChannels,
   previewLinearFilters,
   putCalendarSettings,
+  putSlackMcp,
   resolveSlackChannel,
+  runSlackMcp,
   saveLinearFilters,
   saveLinearStateMap,
   saveSlackChannels,
@@ -60,6 +65,7 @@ export const connectionsKeys = {
   linearStateMap: ["settings", "linear-state-map"] as const,
   savedSlackChannels: ["connections", "slack", "saved-channels"] as const,
   slackChannels: ["connections", "slack", "channels"] as const,
+  slackMcp: ["connections", "slack", "mcp"] as const,
 };
 
 export function linearFiltersQueryOptions() {
@@ -123,6 +129,92 @@ export function useGranolaStatusQuery() {
     refetchInterval: (query) => granolaPollInterval(query.state.data),
     refetchIntervalInBackground: true,
   });
+}
+
+/**
+ * Build the query options that read the Slack connector status.
+ */
+export function slackMcpQueryOptions() {
+  return queryOptions({
+    queryKey: connectionsKeys.slackMcp,
+    queryFn: getSlackMcp,
+  });
+}
+
+/**
+ * Read the Slack connector status, polling only while a round runs.
+ *
+ * @remarks
+ * The status is re-read on mount, after every action and every 5 s only while a round runs, so an
+ * idle Settings page makes no background requests.
+ */
+export function useSlackMcpStatusQuery() {
+  return useQuery({
+    ...slackMcpQueryOptions(),
+    refetchOnMount: "always",
+    refetchInterval: (query) => granolaPollInterval(query.state.data),
+    refetchIntervalInBackground: true,
+  });
+}
+
+/**
+ * Build the mutation options that save the Slack mode or the Poll Slack switch.
+ *
+ * @remarks
+ * The answered status replaces the cached one after any in-flight read is cancelled. The Slack
+ * connection and the channel list change with the mode, so they are marked stale; the channel list
+ * is not re-read at once, because in `mcp` mode each list is a model call.
+ */
+export function putSlackMcpMutationOptions(queryClient: QueryClient) {
+  return {
+    mutationFn: (patch: { mode?: SlackMode; enabled?: boolean }) =>
+      putSlackMcp(patch),
+    onMutate: () =>
+      queryClient.cancelQueries({ queryKey: connectionsKeys.slackMcp }),
+    onSuccess: (status: SlackMcpStatus) => {
+      queryClient.setQueryData(connectionsKeys.slackMcp, status);
+      void queryClient.invalidateQueries({
+        queryKey: connectionsKeys.detail("slack"),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: connectionsKeys.slackChannels,
+        refetchType: "none",
+      });
+    },
+    onError: () =>
+      queryClient.invalidateQueries({ queryKey: connectionsKeys.slackMcp }),
+  };
+}
+
+/**
+ * Save the Slack mode or the Poll Slack switch.
+ */
+export function usePutSlackMcpMutation() {
+  const queryClient = useQueryClient();
+  return useMutation(putSlackMcpMutationOptions(queryClient));
+}
+
+/**
+ * Build the mutation options that start a Slack round now.
+ *
+ * @remarks
+ * A refused run (running, off or not connected) needs no message of its own, so the mutation always
+ * re-reads the status, which then shows the round running or the card state.
+ */
+export function runSlackMcpMutationOptions(queryClient: QueryClient) {
+  return {
+    mutationFn: () => runSlackMcp().catch(() => undefined),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: connectionsKeys.slackMcp }),
+  };
+}
+
+/**
+ * Start a Slack round now.
+ */
+export function useRunSlackMcpMutation() {
+  const queryClient = useQueryClient();
+  return useMutation(runSlackMcpMutationOptions(queryClient));
 }
 
 export function useLinearFiltersQuery(enabled: boolean) {

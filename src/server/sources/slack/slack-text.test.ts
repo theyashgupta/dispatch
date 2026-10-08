@@ -10,6 +10,12 @@ test("user tokens render as @name, falling back to the id, ignoring Slack's labe
   assert.equal(renderSlackText("<@U0G6BEN>", names), "@U0G6BEN");
 });
 
+test("a user token with a label and no known name renders the label", () => {
+  assert.equal(renderSlackText("<@U0G6BEN|Ben Lee> hi", names), "@Ben Lee hi");
+  assert.equal(renderSlackText("<@U0G6BEN|> hi", names), "@U0G6BEN hi");
+  assert.equal(renderSlackText("<@U0G6ANA|Ana Q> hi", names), "@ana hi");
+});
+
 test("channel, broadcast, user group and link tokens render readably", () => {
   assert.equal(
     renderSlackText("<#C0G6ENG|eng-platform>", names),

@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { afterEach, mock, test } from "node:test";
 import { isolateEnv } from "../../test-support/fixtures.js";
-import type { SlackChannel, SourceCursor } from "../../../shared/types.js";
+import type {
+  SlackChannel,
+  SlackMode,
+  SourceCursor,
+} from "../../../shared/types.js";
 
 isolateEnv();
 const { SlackSource } = await import("./slack.source.js");
@@ -235,8 +239,8 @@ test("history reads 24 h back on first sight and from the cursor minus 600 s aft
       .filter((c) => c.method === "conversations.history")
       .every((c) => c.params.get("limit") === "100"),
   );
-  assert.equal(result.cursors.C0G6ENG.cursor, "1700000600.000100");
-  assert.equal(result.cursors.C0G6GEN.cursor, undefined);
+  assert.equal(result.cursors?.C0G6ENG.cursor, "1700000600.000100");
+  assert.equal(result.cursors?.C0G6GEN.cursor, undefined);
 });
 
 test("DMs are found over two pages and a deleted user's DM is dropped", async () => {
@@ -269,7 +273,34 @@ test("DMs are found over two pages and a deleted user's DM is dropped", async ()
   assert.equal(listing.length, 2);
   assert.equal(listing[0].params.get("types"), "im,mpim");
   assert.equal(listing[0].params.get("exclude_archived"), "true");
-  assert.deepEqual(Object.keys(result.cursors).sort(), ["D0G6DM1", "D0G6DM2"]);
+  assert.deepEqual(Object.keys(result.cursors ?? {}).sort(), [
+    "D0G6DM1",
+    "D0G6DM2",
+  ]);
+});
+
+test("a poll keeps a cursor key that is not a conversation id and drops a DM that left the list", async () => {
+  stubSlack({
+    "auth.test": auth,
+    "users.info": users,
+    "users.conversations": noDms,
+    "conversations.history": () => ({ body: { ok: true, messages: [] } }),
+  });
+  const mcp: SourceCursor = {
+    cursor: "2026-10-08T00:00:00.000Z",
+    polledAt: "2026-10-08T00:30:00.000Z",
+    origin: "https://dispatch-test.slack.com",
+  };
+  const stale: SourceCursor = {
+    cursor: "1",
+    polledAt: "2023-11-15T00:00:00.000Z",
+  };
+  const result = await source([ENG]).fetch({
+    cursors: { mcp, D0G6OLD: stale },
+  });
+  assert.deepEqual(result.cursors?.mcp, mcp);
+  assert.equal(result.cursors?.D0G6OLD, undefined);
+  assert.ok(result.cursors?.C0G6ENG);
 });
 
 test("a conversation Slack refuses is skipped with a warning and the rest are read", async () => {
@@ -295,7 +326,7 @@ test("a conversation Slack refuses is skipped with a warning and the rest are re
     result.items.map((i) => i.id),
     ["slack:C0G6ENG:1700000030.000100"],
   );
-  assert.deepEqual(result.cursors.C0G6GEN, {
+  assert.deepEqual(result.cursors?.C0G6GEN, {
     polledAt: new Date(NOW).toISOString(),
   });
   assert.equal(warn.mock.callCount(), 1);
@@ -324,7 +355,7 @@ test("a channel_not_found skip on a target with a cursor keeps its cursor and mo
     },
   });
   assert.deepEqual(result.items, []);
-  assert.deepEqual(result.cursors.C0G6ENG, {
+  assert.deepEqual(result.cursors?.C0G6ENG, {
     cursor: "1700000600.000100",
     polledAt: new Date(NOW).toISOString(),
   });
@@ -393,8 +424,8 @@ test("45 channels make 40 history calls, and targets left out keep their cursors
     calls.filter((c) => c.method === "conversations.history").length,
     40,
   );
-  assert.equal(Object.keys(result.cursors).length, 45);
-  assert.equal(result.cursors.C0044.polledAt, "2026-09-28T00:00:44.000Z");
+  assert.equal(Object.keys(result.cursors ?? {}).length, 45);
+  assert.equal(result.cursors?.C0044.polledAt, "2026-09-28T00:00:44.000Z");
 });
 
 test("users.info is asked at most 50 times per poll; unknown authors fall back to their id", async () => {
@@ -457,7 +488,7 @@ test("a history row with a malformed ts is dropped and the poll goes on", async 
     result.items.map((i) => i.id),
     ["slack:C0G6ENG:1700000041.000100"],
   );
-  assert.equal(result.cursors.C0G6ENG.cursor, "1700000041.000100");
+  assert.equal(result.cursors?.C0G6ENG.cursor, "1700000041.000100");
 });
 
 test("an author Slack will never name is cached as their id; a transient refusal is asked again", async () => {
@@ -518,7 +549,7 @@ test("a DM list refused for a missing scope still reads the picked channels; ano
     result.items.map((i) => i.id),
     ["slack:C0G6ENG:1700000050.000100"],
   );
-  assert.deepEqual(result.cursors.D0G6DM1, dmCursor);
+  assert.deepEqual(result.cursors?.D0G6DM1, dmCursor);
   assert.equal(warn.mock.callCount(), 1);
   mock.restoreAll();
   stubSlack({
@@ -599,4 +630,64 @@ test("a group DM also picked as a channel is read once, as the channel", async (
     1,
   );
   assert.equal(result.items[0]?.type, "mention");
+});
+
+function modeSource(
+  mode: SlackMode | undefined,
+  credential: { token: string } | null = { token: TOKEN },
+) {
+  return new SlackSource(
+    () =>
+      Promise.resolve(
+        credential ? { token: credential.token, via: "vault" as const } : null,
+      ),
+    () => [ENG],
+    120_000,
+    () => NOW,
+    () => mode,
+  );
+}
+
+test("an explicit mcp mode returns no items and no cursors and makes no Slack request", async () => {
+  const calls = stubSlack({});
+  const result = await modeSource("mcp").fetch({
+    cursors: { C0G6ENG: { cursor: "1", polledAt: "x" } },
+  });
+  assert.deepEqual(result, { issues: [], items: [], truncated: false });
+  assert.equal("cursors" in result, false);
+  assert.equal(calls.length, 0);
+});
+
+test("an absent mode with no credential returns the same empty result", async () => {
+  const calls = stubSlack({});
+  const result = await modeSource(undefined, null).fetch();
+  assert.deepEqual(result, { issues: [], items: [], truncated: false });
+  assert.equal(calls.length, 0);
+});
+
+test("an absent mode with a credential polls as before", async () => {
+  const calls = stubSlack({
+    "auth.test": auth,
+    "users.conversations": noDms,
+    "conversations.history": () => ({ body: { ok: true, messages: [] } }),
+    "users.info": users,
+  });
+  const result = await modeSource(undefined).fetch();
+  assert.ok(result.cursors);
+  assert.ok(calls.some((c) => c.method === "auth.test"));
+});
+
+test("a garbage mode with no credential returns the empty result like an absent one", async () => {
+  const calls = stubSlack({});
+  const result = await modeSource("bogus" as SlackMode, null).fetch();
+  assert.deepEqual(result, { issues: [], items: [], truncated: false });
+  assert.equal(calls.length, 0);
+});
+
+test("token mode with no credential still throws", async () => {
+  stubSlack({});
+  await assert.rejects(
+    modeSource("token", null).fetch(),
+    /no Slack credential/,
+  );
 });

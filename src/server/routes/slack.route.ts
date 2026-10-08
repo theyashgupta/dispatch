@@ -16,10 +16,18 @@ import {
   type SlackThreadRefusal,
 } from "../services/orchestration/slack.js";
 import {
+  applySlackSettings,
+  runSlackNow,
+  slackMcpStatus,
+  slackSettings,
+} from "../services/orchestration/slack-round.js";
+import {
   getOrchestrationConfig,
   setSlackChannels,
+  setSlackMcpSettings,
 } from "../services/infra/config-holder.js";
 import {
+  ConflictError,
   HttpError,
   InternalError,
   UpstreamError,
@@ -42,11 +50,13 @@ const REFUSAL_STATUS: Record<SlackRefusal["error"], number> = {
   "missing-scope": 403,
   disabled: 409,
   "no-credential": 409,
+  "not-connected": 409,
   unreachable: 502,
 };
 
 const THREAD_STATUS: Record<SlackThreadRefusal["error"], number> = {
   "not-found": 404,
+  "not-connected": 409,
   disabled: 409,
   "no-credential": 409,
   rejected: 401,
@@ -100,6 +110,41 @@ const saveBodySchema = z.object(
   },
   "invalid-channels",
 );
+
+const mcpBodySchema = z
+  .strictObject(
+    {
+      mode: z.enum(["mcp", "token"], "invalid-settings").optional(),
+      enabled: z.boolean("invalid-settings").optional(),
+    },
+    "invalid-settings",
+  )
+  .refine(
+    (body) => body.mode !== undefined || body.enabled !== undefined,
+    "invalid-settings",
+  );
+
+slackRouter.get("/slack/mcp", async (_req, res) => {
+  res.json(await slackMcpStatus());
+});
+
+slackRouter.put("/slack/mcp", async (req, res) => {
+  const patch = parseOrThrow(mcpBodySchema, req.body);
+  const previous = await slackSettings();
+  try {
+    setSlackMcpSettings(patch);
+  } catch {
+    throw new InternalError("save-failed");
+  }
+  await applySlackSettings(previous);
+  res.json(await slackMcpStatus());
+});
+
+slackRouter.post("/slack/mcp/run", async (_req, res) => {
+  const result = await runSlackNow();
+  if (result !== "started") throw new ConflictError(result);
+  res.status(202).json({ running: true });
+});
 
 slackRouter.get("/slack/channels", async (_req, res) => {
   const result = await guarded(slackChannelOptions);

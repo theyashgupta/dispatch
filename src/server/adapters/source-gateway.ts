@@ -32,6 +32,7 @@ export {
   fetchSlackThread,
   SlackThreadCache,
 } from "../sources/slack/slack-thread.js";
+export { renderSlackText, slackItem } from "../sources/slack/slack-message.js";
 import {
   fetchPrDetail,
   postPrReview,

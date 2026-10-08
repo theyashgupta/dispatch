@@ -9,12 +9,15 @@ import {
   type LinearStateMap,
   type SourceConfig,
   type SlackChannel,
+  type SlackMode,
   type SourceFilters,
   type StatusChannel,
   type TerminalAppearance,
   type UserProfile,
 } from "../../../shared/types.js";
+import { resolveSlackMode } from "../../../shared/slack-mode.js";
 import { CONFIG_PATH } from "./paths.js";
+import { resolveSlackToken } from "./slack-token.js";
 
 /** The loaded config, pushed in once by index.ts at boot. null until set (route → 400 if unset). */
 let orchestrationConfig: Config | null = null;
@@ -457,13 +460,25 @@ export function setSlackChannels(channels: SlackChannel[]): void {
 }
 
 /**
+ * Persist the Slack mode and the Slack switch.
+ *
+ * @remarks Only the keys present in `patch` change; the caller has already validated them.
+ */
+export function setSlackMcpSettings(patch: {
+  mode?: SlackMode;
+  enabled?: boolean;
+}): void {
+  patchSourceBlock("slack", patch);
+}
+
+/**
  * Merge fields into one item source's config block on disk and in the held config.
  *
  * @remarks Atomic write at mode 0600; every other key in the file and in the block is carried verbatim.
  */
 function patchSourceBlock(
   sourceId: ItemSourceId,
-  patch: { enabled?: boolean; channels?: SlackChannel[] },
+  patch: { enabled?: boolean; channels?: SlackChannel[]; mode?: SlackMode },
 ): void {
   const raw = fs.readFileSync(CONFIG_PATH, "utf8");
   let parsed: Record<string, unknown>;
@@ -509,4 +524,15 @@ function patchSourceBlock(
       [sourceId]: { ...orchestrationConfig.sources?.[sourceId], ...patch },
     };
   }
+}
+
+/**
+ * The Slack mode: the configured one, else `token` when the Vault holds a Slack token, else `mcp`.
+ *
+ * @remarks An absent mode resolves on each call and is never written, so a transient Vault read pins nothing.
+ */
+export async function slackMode(): Promise<SlackMode> {
+  const configured = getOrchestrationConfig()?.sources?.slack?.mode;
+  if (configured === "mcp" || configured === "token") return configured;
+  return resolveSlackMode(undefined, (await resolveSlackToken()) !== null);
 }

@@ -67,6 +67,23 @@ export const SLACK_CONNECTION: ConnectionMeta = {
     "Your token is checked against Slack and stored only in the Dispatch Vault on this machine. Dispatch only reads from Slack.",
 };
 
+export const SLACK_TOKEN_CONSENT_LINE =
+  "Your token, in the Dispatch Vault on this machine.";
+
+export const SLACK_MCP_CONNECTION: ConnectionMeta = {
+  source: "slack",
+  name: "Slack",
+  credentialLabel: "No key. Uses your Claude Code login.",
+  steps: [
+    "Open claude.ai, Settings, Connectors, and connect Slack to your workspace.",
+    "In a terminal run claude mcp list. A claude.ai Slack line must end with Connected.",
+    "Turn on Poll Slack and pick channels below. Every 30 minutes Dispatch asks Claude to read your DMs, your mentions and the picked channels.",
+  ],
+  scopes: [],
+  footer:
+    "Dispatch runs Claude Code on this machine with only Slack read tools allowed. Each round uses your Claude plan. Dispatch never posts, replies or reacts in Slack.",
+};
+
 export const SLACK_CONSENT = [
   {
     heading: "Dispatch will read",
@@ -80,7 +97,7 @@ export const SLACK_CONSENT = [
     heading: "Dispatch will store",
     lines: [
       "Messages that mention you or were sent to you, in board.db on this machine.",
-      "Your token, in the Dispatch Vault on this machine.",
+      SLACK_TOKEN_CONSENT_LINE,
     ],
   },
   {

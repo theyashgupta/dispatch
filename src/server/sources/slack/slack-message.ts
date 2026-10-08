@@ -75,7 +75,7 @@ function renderToken(
   const label = bar === -1 ? undefined : token.slice(bar + 1);
   if (target.startsWith("@")) {
     const id = target.slice(1);
-    return `@${names.get(id) ?? id}`;
+    return `@${names.get(id) ?? (label || id)}`;
   }
   if (target.startsWith("#")) return `#${label ?? target.slice(1)}`;
   if (target.startsWith("!")) return label ?? `@${target.slice(1)}`;

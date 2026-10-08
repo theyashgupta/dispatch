@@ -7,7 +7,7 @@ import { http, payload } from "@/lib/http";
  *
  * @remarks
  * A rejected token carries Slack's code for the "Slack refused" line; every other failure,
- * including a network error or no answer within 45 s, reads as unreachable.
+ * including a network error or no answer within 120 s, reads as unreachable.
  */
 export async function getSlackThread(
   itemId: string,
@@ -18,7 +18,7 @@ export async function getSlackThread(
   try {
     const result = await http<unknown>(
       `/api/slack/thread/${encodeURIComponent(itemId)}`,
-      { signal: AbortSignal.timeout(45_000) },
+      { signal: AbortSignal.timeout(120_000) },
     );
     const body = (payload(result) ?? {}) as Partial<SlackThread> & {
       error?: unknown;
