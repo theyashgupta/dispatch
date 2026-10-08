@@ -1,4 +1,6 @@
 import path from "node:path";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
+import { isHiddenCard } from "../../../shared/hidden-card.js";
 import type { BoardPolicy, Card, Session } from "../../../shared/types.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import { sleep } from "../../adapters/exec.js";
@@ -11,7 +13,8 @@ import {
 } from "../domain/loop-progress.js";
 import { paneBusy, paneReady } from "../domain/supervisor-state.js";
 import { readLoopFile } from "./loop-progress-reader.js";
-import { giveUp, record, rootOf } from "./supervisor-record.js";
+import { setHandoffReady } from "./orchestrator-session.js";
+import { giveUp, orchestratorOf, record, rootOf } from "./supervisor-record.js";
 import {
   sendConfirmed,
   SEND_TIMING,
@@ -75,39 +78,97 @@ export function resumePromptText(slug: string, root: string): string {
   ].join(" ");
 }
 
+/** The handoff request an orchestrator receives at the context threshold: save the state, then signal. */
+export function orchestratorHandoffRequestText(
+  orchestratorId: string,
+  hard: boolean,
+): string {
+  return [
+    hard
+      ? `${REQUEST_TITLE} (hard limit). Your context is at the hard limit. Hand off now: do not start or wait for more work. Record where you are, then:`
+      : `${REQUEST_TITLE}. Your context is high. Do not interrupt in-flight work. Let running tool calls finish. Then, at that safe point:`,
+    "1. Call write_state with the full current state (every group and its status, pending decisions, next steps) and handoffReady set to true.",
+    `2. Print the line HANDOFF_READY ${orchestratorId} and end your turn without starting new work.`,
+  ].join("\n");
+}
+
+/** The first prompt of the fresh orchestrator session after a handoff. */
+export function orchestratorResumePromptText(
+  orchestratorId: string,
+  boardKey: string,
+): string {
+  return `Resume as the ${orchestratorId} orchestrator of board ${boardKey}. Before any action call read_state, then list_cards, list_events and the open decision items; act only on what the tools return.`;
+}
+
 const CANCEL_LINE =
   "Ignore the context handoff request above: the handoff is already done and this is the fresh session. Continue the loop.";
 
 /**
+ * The name the handoff request carries and whether the card is active and already pending.
+ *
+ * @remarks
+ * A loop reads both from its engine file. An orchestrator reads them from its record: it
+ * is active while `running` and pending once `write_state` set `handoffReady`.
+ */
+function handoffFacts(
+  card: Card,
+): { name: string; active: boolean; pending: boolean } | null {
+  if (isHiddenCard(card)) {
+    const owner = orchestratorOf(card);
+    return owner
+      ? {
+          name: owner.id,
+          active: owner.state === "running",
+          pending: owner.handoffReady === true,
+        }
+      : null;
+  }
+  const progress = card.loopProgress;
+  const engine = progress?.engine;
+  return progress && engine
+    ? {
+        name: progress.slug,
+        active: engine.active && !engine.closed,
+        pending: engine.handoffPending,
+      }
+    : null;
+}
+
+/** Whether the loop engine or the orchestrator record already says the handoff is pending. */
+export function isHandoffPending(card: Card): boolean {
+  return handoffFacts(card)?.pending === true;
+}
+
+/**
  * Send the handoff request once per threshold crossing, and the hard request once above the hard threshold.
  *
- * @remarks The crossing re-arms when the meter falls under `handoffPercent`, as after a clear. A
- * session whose engine already says `handoff-pending` gets no request.
+ * @remarks
+ * The crossing re-arms when the meter falls under `handoffPercent`, as after a clear. A
+ * session that is already `handoff-pending` gets no request.
  */
 export async function checkHandoffThreshold(
   card: Card,
   session: Session,
   policy: Pick<BoardPolicy, "handoffPercent" | "handoffHardPercent">,
 ): Promise<void> {
-  const progress = card.loopProgress;
-  const engine = progress?.engine;
+  const facts = handoffFacts(card);
   const percent = session.contextPercent;
-  if (!progress || !engine?.active || engine.closed || percent == null) return;
+  if (!facts?.active || percent == null) return;
   if (percent < policy.handoffPercent) {
     crossings.delete(session.id);
     return;
   }
-  if (engine.handoffPending) return;
+  if (facts.pending) return;
   const hardSent = crossings.get(session.id) ?? false;
   const hard = percent >= policy.handoffHardPercent && !hardSent;
   if (crossings.has(session.id) && !hard) return;
   crossings.set(session.id, hardSent || hard);
-  await sendHandoffRequest(card, session, progress.slug, hard, {
+  await sendHandoffRequest(card, session, facts.name, hard, {
     contextPercent: percent,
   });
 }
 
-/** Send the handoff request of a loop and record its `handoff_request` row. */
+/** Send the handoff request of a loop or an orchestrator and record its `handoff_request` row. */
 export async function sendHandoffRequest(
   card: Card,
   session: Session,
@@ -119,7 +180,9 @@ export async function sendHandoffRequest(
   const result = await send(
     card,
     session,
-    handoffRequestText(slug, rootOf(card, session), hard),
+    isHiddenCard(card)
+      ? orchestratorHandoffRequestText(slug, hard)
+      : handoffRequestText(slug, rootOf(card, session), hard),
     hard ? "handoff-hard" : "handoff",
   );
   record(card, session, { action: "handoff_request", hard, ...data, result });
@@ -163,17 +226,20 @@ async function engineSessionId(root: string): Promise<string | null> {
 }
 
 /**
- * Start a fresh conversation in the same pane and resume the loop in it.
+ * Start a fresh conversation in the same pane and resume the loop or the orchestrator in it.
  *
- * @remarks `/clear` starts a new transcript file, so the resume prompt is confirmed in the newest
- * transcript of the same project folder, and the engine must name that file within 80 s. Any
- * unconfirmed step leaves the session at `needs_input`.
+ * @remarks
+ * `/clear` starts a new transcript file, so the resume prompt is confirmed in the newest
+ * transcript of the same project folder. A loop must also have its engine name that file within
+ * 80 s; an orchestrator has no engine file, so the confirmed prompt clears its `handoffReady`
+ * flag instead. Any unconfirmed step leaves the session at `needs_input`.
  */
 export async function runFreshSession(
   card: Card,
   session: Session,
   timing: HandoffTiming = HANDOFF_TIMING,
 ): Promise<boolean> {
+  const owner = orchestratorOf(card);
   const slug = card.loopProgress?.slug;
   const root = rootOf(card, session);
   const target = `=${session.tmuxSession}:`;
@@ -187,7 +253,7 @@ export async function runFreshSession(
     );
     return false;
   };
-  if (!slug || old === null) return fail("transcript");
+  if ((!owner && !slug) || old === null) return fail("transcript");
   const dir = path.dirname(old);
   const newest = () => newestJsonl(dir);
   const quietAndReady = async () => {
@@ -208,7 +274,12 @@ export async function runFreshSession(
   const sent = await sendConfirmed(
     card,
     session,
-    resumePromptText(slug, root),
+    owner
+      ? orchestratorResumePromptText(
+          owner.id,
+          card.boardKey ?? DEFAULT_BOARD_KEY,
+        )
+      : resumePromptText(slug!, root),
     "resume",
     SEND_TIMING,
     newest,
@@ -217,12 +288,16 @@ export async function runFreshSession(
   if (sent !== "confirmed" || fresh === null || fresh === old)
     return fail("resume prompt");
   const id = path.basename(fresh, ".jsonl");
-  const named = await waitFor(
-    async () => (await engineSessionId(root)) === id,
-    timing.engineMs,
-    timing.pollMs,
-  );
-  if (!named) return fail("engine session id");
+  if (owner) {
+    await setHandoffReady(card.boardKey ?? DEFAULT_BOARD_KEY, owner.id, false);
+  } else {
+    const named = await waitFor(
+      async () => (await engineSessionId(root)) === id,
+      timing.engineMs,
+      timing.pollMs,
+    );
+    if (!named) return fail("engine session id");
+  }
   await store.setTranscriptPath(card.id, session.id, fresh);
   resumed.set(session.id, { at: Date.now(), transcript: fresh });
   crossings.delete(session.id);

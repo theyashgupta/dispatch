@@ -24,6 +24,11 @@ import {
   boardRepository as store,
 } from "../../store/board-repository.js";
 import { boardWorkspace } from "../domain/board-workspace.js";
+import { cardOwner, effectivePolicy } from "../domain/orchestrator-rules.js";
+import type {
+  OrchestratorIdentity,
+  ScopeTarget,
+} from "../domain/orchestrator-scope.js";
 import {
   BoardConflictError,
   BoardNotFoundError,
@@ -99,6 +104,26 @@ export function resolveBoard(key: BoardKey | undefined): Board {
   const board = store.getBoard(key ?? DEFAULT_BOARD_KEY);
   if (!board) throw new BoardNotFoundError("unknown-board");
   return structuredClone(board);
+}
+
+/** The policy an orchestrator works under: its board policy narrowed by its own override. */
+export function callerPolicy(caller: OrchestratorIdentity): BoardPolicy {
+  const board = resolveBoard(caller.boardKey);
+  return effectivePolicy(
+    board.policy,
+    board.orchestrators.find((r) => r.id === caller.orchestratorId),
+  );
+}
+
+/** The board and the owner orchestrator of a card, for the scope check of an orchestrator call. */
+export function scopeTargetOf(card: Card): ScopeTarget {
+  const records =
+    store.getBoard(card.boardKey ?? DEFAULT_BOARD_KEY)?.orchestrators ?? [];
+  const group = card.groupId ? store.getCard(card.groupId) : undefined;
+  return {
+    boardKey: card.boardKey,
+    owner: cardOwner(records, card, group),
+  };
 }
 
 /** Resolve the board of a create request; an archived board throws the typed 409 `board-archived`. */
@@ -245,14 +270,28 @@ export function boardCounts(): BoardCounts {
   return { counts: [...byKey.values()], at: new Date().toISOString() };
 }
 
+/**
+ * The sessions that block a board archive.
+ *
+ * @remarks
+ * A stopped orchestrator keeps its hidden card's tmux shell, because stop never kills, so
+ * that card does not count.
+ */
 function activeSessionCount(key: BoardKey): number {
+  const stopped = new Set(
+    store
+      .getBoard(key)
+      ?.orchestrators.filter((r) => r.state === "stopped")
+      .map((r) => r.cardId),
+  );
   return store
-    .listCards(key)
+    .listAllCards(key)
     .filter(
       (card) =>
-        isLiveSessionCard(card) ||
-        card.provisioningStep != null ||
-        store.isStarting(card.id),
+        !stopped.has(card.id) &&
+        (isLiveSessionCard(card) ||
+          card.provisioningStep != null ||
+          store.isStarting(card.id)),
     ).length;
 }
 

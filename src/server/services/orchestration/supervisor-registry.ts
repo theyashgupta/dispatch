@@ -22,7 +22,12 @@ import {
   checkHandoffCancel,
   checkHandoffThreshold,
 } from "./supervisor-handoff.js";
-import { moveToNeedsInput, record } from "./supervisor-record.js";
+import {
+  moveToNeedsInput,
+  orchestratorOf,
+  ownerPolicy,
+  record,
+} from "./supervisor-record.js";
 import { sessionTranscriptPath } from "./supervisor-transcript.js";
 import { refreshLoopProgress } from "./loop-progress-reader.js";
 import { SHELL_SESSION_ENV } from "./steps.js";
@@ -119,7 +124,23 @@ async function recordTransition(
   return from;
 }
 
-function loopOf(card: Card): LoopFacts | null {
+/**
+ * The loop facts the planner reads for a card, or null for a card with no loop.
+ *
+ * @remarks
+ * An orchestrator has no unit or phase, so its once-per-phase continue budget is keyed by
+ * the UTC day: a days-long orchestrator gets one continue per duty each day, not one for its life.
+ */
+function loopOf(card: Card, now: number): LoopFacts | null {
+  const owner = orchestratorOf(card);
+  if (owner) {
+    return {
+      engineActive: owner.state === "running",
+      handoffPending: owner.handoffReady === true,
+      unitPhase: `orchestrator/${new Date(now).toISOString().slice(0, 10)}`,
+      orchestrator: true,
+    };
+  }
   const progress = card.loopProgress;
   if (card.source !== "group" || progress === undefined) return null;
   const { currentUnit, currentPhase } = progress.summary;
@@ -128,6 +149,19 @@ function loopOf(card: Card): LoopFacts | null {
     handoffPending: progress.engine?.handoffPending === true,
     unitPhase: `${currentUnit ?? "none"}/${currentPhase?.number ?? "none"}`,
   };
+}
+
+/**
+ * The second source `detectState` checks before it reports `handoff_ready`.
+ *
+ * @remarks
+ * A loop names it in its engine file. An orchestrator has none, so its record flag
+ * `handoffReady` stands in for the `handoff-pending` value.
+ */
+function engineSessionIdOf(card: Card): string | null {
+  const owner = orchestratorOf(card);
+  if (owner) return owner.handoffReady === true ? "handoff-pending" : null;
+  return card.loopProgress?.engine?.sessionId ?? null;
 }
 
 /** Record one change, then plan and run its actions in the same sampling turn. */
@@ -144,10 +178,8 @@ async function act(
     from,
     to: change.state,
     ...(change.promptKind ? { promptKind: change.promptKind } : {}),
-    loop: loopOf(card),
-    usageLimit:
-      store.getBoard(card.boardKey ?? DEFAULT_BOARD_KEY)?.policy.usageLimit ??
-      "wait",
+    loop: loopOf(card, now),
+    usageLimit: ownerPolicy(card)?.usageLimit ?? "wait",
     wokeAt: lastWakeAt,
     now,
     memory: plan,
@@ -220,7 +252,7 @@ export async function supervisePane(
       tmuxAlive: true,
       atShellPrompt: shellPrompt,
       pane: sample.pane,
-      engineSessionId: card.loopProgress?.engine?.sessionId ?? null,
+      engineSessionId: engineSessionIdOf(card),
       completion: card.loopProgress?.completion ?? null,
       transcript,
       memory: watcher.memory,

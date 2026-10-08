@@ -1,5 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
+import { isHiddenCard } from "../../../shared/hidden-card.js";
 import type { Card, Session } from "../../../shared/types.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import { capturePane, paneAtPrompt, sendKeys } from "../../adapters/tmux.js";
@@ -11,11 +13,15 @@ import {
 import { resumeSession } from "./resume-session.js";
 import { runClaude, type RunClaudeOutcome } from "./run-claude.js";
 import { sendConfirmed, waitFor } from "./supervisor-send.js";
-import { runHandoff } from "./supervisor-handoff.js";
+import {
+  orchestratorResumePromptText,
+  runHandoff,
+} from "./supervisor-handoff.js";
 import { answerLimit, escapeLimit } from "./supervisor-limit.js";
 import {
   continueText,
   markNeedsInput,
+  orchestratorOf,
   record,
   rootOf,
 } from "./supervisor-record.js";
@@ -25,6 +31,7 @@ export interface ActionDeps {
   relaunch: (cardId: string) => Promise<RunClaudeOutcome>;
   atShellPrompt: (target: string) => Promise<boolean>;
   claudeUpMs: number;
+  send?: typeof sendConfirmed;
 }
 
 const DEFAULT_DEPS: ActionDeps = {
@@ -105,6 +112,15 @@ async function resume(
     });
     return;
   }
+  const owner = orchestratorOf(card);
+  if (isHiddenCard(card) && owner?.state !== "running") {
+    record(card, session, {
+      action: "resume",
+      result: "skipped",
+      reason: "the orchestrator is not running",
+    });
+    return;
+  }
   const failed = (why: string) =>
     markNeedsInput(card, session, "resume_failed", `resume: ${why}`);
   if (
@@ -126,10 +142,15 @@ async function resume(
     POLL_MS,
   );
   if (!up) return failed("claude did not start");
-  const result = await sendConfirmed(
+  const result = await (deps.send ?? sendConfirmed)(
     live,
     resumed,
-    continueText(live, resumed, "resume"),
+    owner
+      ? orchestratorResumePromptText(
+          owner.id,
+          live.boardKey ?? DEFAULT_BOARD_KEY,
+        )
+      : continueText(live, resumed, "resume"),
     "resume",
   );
   record(card, session, { action: "resume", result });

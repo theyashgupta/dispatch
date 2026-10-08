@@ -8,7 +8,7 @@ import {
 } from "../domain/errors.js";
 import { checkBudget, checkCap } from "../domain/orchestrator-policy.js";
 import type { OrchestratorIdentity } from "../domain/orchestrator-scope.js";
-import { resolveBoard, runningLoops } from "./boards.js";
+import { callerPolicy, runningLoops } from "./boards.js";
 import { enforce } from "./orchestrator-groups.js";
 import { groupCost } from "./orchestrator-read.js";
 import { sendHandoffRequest } from "./supervisor-handoff.js";
@@ -77,17 +77,14 @@ async function oneAtATime<T>(card: Card, tool: () => Promise<T>): Promise<T> {
 }
 
 /**
- * Type one answer into the card's running claude under the state, stop and budget rules.
+ * Throw the typed 400 when a text cannot be typed as one line of input.
  *
- * @remarks Claude Code reads a first `!`, `/`, `#`, `&` or `@` as an input mode (a shell command,
+ * @remarks
+ * Claude Code reads a first `!`, `/`, `#`, `&` or `@` as an input mode (a shell command,
  * a CLI command, a memory write), so such a text is refused before the short or the pointer send.
  * The check runs on the line that is typed, so a leading control character cannot hide the mode key.
  */
-export async function sendInput(
-  caller: OrchestratorIdentity,
-  card: Card,
-  text: string,
-): Promise<SendResult> {
+function assertTypable(text: string): void {
   const line = typedLine(text);
   if (line === "") {
     throw new ValidationError("invalid-text", {
@@ -99,17 +96,45 @@ export async function sendInput(
       reason: "text starts with a mode character",
     });
   }
+}
+
+/** Type one answer into the card's running claude under the state, stop and budget rules. */
+export async function sendInput(
+  caller: OrchestratorIdentity,
+  card: Card,
+  text: string,
+): Promise<SendResult> {
+  assertTypable(text);
   return oneAtATime(card, async () => {
     const session = liveSession(card);
     assertKeysAllowed(session);
     assertNotUserStop(session);
     enforce(
       checkBudget({
-        policy: resolveBoard(caller.boardKey).policy,
+        policy: callerPolicy(caller),
         cost: groupCost(card),
       }),
     );
     return sessionTools.send(card, session, text, "orchestrator_input");
+  });
+}
+
+/**
+ * Type one reply of the user into the card's running claude.
+ *
+ * @remarks
+ * The user may type to a loop that stopped on budget or usage, so only the state and mode
+ * checks of {@link sendInput} apply.
+ */
+export async function userSendInput(
+  card: Card,
+  text: string,
+): Promise<SendResult> {
+  assertTypable(text);
+  return oneAtATime(card, async () => {
+    const session = liveSession(card);
+    assertKeysAllowed(session);
+    return sessionTools.send(card, session, text, "user_input");
   });
 }
 
@@ -130,7 +155,7 @@ export async function approveGroupPlan(
     const session = liveSession(card);
     assertKeysAllowed(session);
     assertNotUserStop(session);
-    if (resolveBoard(caller.boardKey).policy.roadmapApproval === "ask") {
+    if (callerPolicy(caller).roadmapApproval === "ask") {
       const approval = store
         .listDecisionItems(caller.boardKey, "answered")
         .find(
@@ -194,7 +219,7 @@ export async function resumeLoop(
           "session is not stopped by stop_session or a supervisor give-up",
       });
     }
-    const policy = resolveBoard(caller.boardKey).policy;
+    const policy = callerPolicy(caller);
     enforce(
       checkCap({
         policy,
@@ -218,6 +243,45 @@ export async function resumeLoop(
           from,
           to: "working",
           evidence: `resume_loop by orchestrator ${caller.orchestratorId}`,
+        },
+        "supervisor_state",
+      );
+    }
+    return result;
+  });
+}
+
+/**
+ * Continue a loop that waits at `needs_input`, for the user, whatever stopped it.
+ *
+ * @remarks
+ * The user decides, so a `usage_stop` or `budget` stop is allowed and no cap or budget
+ * check runs.
+ */
+export async function userResumeLoop(card: Card): Promise<SendResult> {
+  return oneAtATime(card, async () => {
+    const session = liveSession(card);
+    if (session.state !== "needs_input") {
+      throw new ConflictError("not-resumable", {
+        reason: "session is not waiting at needs_input",
+      });
+    }
+    const result = await sessionTools.send(
+      card,
+      session,
+      continueText(card, session, "resume"),
+      "resume",
+    );
+    if (result === "confirmed") {
+      const from = session.state;
+      await store.setSessionStateIfSession(card.id, session.id, "working");
+      record(
+        card,
+        session,
+        {
+          from,
+          to: "working",
+          evidence: "resume_loop by user",
         },
         "supervisor_state",
       );
