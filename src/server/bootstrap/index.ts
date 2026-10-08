@@ -76,6 +76,7 @@ import {
 import { startCleanupScheduler } from "../services/orchestration/cleanup-scheduler.js";
 import { startPendingMoveSweep } from "../services/orchestration/session-account-apply.js";
 import { startLoopProgressReader } from "../services/orchestration/loop-progress-reader.js";
+import { settleTransientRecords } from "../services/orchestration/orchestrator-session.js";
 import {
   supervisePane,
   superviseLost,
@@ -380,6 +381,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   await ensureHyperlinksTerminalFeature();
   await ensureNoAltScreenOverride();
   await reconcileSessions();
+  await settleTransientRecords();
   if (isPackagedInstall()) {
     await healServicePlist({ repointNode: false }).catch((err: unknown) => {
       console.warn(
