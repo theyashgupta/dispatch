@@ -23,6 +23,8 @@ import {
   listCalendarsMutationOptions,
   refreshLinearFilters,
   resolveSlackChannelMutationOptions,
+  putSlackMcpMutationOptions,
+  runSlackMcpMutationOptions,
   saveCalendarSettingsMutationOptions,
   saveLinearFiltersMutationOptions,
   saveLinearStateMapMutationOptions,
@@ -30,6 +32,7 @@ import {
   linearStateMapQueryOptions,
   savedSlackChannelsQueryOptions,
   slackChannelsQueryOptions,
+  slackMcpQueryOptions,
 } from "./connections-queries.js";
 import { calendarStatusKeys } from "@/queries/calendar-status-queries";
 import { linearWorkflowKeys } from "@/queries/linear-workflow-queries";
@@ -100,6 +103,7 @@ test("connectionsKeys has the documented shape", () => {
     "slack",
     "channels",
   ]);
+  assert.deepEqual(connectionsKeys.slackMcp, ["connections", "slack", "mcp"]);
 });
 
 test("linearFiltersQueryOptions requests the Linear filters", async () => {
@@ -281,6 +285,7 @@ const channels = [
 const setupFailures = [
   ["not-a-channel", "not-a-channel"],
   ["disabled", "disabled"],
+  ["not-connected", "not-connected"],
   ["rejected", "rejected"],
   ["no-credential", "rejected"],
   ["missing-scope", "restricted"],
@@ -793,5 +798,78 @@ test("putCalendarSettings throws on any other failure status", async () => {
   await assert.rejects(
     putCalendarSettings({ enabled: true }),
     new Error("calendar request failed: 400"),
+  );
+});
+
+const slackStatus = {
+  mode: "mcp" as const,
+  enabled: true,
+  running: false,
+  connector: "connected" as const,
+};
+
+test("slackMcpQueryOptions requests the Slack connector status", async () => {
+  const options = slackMcpQueryOptions();
+  assert.deepEqual(options.queryKey, ["connections", "slack", "mcp"]);
+  reply(200, slackStatus);
+  assert.deepEqual(await newClient().fetchQuery(options), slackStatus);
+  assert.equal(calls[0]?.url, "/api/slack/mcp");
+});
+
+test("a Slack mode save caches the answer and marks the Slack connection and channels stale", async () => {
+  const client = newClient();
+  client.setQueryData(connectionsKeys.slackMcp, {
+    ...slackStatus,
+    mode: "token",
+  });
+  client.setQueryData(connectionsKeys.detail("slack"), { connected: true });
+  client.setQueryData(connectionsKeys.slackChannels, { ok: true });
+  reply(200, slackStatus);
+  await new MutationObserver(client, putSlackMcpMutationOptions(client)).mutate(
+    { mode: "mcp" },
+  );
+  assert.equal(calls[0]?.url, "/api/slack/mcp");
+  assert.equal(calls[0]?.init?.method, "PUT");
+  assert.equal(calls[0]?.init?.body, JSON.stringify({ mode: "mcp" }));
+  assert.deepEqual(client.getQueryData(connectionsKeys.slackMcp), slackStatus);
+  assert.equal(
+    client.getQueryState(connectionsKeys.detail("slack"))?.isInvalidated,
+    true,
+  );
+  assert.equal(
+    client.getQueryState(connectionsKeys.slackChannels)?.isInvalidated,
+    true,
+  );
+  assert.equal(calls.length, 1);
+});
+
+test("a failed Slack save marks the status stale and keeps the old status", async () => {
+  const client = newClient();
+  client.setQueryData(connectionsKeys.slackMcp, slackStatus);
+  reply(500, {}, "Internal Server Error");
+  await assert.rejects(
+    new MutationObserver(client, putSlackMcpMutationOptions(client)).mutate({
+      enabled: false,
+    }),
+  );
+  assert.equal(
+    client.getQueryState(connectionsKeys.slackMcp)?.isInvalidated,
+    true,
+  );
+  assert.deepEqual(client.getQueryData(connectionsKeys.slackMcp), slackStatus);
+});
+
+test("Run now re-reads the status after a 409", async () => {
+  const client = newClient();
+  client.setQueryData(connectionsKeys.slackMcp, slackStatus);
+  reply(409, { error: "not-connected" });
+  await new MutationObserver(client, runSlackMcpMutationOptions(client)).mutate(
+    undefined,
+  );
+  assert.equal(calls[0]?.url, "/api/slack/mcp/run");
+  assert.equal(calls[0]?.init?.method, "POST");
+  assert.equal(
+    client.getQueryState(connectionsKeys.slackMcp)?.isInvalidated,
+    true,
   );
 });

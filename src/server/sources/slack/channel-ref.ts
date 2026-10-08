@@ -1,4 +1,7 @@
-import type { SlackChannel } from "../../../shared/types.js";
+import {
+  SLACK_CHANNEL_NAME,
+  type SlackChannel,
+} from "../../../shared/types.js";
 
 export const CHANNEL_ID = /^[CG][A-Z0-9]{2,}$/;
 
@@ -33,9 +36,12 @@ export function parseChannelRef(input: string): string | null {
 
 export const SLACK_CHANNEL_MAX = 200;
 
-const NAME_MAX = 80;
-
-/** True for a picked channel entry: a channel id and a non-empty name of at most 80 characters. */
+/**
+ * True for a picked channel entry: a channel id and a Slack channel name, or the id itself as the name.
+ *
+ * @remarks The id stands in as the name when Slack could not name the channel. The name test rejects
+ * control and format characters, which keeps newlines out of the round prompt.
+ */
 export function isSlackChannel(value: unknown): value is SlackChannel {
   if (typeof value !== "object" || value === null) return false;
   const { id, name } = value as Record<string, unknown>;
@@ -43,8 +49,7 @@ export function isSlackChannel(value: unknown): value is SlackChannel {
     typeof id === "string" &&
     CHANNEL_ID.test(id) &&
     typeof name === "string" &&
-    name.trim() !== "" &&
-    name.length <= NAME_MAX
+    (name === id || SLACK_CHANNEL_NAME.test(name.trim()))
   );
 }
 

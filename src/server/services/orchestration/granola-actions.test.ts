@@ -2,12 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   buildGranolaPrompt,
-  granolaToolName,
   groupByMeeting,
   nextRunDelay,
-  parseMcpList,
   roundSince,
 } from "./granola-actions.js";
+import { mcpToolPrefix, parseMcpList } from "./connector-list.js";
 import { buildMeetingItems, parseActionItems } from "./meeting-actions.js";
 
 const MACHINE_LIST = [
@@ -34,13 +33,16 @@ test("this machine's list plus a connected Granola line parses to connected", ()
     withGranola(
       "claude.ai Granola: https://mcp.granola.ai/mcp (HTTP) - ✔ Connected",
     ),
+    /granola/i,
   );
   assert.deepEqual(check, { state: "connected", server: "claude.ai Granola" });
-  assert.equal(granolaToolName(check.server ?? ""), "mcp__claude_ai_Granola");
+  assert.equal(mcpToolPrefix(check.server ?? ""), "mcp__claude_ai_Granola");
 });
 
 test("the list without Granola is not-found, even when a command mentions granola", () => {
-  assert.deepEqual(parseMcpList(MACHINE_LIST), { state: "not-found" });
+  assert.deepEqual(parseMcpList(MACHINE_LIST, /granola/i), {
+    state: "not-found",
+  });
 });
 
 test("a Needs authentication line is needs-auth and any other state is failed", () => {
@@ -49,6 +51,7 @@ test("a Needs authentication line is needs-auth and any other state is failed", 
       withGranola(
         "claude.ai Granola: https://mcp.granola.ai/mcp (HTTP) - ! Needs authentication",
       ),
+      /granola/i,
     ),
     { state: "needs-auth", server: "claude.ai Granola" },
   );
@@ -57,6 +60,7 @@ test("a Needs authentication line is needs-auth and any other state is failed", 
       withGranola(
         "granola: https://mcp.granola.ai/mcp (HTTP) - ✘ Failed to connect",
       ),
+      /granola/i,
     ),
     { state: "failed", server: "granola" },
   );
@@ -64,10 +68,10 @@ test("a Needs authentication line is needs-auth and any other state is failed", 
 
 test("granolaToolName replaces every character outside the tool name set", () => {
   assert.equal(
-    granolaToolName("my granola.v2 (work)"),
+    mcpToolPrefix("my granola.v2 (work)"),
     "mcp__my_granola_v2__work_",
   );
-  assert.equal(granolaToolName("granola-x_1"), "mcp__granola-x_1");
+  assert.equal(mcpToolPrefix("granola-x_1"), "mcp__granola-x_1");
 });
 
 test("the Granola prompt carries the contract lines in order", () => {
@@ -258,6 +262,7 @@ test("the first Granola line wins when mcp list shows two", () => {
       withGranola(
         "granola-old: https://old.example/mcp (HTTP) - ✘ Failed to connect\nclaude.ai Granola: https://mcp.granola.ai/mcp (HTTP) - ✔ Connected",
       ),
+      /granola/i,
     ),
     { state: "failed", server: "granola-old" },
   );

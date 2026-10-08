@@ -81,7 +81,8 @@ await store.upsertItems(
 );
 await store.upsertItems("fake", [OTHER], { kind: "append" });
 
-function enable(slack: Record<string, unknown> = { enabled: true }): void {
+function enable(configured: Record<string, unknown> = { enabled: true }): void {
+  const slack = { mode: "token" as const, ...configured };
   setOrchestrationConfig({
     linearApiKey: "",
     sources: { linear: { apiKey: "" }, slack },

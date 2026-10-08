@@ -3,6 +3,7 @@ import type {
   FilterOption,
   Item,
   SlackChannel,
+  SlackMode,
   SourceCredential,
   SourceCursor,
   SourceIssue,
@@ -22,6 +23,8 @@ import {
 const HISTORY_LIMIT = 100;
 
 const NAME_LOOKUP_MAX = 50;
+
+const CONVERSATION_ID = /^[CDG][A-Z0-9]{2,}$/;
 
 const SKIPPED_CODES = new Set([
   "channel_not_found",
@@ -79,6 +82,7 @@ export class SlackSource implements TicketSource {
     private pickedChannels: () => readonly SlackChannel[],
     readonly pollIntervalMs: number,
     private now: () => number = Date.now,
+    private configuredMode: () => SlackMode | undefined = () => "token",
   ) {}
 
   /**
@@ -153,16 +157,24 @@ export class SlackSource implements TicketSource {
    * @remarks A 429 anywhere throws RateLimited so the whole poll is dropped and no cursor moves; a
    * conversation Slack refuses to show is skipped for this poll only. While the DM list is refused
    * every stored cursor is kept, so the DMs resume from their cursors once the scope returns. A
-   * group DM also picked as a channel is read once, as the picked channel.
+   * group DM also picked as a channel is read once, as the picked channel. In `mcp` mode, or with no
+   * mode set and no credential, the poll reads nothing and returns no `cursors`, so it never overwrites
+   * the round cursor.
    */
   async fetch(opts?: { cursors?: Record<string, SourceCursor> }): Promise<{
     issues: SourceIssue[];
     items: Item[];
     truncated: boolean;
-    cursors: Record<string, SourceCursor>;
+    cursors?: Record<string, SourceCursor>;
   }> {
+    const none = { issues: [], items: [], truncated: false };
+    const configured = this.configuredMode();
+    if (configured === "mcp") return none;
     const credential = await this.resolveCredential();
-    if (!credential) throw new Error("no Slack credential is available");
+    if (!credential) {
+      if (configured !== "token") return none;
+      throw new Error("no Slack credential is available");
+    }
     const token = credential.token;
     const auth = await slackAuthTest(token);
     if ("rejected" in auth) {
@@ -178,7 +190,11 @@ export class SlackSource implements TicketSource {
     const dms = (listed ?? []).filter((dm) => !picked.has(dm.id));
     const prev: CursorMap = opts?.cursors ?? {};
     const polledAt = new Date(this.now()).toISOString();
-    const next: CursorMap = listed ? {} : { ...prev };
+    const next: CursorMap = listed
+      ? Object.fromEntries(
+          Object.entries(prev).filter(([key]) => !CONVERSATION_ID.test(key)),
+        )
+      : { ...prev };
     for (const target of [...channels, ...dms]) {
       if (prev[target.id]) next[target.id] = prev[target.id];
     }

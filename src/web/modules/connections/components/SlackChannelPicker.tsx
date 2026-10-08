@@ -39,6 +39,8 @@ interface SlackChannelPickerProps {
   addError: SlackSetupFailure | null;
   saveFailed: boolean;
   busy: boolean;
+  onLoadChannels: (() => void) | null;
+  loadingChannels: boolean;
   onToggle: (row: SlackChannelRow) => void;
   onAdd: (input: string) => Promise<boolean>;
   onClearAddError: () => void;
@@ -59,6 +61,8 @@ export function SlackChannelPicker({
   addError,
   saveFailed,
   busy,
+  onLoadChannels,
+  loadingChannels,
   onToggle,
   onAdd,
   onClearAddError,
@@ -91,6 +95,17 @@ export function SlackChannelPicker({
     <div className="flex min-w-0 flex-col gap-2">
       <span className={SECTION_LABEL}>Channels to watch</span>
       {listFailure && <p className={NOTE}>{SLACK_SETUP_COPY[listFailure]}</p>}
+      {onLoadChannels && (
+        <div>
+          <LoadingButton
+            variant="secondary"
+            loading={loadingChannels}
+            onClick={onLoadChannels}
+          >
+            Load channels
+          </LoadingButton>
+        </div>
+      )}
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button

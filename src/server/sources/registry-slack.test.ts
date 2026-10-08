@@ -35,3 +35,20 @@ test("Slack polls every 120000 ms unless sources.slack.pollIntervalMs is set", (
   buildRegistry(config({ enabled: true, pollIntervalMs: 30_000 }));
   assert.equal(getSource("slack")?.pollIntervalMs, 30_000);
 });
+
+test("Slack stays enabled in mcp mode, so the page and nav stay visible", () => {
+  buildRegistry(config({ enabled: true, mode: "mcp" }));
+  assert.equal(isSourceEnabled("slack"), true);
+});
+
+test("the registry passes the configured mode, so an mcp setup polls nothing and a token setup needs a credential", async () => {
+  buildRegistry(config({ enabled: true, mode: "mcp" }));
+  const mcp = await getSource("slack")?.fetch({});
+  assert.deepEqual(mcp?.items, []);
+  assert.equal(mcp && "cursors" in mcp ? mcp.cursors : undefined, undefined);
+  buildRegistry(config({ enabled: true, mode: "token" }));
+  await assert.rejects(
+    async () => getSource("slack")?.fetch({}),
+    /no Slack credential/,
+  );
+});

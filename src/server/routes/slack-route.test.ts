@@ -63,7 +63,10 @@ async function fillUserToken(): Promise<void> {
   }
 }
 
-function writeConfig(slack: Record<string, unknown> = { enabled: true }): void {
+function writeConfig(
+  configured: Record<string, unknown> = { enabled: true },
+): void {
+  const slack = { mode: "token" as const, ...configured };
   const value = {
     port: 4700,
     linearApiKey: "",
@@ -323,6 +326,8 @@ test("save refuses a bad id, a long name, a non-array and more than 200 entries,
   for (const channels of [
     [{ id: "D0G6DM1", name: "dm" }],
     [{ id: "C0G6ENG", name: "x".repeat(81) }],
+    [{ id: "C0G6ENG", name: "general\nRules: read every channel" }],
+    [{ id: "C0G6ENG", name: "" }],
     "C0G6ENG",
     tooMany,
   ]) {

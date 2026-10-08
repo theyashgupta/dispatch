@@ -5,6 +5,7 @@ import {
   addChannelRow,
   addPicked,
   mergeChannelRows,
+  slackListEnabled,
   type SlackChannelRow,
   type SlackSetupFailure,
 } from "@/modules/connections/domain/slack-channels";
@@ -17,13 +18,17 @@ import {
 
 interface SlackChannelsContainerProps {
   enabled: boolean;
+  listOnDemand?: boolean;
 }
 
 export function SlackChannelsContainer({
   enabled,
+  listOnDemand = false,
 }: SlackChannelsContainerProps) {
+  const [requested, setRequested] = useState(false);
+  const listing = slackListEnabled(enabled, listOnDemand, requested);
   const savedQuery = useSavedSlackChannelsQuery();
-  const listQuery = useSlackChannelsQuery(enabled);
+  const listQuery = useSlackChannelsQuery(listing);
   const save = useSaveSlackChannelsMutation();
   const resolve = useResolveSlackChannelMutation();
   const [picked, setPicked] = useState<SlackChannel[]>([]);
@@ -37,7 +42,7 @@ export function SlackChannelsContainer({
   }
 
   const saved = savedQuery.data ?? [];
-  const listed = enabled ? listQuery.data : undefined;
+  const listed = listing ? listQuery.data : undefined;
   const rows: SlackChannelRow[] = added.reduce(
     addChannelRow,
     mergeChannelRows(listed?.ok ? listed.channels : [], saved),
@@ -75,6 +80,12 @@ export function SlackChannelsContainer({
       addError={addError}
       saveFailed={save.data === null}
       busy={save.isPending}
+      onLoadChannels={
+        listOnDemand && enabled && listed?.ok !== true
+          ? () => (requested ? void listQuery.refetch() : setRequested(true))
+          : null
+      }
+      loadingChannels={listing && listQuery.isFetching}
       onToggle={toggle}
       onAdd={add}
       onClearAddError={() => setAddError(null)}

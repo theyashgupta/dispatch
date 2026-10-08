@@ -22,7 +22,7 @@ Scope: this doc exists for what layer 1 cannot express — a route file with zer
 ## Backend: `services/orchestration/`
 
 - [ ] Composes adapters + store writes; steps are idempotent (`docs/standards/backend-design.md` rule on producer/orchestration shape).
-- [ ] Where a flow has genuine compensation (a do step with a matching undo/rollback), it is a saga proper: `start-session.ts`, `resume-session.ts`, `cleanup.ts`. Flows without compensation (`terminal.ts`, `uninstall.ts`, `update.ts`, `playbook-generate.ts`, the timer-driven `granola-round.ts`) still belong here because they compose adapters + store, not because they carry rollback, do not claim "saga" for these in new documentation or comments.
+- [ ] Where a flow has genuine compensation (a do step with a matching undo/rollback), it is a saga proper: `start-session.ts`, `resume-session.ts`, `cleanup.ts`. Flows without compensation (`terminal.ts`, `uninstall.ts`, `update.ts`, `playbook-generate.ts`, the timer-driven `granola-round.ts` and `slack-round.ts`) still belong here because they compose adapters + store, not because they carry rollback, do not claim "saga" for these in new documentation or comments.
 - [ ] Reads and writes the board store through `boardRepository`; a new test replaces it with `fakeBoardRepository` (`docs/standards/backend-design.md`, Tests).
 - [ ] No new second write path to `board.json` or the in-memory snapshot — every mutation still goes through the store's single-writer queue.
 
@@ -146,6 +146,7 @@ Every exception below is a named, narrow allow-rule that survives the error-leve
 - **The `watcher -> ttyd -> store` edge.** Both `watcher` and `ttyd` classify as the general `adapters` element; `adapters -> store` is an already-allowed edge. This is a documented architecture invariant (`docs/ARCHITECTURE.md#preserved-import-edges`), not an unenforced gap — no allow-rule was needed to encode it, and none should be added.
 - **Exception U4-13: the viewer.** `src/web/viewer/` and `src/web/viewer-main.tsx` keep their style constants and their file fetch. One dated block in `eslint.config.ts` (2026-10-01) allows them. Do not flag these.
 - **Record, 2026-10-07 (LOCAL-77).** The exceptions R-05 (the two lib barrels) and R-14 (router transitional imports) are removed with the legacy tree. Route file names follow the lint pattern in `docs/standards/frontend-architecture.md` (Naming).
+- **Slack connector routes (LOCAL-82).** `GET /api/slack/mcp` waits on a cache miss for one `claude mcp list` (up to 60 s). `PUT /api/slack/mcp` waits for the settings apply (up to 5 s for an aborted child). `POST /api/slack/mcp/run` waits for one `claude mcp list` (up to 60 s), because the 409 `not-connected` is the only feedback. In `mcp` mode, `GET /api/slack/channels` and `GET /api/slack/thread/:itemId` wait for one headless claude call with one read tool (up to 90 s), and a 10 minute cache answers repeats. `POST /api/slack/channels/resolve` makes no call. Do not flag these.
 
 ## Comments (all layers)
 

@@ -8,6 +8,8 @@ import type {
   LinearStateMap,
   SlackChannel,
   SlackChannelOption,
+  SlackMcpStatus,
+  SlackMode,
   SourceFilters,
 } from "../../../../shared/types.js";
 import { http, type ApiResult, httpError, payload } from "@/lib/http";
@@ -140,6 +142,7 @@ function slackSetupFailure(error: unknown): SlackSetupFailure {
   if (
     error === "not-a-channel" ||
     error === "disabled" ||
+    error === "not-connected" ||
     error === "rejected"
   ) {
     return error;
@@ -325,4 +328,36 @@ export async function checkCalendarAccess(): Promise<
     await http("/api/calendar/access/check", { method: "POST" }),
     (body) => body as CalendarStatus,
   );
+}
+
+/** Read the Slack connector status: GET /api/slack/mcp. */
+export async function getSlackMcp(): Promise<SlackMcpStatus> {
+  const result = await http<SlackMcpStatus>("/api/slack/mcp");
+  if (!result.ok) throw httpError("getSlackMcp", result);
+  return result.data;
+}
+
+/** Save the Slack mode or the Poll Slack switch: PUT /api/slack/mcp; answers the status after the change. */
+export async function putSlackMcp(patch: {
+  mode?: SlackMode;
+  enabled?: boolean;
+}): Promise<SlackMcpStatus> {
+  const result = await http<SlackMcpStatus>("/api/slack/mcp", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!result.ok) throw httpError("putSlackMcp", result);
+  return result.data;
+}
+
+/**
+ * Run a Slack round now: POST /api/slack/mcp/run.
+ *
+ * @remarks
+ * A 409 (running, disabled or not connected) needs no message of its own, because the status
+ * read that follows shows the round running, the card off or the connector state.
+ */
+export async function runSlackMcp(): Promise<void> {
+  await http("/api/slack/mcp/run", { method: "POST" });
 }
