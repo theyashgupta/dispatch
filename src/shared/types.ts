@@ -232,6 +232,7 @@ export interface Card {
   column: Column;
   /** ISO timestamp; secondary sort key. */
   updatedAt: string;
+  columnSince?: string;
   /** Set when the issue disappeared from Linear while the card was past To Do. */
   goneFromLinear?: boolean;
   /**
@@ -1808,6 +1809,7 @@ export interface BoardCount {
   running: number;
   openGroups: number;
   attention: number;
+  loops: { groupId: string; percent: number }[];
 }
 
 export interface BoardCounts {
@@ -1851,6 +1853,7 @@ export interface LoopPhase {
   gate: "pass" | "fail" | "pending";
   attempts: number;
   passedAt: string | null;
+  retryBudget?: number | null;
 }
 
 export interface LoopUnit {
@@ -2019,4 +2022,17 @@ export interface SessionMeters {
   model: string | null;
   cost: number | null;
   usage: { fiveHourPercent: number | null; sevenDayPercent: number | null };
+}
+
+export interface OrchestrationSummary {
+  concurrencyCap: number | null;
+  runningLoops: number;
+  groups: {
+    cardId: string;
+    groupId: string;
+    cost: number;
+    budget: number | null;
+    budgetSource: "board" | "override";
+    ownerName: string | null;
+  }[];
 }

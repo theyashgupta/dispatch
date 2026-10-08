@@ -111,6 +111,7 @@ and roles only, it does not restate the layering policy.
 | Frontend entry      | `web/main.tsx`, `web/lib/app-store.ts`, `web/lib/query-client.ts`, `web/lib/http.ts`                                                                                                                                                                                                                                                            | The provider stack (QueryClientProvider, ThemeProvider, RouterProvider and the splash), the app store for cross-module UI state, the query client, and the HTTP client that returns 4xx and 5xx responses as typed data.                                                                                             |
 | Frontend routes     | `web/routes/__root.tsx`, `web/routes/board.{-$id}.lazy.tsx`, `web/modules/shell/containers/ShellContainer.tsx`                                                                                                                                                                                                                                  | Hash routes own the URL and its params. The router context gives the query client and the app store to every container. The root route renders the shell view with module views in its slots: the page, the detail panel and the card action dialogs.                                                                |
 | Frontend modules    | `web/modules/board/views/BoardView.tsx`, `web/modules/board/containers/BoardContainer.tsx`, `web/modules/detail/containers/DetailPanelContainer.tsx`, `web/modules/shell/components/AppSidebar.tsx`                                                                                                                                             | One folder per feature under `web/modules/`, with the layers views, containers, components, hooks, domain and queries. A module never imports a sibling module. [frontend-architecture.md](standards/frontend-architecture.md) has the layer rules.                                                                  |
+| Frontend dashboard  | `web/routes/dashboard.{-$id}.lazy.tsx`, `web/modules/dashboard/views/DashboardView.tsx`, `web/modules/dashboard/views/DashboardHeaderView.tsx`, `web/modules/dashboard/containers/use-dashboard-data.ts`                                                                                                                                        | The `/dashboard` page of the selected board. Each section container reads its inputs through `use-dashboard-data.ts` and shows its own loading, error and empty state. The shell page header shows the title and the stale badge.                                                                                    |
 | Frontend shared     | `web/components/ui/button.tsx`, `web/components/ui/hooks/use-app-store.ts`, `web/components/ThemeProvider.tsx`, `web/queries/board-snapshot-queries.ts`                                                                                                                                                                                         | The shadcn primitives and app-wide hooks, the shared components, the queries that two or more modules read (the board snapshot and its SSE stream), and the design tokens in `web/styles/tokens.css`.                                                                                                                |
 
 ## Cross-Module Invariants
@@ -242,9 +243,12 @@ a `workspaceRoot` that equals the current one. `DELETE /api/workspace-folders?bo
 remove the last repository of a board other than `LOCAL`.
 
 **Counts route.** `GET /api/boards/counts` returns
-`{ counts: [{ key, running, openGroups, attention }], at }` for each board, archived boards
+`{ counts: [{ key, running, openGroups, attention, loops }], at }` for each board, archived boards
 included. `running` counts the cards that show the Live session chip. `openGroups` counts the group
-cards that are not in Done. `attention` counts the cards in Needs input.
+cards that are not in Done. `attention` is the length of the attention queue of the board, built by
+`buildAttentionQueue` in `src/shared/attention-queue.ts` from the cards and the open decisions of
+that board. `loops` lists `{ groupId, percent }` for each group card of the board whose loop
+progress is `running`, sorted by `groupId`.
 
 **List routes.** `GET /api/cards?board=&column=&source=&hasSession=` returns `{ cards, total }`
 with the snapshot redaction. `GET /api/sessions?board=&live=` returns `{ sessions }`, and each
@@ -5138,6 +5142,25 @@ records `decision_answered`. `orchestrator-wait.ts` answers `wait_for_event` fro
 then listens to the store `orchestration` event until a match or the time limit, which is 1 to
 540 seconds. A `tool_call` row never ends a wait unless `kinds` names it, because every call,
 the wait call included, writes one. An aborted request ends the wait and leaves no listener.
+
+**Dashboard reads.** Two user routes serve the dashboard. Both take a board key and answer 400
+`invalid-board` for a bad key and 404 `unknown-board` for a key with no board or an archived
+board. `GET /api/boards/:key/orchestration` returns
+`{ concurrencyCap, runningLoops, groups }`. A group is
+`{ cardId, groupId, cost, budget, budgetSource, ownerName }` for each group card outside Done that
+has loop progress or a session. `groupId` is the identifier of the card. `cost` is `groupCost`.
+`budget` is `budgetPerGroup` of the board policy narrowed by the override of the owner orchestrator of the group (the rule of the supervisor budget stop), or null. A
+lower override sets `budgetSource` to `override` and `ownerName` to the name of the owner; a higher
+override is ignored, and then `budgetSource` is `board` and `ownerName` is null. `GET /api/boards/:key/orchestration/events?since=&limit=` returns `{ events }`.
+`limit` is 1 to 1000 and defaults to 200. Without `since`, the answer is the newest `limit` events,
+newest first. With `since`, the answer is the events after that id, oldest first. A bad `limit`
+answers 400 `invalid-limit` and a bad `since` answers 400 `invalid-since`.
+
+**Orchestration frame.** On every store `orchestration` event, `routes/sse.route.ts` writes
+`event: orchestration` with the data `{"boardKey":"<key>","lastEventId":<id>}`. Only the clients
+whose window board equals the event board get the frame. The frame holds no event data. The browser
+reacts with an invalidation of the query prefix `["orchestration", boardKey]` and then reads the
+routes above.
 
 **Ship flow.** `ship-flow.ts` runs the D-8 steps for the branches of a finished group in stack
 order. The branch states are `queued`, `merging_main`, `checking`, `pushing`, `waiting_checks`,

@@ -5,7 +5,7 @@ import path from "node:path";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { issue } from "../../test-support/fake-source.js";
 import { parseBoardKey } from "../../../shared/board-key.js";
-import type { BoardKey, Card } from "../../../shared/types.js";
+import type { BoardKey, Card, LoopProgress } from "../../../shared/types.js";
 
 const env = isolateEnv();
 const { store } = await import("../../store/board.store.js");
@@ -359,4 +359,113 @@ test("updateBoard LOCAL writes only the workspace folders that differ", async ()
     add.mock.restore();
     remove.mock.restore();
   }
+});
+
+const RUNNING_LOOP = {
+  slug: "loop",
+  roadmapFile: "units.md",
+  units: [],
+  engine: null,
+  completion: "running",
+  summary: {
+    unitsDone: 0,
+    unitsTotal: 2,
+    currentUnit: 1,
+    currentPhase: null,
+    lastGate: null,
+  },
+  warnings: [],
+  readAt: "2026-10-06T00:00:00.000Z",
+} satisfies LoopProgress;
+
+async function startedOn(board: BoardKey, title: string): Promise<Card> {
+  const card = await store.createLocalCard(board, title, "");
+  await store.completeStart(card.id, undefined, {
+    workspacePath: path.join(env.root, "ws", card.id),
+    branch: card.id,
+    tmuxSession: `dsp-${card.id}`,
+  });
+  return store.getCard(card.id) as Card;
+}
+
+test("boardCounts sets attention to the queue length of each board, a hand-moved Needs Input card included", async () => {
+  const a = key("CNTA");
+  const b = key("CNTB");
+  for (const k of [a, b]) {
+    await createBoard(input({ key: k, name: k }), countingReader([]));
+  }
+  const waiting = await startedOn(a, "waiting");
+  await store.setSessionStateIfSession(
+    waiting.id,
+    waiting.activeSessionId as string,
+    "needs_input",
+  );
+  const manual = await store.createLocalCard(b, "moved by hand", "");
+  await store.moveCardManual(manual.id, "needs_input");
+  const find = (k: BoardKey) =>
+    boardCounts().counts.find((count) => count.key === k);
+  assert.equal(find(a)?.attention, 1);
+  assert.equal(find(b)?.attention, 1);
+});
+
+test("boardCounts counts a Needs Input group once, not once per mirrored member", async () => {
+  const board = key("CNTG");
+  await createBoard(input({ key: board, name: board }), countingReader([]));
+  const m1 = await store.createLocalCard(board, "m1", "");
+  const m2 = await store.createLocalCard(board, "m2", "");
+  const group = await store.createGroupCard(board, "group", [m1.id, m2.id]);
+  assert.ok(group.ok);
+  if (!group.ok) return;
+  await store.moveCardManual(group.card.id, "needs_input");
+  assert.equal(store.getCard(m1.id)?.column, "needs_input");
+  assert.equal(
+    boardCounts().counts.find((count) => count.key === board)?.attention,
+    1,
+  );
+});
+
+test("boardCounts lists the running loops of a board, sorted by group id", async () => {
+  const board = key("CNTL");
+  await createBoard(input({ key: "CNTL", name: "Loops" }), countingReader([]));
+  const members = async (title: string) =>
+    (await store.createLocalCard(board, title, "")).id;
+  const running = await store.createGroupCard(board, "running", [
+    await members("r1"),
+    await members("r2"),
+  ]);
+  const idle = await store.createGroupCard(board, "idle", [
+    await members("i1"),
+    await members("i2"),
+  ]);
+  const second = await store.createGroupCard(board, "second", [
+    await members("s1"),
+    await members("s2"),
+  ]);
+  assert.ok(running.ok && idle.ok && second.ok);
+  if (!running.ok || !idle.ok || !second.ok) return;
+  await store.setLoopProgress(second.card.id, RUNNING_LOOP);
+  await store.setLoopProgress(running.card.id, RUNNING_LOOP);
+  await store.setLoopProgress(idle.card.id, {
+    ...RUNNING_LOOP,
+    completion: "complete",
+  });
+  const count = boardCounts().counts.find((c) => c.key === board);
+  assert.deepEqual(
+    count?.loops,
+    [running.card.identifier, second.card.identifier]
+      .sort((x, y) => x.localeCompare(y))
+      .map((groupId) => ({ groupId, percent: 0 })),
+  );
+  assert.deepEqual(
+    boardCounts().counts.find((c) => c.key === "CNTA")?.loops,
+    [],
+  );
+});
+
+test("boardCounts keeps an archived board with empty attention and loops", async () => {
+  await createBoard(input({ key: "CNTX", name: "Gone" }), countingReader([]));
+  await archiveBoard(key("CNTX"));
+  const count = boardCounts().counts.find((c) => c.key === "CNTX");
+  assert.equal(count?.attention, 0);
+  assert.deepEqual(count?.loops, []);
 });

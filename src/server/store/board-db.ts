@@ -140,6 +140,10 @@ export interface BoardDb {
     sinceId: number,
     limit: number,
   ): OrchestrationEvent[];
+  listLatestOrchestrationEvents(
+    board: BoardKey,
+    limit: number,
+  ): OrchestrationEvent[];
   /** Revoke every live token of one orchestrator, then store the new token hash as its only live token. */
   replaceOrchestratorToken(row: Omit<OrchestratorTokenRow, "revokedAt">): void;
   /** Revoke every live token of one orchestrator and return how many were revoked. */
@@ -292,6 +296,18 @@ function parseEventData(raw: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function toOrchestrationEvent(r: OrchestrationEventRow): OrchestrationEvent {
+  return {
+    id: r.id,
+    boardKey: r.board_key as BoardKey,
+    cardId: r.card_id,
+    sessionId: r.session_id,
+    kind: r.kind as OrchestrationEvent["kind"],
+    data: parseEventData(r.data),
+    ts: r.ts,
+  };
 }
 
 interface BoardRow {
@@ -941,6 +957,10 @@ export function openBoardDb(): BoardDb {
     `SELECT id, board_key, card_id, session_id, kind, data, ts
        FROM orchestration_events WHERE board_key = ? AND id > ? ORDER BY id ASC LIMIT ?`,
   );
+  const selectLatestOrchestrationEvents = db.prepare(
+    `SELECT id, board_key, card_id, session_id, kind, data, ts
+       FROM orchestration_events WHERE board_key = ? ORDER BY id DESC LIMIT ?`,
+  );
   const insertOrchestratorToken = db.prepare(
     `INSERT INTO orchestrator_tokens (token_hash, board_key, orchestrator_id, created_at, revoked_at)
      VALUES (@tokenHash, @boardKey, @orchestratorId, @createdAt, NULL)`,
@@ -1172,20 +1192,21 @@ export function openBoardDb(): BoardDb {
       return Number(info.lastInsertRowid);
     },
     listOrchestrationEvents(board, sinceId, limit) {
-      const rows = selectOrchestrationEvents.all(
-        board,
-        sinceId,
-        limit,
-      ) as unknown as OrchestrationEventRow[];
-      return rows.map((r) => ({
-        id: r.id,
-        boardKey: r.board_key as BoardKey,
-        cardId: r.card_id,
-        sessionId: r.session_id,
-        kind: r.kind as OrchestrationEvent["kind"],
-        data: parseEventData(r.data),
-        ts: r.ts,
-      }));
+      return (
+        selectOrchestrationEvents.all(
+          board,
+          sinceId,
+          limit,
+        ) as unknown as OrchestrationEventRow[]
+      ).map(toOrchestrationEvent);
+    },
+    listLatestOrchestrationEvents(board, limit) {
+      return (
+        selectLatestOrchestrationEvents.all(
+          board,
+          limit,
+        ) as unknown as OrchestrationEventRow[]
+      ).map(toOrchestrationEvent);
     },
     replaceOrchestratorToken(row) {
       withTxn(db, () => {

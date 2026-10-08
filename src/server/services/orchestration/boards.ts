@@ -6,6 +6,8 @@ import {
   isReservedBoardKey,
   parseBoardKey,
 } from "../../../shared/board-key.js";
+import { buildAttentionQueue } from "../../../shared/attention-queue.js";
+import { loopView } from "../../../shared/loop-view.js";
 import type {
   Board,
   BoardCount,
@@ -104,6 +106,13 @@ export function resolveBoard(key: BoardKey | undefined): Board {
   const board = store.getBoard(key ?? DEFAULT_BOARD_KEY);
   if (!board) throw new BoardNotFoundError("unknown-board");
   return structuredClone(board);
+}
+
+/** Resolve a board that is not archived; an archived board throws the same 404 as an unknown one. */
+export function resolveOpenBoard(key: BoardKey): Board {
+  const board = resolveBoard(key);
+  if (board.archived) throw new BoardNotFoundError("unknown-board");
+  return board;
 }
 
 /** The policy an orchestrator works under: its board policy narrowed by its own override. */
@@ -248,26 +257,56 @@ export function listBoardSessions(
     );
 }
 
-/** The counts of every board, from a single pass over the cards of all boards. */
+/**
+ * The counts of every board, from a single pass over the cards of all boards.
+ *
+ * @remarks `attention` is the length of the attention queue of the board. `loops` lists the group cards whose loop runs.
+ */
 export function boardCounts(): BoardCounts {
+  const now = new Date();
   const byKey = new Map<BoardKey, BoardCount>(
-    store
-      .listBoards()
-      .map((board) => [
-        board.key,
-        { key: board.key, running: 0, openGroups: 0, attention: 0 },
-      ]),
+    store.listBoards().map((board) => [
+      board.key,
+      {
+        key: board.key,
+        running: 0,
+        openGroups: 0,
+        attention: 0,
+        loops: [],
+      },
+    ]),
   );
+  const cardsByKey = new Map<BoardKey, Card[]>();
   for (const card of store.listCards(ALL_BOARDS)) {
-    const count = byKey.get(card.boardKey ?? DEFAULT_BOARD_KEY);
+    const key = card.boardKey ?? DEFAULT_BOARD_KEY;
+    const count = byKey.get(key);
     if (!count) continue;
+    const list = cardsByKey.get(key);
+    if (list === undefined) cardsByKey.set(key, [card]);
+    else list.push(card);
     if (isLiveSessionCard(card)) count.running += 1;
     if (card.source === "group" && card.column !== "done") {
       count.openGroups += 1;
     }
-    if (card.column === "needs_input") count.attention += 1;
+    if (card.loopProgress?.completion === "running") {
+      count.loops.push({
+        groupId: card.identifier,
+        percent: loopView(card.loopProgress, {}).percent,
+      });
+    }
   }
-  return { counts: [...byKey.values()], at: new Date().toISOString() };
+  for (const count of byKey.values()) {
+    count.loops.sort((a, b) =>
+      a.groupId.localeCompare(b.groupId, undefined, { numeric: true }),
+    );
+    count.attention = buildAttentionQueue({
+      boardKey: count.key,
+      cards: cardsByKey.get(count.key) ?? [],
+      decisions: store.listDecisionItems(count.key, "open"),
+      now,
+    }).length;
+  }
+  return { counts: [...byKey.values()], at: now.toISOString() };
 }
 
 /**

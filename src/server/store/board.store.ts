@@ -1603,6 +1603,14 @@ class BoardStore extends EventEmitter {
     return this.db.listOrchestrationEvents(board, sinceId, limit);
   }
 
+  /** The newest `limit` orchestration events of one board, newest first. */
+  listLatestOrchestrationEvents(
+    board: BoardKey,
+    limit: number,
+  ): OrchestrationEvent[] {
+    return this.db.listLatestOrchestrationEvents(board, limit);
+  }
+
   /** Store a token hash as the only live token of one orchestrator, revoking any earlier one. */
   replaceOrchestratorToken(
     tokenHash: string,
@@ -3123,6 +3131,7 @@ class BoardStore extends EventEmitter {
       const consumed = MARKER_CONSUMED_SOURCES.includes(from);
       if (!consumed) {
         c.column = column;
+        if (from !== column) c.columnSince = new Date().toISOString();
         this.mirrorMemberColumn(c, column);
         c.statusReason = statusReason;
       }
@@ -3245,6 +3254,7 @@ class BoardStore extends EventEmitter {
       moved = true;
       const target = "in_progress";
       c.column = target;
+      c.columnSince = new Date().toISOString();
       this.mirrorMemberColumn(c, target);
       c.statusReason = undefined;
       if (FLIP_BACK_CLEARS_LAST_MARKER.includes(from)) {
@@ -3475,6 +3485,7 @@ class BoardStore extends EventEmitter {
         .filter((card): card is Card => card != null)
         .map((card) => ({ card, fromCol: card.column }));
       c.column = column;
+      if (from !== column) c.columnSince = new Date().toISOString();
       this.mirrorMemberColumn(c, column);
       changes = moved
         .filter(({ card, fromCol }) => card.column !== fromCol)

@@ -167,6 +167,7 @@ void test(
     for (const text of ["", "   ", "! rm", "/clear", "#note", "&x", "@file"]) {
       await refused(s, route, { text }, 400, "invalid-text");
     }
+    await refused(s, route, { text: "x", extra: 1 }, 400, "unknown-field");
     assert.deepEqual(s.userTexts(), []);
   },
 );

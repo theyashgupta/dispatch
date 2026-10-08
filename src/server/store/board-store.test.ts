@@ -472,6 +472,64 @@ void test("flipBack from parked lands in in_progress and keeps the consumed mark
   );
 });
 
+void test("applyMarker stamps columnSince on a column change and leaves it on a consumed or deduped marker", async () => {
+  const { store, cardId, sessionId } =
+    await parkedCardWithSession("since-marker");
+  const parkedSince = store.getCard(cardId)?.columnSince;
+  await store.applyMarker(
+    cardId,
+    sessionId,
+    "agent_done",
+    undefined,
+    "DONE|since",
+    "status_agent_done",
+  );
+  assert.equal(store.getCard(cardId)?.columnSince, parkedSince, "consumed");
+  assert.equal(await store.flipBack(cardId, sessionId), true);
+  const started = Date.now();
+  await store.applyMarker(
+    cardId,
+    sessionId,
+    "needs_input",
+    "which?",
+    "NEEDS_INPUT|since",
+    "status_needs_input",
+  );
+  const stamped = store.getCard(cardId)?.columnSince;
+  assert.equal(store.getCard(cardId)?.column, "needs_input");
+  assert.ok(Date.parse(stamped!) >= started);
+  await store.applyMarker(
+    cardId,
+    sessionId,
+    "needs_input",
+    "which?",
+    "NEEDS_INPUT|since",
+    "status_needs_input",
+  );
+  assert.equal(store.getCard(cardId)?.columnSince, stamped, "deduped");
+});
+
+void test("flipBack stamps columnSince", async () => {
+  const { store, cardId, sessionId } =
+    await parkedCardWithSession("since-flip");
+  const started = Date.now();
+  assert.equal(await store.flipBack(cardId, sessionId), true);
+  const stamped = store.getCard(cardId)?.columnSince;
+  assert.ok(Date.parse(stamped!) >= started);
+});
+
+void test("moveCardManual stamps columnSince only when the column changes", async () => {
+  const { store, cardId } = await parkedCardWithSession("since-manual");
+  const parkedSince = store.getCard(cardId)?.columnSince;
+  const started = Date.now();
+  await store.moveCardManual(cardId, "done");
+  const stamped = store.getCard(cardId)?.columnSince;
+  assert.ok(Date.parse(stamped!) >= started);
+  await store.moveCardManual(cardId, "done");
+  assert.equal(store.getCard(cardId)?.columnSince, stamped, "no-op move");
+  assert.ok(parkedSince !== undefined);
+});
+
 void test("parked to done stamps every session's cleanup schedule and done to parked clears it", async () => {
   const { store, cardId } = await parkedCardWithSession("parked-cleanup");
   await store.moveCardManual(cardId, "done");

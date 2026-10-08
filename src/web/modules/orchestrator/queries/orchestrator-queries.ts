@@ -11,6 +11,7 @@ import type {
   BoardPolicy,
   OrchestratorPolicyOverride,
 } from "../../../../shared/types.js";
+import { openDecisionsQueryOptions } from "@/queries/attention-actions-queries";
 import {
   boardListKeys,
   boardListQueryOptions,
@@ -19,16 +20,12 @@ import type { ScopeStep } from "@/modules/orchestrator/domain/ownership";
 import type { ControlKind } from "@/modules/orchestrator/domain/panel-model";
 import {
   addExtraOrchestrator,
-  answerDecision,
   ensureOrchestratorTerminal,
-  getOpenDecisions,
   getOrchestrators,
   patchScopes,
-  resumeLoop,
   runLifecycle,
   saveBoardPolicy,
   saveOverrides,
-  sendLoopInput,
   startMain,
   type ExtraInput,
 } from "./orchestrator-api.js";
@@ -37,8 +34,6 @@ export const PANEL_POLL_MS = 3000;
 
 export const orchestratorKeys = {
   panel: (board: BoardKey) => ["orchestrators", "panel", board] as const,
-  decisions: (board: BoardKey) =>
-    ["orchestrators", "decisions", board] as const,
 };
 
 /**
@@ -127,72 +122,22 @@ export function useEnsureOrchestratorTerminalMutation() {
 }
 
 /**
- * Read the open decision items of a board, refetching every 3 s while the panel is open.
+ * Build the open decisions query options of the open panel: the shared decisions query, refetched every 3 s.
  *
  * @remarks
- * A decision item arrives from an orchestrator tool call and no stream event carries it, so the poll is the live feed, as for the panel records.
+ * A decision item arrives from an orchestrator tool call and no stream event carries it, so the poll is the live feed, as for the panel records. The key is the shared one, so the dashboard and the panel hold one cache entry.
  */
-export function openDecisionsQueryOptions(board: BoardKey) {
+export function panelDecisionsQueryOptions(board: BoardKey) {
   return queryOptions({
-    queryKey: orchestratorKeys.decisions(board),
-    queryFn: () => getOpenDecisions(board),
+    ...openDecisionsQueryOptions(board),
     staleTime: 0,
     refetchInterval: PANEL_POLL_MS,
   });
 }
 
 /** Read the open decision items of the board of the open panel. */
-export function useOpenDecisionsQuery(board: BoardKey) {
-  return useQuery(openDecisionsQueryOptions(board));
-}
-
-export interface AnswerVariables {
-  id: string;
-  optionId: string;
-  note: string | null;
-}
-
-/** Build the mutation options of a decision answer, which refreshes the open decisions after it settles. */
-export function answerMutationOptions(
-  queryClient: QueryClient,
-  board: BoardKey,
-) {
-  return {
-    mutationFn: (vars: AnswerVariables) =>
-      answerDecision(vars.id, vars.optionId, vars.note),
-    onSettled: () =>
-      queryClient.invalidateQueries({
-        queryKey: orchestratorKeys.decisions(board),
-      }),
-  };
-}
-
-/** Answer a decision item with an option and an optional typed note. */
-export function useAnswerDecisionMutation(board: BoardKey) {
-  return useMutation(answerMutationOptions(useQueryClient(), board));
-}
-
-/** Build the mutation options of the inline reply to a loop. */
-export function replyMutationOptions() {
-  return {
-    mutationFn: (vars: { cardId: string; text: string }) =>
-      sendLoopInput(vars.cardId, vars.text),
-  };
-}
-
-/** Type a reply into a loop session as the user. */
-export function useLoopReplyMutation() {
-  return useMutation(replyMutationOptions());
-}
-
-/** Build the mutation options of "Resume loop". */
-export function resumeLoopMutationOptions() {
-  return { mutationFn: (cardId: string) => resumeLoop(cardId) };
-}
-
-/** Resume a stopped loop as the user. */
-export function useResumeLoopMutation() {
-  return useMutation(resumeLoopMutationOptions());
+export function usePanelDecisionsQuery(board: BoardKey) {
+  return useQuery(panelDecisionsQueryOptions(board));
 }
 
 /**

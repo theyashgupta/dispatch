@@ -466,3 +466,15 @@ Static sketches of the populated state of each screen. Each sketch is one HTML f
 | Screen 3: Orchestrator panel         | [orchestrator-panel.html](../research/sketches/orchestrator-panel.html)       | [orchestrator-panel-1440-light.png](../research/sketches/screenshots/orchestrator-panel-1440-light.png)       | [orchestrator-panel-1440-dark.png](../research/sketches/screenshots/orchestrator-panel-1440-dark.png)       | [orchestrator-panel-390-light.png](../research/sketches/screenshots/orchestrator-panel-390-light.png)       | [orchestrator-panel-390-dark.png](../research/sketches/screenshots/orchestrator-panel-390-dark.png)       |
 | Screen 4: Dashboard                  | [dashboard.html](../research/sketches/dashboard.html)                         | [dashboard-1440-light.png](../research/sketches/screenshots/dashboard-1440-light.png)                         | [dashboard-1440-dark.png](../research/sketches/screenshots/dashboard-1440-dark.png)                         | [dashboard-390-light.png](../research/sketches/screenshots/dashboard-390-light.png)                         | [dashboard-390-dark.png](../research/sketches/screenshots/dashboard-390-dark.png)                         |
 | Screen 5: Board with no orchestrator | [board-no-orchestrator.html](../research/sketches/board-no-orchestrator.html) | [board-no-orchestrator-1440-light.png](../research/sketches/screenshots/board-no-orchestrator-1440-light.png) | [board-no-orchestrator-1440-dark.png](../research/sketches/screenshots/board-no-orchestrator-1440-dark.png) | [board-no-orchestrator-390-light.png](../research/sketches/screenshots/board-no-orchestrator-390-light.png) | [board-no-orchestrator-390-dark.png](../research/sketches/screenshots/board-no-orchestrator-390-dark.png) |
+
+## Changes
+
+### 2026-10-07 (LOCAL-92)
+
+This entry adds to the screens above. It does not change the text of an earlier section.
+
+- **Screen 4, Section 2 (R-12).** Each row gains two neutral badges after the state badge. "Session <time>" shows the age of the active session. The time-left badge shows "About <time> left", "At least <time> left" when a later unit has no PRD, or "Estimate after 2 gates" when fewer than two gates passed.
+- **Screen 4, Section 2 label (U1-11).** A loop with all units shipped shows "<n> of <n> units shipped". A loop between units shows "<done> of <total> units built, unit <n> not started".
+- **Screen 4, Section 3 (U1-10).** The section gains a collapsible "Show cards" list. A group select and a column select filter the list.
+- **Screen 4, Section 4 (U1-09).** The section gains an actor select with the options All, Orchestrator, Supervisor and You, and a group select.
+- **Screen 1 (R-16).** The boards table gains a "Loops" column after "Attention". Each running loop shows "<group id> <percent>%". The cell shows at most three loops, then "+<n> more". A board with no running loop shows "0". From 768 px to 1279 px, the cell shows only the number of running loops, as the Repositories cell shows a count (U1-30). Below 768 px, each board item gains one more badge line with the same text.

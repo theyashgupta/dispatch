@@ -1,3 +1,4 @@
+import { STALE_MINUTES } from "../../../shared/orchestrator-limits.js";
 import type { LoopProgress, SupervisorState } from "../../../shared/types.js";
 import { parseLimitSurface, type LimitSurface } from "./limit-surface.js";
 
@@ -40,7 +41,7 @@ interface Dialog {
 
 const IDLE_SAMPLE_MS = 60_000;
 const IDLE_SAMPLES = 3;
-const STALE_MS = 15 * 60_000;
+const STALE_MS = STALE_MINUTES * 60_000;
 const EVIDENCE_MAX = 160;
 
 const INPUT_LINE = /^\s*❯(?!\s*\d+\.)(?!\s*Deny\b)/;

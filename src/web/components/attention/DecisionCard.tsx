@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/card";
 import { Field } from "@/components/ui/field";
 import { Textarea } from "@/components/ui/textarea";
-import type { DecisionView } from "@/modules/orchestrator/domain/decision-view";
+import type { DecisionView } from "../../../shared/decision-view.js";
 
 interface DecisionCardProps {
   view: DecisionView;
@@ -27,7 +27,7 @@ export function DecisionCard({ view, disabled, onAnswer }: DecisionCardProps) {
     if (await onAnswer(view.otherOptionId, typed)) setText("");
   }
   return (
-    <Card className="gap-(--space-md) py-(--space-lg)">
+    <Card className="gap-(--space-md) py-(--space-lg) wrap-anywhere">
       <CardHeader className="gap-(--space-xs)">
         <CardTitle className="text-base font-semibold">
           {view.question}

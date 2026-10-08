@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useRouteContext } from "@tanstack/react-router";
+import {
+  useNavigate,
+  useRouteContext,
+  useSearch,
+} from "@tanstack/react-router";
 import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { OrchestratorPanel } from "@/modules/orchestrator/components/OrchestratorPanel";
 import { PanelAlertBar } from "@/modules/orchestrator/components/PanelAlertBar";
@@ -22,7 +26,6 @@ import {
   staleBadgeText,
   type ControlKind,
 } from "@/modules/orchestrator/domain/panel-model";
-import { sessionStateLabel } from "@/modules/orchestrator/domain/session-state-label";
 import { focusEntryButton } from "@/modules/orchestrator/hooks/focus-entry";
 import {
   useBoardRecordQuery,
@@ -45,7 +48,8 @@ export function OrchestratorPanelContainer() {
   const lifecycle = useLifecycleMutation(boardKey);
   const { mutateAsync: ensureTerminal } =
     useEnsureOrchestratorTerminalMutation();
-  const [tab, setTab] = useState<PanelTab>("terminal");
+  const linkedTab = useSearch({ from: "/board/{-$id}" }).tab;
+  const [tab, setTab] = useState<PanelTab>(linkedTab ?? "terminal");
   const [failure, setFailure] = useState<{
     kind: ControlKind;
     reason: string;
@@ -94,7 +98,7 @@ export function OrchestratorPanelContainer() {
   function close() {
     void navigate({
       to: "/board/{-$id}",
-      search: (prev) => ({ ...prev, panel: undefined }),
+      search: (prev) => ({ ...prev, panel: undefined, tab: undefined }),
     });
     focusEntryButton();
   }
@@ -133,7 +137,7 @@ export function OrchestratorPanelContainer() {
       header={
         <PanelHeader
           boardName={record?.name ?? boardKey}
-          state={sessionStateLabel(model.stateKey)}
+          state={model.stateKey}
           transition={model.transition}
           staleBadge={staleBadge}
           loading={loading}
@@ -148,7 +152,11 @@ export function OrchestratorPanelContainer() {
         />
       }
       stoppedLoops={
-        <StoppedLoopsContainer loops={decisions.loops} stale={stale} />
+        <StoppedLoopsContainer
+          board={boardKey}
+          loops={decisions.loops}
+          stale={stale}
+        />
       }
       alert={
         alertMessage === null ? null : (

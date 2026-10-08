@@ -73,13 +73,15 @@ export function buildCommands(
     },
   ];
   const general: Command[] = [
-    ...[...navItems, { page: "settings" as const, label: "Settings" }].map(
-      (item) => ({
-        id: `go:${item.page}`,
-        label: `Go to ${item.label}`,
-        run: () => ctx.navigate(item.page),
-      }),
-    ),
+    ...[
+      ...navItems.filter((item) => item.page !== "dashboard"),
+      { page: "settings" as const, label: "Settings" },
+      { page: "dashboard" as const, label: "Dashboard" },
+    ].map((item) => ({
+      id: `go:${item.page}`,
+      label: `Go to ${item.label}`,
+      run: () => ctx.navigate(item.page),
+    })),
     { id: "new-ticket", label: "New ticket", key: "n", run: ctx.newTicket },
     {
       id: "meeting-notes",

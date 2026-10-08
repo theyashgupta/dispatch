@@ -5,18 +5,19 @@ import { DecisionsList } from "@/modules/orchestrator/components/DecisionsList";
 import {
   liveReplyResults,
   replyKey,
-  type AttentionRow,
   type DecisionView,
   type StoredReply,
-} from "@/modules/orchestrator/domain/decision-view";
+} from "../../../../shared/decision-view.js";
+import type { AttentionRow } from "@/modules/orchestrator/domain/decision-view";
 import {
   actionErrorCopy,
+  refusalReason,
   STALE_REASON,
 } from "@/modules/orchestrator/domain/panel-model";
 import {
   useAnswerDecisionMutation,
   useLoopReplyMutation,
-} from "@/modules/orchestrator/queries/orchestrator-queries";
+} from "@/queries/attention-actions-queries";
 import type { BoardKey } from "../../../../shared/types.js";
 
 interface DecisionsContainerProps {
@@ -36,7 +37,7 @@ export function DecisionsContainer({
 }: DecisionsContainerProps) {
   const { appStore } = useRouteContext({ from: "__root__" });
   const answer = useAnswerDecisionMutation(board);
-  const reply = useLoopReplyMutation();
+  const reply = useLoopReplyMutation(board);
   const [results, setResults] = useState<Record<string, StoredReply>>({});
 
   async function onAnswer(
@@ -46,12 +47,18 @@ export function DecisionsContainer({
   ): Promise<boolean> {
     const result = await answer.mutateAsync({ id, optionId, note });
     if (!result.ok) {
-      toast.error(actionErrorCopy("Decision answer", result.reason), {
-        action: {
-          label: "Try again",
-          onClick: () => void onAnswer(id, optionId, note),
+      toast.error(
+        actionErrorCopy(
+          "Decision answer",
+          refusalReason(result.error, result.reason),
+        ),
+        {
+          action: {
+            label: "Try again",
+            onClick: () => void onAnswer(id, optionId, note),
+          },
         },
-      });
+      );
     }
     return result.ok;
   }
@@ -63,18 +70,24 @@ export function DecisionsContainer({
     );
     const result = await reply.mutateAsync({ cardId, text });
     if (!result.ok) {
-      toast.error(actionErrorCopy("Reply", result.reason), {
-        action: {
-          label: "Try again",
-          onClick: () => void onReply(cardId, text),
+      toast.error(
+        actionErrorCopy("Reply", refusalReason(result.error, result.reason)),
+        {
+          action: {
+            label: "Try again",
+            onClick: () => void onReply(cardId, text),
+          },
         },
-      });
+      );
       return false;
     }
     if (row !== undefined) {
       setResults((prev) => ({
         ...prev,
-        [cardId]: { result: result.result, key: replyKey(row) },
+        [cardId]: {
+          result: result.result ?? "unconfirmed",
+          key: replyKey(row),
+        },
       }));
     }
     return result.result === "confirmed";

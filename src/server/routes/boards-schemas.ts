@@ -9,7 +9,7 @@ import { TEAM_KEY_RE } from "../../shared/orchestrator-limits.js";
 import type { BoardKey } from "../../shared/types.js";
 import { hasControlByte } from "../services/domain/claude-launch.js";
 import { BoardValidationError } from "../services/domain/errors.js";
-import { fieldsOf } from "./schema-primitives.js";
+import { fieldsOf, intText } from "./schema-primitives.js";
 
 const INVALID_BOARD = "invalid-board";
 const CHECK_COMMAND_MAX = 500;
@@ -177,3 +177,10 @@ export function parseBoardKeyParam(raw: unknown): BoardKey {
   if (!parsed.success) throw new BoardValidationError(INVALID_BOARD);
   return parsed.data;
 }
+
+export const orchestrationEventsQuerySchema = z.object({
+  since: intText("invalid-since").optional(),
+  limit: intText("invalid-limit")
+    .refine((n) => n >= 1 && n <= 1000, "invalid-limit")
+    .default(200),
+});

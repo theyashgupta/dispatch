@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/item";
 import type { BoardRow } from "@/modules/boards/domain/board-rows";
 import { BoardCountBadge } from "./BoardCountBadge";
+import { BoardLoopsBadge } from "./BoardLoopsBadge";
 import { BoardNameMarks } from "./BoardNameMarks";
 import { BoardRowMenu } from "./BoardRowMenu";
 
@@ -60,6 +61,9 @@ export function BoardsList({
                 kind="attention"
                 count={row.counts?.attention ?? null}
               />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <BoardLoopsBadge loops={row.counts?.loops ?? null} />
             </div>
           </ItemContent>
           <ItemActions>

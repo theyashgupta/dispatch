@@ -17,11 +17,12 @@ test("a global page keeps its title when a board name is given", () => {
   assert.equal(boardPageTitle("vault", "Vault", "Acme"), "Vault");
 });
 
-test("BOARD_PAGES holds exactly the ten board pages", () => {
+test("BOARD_PAGES holds exactly the eleven board pages", () => {
   assert.deepEqual([...BOARD_PAGES].sort(), [
     "activity",
     "archive",
     "board",
+    "dashboard",
     "flow",
     "inbox",
     "sessions",
