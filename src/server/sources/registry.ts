@@ -97,6 +97,8 @@ export function buildRegistry(config: Config): void {
     () => (resolvers.get("slack") ?? noCredential)(),
     () => config.sources?.slack?.channels ?? [],
     slackPollMs,
+    Date.now,
+    () => config.sources?.slack?.mode,
   );
   sources.set(slack.id, slack);
   if (config.sources?.slack?.enabled === true) enabled.add(slack.id);

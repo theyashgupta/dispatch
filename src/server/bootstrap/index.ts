@@ -51,6 +51,10 @@ import {
   startGranolaRound,
   stopGranolaRound,
 } from "../services/orchestration/granola-round.js";
+import {
+  startSlackRound,
+  stopSlackRound,
+} from "../services/orchestration/slack-round.js";
 import { sendPushForCard } from "../services/orchestration/push-send.js";
 import { startArtifactDetectionLoop } from "../adapters/artifact-detect.js";
 import {
@@ -251,7 +255,7 @@ let stopSupervisorPass: (() => void) | undefined;
  * The FIRST `process.on("SIGINT"/"SIGTERM", ...)` handler in this codebase — every other
  * subprocess (ttyd, tmux, git) is either deliberately detached-to-survive or short-lived-and-
  * awaited, so nothing else needed a "clean up before I die" hook until cloudflared. Scoped
- * NARROWLY to `disableTunnel()` (kills cloudflared + clears the token) and a running Granola round,
+ * NARROWLY to `disableTunnel()` (kills cloudflared + clears the token) and a running Granola or Slack round,
  * which exit waits for (at most 6 s) so its claude child is gone first; it does NOT tear down
  * ttyd/tmux sessions, which intentionally survive a backend restart.
  * @remarks T-74-03: `disableTunnel()`'s `clearToken()` call is synchronous, so the token stops
@@ -267,7 +271,9 @@ function shutdown(signal: NodeJS.Signals): void {
   disableTunnel();
   stopAskRuns();
   setTimeout(() => process.exit(0), SHUTDOWN_WAIT_MS).unref();
-  void stopGranolaRound().finally(() => process.exit(0));
+  void Promise.all([stopGranolaRound(), stopSlackRound()]).finally(() =>
+    process.exit(0),
+  );
 }
 
 /** Options for {@link main}; `desiredPort` overrides the configured port (the CLI's `--port`). */
@@ -447,6 +453,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   setHooksRuntime({ capable, port, statusChannel });
   startEnabledPollers();
   startGranolaRound();
+  void startSlackRound();
   setPaneSink(supervisePane);
   startMarkerWatcher(statusChannel);
   stopLoopProgressReader = startLoopProgressReader();

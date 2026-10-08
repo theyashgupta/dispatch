@@ -46,6 +46,15 @@ test("the Slack block parses enabled, interval and valid channels, dropping malf
   });
 });
 
+test("the Slack block keeps an mcp or token mode and drops any other value", () => {
+  write({ linearApiKey: "", sources: { slack: { mode: "mcp" } } });
+  assert.deepEqual(loadConfig().sources?.slack, { mode: "mcp" });
+  write({ linearApiKey: "", sources: { slack: { mode: "token" } } });
+  assert.deepEqual(loadConfig().sources?.slack, { mode: "token" });
+  write({ linearApiKey: "", sources: { slack: { mode: "bogus" } } });
+  assert.deepEqual(loadConfig().sources?.slack, {});
+});
+
 test("a malformed Slack block never throws and yields no settings", () => {
   write({
     linearApiKey: "",
@@ -131,4 +140,23 @@ test("boot keeps the first entry per channel id, trims names, and cuts the list 
   assert.deepEqual(channels[0], { id: "C0G6DUP", name: "first" });
   assert.equal(channels.filter((c) => c.id === "C0G6DUP").length, 1);
   assert.deepEqual(channels[199], { id: "C0G6198", name: "ch-198" });
+});
+
+test("the Slack block keeps mode, enabled and a positive integer mcpIntervalMinutes through a restart", () => {
+  write({
+    linearApiKey: "",
+    sources: { slack: { mode: "mcp", enabled: true, mcpIntervalMinutes: 45 } },
+  });
+  assert.deepEqual(loadConfig().sources?.slack, {
+    mode: "mcp",
+    enabled: true,
+    mcpIntervalMinutes: 45,
+  });
+  for (const bad of [0, -5, 2.5, "45", null]) {
+    write({
+      linearApiKey: "",
+      sources: { slack: { mcpIntervalMinutes: bad } },
+    });
+    assert.deepEqual(loadConfig().sources?.slack, {}, String(bad));
+  }
 });

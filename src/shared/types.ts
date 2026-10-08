@@ -180,6 +180,7 @@ export interface SlackThread {
 export interface SourceCursor {
   cursor?: string;
   polledAt: string;
+  origin?: string;
 }
 
 export interface Item {
@@ -1233,12 +1234,16 @@ export interface SlackChannel {
   name: string;
 }
 
+export const SLACK_CHANNEL_NAME = /^[^\p{Cc}\p{Cf}\p{Zl}\p{Zp}]{1,80}$/u;
+
 export interface SlackChannelOption extends SlackChannel {
   private: boolean;
 }
 
 export type SlackSourceConfig = ItemSourceConfig & {
   channels?: SlackChannel[];
+  mode?: SlackMode;
+  mcpIntervalMinutes?: number;
 };
 
 export type PrCheckState = "pass" | "pending" | "fail";
@@ -1983,4 +1988,23 @@ export interface SessionMeters {
   model: string | null;
   cost: number | null;
   usage: { fiveHourPercent: number | null; sevenDayPercent: number | null };
+}
+
+export type SlackMode = "mcp" | "token";
+
+export type SlackConnectorState = GranolaCheckState;
+
+export type SlackRoundError =
+  Exclude<SlackConnectorState, "connected"> | "timeout" | "invalid-output";
+
+export interface SlackMcpStatus {
+  mode: SlackMode;
+  enabled: boolean;
+  running: boolean;
+  connector?: SlackConnectorState;
+  server?: string;
+  lastRunAt?: string;
+  lastError?: SlackRoundError;
+  lastCount?: number;
+  polledAt?: string;
 }

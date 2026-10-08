@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseChannelRef } from "./channel-ref.js";
+import { isSlackChannel, parseChannelRef } from "./channel-ref.js";
 
 const cases: [string, string | null][] = [
   ["https://acme.slack.com/archives/C0G6ENG", "C0G6ENG"],
@@ -30,3 +30,21 @@ for (const [input, expected] of cases) {
     assert.equal(parseChannelRef(input), expected);
   });
 }
+
+test("a picked channel needs a Slack channel name, or its own id as the name", () => {
+  const ok = (name: unknown, id = "C0G6ENG") => isSlackChannel({ id, name });
+  assert.ok(ok("general"));
+  assert.ok(ok("dev.ops_1-x"));
+  assert.ok(ok("a".repeat(80)));
+  assert.ok(ok("C0G6ENG"));
+  assert.equal(ok("a".repeat(81)), false);
+  for (const name of ["проект", "日本語", "Dev-Team"]) {
+    assert.ok(ok(name), name);
+  }
+  assert.equal(ok("line\nbreak"), false);
+  assert.equal(ok("bidi\u202eflip"), false);
+  assert.equal(ok("line\u2028sep"), false);
+  assert.equal(ok("para\u2029sep"), false);
+  assert.equal(ok(""), false);
+  assert.equal(ok(7), false);
+});

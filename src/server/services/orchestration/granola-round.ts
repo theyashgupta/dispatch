@@ -10,13 +10,16 @@ import {
   GRANOLA_UNAVAILABLE,
   RUN_INTERVAL_MS,
   buildGranolaPrompt,
-  granolaToolName,
   groupByMeeting,
   nextRunDelay,
-  parseMcpList,
   roundSince,
-  type GranolaCheck,
 } from "./granola-actions.js";
+import {
+  mcpToolPrefix,
+  parseMcpList,
+  readMcpList,
+  type ConnectorCheck,
+} from "./connector-list.js";
 import {
   buildMeetingItems,
   localDate,
@@ -28,7 +31,7 @@ import { DISPATCH_DIR } from "../infra/paths.js";
 export type GranolaRunResult = "started" | "running" | "disabled";
 
 const CURSOR_KEY = "granola";
-const LIST_TIMEOUT_MS = 60_000;
+const GRANOLA_SERVER = /granola/i;
 const ROUND_TIMEOUT_MS = 300_000;
 const KILL_GRACE_MS = 5_000;
 
@@ -124,14 +127,8 @@ async function abortRound(): Promise<void> {
 async function listGranola(
   claude: string,
   signal?: AbortSignal,
-): Promise<GranolaCheck> {
-  const list = await run(claude, ["mcp", "list"], {
-    cwd: DISPATCH_DIR,
-    timeout: LIST_TIMEOUT_MS,
-    signal,
-    killEscalationMs: KILL_GRACE_MS,
-  });
-  return parseMcpList(list.stdout);
+): Promise<ConnectorCheck> {
+  return parseMcpList(await readMcpList(claude, signal), GRANOLA_SERVER);
 }
 
 /**
@@ -187,7 +184,7 @@ async function runRound(round: AbortController): Promise<void> {
         "--tools",
         "",
         "--allowedTools",
-        granolaToolName(server),
+        mcpToolPrefix(server),
         "--no-session-persistence",
       ],
       {

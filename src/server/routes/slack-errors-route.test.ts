@@ -62,7 +62,10 @@ const OTHER = fakeItem("thread", { meta: { channel: "C0R6", threadTs: "1" } });
 await store.upsertItems("slack", [THREAD, NO_THREAD], { kind: "append" });
 await store.upsertItems("fake", [OTHER], { kind: "append" });
 
-function writeConfig(slack: Record<string, unknown> = { enabled: true }): void {
+function writeConfig(
+  configured: Record<string, unknown> = { enabled: true },
+): void {
+  const slack = { mode: "token" as const, ...configured };
   const value = {
     port: 4700,
     linearApiKey: "",
