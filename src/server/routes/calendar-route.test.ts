@@ -1,32 +1,12 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import path from "node:path";
 import { after, test } from "node:test";
+import { installCalendarStubs } from "../test-support/calendar-stubs.js";
 import { isolateEnv } from "../test-support/fixtures.js";
 
 const env = isolateEnv();
-const stubDir = path.join(env.root, "osascript-stub");
-fs.mkdirSync(stubDir);
-process.env.STUB_DIR = stubDir;
-
-fs.writeFileSync(
-  path.join(env.binDir, "osascript"),
-  [
-    "#!/bin/sh",
-    'cat > "$STUB_DIR/stdin.txt"',
-    'mode=$(cat "$STUB_DIR/mode" 2>/dev/null || echo ok)',
-    'case "$mode" in',
-    `denied) printf '%s' '{"error":"calendar-denied"}'; exit 0 ;;`,
-    'stderr) echo "execution error: Not authorized (-1743)" >&2; exit 1 ;;',
-    "esac",
-    'if grep -q eventsMatchingPredicate "$STUB_DIR/stdin.txt"; then',
-    `  node -e 'const t = Date.now() + 600000; console.log(JSON.stringify({ events: [{ uid: "e1", title: "Sync", start: new Date(t).toISOString(), end: new Date(t + 1800000).toISOString(), allDay: false, calendar: "Work" }] }))'`,
-    "else",
-    `  printf '%s' '{"calendars":[{"title":"Work","source":"iCloud"},{"title":"Birthdays","source":"Other"},{"title":"US Holidays","source":"Subscribed"},{"title":"Siri Suggestions","source":"Other"}]}'`,
-    "fi",
-  ].join("\n"),
-  { mode: 0o755 },
-);
+const stubs = installCalendarStubs(env);
+stubs.useScripts();
 
 const { store } = await import("../store/board.store.js");
 const express = (await import("express")).default;
@@ -71,8 +51,39 @@ after(() => {
 });
 
 function mode(value: string): void {
-  fs.writeFileSync(path.join(stubDir, "mode"), value);
+  stubs.reset();
+  if (value === "denied") {
+    stubs.osaStatus(2);
+    return;
+  }
+  if (value === "stderr") {
+    stubs.osaMode("stderr");
+    return;
+  }
+  const t = Date.now() + 600_000;
+  stubs.osaReply("events", {
+    events: [
+      {
+        uid: "e1",
+        title: "Sync",
+        start: new Date(t).toISOString(),
+        end: new Date(t + 1_800_000).toISOString(),
+        allDay: false,
+        calendar: "Work",
+      },
+    ],
+  });
+  stubs.osaReply("calendars", {
+    calendars: [
+      { title: "Work", source: "iCloud" },
+      { title: "Birthdays", source: "Other" },
+      { title: "US Holidays", source: "Subscribed" },
+      { title: "Siri Suggestions", source: "Other" },
+    ],
+  });
 }
+
+mode("ok");
 
 function put(body: unknown): Promise<Response> {
   return fetch(`${base}/calendar/settings`, {
@@ -97,6 +108,8 @@ test("the status starts off, in macos mode, with the Vault key empty", async () 
     mode: "macos",
     calendars: [],
     icalFilled: false,
+    permission: "granted",
+    missingCalendars: [],
   });
 });
 

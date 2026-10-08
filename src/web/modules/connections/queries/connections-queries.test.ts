@@ -15,6 +15,7 @@ import {
   saveSlackChannels,
 } from "./connections-api.js";
 import {
+  checkCalendarAccessMutationOptions,
   connectionsKeys,
   linearFiltersQueryOptions,
   linearOptionsQueryOptions,
@@ -650,16 +651,93 @@ test("an accepted calendar save writes the status into the shared calendar statu
 
 test("a refused calendar save leaves the shared calendar status alone", async () => {
   const client = newClient();
-  client.setQueryData(calendarStatusKeys.status, { enabled: false });
+  const before = { enabled: false, mode: "macos", calendars: [] };
+  client.setQueryData(calendarStatusKeys.status, before);
   reply(409, { error: "denied" });
   const result = await new MutationObserver(
     client,
     saveCalendarSettingsMutationOptions(client),
   ).mutate({ enabled: true });
   assert.deepEqual(result, { ok: false, error: "denied" });
+  assert.deepEqual(client.getQueryData(calendarStatusKeys.status), before);
+});
+
+test("a calendar access check posts and writes the answered status into the cache", async () => {
+  const client = newClient();
+  client.setQueryData(calendarStatusKeys.status, { permission: "not-asked" });
+  reply(200, { permission: "granted" });
+  await new MutationObserver(
+    client,
+    checkCalendarAccessMutationOptions(client),
+  ).mutate();
+  assert.equal(calls[0]?.url, "/api/calendar/access/check");
+  assert.equal(calls[0]?.init?.method, "POST");
+  assert.deepEqual(client.getQueryData(calendarStatusKeys.status), {
+    permission: "granted",
+  });
+});
+
+test("an optimistic calendar save shows the calendars at once and a 409 restores the snapshot", async () => {
+  const client = newClient();
+  const before = { enabled: false, mode: "macos", calendars: ["Home"] };
+  client.setQueryData(calendarStatusKeys.status, before);
+  let seen: unknown;
+  globalThis.fetch = () => {
+    seen = client.getQueryData(calendarStatusKeys.status);
+    return Promise.resolve(
+      new Response(JSON.stringify({ error: "denied" }), { status: 409 }),
+    );
+  };
+  const result = await new MutationObserver(
+    client,
+    saveCalendarSettingsMutationOptions(client),
+  ).mutate({ enabled: true, calendars: ["Work"] });
+  assert.deepEqual(seen, { ...before, calendars: ["Work"] });
+  assert.deepEqual(result, { ok: false, error: "denied" });
+  assert.deepEqual(client.getQueryData(calendarStatusKeys.status), before);
+});
+
+test("a refused calendar save keeps a permission an access check wrote after the snapshot", async () => {
+  const client = newClient();
+  client.setQueryData(calendarStatusKeys.status, {
+    enabled: false,
+    mode: "macos",
+    calendars: ["Home"],
+    permission: "not-asked",
+  });
+  globalThis.fetch = () => {
+    client.setQueryData(calendarStatusKeys.status, {
+      ...client.getQueryData<object>(calendarStatusKeys.status),
+      permission: "granted",
+    });
+    return Promise.resolve(
+      new Response(JSON.stringify({ error: "denied" }), { status: 409 }),
+    );
+  };
+  await new MutationObserver(
+    client,
+    saveCalendarSettingsMutationOptions(client),
+  ).mutate({ calendars: ["Work"] });
   assert.deepEqual(client.getQueryData(calendarStatusKeys.status), {
     enabled: false,
+    mode: "macos",
+    calendars: ["Home"],
+    permission: "granted",
   });
+});
+
+test("a thrown network error restores the calendar status snapshot", async () => {
+  const client = newClient();
+  const before = { enabled: false, mode: "macos", calendars: ["Home"] };
+  client.setQueryData(calendarStatusKeys.status, before);
+  globalThis.fetch = () => Promise.reject(new TypeError("network down"));
+  await assert.rejects(
+    new MutationObserver(
+      client,
+      saveCalendarSettingsMutationOptions(client),
+    ).mutate({ calendars: ["Work"] }),
+  );
+  assert.deepEqual(client.getQueryData(calendarStatusKeys.status), before);
 });
 
 test("listCalendars resolves the calendars on a 200", async () => {

@@ -7,6 +7,7 @@ import type {
   CalendarSettingsPatch,
 } from "../../../../shared/types.js";
 import { CalendarCard } from "@/modules/connections/components/CalendarCard";
+import { calendarAccessView } from "@/modules/connections/domain/calendar-permission";
 import {
   selectionAfterLoad,
   settingsDraft,
@@ -14,6 +15,7 @@ import {
 } from "@/modules/connections/domain/calendar-selection";
 import {
   useCalendarConnectionStatusQuery,
+  useCheckCalendarAccessMutation,
   useListCalendarsMutation,
   useSaveCalendarSettingsMutation,
 } from "@/modules/connections/queries/connections-queries";
@@ -22,6 +24,7 @@ export function CalendarContainer() {
   const statusQuery = useCalendarConnectionStatusQuery();
   const list = useListCalendarsMutation();
   const saveSettings = useSaveCalendarSettingsMutation();
+  const checkAccess = useCheckCalendarAccessMutation();
   const status = statusQuery.data ?? null;
   const [initialized, setInitialized] = useState(false);
   const [mode, setMode] = useState<CalendarMode>("macos");
@@ -57,6 +60,16 @@ export function CalendarContainer() {
     }
   };
 
+  const checkCalendarAccess = async () => {
+    setActionError(null);
+    try {
+      const result = await checkAccess.mutateAsync();
+      if (!result.ok) setActionError(result.error);
+    } catch {
+      setActionError("failed");
+    }
+  };
+
   const send = async (patch: CalendarSettingsPatch) => {
     setActionError(null);
     try {
@@ -80,10 +93,13 @@ export function CalendarContainer() {
       icalFilled={status?.icalFilled === true}
       enabled={status?.enabled === true}
       statusKnown={status !== null}
+      access={status === null ? null : calendarAccessView(status, new Date())}
+      checkingAccess={checkAccess.isPending}
       onModeChange={(next) => {
         setActionError(null);
         setMode(next);
       }}
+      onCheckAccess={() => void checkCalendarAccess()}
       onLoad={() => void loadCalendars()}
       onToggle={(title) =>
         setSelected((current) => {

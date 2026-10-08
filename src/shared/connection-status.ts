@@ -1,5 +1,6 @@
 import type {
   CalendarErrorCode,
+  CalendarPermission,
   CalendarStatus,
   GranolaCheckState,
   GranolaError,
@@ -171,7 +172,19 @@ export function granolaRunLine(status: GranolaStatus, now: number): string {
 
 export const CALENDAR_ERROR_COPY: Record<CalendarErrorCode, string> = {
   "calendar-denied":
-    "Dispatch needs access to your calendars. Open System Settings, Privacy and Security, Calendars, and allow the app that runs Dispatch.",
+    "Calendar access is off for Dispatch Calendar. Open System Settings, Privacy and Security, Calendars, and turn on Dispatch Calendar.",
+  "not-asked":
+    "Dispatch has not asked for Calendar access yet. Press Check access to show the macOS prompt.",
+  restricted:
+    "Calendar access is restricted on this Mac by a profile or a parental control. Dispatch cannot change it.",
+  "write-only":
+    "Dispatch Calendar can only add events. Open System Settings, Privacy and Security, Calendars, and choose Full Access for Dispatch Calendar.",
+  "prompt-timeout":
+    "The macOS prompt got no answer within 2 minutes. Press Check access to try again.",
+  "read-timeout": "Reading the calendar took longer than 30 seconds.",
+  "calendars-missing":
+    "A saved calendar no longer exists on this Mac. Load calendars and save your selection again.",
+  unknown: "Couldn't read the Calendar permission state.",
   "ical-url-missing": "Fill CALENDAR_ICAL_URL in Settings, Vault first.",
   "ical-url-invalid": "The iCal URL in the Vault is not a valid https address.",
   "ical-unreachable":
@@ -182,14 +195,38 @@ export const CALENDAR_ERROR_COPY: Record<CalendarErrorCode, string> = {
   failed: "Couldn't read the calendar.",
 };
 
+/**
+ * The message for a Calendar permission, or null when access is granted.
+ *
+ * @remarks `denied` is the permission name, `calendar-denied` is its error code; every other
+ * permission shares its code.
+ */
+export function calendarPermissionCopy(
+  permission: CalendarPermission,
+): string | null {
+  if (permission === "granted") return null;
+  return CALENDAR_ERROR_COPY[
+    permission === "denied" ? "calendar-denied" : permission
+  ];
+}
+
 export const CALENDAR_LOAD_FAILED_COPY =
   "Couldn't load the Calendar status. Reload the page.";
+
+const CALENDAR_BLOCKING_PERMISSIONS: ReadonlySet<CalendarPermission> = new Set([
+  "not-asked",
+  "denied",
+  "restricted",
+  "write-only",
+]);
 
 /**
  * Map the Calendar status to the status its connection card shows (U4-10).
  *
  * @remarks A refused Connect or Load outranks the saved state, so the card shows why the click
- * failed instead of a stale Not connected.
+ * failed instead of a stale Not connected. In macOS mode an enabled card shows the permission copy
+ * only for not-asked, denied, restricted and write-only; any other permission falls through to
+ * `lastError` and Connected.
  */
 export function calendarCardStatus(
   status: CalendarStatus | null,
@@ -205,6 +242,15 @@ export function calendarCardStatus(
     return { kind: "error", message: CALENDAR_ERROR_COPY[actionError] };
   }
   if (!status.enabled) return { kind: "disconnected" };
+  if (
+    status.mode === "macos" &&
+    CALENDAR_BLOCKING_PERMISSIONS.has(status.permission)
+  ) {
+    return {
+      kind: "error",
+      message: calendarPermissionCopy(status.permission) ?? "",
+    };
+  }
   if (status.lastError !== undefined) {
     return { kind: "error", message: CALENDAR_ERROR_COPY[status.lastError] };
   }
@@ -213,6 +259,6 @@ export function calendarCardStatus(
       ? "iCal URL"
       : status.calendars.length === 0
         ? "All calendars"
-        : `${status.calendars.length} calendars`;
+        : `${status.calendars.length} ${status.calendars.length === 1 ? "calendar" : "calendars"}`;
   return { kind: "connected", account };
 }
