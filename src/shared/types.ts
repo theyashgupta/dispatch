@@ -348,6 +348,7 @@ export interface Card {
   dependsOn?: string[];
   startQueued?: boolean;
   createdByOrchestrator?: string;
+  ownerOrchestrator?: string;
   launch?: { playbook?: string; direction: string };
   /**
    * The id of this card's ACTIVE session within `sessions` — the one the six flat fields mirror.
@@ -1728,6 +1729,53 @@ export interface BoardPolicy {
   supervisor: "on" | "off";
 }
 
+export type OrchestratorPolicyOverride = Partial<
+  Pick<
+    BoardPolicy,
+    | "roadmapApproval"
+    | "concurrencyCap"
+    | "usageLimit"
+    | "shipRights"
+    | "budgetPerGroup"
+  >
+>;
+
+export interface OrchestratorScope {
+  groupIds: string[];
+  ticketIds: string[];
+}
+
+export interface OrchestratorRecord {
+  id: string;
+  name: string;
+  role: "main" | "extra";
+  scope: OrchestratorScope;
+  policyOverride: OrchestratorPolicyOverride;
+  cardId: string | null;
+  state: "stopped" | "starting" | "running" | "stopping";
+  createdAt: string;
+  stateMarkdown?: string;
+  stateUpdatedAt?: string;
+  handoffReady?: boolean;
+}
+
+export interface OrchestratorSessionView {
+  cardId: string;
+  state: SupervisorState | null;
+  stateReason: string | null;
+  contextPercent: number | null;
+  model: string | null;
+  hasTmuxSession: boolean;
+  activeSessionId: string | null;
+  ttydPort: number | null;
+  stateSince: string | null;
+  startError: string | null;
+}
+
+export type OrchestratorView = Omit<OrchestratorRecord, "stateMarkdown"> & {
+  session: OrchestratorSessionView | null;
+};
+
 export interface Board {
   key: BoardKey;
   name: string;
@@ -1736,6 +1784,7 @@ export interface Board {
   linearTeamKeys: string[];
   lastUsedFolder: string | null;
   policy: BoardPolicy;
+  orchestrators: OrchestratorRecord[];
   createdAt: string;
   archived: boolean;
 }
@@ -1901,6 +1950,7 @@ export const ORCHESTRATION_EVENT_KINDS = [
   "tool_call",
   "decision_raised",
   "decision_answered",
+  "intake_submitted",
 ] as const;
 
 export type OrchestrationEventKind = (typeof ORCHESTRATION_EVENT_KINDS)[number];
@@ -1940,6 +1990,7 @@ export const DECISION_KINDS = [
   "roadmap_approval",
   "ruling",
   "ship_failure",
+  "ticket_proposal",
   "other",
 ] as const;
 
@@ -1957,6 +2008,10 @@ export interface DecisionItem {
   createdAt: string;
   answeredAt: string | null;
   consumedAt?: string;
+  proposal?: {
+    tickets: { title: string; description: string }[];
+    usedIndexes: number[];
+  };
 }
 
 export interface SessionMeters {
