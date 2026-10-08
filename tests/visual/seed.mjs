@@ -259,7 +259,7 @@ const config =
         workspaceRoot: join(dir, "workspaces"),
         updateCheck: false,
         onboardingDone: true,
-        sources: { slack: { enabled: true, channels: [] } },
+        sources: { slack: { enabled: true, mode: "token", channels: [] } },
       };
 writeFileSync(
   join(dir, "config.json"),
