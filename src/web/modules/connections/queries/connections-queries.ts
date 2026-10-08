@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-query";
 import type {
   CalendarSettingsPatch,
+  CalendarStatus,
   LinearStateMap,
   SlackChannel,
   SourceFilters,
@@ -32,6 +33,7 @@ import {
   useSourceConnectionQuery,
 } from "@/queries/source-connection-queries";
 import {
+  checkCalendarAccess,
   getLinearFilters,
   getLinearOptions,
   getLinearStateMap,
@@ -294,18 +296,77 @@ export function useListCalendarsMutation() {
  * Build the mutation options that save Calendar settings.
  *
  * @remarks
- * An accepted save writes the answered status into the shared calendar status. A refusal resolves
- * `{ ok: false }` with the error code and leaves the cache alone.
+ * The mode and calendars show in the cached status at once. A refusal or an error restores only
+ * those two fields, so a permission an access check wrote in the meantime survives. `enabled`
+ * waits for the answer because a Connect depends on the server's test read.
  */
 export function saveCalendarSettingsMutationOptions(queryClient: QueryClient) {
+  const restore = (snapshot: CalendarStatus | undefined) => {
+    if (snapshot === undefined) return;
+    queryClient.setQueryData<CalendarStatus>(
+      calendarStatusKeys.status,
+      (current) => ({
+        ...(current ?? snapshot),
+        mode: snapshot.mode,
+        calendars: snapshot.calendars,
+      }),
+    );
+  };
   return {
     mutationFn: (patch: CalendarSettingsPatch) => putCalendarSettings(patch),
-    onSuccess: (result: Awaited<ReturnType<typeof putCalendarSettings>>) => {
+    onMutate: async (patch: CalendarSettingsPatch) => {
+      await queryClient.cancelQueries({ queryKey: calendarStatusKeys.status });
+      const snapshot = queryClient.getQueryData<CalendarStatus>(
+        calendarStatusKeys.status,
+      );
+      if (snapshot !== undefined) {
+        queryClient.setQueryData<CalendarStatus>(calendarStatusKeys.status, {
+          ...snapshot,
+          ...(patch.mode !== undefined && { mode: patch.mode }),
+          ...(patch.calendars !== undefined && { calendars: patch.calendars }),
+        });
+      }
+      return snapshot;
+    },
+    onSuccess: (
+      result: Awaited<ReturnType<typeof putCalendarSettings>>,
+      _patch: CalendarSettingsPatch,
+      snapshot: CalendarStatus | undefined,
+    ) => {
+      if (result.ok) {
+        queryClient.setQueryData(calendarStatusKeys.status, result.value);
+      } else {
+        restore(snapshot);
+      }
+    },
+    onError: (
+      _error: Error,
+      _patch: CalendarSettingsPatch,
+      snapshot: CalendarStatus | undefined,
+    ) => restore(snapshot),
+  };
+}
+
+/**
+ * Build the mutation options that check the Calendar permission.
+ *
+ * @remarks An answered check writes its status into the shared calendar status. A refusal leaves
+ * the cache alone.
+ */
+export function checkCalendarAccessMutationOptions(queryClient: QueryClient) {
+  return {
+    mutationFn: () => checkCalendarAccess(),
+    onSuccess: (result: Awaited<ReturnType<typeof checkCalendarAccess>>) => {
       if (result.ok) {
         queryClient.setQueryData(calendarStatusKeys.status, result.value);
       }
     },
   };
+}
+
+export function useCheckCalendarAccessMutation() {
+  const queryClient = useQueryClient();
+  return useMutation(checkCalendarAccessMutationOptions(queryClient));
 }
 
 export function useSaveCalendarSettingsMutation() {

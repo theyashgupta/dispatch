@@ -1,16 +1,20 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import path from "node:path";
-import { test } from "node:test";
+import { after, beforeEach, test } from "node:test";
 import vm from "node:vm";
+import {
+  codeOf,
+  FROM,
+  installCalendarStubs,
+  TO,
+} from "../test-support/calendar-stubs.js";
 import { isolateEnv } from "../test-support/fixtures.js";
 
 const env = isolateEnv();
-const stubDir = path.join(env.root, "osascript-stub");
-fs.mkdirSync(stubDir);
-process.env.STUB_DIR = stubDir;
+const stubs = installCalendarStubs(env);
+stubs.useScripts();
 
-const EVENTS = JSON.stringify({
+const EVENTS = {
   events: [
     {
       uid: "u1",
@@ -32,52 +36,25 @@ const EVENTS = JSON.stringify({
       calendar: "Work",
     },
   ],
+};
+
+const {
+  readMacEvents,
+  parseMacOutput,
+  osascriptError,
+  readPermission,
+  EVENTS_SCRIPT,
+} = await import("./calendar-mac.js");
+const { run } = await import("./exec.js");
+
+after(() => env.cleanup());
+
+beforeEach(() => {
+  stubs.reset();
+  stubs.osaReply("events", EVENTS);
 });
 
-fs.writeFileSync(
-  path.join(env.binDir, "osascript"),
-  [
-    "#!/bin/sh",
-    'printf "%s\\n" "$@" > "$STUB_DIR/argv.txt"',
-    'cat > "$STUB_DIR/stdin.txt"',
-    'mode=$(cat "$STUB_DIR/mode" 2>/dev/null || echo ok)',
-    'case "$mode" in',
-    `ok) printf '%s' '${EVENTS}' ;;`,
-    `denied) printf '%s' '{"error":"calendar-denied"}' ;;`,
-    'stderr) echo "execution error: Not authorized to send Apple events to Calendar. (-1743)" >&2; exit 1 ;;',
-    "garbage) echo 'osascript: something odd' ;;",
-    "slow) exec sleep 60 ;;",
-    'file) cat "$STUB_DIR/out.json" ;;',
-    "esac",
-  ].join("\n"),
-  { mode: 0o755 },
-);
-
-const { readMacEvents, parseMacOutput, osascriptError, EVENTS_SCRIPT } =
-  await import("./calendar-mac.js");
-const { run } = await import("./exec.js");
-const { CalendarReadError } =
-  await import("../sources/calendar/calendar-events.js");
-
-function mode(value: string): void {
-  fs.writeFileSync(path.join(stubDir, "mode"), value);
-}
-
-async function codeOf(promise: Promise<unknown>): Promise<string> {
-  try {
-    await promise;
-    return "resolved";
-  } catch (err) {
-    assert.ok(err instanceof CalendarReadError);
-    return err.message;
-  }
-}
-
-const FROM = new Date("2026-11-02T00:00:00.000Z");
-const TO = new Date("2026-11-04T00:00:00.000Z");
-
 test("the script goes on stdin and the calendars travel only inside one JSON argv element", async () => {
-  mode("ok");
   const titles = ['Work"; do shell script "rm x', "Home"];
   const { events, partial } = await readMacEvents(FROM, TO, titles);
   assert.equal(partial, false);
@@ -86,10 +63,7 @@ test("the script goes on stdin and the calendars travel only inside one JSON arg
     ["u1"],
   );
   assert.equal(events[0].notes, "LOCAL-12");
-  const argv = fs
-    .readFileSync(path.join(stubDir, "argv.txt"), "utf8")
-    .trimEnd()
-    .split("\n");
+  const argv = stubs.osaArgv();
   assert.deepEqual(argv.slice(0, 3), ["-l", "JavaScript", "-"]);
   assert.equal(argv.length, 4);
   const args = JSON.parse(argv[3]) as {
@@ -99,30 +73,43 @@ test("the script goes on stdin and the calendars travel only inside one JSON arg
   };
   assert.deepEqual(args.calendars, titles);
   assert.equal(args.from, FROM.toISOString());
-  const script = fs.readFileSync(path.join(stubDir, "stdin.txt"), "utf8");
+  const script = stubs.osaStdin();
   assert.match(script, /EKEventStore/);
   assert.equal(script.includes("Home"), false);
   assert.equal(script.includes("rm x"), false);
 });
 
-test("denied output and a -1743 stderr both map to calendar-denied without the stderr text", async () => {
-  mode("denied");
+test("a denied answer that carries its raw status and a -1743 stderr both map to calendar-denied without the stderr text", async () => {
+  stubs.osaReply("events", { error: "calendar-denied", status: 2 });
   assert.equal(await codeOf(readMacEvents(FROM, TO, [])), "calendar-denied");
-  mode("stderr");
+  stubs.reset();
+  stubs.osaMode("stderr");
   assert.equal(await codeOf(readMacEvents(FROM, TO, [])), "calendar-denied");
+});
+
+test("the status read without a helper runs a status-only script and returns the permission state", async () => {
+  stubs.osaStatus(2);
+  assert.equal(await readPermission(), "denied");
+  assert.match(stubs.osaStdin(), /authorizationStatusForEntityType/);
+  assert.equal(stubs.osaStdin().includes("requestFullAccess"), false);
+  assert.equal(stubs.osaStdin().includes("requestAccess"), false);
 });
 
 test("garbage output maps to failed and a slow reader is killed at the timeout", async () => {
-  mode("garbage");
+  stubs.osaMode("garbage");
   assert.equal(await codeOf(readMacEvents(FROM, TO, [])), "failed");
-  mode("slow");
+  stubs.osaMode("slow");
   const started = Date.now();
-  assert.equal(await codeOf(readMacEvents(FROM, TO, [], 300)), "timeout");
+  assert.equal(await codeOf(readMacEvents(FROM, TO, [], 300)), "read-timeout");
   assert.ok(Date.now() - started < 10_000);
 });
 
-test("only a child killed by the deadline maps to timeout", () => {
-  assert.equal(osascriptError({ killed: true }), "timeout");
+test("only a child killed by the deadline maps to a timeout code", () => {
+  assert.equal(osascriptError({ killed: true }), "read-timeout");
+  assert.equal(
+    osascriptError({ killed: true }, "prompt-timeout"),
+    "prompt-timeout",
+  );
   assert.equal(osascriptError({ killed: false }), "failed");
   assert.equal(osascriptError({}), "failed");
 });
@@ -138,8 +125,7 @@ test("an answer over Node's 1 MB default buffer still reads", async () => {
     notes,
     calendar: "Work",
   }));
-  fs.writeFileSync(path.join(stubDir, "out.json"), JSON.stringify({ events }));
-  mode("file");
+  stubs.osaReply("events", { events });
   assert.equal((await readMacEvents(FROM, TO, [])).events.length, 800);
 });
 
@@ -196,8 +182,13 @@ function runScriptIn(
   saved: string[],
   events: FakeEvent[] = [],
   queried: unknown[] = [],
+  status: unknown = 3,
+  requests: string[] = [],
 ): unknown {
   const store = {
+    respondsToSelector: () => true,
+    requestFullAccessToEventsWithCompletion: () => requests.push("full"),
+    requestAccessToEntityTypeCompletion: () => requests.push("legacy"),
     calendarsForEntityType: () => titles.map((title) => ({ title: ns(title) })),
     predicateForEventsWithStartDateEndDateCalendars: (
       _from: unknown,
@@ -213,7 +204,7 @@ function runScriptIn(
     ObjC: { import: () => undefined, unwrap },
     $: Object.assign((v: unknown) => v, {
       EKEventStore: {
-        authorizationStatusForEntityType: () => 3,
+        authorizationStatusForEntityType: () => status,
         alloc: { init: store },
       },
       EKEntityTypeEvent: 0,
@@ -241,7 +232,7 @@ test("saved calendar titles that match no calendar answer an error, so the read 
   });
   assert.throws(
     () => parseMacOutput('{"error":"calendars-missing"}'),
-    /failed/,
+    /calendars-missing/,
   );
   assert.deepEqual(runScriptIn(["Birthdays"], []), { events: [] });
   assert.deepEqual(runScriptIn(["Work"], ["Work"]), {
@@ -293,7 +284,7 @@ test("parseMacOutput keeps valid events, drops broken ones and cuts notes to 400
   assert.equal(partial, false);
   assert.throws(() => parseMacOutput('{"events":"no"}'), /failed/);
   assert.throws(
-    () => parseMacOutput('{"error":"calendar-denied"}'),
+    () => parseMacOutput('{"error":"calendar-denied","status":2}'),
     /calendar-denied/,
   );
 });
@@ -359,4 +350,20 @@ test("the script maps EKEvents with the uid fallback, allDay, URL, cut notes and
   const defaults: unknown[] = [];
   runScriptIn(["Work", "Home", "Birthdays"], [], [], defaults);
   assert.deepEqual(defaults, ["Work", "Home"]);
+});
+
+test("the events script reads when the ObjC bridge hands the full access status over as the string 3", () => {
+  assert.deepEqual(runScriptIn(["Work"], ["Work"], [], [], "3"), {
+    events: [],
+    partial: false,
+  });
+});
+
+test("the events script answers the numeric status for a string 0 and never requests access", () => {
+  const requests: string[] = [];
+  assert.deepEqual(runScriptIn(["Work"], ["Work"], [], [], "0", requests), {
+    error: "calendar-denied",
+    status: 0,
+  });
+  assert.deepEqual(requests, []);
 });

@@ -50,7 +50,7 @@
     "build:web": "vite build",
     "analyze": "ANALYZE=1 vite build",
     "build:server": "tsc -p tsconfig.build.json",
-    "build": "npm run build:web && npm run build:server",
+    "build": "npm run build:web && npm run build:server && node scripts/build-calendar-helper.mjs",
     "start": "NODE_ENV=production node dist/server/bootstrap/index.js",
     "replay-gate": "tsx scripts/replay-watcher.ts --check",
     "doc-drift": "node scripts/check-doc-drift.mjs",
@@ -80,7 +80,8 @@
     "check:unlocked": "npm run format:check && npm run lint && npm run depcruise && npm run typecheck && npm run test && npm run deadcode && npm run replay-gate && npm run doc-drift && npm run invariants && npm run check-hooks",
     "prepack": "npm run build",
     "test:visual": "playwright test",
-    "test:visual:update": "playwright test --update-snapshots"
+    "test:visual:update": "playwright test --update-snapshots",
+    "prepublishOnly": "node scripts/build-calendar-helper.mjs --require"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",

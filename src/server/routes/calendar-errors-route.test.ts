@@ -1,28 +1,12 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import path from "node:path";
 import { after, test } from "node:test";
+import { installCalendarStubs } from "../test-support/calendar-stubs.js";
 import { isolateEnv } from "../test-support/fixtures.js";
 
 const env = isolateEnv();
-const stubDir = path.join(env.root, "osascript-stub");
-fs.mkdirSync(stubDir);
-process.env.STUB_DIR = stubDir;
-
-fs.writeFileSync(
-  path.join(env.binDir, "osascript"),
-  [
-    "#!/bin/sh",
-    'cat > "$STUB_DIR/stdin.txt"',
-    'mode=$(cat "$STUB_DIR/mode" 2>/dev/null || echo ok)',
-    'case "$mode" in',
-    `denied) printf '%s' '{"error":"calendar-denied"}'; exit 0 ;;`,
-    'stderr) echo "execution error: Not authorized (-1743)" >&2; exit 1 ;;',
-    "esac",
-    `printf '%s' '{"calendars":[{"title":"Work","source":"iCloud"}]}'`,
-  ].join("\n"),
-  { mode: 0o755 },
-);
+const stubs = installCalendarStubs(env);
+stubs.useScripts();
 
 const { store } = await import("../store/board.store.js");
 const express = (await import("express")).default;
@@ -62,8 +46,21 @@ after(() => {
 });
 
 function mode(value: string): void {
-  fs.writeFileSync(path.join(stubDir, "mode"), value);
+  stubs.reset();
+  if (value === "denied") {
+    stubs.osaStatus(2);
+    return;
+  }
+  if (value === "stderr") {
+    stubs.osaMode("stderr");
+    return;
+  }
+  stubs.osaReply("calendars", {
+    calendars: [{ title: "Work", source: "iCloud" }],
+  });
 }
+
+mode("ok");
 
 async function send(
   method: string,

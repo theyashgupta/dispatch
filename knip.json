@@ -22,7 +22,8 @@
     "cloudflared",
     "launchctl",
     "lsof",
-    "tmux"
+    "tmux",
+    "swiftc"
   ],
   "ignoreDependencies": ["tailwindcss"]
 }

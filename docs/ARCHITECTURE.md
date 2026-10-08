@@ -391,13 +391,14 @@ The Calendar source turns the user's events from one hour ago to 48 hours ahead 
 `snapshot` ticket source (`sources/calendar/calendar.source.ts`, id `calendar`, no filter
 dimensions) that polls every 300 s and is enabled only when `sources.calendar.enabled` is exactly
 `true`. `sources.calendar.mode` picks one of two readers. In `macos` mode (the default) it reads
-this Mac's calendars through `adapters/calendar-mac.ts`: one JXA script run as `osascript -l
-JavaScript -` through the exec chokepoint, the script on stdin and its arguments as one JSON argv
+this Mac's calendars through `adapters/calendar-mac.ts`: the helper app of the LOCAL-81 record
+below or, when it is absent, one JXA script run as `osascript -l JavaScript -` through the exec
+chokepoint, the script on stdin and its arguments as one JSON argv
 element so no calendar title is ever spliced into script source, 30 s limit, SIGKILL 5 s after
 SIGTERM. The script uses the ObjC bridge to EventKit, `eventsMatchingPredicate` over the window and
 the selected calendars (by title; none selected reads every calendar whose title does not match
 `/birthday|holiday|siri suggestions/i`), and keeps the first 4000 characters of the notes. When no
-saved title matches a calendar the script answers an error (`failed`), so a renamed calendar keeps
+saved title matches a calendar the script answers an error (`calendars-missing`), so a renamed calendar keeps
 the last good items instead of reading as an empty day; when only some match, it reads the rest and
 the pull is partial, so no row of the missing calendar auto-resolves. The osascript output buffer is 16 MB. It uses
 EventKit and not the Calendar app's scripting dictionary because that dictionary returns a recurring
@@ -411,12 +412,81 @@ before the registry is built. A failed read is rethrown as its
 error code, so the poller keeps the last good items, and the code with the last poll time and event
 count stays in memory for the status route.
 
-Consent: macOS asks once for calendar access, on the first read or calendar list, and the script
-waits up to 25 s for the answer. An authorization of denied or restricted, and an osascript error `-1743`, both map to the
-`calendar-denied` code, which the client shows as "Dispatch needs access to your calendars. Open
-System Settings, Privacy and Security, Calendars, and allow the app that runs Dispatch." A
-`selftest` argument makes the script answer before it touches EventKit, so a check can prove the
-script runs under the real osascript without raising the privacy prompt.
+**Record (2026-10-06, LOCAL-81).** Calendar permission on macOS now has its own process, its own
+status codes and its own prompt flow. This record replaces the earlier rule, under which osascript
+asked for access on the first read and one `calendar-denied` message covered every case.
+
+**Diagnosis.** The server runs as a plain `node` binary under a LaunchAgent. It has no app bundle,
+so macOS (TCC) names `node` as the process that asks for Calendar access, and a grant never
+attaches to Dispatch. A second cause hid the first. Under real osascript the ObjC bridge returns
+the EventKit status as a string, so the old `=== 3` check never matched and the read always
+answered `calendar-denied`. Each status read in the JXA scripts is now wrapped in `Number(...)`.
+
+**Decision: the "Dispatch Calendar" helper app.** `native/calendar-helper/` holds a Swift app with
+bundle id `com.dispatch.calendar-helper` and the name "Dispatch Calendar". The adapter starts it
+through Launch Services: `open -n -W -g -a <app> --stdout <file> --args <command>`. Because Launch
+Services starts it, TCC names the helper as the responsible process, and the macOS prompt and
+System Settings list "Dispatch Calendar". The helper has four commands: `status`, `request`,
+`calendars` and `events`. Each prints one JSON object, and its `status` field holds the raw EventKit status. `open` does not
+relay stdout, so the adapter reads the answer from a private temp file. The adapter uses the app
+at `dist/native/DispatchCalendar.app`, or at `DISPATCH_CALENDAR_HELPER` when set. When the app is
+absent, the adapter falls back to the JXA path described above. That path keeps the `-1743`
+osascript error as `calendar-denied`.
+
+**Build.** `scripts/build-calendar-helper.mjs` runs in `npm run build`. It compiles two slices
+with `swiftc` (`-target arm64-apple-macos14` and `-target x86_64-apple-macos14`), joins them with
+`lipo -create`, signs the app ad hoc in a temp folder under `dist/native`, and renames it to
+`dist/native/DispatchCalendar.app` only after signing passed. When the host is not macOS or `swiftc`
+is absent, it prints one skip line and the build still passes. With `--require` (the
+`prepublishOnly` script) it exits 1 when the helper binary is missing, so a package cannot ship
+without it; the publish workflow runs on `macos-latest` and checks the binary after the build.
+
+The helper runner lives in `adapters/calendar-helper.ts`. After `open` exits 0 it waits at most 2 s
+more for a whole JSON answer. A failed `open` whose stderr says "Unable to block" means the helper
+had already exited, so its answer file is whole and is read at once. Any other failed `open` fails
+at once. It reads at most 16 MiB, and it uses the app only when `Contents/MacOS/DispatchCalendar` is
+executable.
+
+**Signature limit.** An ad hoc signature has no team identity, so the Calendar grant is tied to the
+helper code signature. A `node` upgrade keeps the grant. A release that rebuilds the helper gives
+the helper a new signature, and macOS asks again.
+
+**Status codes.** A raw EventKit status maps to a permission state in
+`src/shared/calendar-permission.ts`:
+
+| Raw status | Permission   | Error code        |
+| ---------- | ------------ | ----------------- |
+| 0          | `not-asked`  | `not-asked`       |
+| 1          | `restricted` | `restricted`      |
+| 2          | `denied`     | `calendar-denied` |
+| 3          | `granted`    | none              |
+| 4          | `write-only` | `write-only`      |
+
+Only status 3 (full access) is connected, so write-only access never connects. A status outside 0
+to 4 and an unreadable answer give `unknown`. A wait that ends with no answer gives
+`prompt-timeout` for the prompt and `read-timeout` for a read. A saved calendar title that no
+longer exists gives `calendars-missing`. Each code has its own message in the card.
+
+**Limits and who may request.** The prompt wait is 120 s. A read is 30 s. The two limits are
+separate and give separate codes. Two actions request access: Check access
+(`POST /api/calendar/access/check`) and Connect. Connect requests only when the connection goes from
+off to on, the mode is `macos` and the permission is `not-asked`. A Save on a connection that is
+already on never requests. Connect and Check access share one request: a second call while the first
+waits joins it. A poll, a status read, a calendar list and a read of events never request access,
+so none of them can raise the macOS prompt. A Check access that answers `granted` on an enabled
+`macos` connection starts one calendar poll, so a stale read error clears at once.
+
+**Status route.** `GET /api/calendar/status` returns `permission` and `missingCalendars`, also
+while the connection is off. In `macos` mode the server caches the permission for 60 s and reads it
+again after each poll. A Check access call replaces the cache. In `ical` mode the route makes no
+EventKit read. It returns the permission that a Check access cached in the last 60 s, else
+`unknown`, and `missingCalendars` is empty. A save clears the cache.
+
+**The card.** The Calendar card shows the app name "Dispatch Calendar". It offers Check access
+and Open System Settings, as the permission state allows. Open System Settings is a link to
+`x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars`. It has no server
+route. A `selftest` argument makes the JXA script answer before it touches EventKit, so a check can
+prove the script runs under the real osascript without raising the privacy prompt.
 
 The pure `sources/calendar/calendar-events.ts#calendarPriority` ranks a timed event 92 while it
 runs or when it starts within 15 minutes, 84 when it starts within 60 minutes, 64 when it starts
@@ -481,13 +551,18 @@ destructive notice in every state while the status read fails.
 
 The routes live in `routes/calendar.route.ts`: `GET /api/calendar/status` answers 200 with the
 enabled flag, mode, selected calendars, whether the Vault key is filled (read in every mode, so
-the card's iCal choice is truthful while a macOS calendar is connected) and the last read (500 `status-failed` on a fault);
+the card's iCal choice is truthful while a macOS calendar is connected), the `permission` state,
+`missingCalendars` and the last read (500 `status-failed` on a fault; in `ical` mode no EventKit
+read, see Status route);
 `POST /api/calendar/calendars` (no body) answers 200 `{ calendars }` (title, account and
 `ignoredByDefault`) or 409 `{ error }` with the reader's code. It is a POST because the list runs
-EventKit, which can raise the macOS Calendars prompt, and a cross-site GET carries no Origin for
-the loopback gate to refuse; `PUT
-/api/calendar/settings` validates `{ mode?, calendars?, enabled? }` (400 on a wrong shape), runs one
-test read first when the result is enabled and answers 409 `{ error }` without writing when it
+EventKit and a cross-site GET carries no Origin for the loopback gate to refuse. It never requests
+access; without full access it answers 409 with the permission's code. `POST /api/calendar/access/check`
+(no body) requests access and answers 200 with the status (500 `check-failed` on a fault); `PUT
+/api/calendar/settings` validates `{ mode?, calendars?, enabled? }` (400 on a wrong shape), requests
+access first only on the off to on change in `macos` mode when the permission is `not-asked` (a
+Save never requests), runs one
+test read when the result is enabled and answers 409 `{ error }` without writing when it
 fails, else writes the config, rebuilds the sources, restarts the pollers and answers 200 with the
 status. None of them returns the iCal URL.
 

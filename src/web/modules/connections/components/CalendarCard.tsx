@@ -19,7 +19,11 @@ import {
 } from "@/components/ui/select";
 import { ConnectionCard } from "@/modules/connections/components/ConnectionCard";
 import { LoadingButton } from "@/components/LoadingButton";
+import type { CalendarAccessView } from "@/modules/connections/domain/calendar-permission";
 import { CALENDAR_MODE_LABELS } from "@/modules/connections/domain/calendar-selection";
+
+const SYSTEM_SETTINGS_HREF =
+  "x-apple.systempreferences:com.apple.preference.security?Privacy_Calendars";
 
 interface CalendarCardProps {
   status: SourceCardStatus;
@@ -31,7 +35,10 @@ interface CalendarCardProps {
   icalFilled: boolean;
   enabled: boolean;
   statusKnown: boolean;
+  access: CalendarAccessView | null;
+  checkingAccess: boolean;
   onModeChange: (mode: CalendarMode) => void;
+  onCheckAccess: () => void;
   onLoad: () => void;
   onToggle: (title: string) => void;
   onSave: () => void;
@@ -49,7 +56,10 @@ export function CalendarCard({
   icalFilled,
   enabled,
   statusKnown,
+  access,
+  checkingAccess,
   onModeChange,
+  onCheckAccess,
   onLoad,
   onToggle,
   onSave,
@@ -91,6 +101,46 @@ export function CalendarCard({
         </div>
         {mode === "macos" ? (
           <>
+            {access !== null && (
+              <div className="flex min-w-0 flex-col gap-2">
+                <div className="flex min-w-0 flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold text-muted-foreground">
+                    Calendar access
+                  </span>
+                  <Badge tone={access.tone}>{access.label}</Badge>
+                  <span className="text-sm text-muted-foreground">
+                    {access.appName}
+                  </span>
+                </div>
+                {access.message !== null && (
+                  <span className="text-sm [overflow-wrap:anywhere] text-muted-foreground">
+                    {access.message}
+                  </span>
+                )}
+                {(access.showCheckAccess || access.showSystemSettings) && (
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    {access.showCheckAccess && (
+                      <LoadingButton
+                        variant="secondary"
+                        onClick={onCheckAccess}
+                        loading={checkingAccess}
+                        disabled={checkingAccess}
+                      >
+                        Check access
+                      </LoadingButton>
+                    )}
+                    {access.showSystemSettings && (
+                      <a
+                        href={SYSTEM_SETTINGS_HREF}
+                        className="text-sm text-foreground underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+                      >
+                        Open System Settings
+                      </a>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <LoadingButton
                 variant="secondary"
@@ -116,6 +166,24 @@ export function CalendarCard({
                   </Label>
                 ))}
               </FieldSet>
+            )}
+            {access !== null && access.missing.length > 0 && (
+              <div className="flex min-w-0 flex-col gap-1 text-sm text-muted-foreground">
+                <span>Missing calendars:</span>
+                <ul className="list-disc pl-5">
+                  {access.missing.map((title) => (
+                    <li key={title} className="[overflow-wrap:anywhere]">
+                      {title}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {access?.details != null && (
+              <div className="flex min-w-0 flex-col gap-1 text-sm text-muted-foreground">
+                <span>{access.details.lastPoll}</span>
+                <span>{access.details.eventCount}</span>
+              </div>
             )}
           </>
         ) : (

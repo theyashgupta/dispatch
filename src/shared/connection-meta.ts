@@ -129,7 +129,7 @@ export const CALENDAR_CONNECTION: ConnectionMeta = {
   credentialLabel: "This Mac's Calendar or a secret iCal URL",
   steps: [
     "Choose This Mac's Calendar to read the calendars on this Mac, or iCal URL for a secret calendar address.",
-    "For This Mac's Calendar, press Load calendars and pick the ones to show. macOS asks once for access to your calendars.",
+    "For This Mac's Calendar, press Load calendars and pick the ones to show. Press Check access to show the macOS prompt for Dispatch Calendar.",
     "For an iCal URL, copy the secret address in iCal format (Google Calendar: Settings, Integrate calendar) into CALENDAR_ICAL_URL in Settings, Vault.",
     "Press Connect. Dispatch reads the next 48 hours once before it saves.",
   ],

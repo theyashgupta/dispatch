@@ -169,6 +169,8 @@ test("Calendar status maps off to disconnected, errors to their copy and connect
     mode: "macos",
     calendars: [],
     icalFilled: false,
+    permission: "granted",
+    missingCalendars: [],
   };
   assert.deepEqual(calendarCardStatus(null), { kind: "checking" });
   assert.deepEqual(calendarCardStatus(null, null, true), {
@@ -184,7 +186,7 @@ test("Calendar status maps off to disconnected, errors to their copy and connect
   });
   assert.deepEqual(calendarCardStatus({ ...base, calendars: ["Work"] }), {
     kind: "connected",
-    account: "1 calendars",
+    account: "1 calendar",
   });
   assert.deepEqual(
     calendarCardStatus({ ...base, calendars: ["Work", "Home"] }),
@@ -207,10 +209,96 @@ test("Calendar status maps off to disconnected, errors to their copy and connect
   );
 });
 
+test("macOS mode connects only on full access; iCal mode ignores the permission", () => {
+  const base: CalendarStatus = {
+    enabled: true,
+    mode: "macos",
+    calendars: [],
+    icalFilled: false,
+    permission: "write-only",
+    missingCalendars: [],
+  };
+  assert.deepEqual(calendarCardStatus(base), {
+    kind: "error",
+    message: CALENDAR_ERROR_COPY["write-only"],
+  });
+  assert.deepEqual(calendarCardStatus({ ...base, permission: "granted" }), {
+    kind: "connected",
+    account: "All calendars",
+  });
+  assert.deepEqual(calendarCardStatus({ ...base, mode: "ical" }), {
+    kind: "connected",
+    account: "iCal URL",
+  });
+});
+
+test("an enabled macOS card shows the permission copy only for the blocking permissions", () => {
+  const base: CalendarStatus = {
+    enabled: true,
+    mode: "macos",
+    calendars: [],
+    icalFilled: false,
+    permission: "unknown",
+    missingCalendars: [],
+  };
+  for (const permission of ["granted", "unknown", "prompt-timeout"] as const) {
+    assert.deepEqual(calendarCardStatus({ ...base, permission }), {
+      kind: "connected",
+      account: "All calendars",
+    });
+  }
+  assert.deepEqual(
+    calendarCardStatus({
+      ...base,
+      permission: "read-timeout",
+      lastError: "timeout",
+    }),
+    { kind: "error", message: CALENDAR_ERROR_COPY.timeout },
+  );
+  assert.deepEqual(calendarCardStatus({ ...base, permission: "denied" }), {
+    kind: "error",
+    message: CALENDAR_ERROR_COPY["calendar-denied"],
+  });
+  for (const permission of ["not-asked", "restricted"] as const) {
+    assert.deepEqual(calendarCardStatus({ ...base, permission }), {
+      kind: "error",
+      message: CALENDAR_ERROR_COPY[permission],
+    });
+  }
+});
+
 test("every calendar error code has its verbatim U4-08 copy", () => {
   assert.equal(
     CALENDAR_ERROR_COPY["calendar-denied"],
-    "Dispatch needs access to your calendars. Open System Settings, Privacy and Security, Calendars, and allow the app that runs Dispatch.",
+    "Calendar access is off for Dispatch Calendar. Open System Settings, Privacy and Security, Calendars, and turn on Dispatch Calendar.",
+  );
+  assert.equal(
+    CALENDAR_ERROR_COPY["not-asked"],
+    "Dispatch has not asked for Calendar access yet. Press Check access to show the macOS prompt.",
+  );
+  assert.equal(
+    CALENDAR_ERROR_COPY.restricted,
+    "Calendar access is restricted on this Mac by a profile or a parental control. Dispatch cannot change it.",
+  );
+  assert.equal(
+    CALENDAR_ERROR_COPY["write-only"],
+    "Dispatch Calendar can only add events. Open System Settings, Privacy and Security, Calendars, and choose Full Access for Dispatch Calendar.",
+  );
+  assert.equal(
+    CALENDAR_ERROR_COPY["prompt-timeout"],
+    "The macOS prompt got no answer within 2 minutes. Press Check access to try again.",
+  );
+  assert.equal(
+    CALENDAR_ERROR_COPY["read-timeout"],
+    "Reading the calendar took longer than 30 seconds.",
+  );
+  assert.equal(
+    CALENDAR_ERROR_COPY["calendars-missing"],
+    "A saved calendar no longer exists on this Mac. Load calendars and save your selection again.",
+  );
+  assert.equal(
+    CALENDAR_ERROR_COPY.unknown,
+    "Couldn't read the Calendar permission state.",
   );
   assert.equal(
     CALENDAR_ERROR_COPY["ical-url-missing"],
@@ -237,4 +325,53 @@ test("every calendar error code has its verbatim U4-08 copy", () => {
     "Reading the calendar took longer than 30 seconds.",
   );
   assert.equal(CALENDAR_ERROR_COPY.failed, "Couldn't read the calendar.");
+});
+
+test("a disabled macOS card with a blocking permission shows disconnected, not the permission copy", () => {
+  const base: CalendarStatus = {
+    enabled: false,
+    mode: "macos",
+    calendars: [],
+    icalFilled: false,
+    permission: "not-asked",
+    missingCalendars: [],
+  };
+  for (const permission of [
+    "not-asked",
+    "denied",
+    "restricted",
+    "write-only",
+  ] as const) {
+    assert.deepEqual(calendarCardStatus({ ...base, permission }), {
+      kind: "disconnected",
+    });
+  }
+  assert.deepEqual(
+    calendarCardStatus({ ...base, permission: "denied", lastError: "failed" }),
+    { kind: "disconnected" },
+  );
+});
+
+test("an enabled macOS card with a blocking permission and a last error shows the permission copy", () => {
+  const base: CalendarStatus = {
+    enabled: true,
+    mode: "macos",
+    calendars: [],
+    icalFilled: false,
+    permission: "denied",
+    missingCalendars: [],
+    lastError: "failed",
+  };
+  assert.deepEqual(calendarCardStatus(base), {
+    kind: "error",
+    message: CALENDAR_ERROR_COPY["calendar-denied"],
+  });
+  assert.deepEqual(calendarCardStatus({ ...base, permission: "not-asked" }), {
+    kind: "error",
+    message: CALENDAR_ERROR_COPY["not-asked"],
+  });
+  assert.deepEqual(calendarCardStatus({ ...base, permission: "granted" }), {
+    kind: "error",
+    message: CALENDAR_ERROR_COPY.failed,
+  });
 });

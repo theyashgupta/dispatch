@@ -5,6 +5,7 @@ import { ConflictError, InternalError } from "../services/domain/errors.js";
 import {
   applyCalendarSettings,
   calendarStatus,
+  checkCalendarAccess,
   listCalendars,
 } from "../services/orchestration/calendar.js";
 import { httpErrorHandler } from "./error-handler.js";
@@ -57,6 +58,14 @@ calendarRouter.post("/calendar/calendars", async (_req, res) => {
   });
   if (!result.ok) throw new ConflictError(result.error);
   res.json({ calendars: result.calendars });
+});
+
+calendarRouter.post("/calendar/access/check", async (_req, res) => {
+  res.json(
+    await checkCalendarAccess().catch((err: unknown) => {
+      throw failure("access-check", "check-failed", err);
+    }),
+  );
 });
 
 calendarRouter.put("/calendar/settings", async (req, res) => {
