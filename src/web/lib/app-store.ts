@@ -8,6 +8,7 @@ import type { StartRequest } from "../../shared/start-request.js";
 import type {
   BoardKey,
   Card,
+  ConnectionStatus,
   SetupChecks,
   TunnelState,
 } from "../../shared/types.js";
@@ -40,6 +41,7 @@ export interface AppState {
   soundEnabled: boolean;
   errorsInFeeds: boolean;
   tunnelState: TunnelState;
+  connection: ConnectionStatus;
   activityOpen: boolean;
   toast: UndoToastState;
   toastSeq: number;
@@ -67,6 +69,7 @@ const DEFAULT_STATE: AppState = {
   soundEnabled: true,
   errorsInFeeds: false,
   tunnelState: { status: "off" },
+  connection: "connecting",
   activityOpen: false,
   toast: IDLE_TOAST,
   toastSeq: 0,
@@ -248,6 +251,7 @@ export function createAppStore(initial: Partial<AppState> = {}) {
     setSoundEnabled: (on: boolean): void => set({ soundEnabled: on }),
     setErrorsInFeeds: (on: boolean): void => set({ errorsInFeeds: on }),
     setTunnelState: (tunnelState: TunnelState): void => set({ tunnelState }),
+    setConnection: (connection: ConnectionStatus): void => set({ connection }),
     setActivityOpen: (open: boolean): void => set({ activityOpen: open }),
 
     showUndo: (label: string, undo: () => Promise<void>): void => {
