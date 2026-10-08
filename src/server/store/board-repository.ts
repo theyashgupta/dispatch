@@ -114,6 +114,10 @@ export interface BoardRepository {
     sinceId: number,
     limit: number,
   ): OrchestrationEvent[];
+  listLatestOrchestrationEvents(
+    board: BoardKey,
+    limit: number,
+  ): OrchestrationEvent[];
   replaceOrchestratorToken(
     tokenHash: string,
     boardKey: BoardKey,

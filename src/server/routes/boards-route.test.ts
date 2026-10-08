@@ -19,6 +19,7 @@ const { boardsRouter } = await import("./boards.route.js");
 const { getOrchestrationConfig, setOrchestrationConfig, updateWorkspaceRoot } =
   await import("../services/infra/config-holder.js");
 const { CONFIG_PATH } = await import("../services/infra/paths.js");
+const { LOOP_PROGRESS } = await import("../test-support/supervised-session.js");
 const { rebuildSources } = await import("../adapters/source-gateway.js");
 const { getWorkflow, invalidateWorkflow } =
   await import("../services/orchestration/linear-outbound.js");
@@ -406,12 +407,14 @@ test("GET /boards/counts gives one entry per board, archived ones included, and 
     running: 1,
     openGroups: 1,
     attention: 1,
+    loops: [],
   });
   assert.deepEqual(byKey.OLDB, {
     key: "OLDB",
     running: 0,
     openGroups: 0,
     attention: 0,
+    loops: [],
   });
   assert.ok(Math.abs(Date.parse(counts.body.at) - before) < 10_000);
 });
@@ -446,6 +449,7 @@ test("GET /boards/counts leaves a Done group, a lost card and a provisioning car
     running: 1,
     openGroups: 0,
     attention: 0,
+    loops: [],
   });
 
   const lost = await start("lost");
@@ -461,6 +465,7 @@ test("GET /boards/counts leaves a Done group, a lost card and a provisioning car
     running: 1,
     openGroups: 1,
     attention: 0,
+    loops: [],
   });
 });
 
@@ -765,4 +770,31 @@ test("the API router mounts the board routes, with counts ahead of the key route
   } finally {
     s.close();
   }
+});
+
+test("GET /boards/counts still answers for a running loop whose last gate time is garbage", async () => {
+  await call("POST", "/boards", acmeBody({ key: "BADT", name: "Bad time" }));
+  const board = key("BADT");
+  const a = await store.createLocalCard(board, "a", "");
+  const b = await store.createLocalCard(board, "b", "");
+  const minted = await store.createGroupCard(board, "group", [a.id, b.id]);
+  assert.ok(minted.ok);
+  await store.setLoopProgress(minted.card.id, {
+    ...LOOP_PROGRESS,
+    summary: {
+      ...LOOP_PROGRESS.summary,
+      lastGate: { unit: 1, phase: 3, result: "fail", at: "garbage" },
+    },
+  });
+  const counts = await call("GET", "/boards/counts");
+  assert.equal(counts.status, 200, counts.text);
+  const entry = (
+    counts.body.counts as unknown as {
+      key: string;
+      attention: number;
+      loops: unknown[];
+    }[]
+  ).find((c) => c.key === "BADT");
+  assert.equal(entry?.loops.length, 1);
+  assert.equal(entry?.attention, 1);
 });

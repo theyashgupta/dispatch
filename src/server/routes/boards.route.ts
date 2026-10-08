@@ -11,9 +11,11 @@ import {
   isStaticBoardVariant,
   listBoards,
   resolveBoard,
+  resolveOpenBoard,
   restoreBoard,
   updateBoard,
 } from "../services/orchestration/boards.js";
+import { orchestrationSummary } from "../services/orchestration/orchestration-summary.js";
 import {
   mintOrchestratorToken,
   revokeOrchestratorToken,
@@ -21,11 +23,13 @@ import {
 import {
   createBoardBodySchema,
   parseBoardKeyParam,
+  orchestrationEventsQuerySchema,
   patchBoardBodySchema,
 } from "./boards-schemas.js";
 import { httpErrorHandler } from "./error-handler.js";
 import { orchestratorIdSchema } from "./orchestrator-schemas.js";
 import { parseOrThrow } from "./parse-input.js";
+import { boardRepository } from "../store/board-repository.js";
 
 export const boardsRouter = Router({ caseSensitive: true });
 
@@ -58,6 +62,26 @@ boardsRouter.post("/boards", async (req, res) => {
 
 boardsRouter.get("/boards/:key", (req, res) => {
   res.status(200).json({ board: getBoard(parseBoardKeyParam(req.params.key)) });
+});
+
+boardsRouter.get("/boards/:key/orchestration", (req, res) => {
+  const key = parseBoardKeyParam(req.params.key);
+  resolveOpenBoard(key);
+  res.status(200).json(orchestrationSummary(key));
+});
+
+boardsRouter.get("/boards/:key/orchestration/events", (req, res) => {
+  const key = parseBoardKeyParam(req.params.key);
+  const { since, limit } = parseOrThrow(
+    orchestrationEventsQuerySchema,
+    req.query,
+  );
+  resolveOpenBoard(key);
+  const events =
+    since === undefined
+      ? boardRepository.listLatestOrchestrationEvents(key, limit)
+      : boardRepository.listOrchestrationEvents(key, since, limit);
+  res.status(200).json({ events });
 });
 
 boardsRouter.patch("/boards/:key", async (req, res) => {

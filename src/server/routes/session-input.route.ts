@@ -10,17 +10,18 @@ import { boardRepository } from "../store/board-repository.js";
 import { httpErrorHandler } from "./error-handler.js";
 import { sessionCardParamsSchema } from "./orchestrator-schemas.js";
 import { parseOrThrow } from "./parse-input.js";
+import { unknownFieldError } from "./schema-primitives.js";
 
 export const sessionInputRouter = Router({ caseSensitive: true });
 
-const inputBodySchema = z.object(
+const inputBodySchema = z.strictObject(
   {
     text: z
       .string("invalid-text")
       .min(1, "invalid-text")
       .max(SESSION_INPUT_MAX, "invalid-text"),
   },
-  "invalid-text",
+  { error: unknownFieldError("invalid-text") },
 );
 
 function cardOf(params: unknown) {
