@@ -178,9 +178,31 @@ void test("state and attempt lines parse and ignore other lines", () => {
   assert.deepEqual(
     parsePhases("### Phase 1: A (no-budget)\n### Phase 2: B").phases,
     [
-      { number: 1, name: "A (no-budget)" },
-      { number: 2, name: "B" },
+      { number: 1, name: "A (no-budget)", retryBudget: null },
+      { number: 2, name: "B", retryBudget: null },
     ],
+  );
+});
+
+void test("parsePhases reads the first retry budget line under each heading", () => {
+  const text = [
+    "- **Retry budget:** 9",
+    "### Phase 1: A",
+    "- **Retry budget:** 3 (largest switch)",
+    "- **Retry budget:** 7",
+    "### Phase 2: B",
+    "text only",
+    "### Phase 3: C",
+    "#### Notes",
+    "- **Retry budget:** 5",
+    "### Phase 4: D",
+    "- **Retry budget:** 2",
+    "### Phase 5: E",
+    "- **Retry budget:** 1000",
+  ].join("\n");
+  assert.deepEqual(
+    parsePhases(text).phases.map((phase) => phase.retryBudget),
+    [3, null, null, 2, null],
   );
 });
 
@@ -534,4 +556,47 @@ void test("lastGate falls back to the newest done unit when the current unit has
     result: "pass",
     at: "2026-10-06T00:00:00Z",
   });
+});
+
+test("an attempt line with an unparseable time is dropped", () => {
+  assert.deepEqual(parseAttemptLines("phase 3 RED attempt 2 garbage\n"), []);
+});
+
+test("a pass line with an unparseable time is kept with a null time", () => {
+  assert.deepEqual(parseStateLines("phase 2 Name GREEN garbage gate=pass\n"), [
+    { phase: 2, at: null },
+  ]);
+});
+
+test("a pass line with a bad time still passes the phase and hides its older RED attempt", () => {
+  const result = buildLoopProgress({
+    slug: "s",
+    roadmapFile: "ROADMAP.md",
+    readAt: READ_AT,
+    roadmapText: [
+      "### Unit 1: A",
+      "- **Status:** in progress",
+      "- **PRD:** `d/.planning/prds/s-unit-1.md`",
+      "",
+    ].join("\n"),
+    progressText: PROGRESS_OK,
+    engine: null,
+    files: new Map([
+      ["d/.planning/prds/s-unit-1.md", "### Phase 1: One\n"],
+      [
+        "d/.planning/s-unit-1/state.md",
+        "phase 1 One GREEN not-a-time gate=pass\n",
+      ],
+      [
+        "d/.planning/s-unit-1/attempts.md",
+        "phase 1 RED attempt 1 2026-10-05T00:00:00Z\n",
+      ],
+    ]),
+    refused: new Set(),
+    warnings: [],
+  });
+  const phase = result.units[0]?.phases[0];
+  assert.equal(phase?.gate, "pass");
+  assert.equal(phase?.passedAt, null);
+  assert.equal(result.summary.lastGate, null);
 });

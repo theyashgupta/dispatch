@@ -31,11 +31,12 @@ interface ProgressFile {
 interface PrdPhase {
   number: number;
   name: string;
+  retryBudget: number | null;
 }
 
 interface PassLine {
   phase: number;
-  at: string;
+  at: string | null;
 }
 
 interface AttemptLine {
@@ -237,29 +238,59 @@ export function parseProgressFile(text: string): ProgressFile {
   return { roadmapPath, units, warnings };
 }
 
-/** Lists the `### Phase <N>: <name>` headings of a PRD in file order, keeping the first 99. */
+/**
+ * Lists the `### Phase <N>: <name>` headings of a PRD in file order, keeping the first 99.
+ *
+ * @remarks Each phase takes the first `- **Retry budget:** <n>` line between its heading and the next heading.
+ */
 export function parsePhases(text: string): {
   phases: PrdPhase[];
   capped: boolean;
 } {
   const phases: PrdPhase[] = [];
+  let open: PrdPhase | null = null;
   for (const line of toLines(text)) {
     const match = /^### Phase (\d{1,4}): (.+)$/.exec(line);
-    if (!match) continue;
-    if (phases.length >= MAX_ITEMS) return { phases, capped: true };
-    phases.push({ number: Number(match[1]), name: (match[2] ?? "").trim() });
+    if (match) {
+      if (phases.length >= MAX_ITEMS) return { phases, capped: true };
+      open = {
+        number: Number(match[1]),
+        name: (match[2] ?? "").trim(),
+        retryBudget: null,
+      };
+      phases.push(open);
+      continue;
+    }
+    if (/^#{1,6} /.test(line)) {
+      open = null;
+      continue;
+    }
+    if (open === null || open.retryBudget !== null) continue;
+    const budget = /^- \*\*Retry budget:\*\* (\d{1,3})(?!\d)/.exec(line);
+    if (budget) open.retryBudget = Number(budget[1]);
   }
   return { phases, capped: false };
 }
 
+function isTimestamp(text: string | undefined): boolean {
+  return text !== undefined && !Number.isNaN(Date.parse(text));
+}
+
 /**
  * Lists the `gate=pass` lines of a unit state file.
+ *
+ * @remarks A pass line with an unparseable time is kept with a null time, so a passed phase never reads as pending.
  */
 export function parseStateLines(text: string): PassLine[] {
   const lines: PassLine[] = [];
   for (const line of toLines(text)) {
     const match = /^phase (\d+) (.+) GREEN (\S+) gate=pass$/.exec(line.trim());
-    if (match) lines.push({ phase: Number(match[1]), at: match[3] ?? "" });
+    if (match) {
+      lines.push({
+        phase: Number(match[1]),
+        at: isTimestamp(match[3]) ? (match[3] ?? null) : null,
+      });
+    }
   }
   return lines;
 }
@@ -271,7 +302,7 @@ export function parseAttemptLines(text: string): AttemptLine[] {
   const lines: AttemptLine[] = [];
   for (const line of toLines(text)) {
     const match = /^phase (\d+) RED attempt (\d+) (\S+)/.exec(line.trim());
-    if (match) {
+    if (match && isTimestamp(match[3])) {
       lines.push({
         phase: Number(match[1]),
         attempt: Number(match[2]),
@@ -419,19 +450,21 @@ interface ReadContext {
 }
 
 function gateOf(unit: number, evidence: UnitEvidence): LoopGate | null {
+  const passedPhases = new Set(evidence.passes.map((line) => line.phase));
   const candidates: LoopGate[] = [
-    ...evidence.passes.map((line): LoopGate => ({
-      unit,
-      phase: line.phase,
-      result: "pass",
-      at: line.at,
-    })),
-    ...evidence.attempts.map((line): LoopGate => ({
-      unit,
-      phase: line.phase,
-      result: "fail",
-      at: line.at,
-    })),
+    ...evidence.passes.flatMap((line): LoopGate[] =>
+      line.at === null
+        ? []
+        : [{ unit, phase: line.phase, result: "pass", at: line.at }],
+    ),
+    ...evidence.attempts
+      .filter((line) => !passedPhases.has(line.phase))
+      .map((line): LoopGate => ({
+        unit,
+        phase: line.phase,
+        result: "fail",
+        at: line.at,
+      })),
   ];
   return newest(candidates);
 }
@@ -522,18 +555,24 @@ function readEngine(
 
 function phasesOf(headings: PrdPhase[], evidence: UnitEvidence): LoopPhase[] {
   return headings.map((heading): LoopPhase => {
-    const passed = newest(
-      evidence.passes.filter((line) => line.phase === heading.number),
+    const passes = evidence.passes.filter(
+      (line) => line.phase === heading.number,
     );
+    const passedAt =
+      passes
+        .flatMap((line) => (line.at === null ? [] : [line.at]))
+        .sort()
+        .at(-1) ?? null;
     const tries = evidence.attempts.filter(
       (line) => line.phase === heading.number,
     ).length;
     return {
       number: heading.number,
       name: heading.name,
-      gate: passed ? "pass" : tries > 0 ? "fail" : "pending",
+      gate: passes.length > 0 ? "pass" : tries > 0 ? "fail" : "pending",
       attempts: tries,
-      passedAt: passed?.at ?? null,
+      passedAt,
+      retryBudget: heading.retryBudget,
     };
   });
 }

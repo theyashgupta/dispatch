@@ -1,12 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PAGES, parseRoute } from "./route.js";
-import { NAV_ITEMS, navGroups } from "./nav-items.js";
+import { NAV_ITEMS, navGroups, visibleNavItems } from "./nav-items.js";
 
 test("every route page except settings and boards has exactly one nav row", () => {
   for (const page of PAGES) {
     const rows = NAV_ITEMS.filter((item) => item.page === page).length;
-    assert.equal(rows, page === "settings" || page === "boards" ? 0 : 1, page);
+    const sidebarless = page === "settings" || page === "boards";
+    assert.equal(rows, sidebarless ? 0 : 1, page);
   }
 });
 
@@ -42,10 +43,10 @@ test("the System group lists its pages in order, Workspaces after Archive, Flow 
   );
 });
 
-test("the Work group lists Board, Sessions, Workspace and Activity in order", () => {
+test("the Work group lists Board, Dashboard, Sessions, Workspace and Activity in order", () => {
   assert.deepEqual(
     NAV_ITEMS.filter((item) => item.group === "Work").map((item) => item.page),
-    ["board", "sessions", "workspace", "activity"],
+    ["board", "dashboard", "sessions", "workspace", "activity"],
   );
 });
 
@@ -74,4 +75,24 @@ test("NAV_ITEMS has exactly one Tickets row, in the Sources group", () => {
 test("navGroups orders Home, Work, Sources, System", () => {
   const groups = navGroups(NAV_ITEMS).map((entry) => entry.group);
   assert.deepEqual(groups, ["Home", "Work", "Sources", "System"]);
+});
+
+test("the Dashboard row shows in Work only when the board has a main orchestrator", () => {
+  const pages = (hasMain: boolean) =>
+    visibleNavItems(NAV_ITEMS, [], hasMain)
+      .filter((item) => item.group === "Work")
+      .map((item) => item.page);
+  assert.deepEqual(pages(false), [
+    "board",
+    "sessions",
+    "workspace",
+    "activity",
+  ]);
+  assert.deepEqual(pages(true), [
+    "board",
+    "dashboard",
+    "sessions",
+    "workspace",
+    "activity",
+  ]);
 });
