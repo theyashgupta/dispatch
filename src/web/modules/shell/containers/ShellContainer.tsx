@@ -236,6 +236,9 @@ export function ShellContainer({
       if (fresh) setLiveBoard(snapshot);
     },
   });
+  useEffect(() => {
+    appStore.setConnection(connection);
+  }, [appStore, connection]);
   const boardQuery = useBoardSnapshotQuery(boardKey, doneLimit);
   const [lastBoard, setLastBoard] = useState<BoardSnapshot | null>(null);
   const current = latestBoard(boardQuery.data, lastBoard, boardKey);

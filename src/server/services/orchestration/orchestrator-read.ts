@@ -11,6 +11,8 @@ import {
   boardRepository as store,
 } from "../../store/board-repository.js";
 import { ConflictError, ValidationError } from "../domain/errors.js";
+import { effectivePolicy } from "../domain/orchestrator-rules.js";
+import type { OrchestratorIdentity } from "../domain/orchestrator-scope.js";
 import { runningLoops } from "./boards.js";
 
 export type CapturePane = (target: string) => Promise<string>;
@@ -99,14 +101,23 @@ export function groupCost(card: Card): number {
   );
 }
 
-/** The policy of one board with its running group count and the cost of each group. */
-export function policySummary(board: BoardKey): {
+/** The caller's policy (the board policy narrowed by its override) with the running group count and group costs. */
+export function policySummary({
+  boardKey: board,
+  orchestratorId,
+}: OrchestratorIdentity): {
   policy: BoardPolicy | null;
   runningLoops: number;
   concurrencyCap: number | null;
   groups: { cardId: string; cost: number; budget: number | null }[];
 } {
-  const policy = store.getBoard(board)?.policy ?? null;
+  const stored = store.getBoard(board);
+  const policy = stored
+    ? effectivePolicy(
+        stored.policy,
+        stored.orchestrators.find((r) => r.id === orchestratorId),
+      )
+    : null;
   const groups = store.listCards(board).filter((c) => c.source === "group");
   return {
     policy,

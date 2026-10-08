@@ -9,11 +9,13 @@ import {
   ForbiddenError,
   HttpError,
   NotFoundError,
+  ValidationError,
 } from "../domain/errors.js";
 import type { OutboundDeps } from "./linear-outbound.js";
 
 const env = isolateEnv();
 const { store } = await import("../../store/board.store.js");
+const { createDecisionItem } = await import("./decision-items.js");
 const {
   commentOnTicket,
   commentOutbound,
@@ -41,20 +43,134 @@ const linear = store.getCard("lin-1")!;
 assert.equal(linear.boardKey, SBX);
 after(() => env.cleanup());
 
-const own = () =>
-  createOrchestratorTicket(CALLER, { title: "own", fullDescription: "d" });
+const OPTIONS = [
+  { id: "approve", label: "x" },
+  { id: "reject", label: "y" },
+];
 
-void test("createOrchestratorTicket stores a local ticket marked with the orchestrator", async () => {
+/** Raise a proposal and answer it with `optionId` when given. */
+function proposal(
+  tickets: { title: string; description: string }[],
+  optionId?: string,
+): string {
+  const item = createDecisionItem(CALLER, {
+    kind: "ticket_proposal",
+    question: "q",
+    options: OPTIONS,
+    tickets,
+  });
+  if (optionId !== undefined) {
+    store.answerDecisionItem(item.id, { optionId, note: null });
+  }
+  return item.id;
+}
+
+const own = () =>
+  createOrchestratorTicket(CALLER, {
+    proposalItemId: proposal([{ title: "own", description: "d" }], "approve"),
+    index: 0,
+  });
+
+void test("createOrchestratorTicket stores a local ticket from the proposal entry, marked with the orchestrator", async () => {
+  const proposalItemId = proposal(
+    [{ title: "new", description: "what to do" }],
+    "approve",
+  );
   const card = await createOrchestratorTicket(CALLER, {
-    title: "new",
-    fullDescription: "what to do",
+    proposalItemId,
+    index: 0,
   });
   const stored = store.getCard(card.id)!;
   assert.equal(stored.boardKey, SBX);
   assert.equal(stored.source, "local");
+  assert.equal(stored.title, "new");
   assert.equal(stored.description, "what to do");
   assert.equal(stored.createdByOrchestrator, "orc-sbx");
   assert.equal(card.createdByOrchestrator, "orc-sbx");
+  assert.deepEqual(
+    store.getDecisionItem(proposalItemId)?.proposal?.usedIndexes,
+    [0],
+  );
+});
+
+void test("createOrchestratorTicket refuses each unusable proposal with its typed error", async () => {
+  const entry = [{ title: "t", description: "d" }];
+  const ruling = createDecisionItem(CALLER, {
+    kind: "ruling",
+    question: "q",
+    options: OPTIONS,
+  });
+  const used = proposal(entry, "approve");
+  await createOrchestratorTicket(CALLER, { proposalItemId: used, index: 0 });
+  const cases: [string, number, (err: unknown) => boolean][] = [
+    [
+      proposal(entry),
+      0,
+      (e) => e instanceof ConflictError && e.code === "proposal-open",
+    ],
+    [
+      proposal(entry, "reject"),
+      0,
+      (e) => e instanceof ConflictError && e.code === "proposal-rejected",
+    ],
+    [
+      "missing",
+      0,
+      (e) => e instanceof NotFoundError && e.code === "unknown-proposal",
+    ],
+    [
+      ruling.id,
+      0,
+      (e) => e instanceof ValidationError && e.code === "not-a-proposal",
+    ],
+    [
+      proposal(entry, "approve"),
+      1,
+      (e) => e instanceof ValidationError && e.code === "invalid-index",
+    ],
+    [
+      used,
+      0,
+      (e) => e instanceof ConflictError && e.code === "proposal-index-used",
+    ],
+  ];
+  const before = store.listCards(SBX).length;
+  for (const [proposalItemId, index, matches] of cases) {
+    await assert.rejects(
+      createOrchestratorTicket(CALLER, { proposalItemId, index }),
+      matches,
+    );
+  }
+  assert.equal(store.listCards(SBX).length, before);
+});
+
+void test("createOrchestratorTicket frees the index when the ticket create fails", async () => {
+  const BAD = parseBoardKey("BAD") as BoardKey;
+  const id = "proposal-bad";
+  store.insertDecisionItem({
+    id,
+    boardKey: BAD,
+    cardId: null,
+    orchestratorId: "orc-bad",
+    kind: "ticket_proposal",
+    question: "q",
+    options: OPTIONS,
+    recommendedOptionId: "approve",
+    state: "open",
+    answer: null,
+    createdAt: new Date().toISOString(),
+    answeredAt: null,
+    proposal: { tickets: [{ title: "t", description: "d" }], usedIndexes: [] },
+  });
+  store.answerDecisionItem(id, { optionId: "approve", note: null });
+  await assert.rejects(
+    createOrchestratorTicket(
+      { boardKey: BAD, orchestratorId: "orc-bad" },
+      { proposalItemId: id, index: 0 },
+    ),
+    NotFoundError,
+  );
+  assert.deepEqual(store.getDecisionItem(id)?.proposal?.usedIndexes, []);
 });
 
 void test("updateTicket changes a local card and refuses a group card and a Linear card", async () => {
@@ -152,4 +268,113 @@ void test("commentOnTicket maps an unknown local card to 404 and leaves no comme
   const gone = { ...card, id: "LOCAL-9999" };
   await assert.rejects(commentOnTicket(CALLER, gone, "x"), NotFoundError);
   assert.equal(store.getCard(card.id)?.comments, undefined);
+});
+
+void test("a ticket an extra creates joins that extra's scope; a ticket the main creates changes no scope", async () => {
+  const EXT = parseBoardKey("EXT") as BoardKey;
+  await store.createBoard({
+    key: EXT,
+    name: "Extras",
+    workspaceRoot: "/ext/sessions",
+    repositories: [],
+    linearTeamKeys: [],
+  });
+  const held = await store.createLocalCard(EXT, "held", "");
+  await store.setBoardOrchestrators(EXT, [
+    {
+      id: "main",
+      name: "Main",
+      role: "main",
+      scope: { groupIds: [], ticketIds: [] },
+      policyOverride: {},
+      cardId: null,
+      state: "stopped",
+      createdAt: "2026-10-07T00:00:00.000Z",
+    },
+    {
+      id: "extra-1",
+      name: "Extra 1",
+      role: "extra",
+      scope: { groupIds: [], ticketIds: [held.id] },
+      policyOverride: {},
+      cardId: null,
+      state: "stopped",
+      createdAt: "2026-10-07T00:00:00.000Z",
+    },
+  ]);
+  const ticketBy = async (orchestratorId: string) => {
+    const caller = { boardKey: EXT, orchestratorId };
+    const item = createDecisionItem(caller, {
+      kind: "ticket_proposal",
+      question: "q",
+      options: OPTIONS,
+      tickets: [{ title: "t", description: "d" }],
+    });
+    store.answerDecisionItem(item.id, { optionId: "approve", note: null });
+    return createOrchestratorTicket(caller, {
+      proposalItemId: item.id,
+      index: 0,
+    });
+  };
+  const scopeOf = (id: string) =>
+    store.getBoard(EXT)!.orchestrators.find((r) => r.id === id)!.scope;
+  const mine = await ticketBy("extra-1");
+  assert.deepEqual(scopeOf("extra-1").ticketIds, [held.id, mine.id]);
+  await ticketBy("main");
+  assert.deepEqual(scopeOf("extra-1").ticketIds, [held.id, mine.id]);
+  assert.deepEqual(scopeOf("main"), { groupIds: [], ticketIds: [] });
+});
+
+void test("create_ticket by an extra with a stale scope id and a stale wider override still answers the ticket and appends it", async () => {
+  const STL = parseBoardKey("STL") as BoardKey;
+  await store.createBoard({
+    key: STL,
+    name: "Stale",
+    workspaceRoot: "/stl/sessions",
+    repositories: [],
+    linearTeamKeys: [],
+  });
+  const held = await store.createLocalCard(STL, "held", "");
+  const cap = store.getBoard(STL)!.policy.concurrencyCap;
+  await store.setBoardOrchestrators(STL, [
+    {
+      id: "main",
+      name: "Main",
+      role: "main",
+      scope: { groupIds: [], ticketIds: [] },
+      policyOverride: {},
+      cardId: null,
+      state: "stopped",
+      createdAt: "2026-10-07T00:00:00.000Z",
+    },
+    {
+      id: "extra-1",
+      name: "Extra 1",
+      role: "extra",
+      scope: { groupIds: ["STL-GONE"], ticketIds: [held.id] },
+      policyOverride: { concurrencyCap: cap + 1 },
+      cardId: null,
+      state: "stopped",
+      createdAt: "2026-10-07T00:00:00.000Z",
+    },
+  ]);
+  const caller = { boardKey: STL, orchestratorId: "extra-1" };
+  const item = createDecisionItem(caller, {
+    kind: "ticket_proposal",
+    question: "q",
+    options: OPTIONS,
+    tickets: [{ title: "t", description: "d" }],
+  });
+  store.answerDecisionItem(item.id, { optionId: "approve", note: null });
+  const made = await createOrchestratorTicket(caller, {
+    proposalItemId: item.id,
+    index: 0,
+  });
+  const scope = store
+    .getBoard(STL)!
+    .orchestrators.find((r) => r.id === "extra-1")!.scope;
+  assert.deepEqual(scope, {
+    groupIds: ["STL-GONE"],
+    ticketIds: [held.id, made.id],
+  });
 });

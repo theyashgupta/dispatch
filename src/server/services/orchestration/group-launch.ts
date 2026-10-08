@@ -1,4 +1,5 @@
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
+import { isHiddenCard } from "../../../shared/hidden-card.js";
 import type { BoardKey, Card, Config } from "../../../shared/types.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import { ConflictError, ValidationError } from "../domain/errors.js";
@@ -35,6 +36,7 @@ function memberIneligibleReason(
   if (card.column !== "todo") return "not in To Do";
   if (card.groupId != null) return "already grouped";
   if (card.source === "group") return "is itself a group";
+  if (isHiddenCard(card)) return "is an orchestrator session";
   return null;
 }
 

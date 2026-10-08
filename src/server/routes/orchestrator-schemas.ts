@@ -10,6 +10,7 @@ import {
   ITEM_DESCRIPTION_MAX,
   ITEM_TITLE_MAX,
   MOVABLE_COLUMNS,
+  ORCHESTRATOR_STATE_MAX_BYTES,
   SESSION_INPUT_MAX,
   SHIP_BODY_MAX,
   SHIP_TITLE_MAX,
@@ -25,6 +26,7 @@ import {
   booleanFilter,
   boundedText,
   intText,
+  unknownFieldError,
 } from "./schema-primitives.js";
 
 export const orchestratorIdSchema = z
@@ -79,15 +81,26 @@ const ticketDescription = boundedText(
   "invalid-description",
 ).refine(markerFree, MARKER_ERROR);
 
-export const createTicketBodySchema = z
-  .object(
-    { title: ticketTitle, description: ticketDescription },
-    "invalid-title",
-  )
-  .transform(({ title, description }) => ({
-    title,
-    fullDescription: description,
-  }));
+/**
+ * The body of `create_ticket`: an approved proposal item id and the index of one ticket in it.
+ *
+ * @remarks
+ * A title or description field is refused, because the ticket text comes from the proposal.
+ */
+export const createTicketBodySchema = z.strictObject(
+  {
+    proposalItemId: z
+      .string("invalid-proposal-item")
+      .regex(DECISION_ID_RE, "invalid-proposal-item"),
+    index: z
+      .number("invalid-index")
+      .int("invalid-index")
+      .min(0, "invalid-index"),
+  },
+  {
+    error: unknownFieldError(),
+  },
+);
 
 export const updateTicketBodySchema = z
   .object(
@@ -154,6 +167,19 @@ export const sendInputBodySchema = z.object(
   "invalid-text",
 );
 
+export const writeStateBodySchema = z.object(
+  {
+    markdown: z
+      .string("invalid-markdown")
+      .refine(
+        (text) => Buffer.byteLength(text) <= ORCHESTRATOR_STATE_MAX_BYTES,
+        "state-too-large",
+      ),
+    handoffReady: z.boolean("invalid-handoff-ready").optional(),
+  },
+  "invalid-markdown",
+);
+
 export const approveBodySchema = z.object(
   {
     decisionIds: z
@@ -176,7 +202,7 @@ export const handoffBodySchema = z
 const optionId = (code: string) =>
   z.string(code).regex(DECISION_OPTION_ID_RE, code);
 
-export const createDecisionBodySchema = z.object(
+const decisionBodyShape = z.object(
   {
     cardId: cardId("invalid-card-id").nullable().optional(),
     kind: z.enum(DECISION_KINDS, "invalid-kind"),
@@ -205,8 +231,24 @@ export const createDecisionBodySchema = z.object(
         "invalid-options",
       ),
     recommendedOptionId: optionId("invalid-recommended-option").optional(),
+    tickets: z
+      .array(
+        z.object(
+          { title: ticketTitle, description: ticketDescription },
+          "invalid-tickets",
+        ),
+        "invalid-tickets",
+      )
+      .min(1, "invalid-tickets")
+      .max(20, "invalid-tickets")
+      .optional(),
   },
   "invalid-kind",
+);
+
+export const createDecisionBodySchema = decisionBodyShape.refine(
+  (body) => (body.kind === "ticket_proposal") === (body.tickets !== undefined),
+  "invalid-tickets",
 );
 
 export const waitBodySchema = z.object(

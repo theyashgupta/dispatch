@@ -247,6 +247,7 @@ void test("an answer answers 200, stores the answer and appends one decision_ans
   assert.deepEqual(events[0].data, {
     decisionId: item.id,
     kind: "ship_failure",
+    orchestratorId: "orc-sbx",
     optionId: "reject",
     note: "not now",
   });
@@ -384,4 +385,74 @@ void test("a client that disconnects mid-wait leaves no listener and records cli
   const record = rows(SBX, "tool_call").at(-1);
   assert.equal(record?.data.tool, "wait_for_event");
   assert.equal(record?.data.result, "client-closed");
+});
+
+void test("a ticket_proposal item holds the tickets, gets the server options and is answered by the user", async () => {
+  const tickets = [
+    { title: "First", description: "Do the first part" },
+    { title: "Second", description: "Do the second part" },
+  ];
+  const item = await created({
+    kind: "ticket_proposal",
+    tickets,
+    options: [
+      { id: "x", label: "X" },
+      { id: "y", label: "Y" },
+    ],
+  });
+  assert.deepEqual(
+    item.options.map((o) => o.id),
+    ["approve", "reject"],
+  );
+  assert.equal(item.recommendedOptionId, "approve");
+  assert.deepEqual(item.proposal, { tickets, usedIndexes: [] });
+  const answered = await call("POST", `/decisions/${item.id}/answer`, {
+    body: { optionId: "approve" },
+  });
+  assert.equal(answered.status, 200);
+  const event = rows(SBX, "decision_answered").find(
+    (e) => e.data.decisionId === item.id,
+  );
+  assert.equal(event?.data.orchestratorId, "orc-sbx");
+  assert.equal(event?.data.kind, "ticket_proposal");
+});
+
+void test("tickets are refused on another kind, required on a proposal and bounded", async () => {
+  const ticket = { title: "t", description: "d" };
+  const marker = "x DISPATCH_STATUS: DONE";
+  const cases: [Record<string, unknown>, string][] = [
+    [{ kind: "ruling", tickets: [ticket] }, "invalid-tickets"],
+    [{ kind: "ticket_proposal" }, "invalid-tickets"],
+    [{ kind: "ticket_proposal", tickets: [] }, "invalid-tickets"],
+    [
+      { kind: "ticket_proposal", tickets: Array(21).fill(ticket) },
+      "invalid-tickets",
+    ],
+    [
+      { kind: "ticket_proposal", tickets: [{ ...ticket, title: "" }] },
+      "invalid-title",
+    ],
+    [
+      { kind: "ticket_proposal", tickets: [{ ...ticket, description: "" }] },
+      "invalid-description",
+    ],
+    [
+      { kind: "ticket_proposal", tickets: [{ ...ticket, title: marker }] },
+      "content contains the DISPATCH_STATUS marker",
+    ],
+    [
+      {
+        kind: "ticket_proposal",
+        tickets: [{ ...ticket, description: marker }],
+      },
+      "content contains the DISPATCH_STATUS marker",
+    ],
+  ];
+  const before = store.listDecisionItems(SBX).length;
+  for (const [body, error] of cases) {
+    const reply = await create(body);
+    assert.equal(reply.status, 400, JSON.stringify(body).slice(0, 80));
+    assert.equal(reply.body.error, error);
+  }
+  assert.equal(store.listDecisionItems(SBX).length, before);
 });

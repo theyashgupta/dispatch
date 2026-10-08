@@ -223,8 +223,12 @@ const ROADMAP_TOOL_FILES = [
   /^src\/server\/services\/orchestration\/orchestrator-sessions\.ts$/,
   /^src\/server\/bootstrap\/mcp-tools\.ts$/,
   /^src\/server\/bootstrap\/mcp-tools\.test\.ts$/,
+  /^src\/server\/test-support\/fake-claude-tui\.test\.ts$/,
   /^src\/server\/services\/orchestration\/decision-items\.ts$/,
   /^src\/server\/routes\/decisions-route\.test\.ts$/,
+  /^src\/server\/services\/infra\/playbooks\.ts$/,
+  /^src\/web\/modules\/orchestrator\/components\/(OverrideFields|PolicyForm)\.tsx$/,
+  /^src\/web\/modules\/orchestrator\/domain\/(ownership|policy-form|session-state-label)(\.test)?\.ts$/,
 ];
 
 /**

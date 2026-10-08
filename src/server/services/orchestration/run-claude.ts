@@ -1,5 +1,6 @@
 import type { Card } from "../../../shared/types.js";
 import { DEFAULT_CLAUDE_ACCOUNT_ID } from "../../../shared/types.js";
+import { isHiddenCard } from "../../../shared/hidden-card.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import {
   hasSession,
@@ -11,6 +12,7 @@ import {
   awaitReplReady,
   buildLaunch,
   existingHooks,
+  primeOrchestratorShell,
   RESUME_MISSING,
   SHELL_SESSION_ENV,
   StartStepError,
@@ -78,11 +80,13 @@ async function relaunch(
   ).catch(() => null);
   if (account == null) return "account";
 
+  if (isHiddenCard(card)) await primeOrchestratorShell(card, tmuxSession);
   const attempted = card.claudeSessionId;
   const { argv } = await buildLaunch(
     account,
     attempted ? ["--resume", attempted] : [],
     existingHooks(card),
+    card,
   );
   await typeLaunchLine(tmuxSession, argv);
   void awaitReplReady(tmuxSession).catch(async (err: unknown) => {

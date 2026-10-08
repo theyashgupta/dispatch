@@ -111,3 +111,93 @@ void test("rootOf prefers the session workspace path over the card one and never
   assert.equal(rootOf(card, folderOnly), "/card/path");
   assert.equal(rootOf({} as unknown as Card, folderOnly), "");
 });
+
+void test("orchestratorOf matches the record that names the hidden card, not a re-added id", async () => {
+  const { orchestratorOf } = await import("./supervisor-record.js");
+  const hidden = await store.createOrchestratorCard(
+    SBX,
+    "Orchestrator: old",
+    "re-added",
+  );
+  const base = {
+    id: "re-added",
+    name: "Re-added",
+    role: "main" as const,
+    scope: { groupIds: [], ticketIds: [] },
+    policyOverride: {},
+    state: "running" as const,
+    createdAt: "2026-10-08T00:00:00.000Z",
+  };
+  await store.setBoardOrchestrators(SBX, [{ ...base, cardId: null }]);
+  assert.equal(orchestratorOf(store.getCard(hidden.id)!), undefined);
+  await store.setBoardOrchestrators(SBX, [{ ...base, cardId: hidden.id }]);
+  assert.equal(orchestratorOf(store.getCard(hidden.id)!)?.id, "re-added");
+  await store.setBoardOrchestrators(SBX, []);
+});
+
+void test("ownerPolicy narrows the board policy by the override of the card's owner", async () => {
+  const { ownerPolicy } = await import("./supervisor-record.js");
+  const board = store.getBoard(SBX)!;
+  await store.setBoardPolicy(SBX, {
+    ...board.policy,
+    usageLimit: "wait",
+    concurrencyCap: 5,
+    budgetPerGroup: 100,
+  });
+  const a = await store.createLocalCard(SBX, "owned-a", "");
+  const b = await store.createLocalCard(SBX, "owned-b", "");
+  const made = await store.createGroupCard(SBX, "owned", [a.id, b.id]);
+  assert.ok(made.ok);
+  const loose = await store.createLocalCard(SBX, "owned-loose", "");
+  const hidden = await store.createOrchestratorCard(
+    SBX,
+    "Orchestrator: x",
+    "extra-1",
+  );
+  const base = {
+    cardId: null,
+    state: "stopped" as const,
+    createdAt: "2026-10-08T00:00:00.000Z",
+  };
+  await store.setBoardOrchestrators(SBX, [
+    {
+      ...base,
+      id: "main",
+      name: "Main",
+      role: "main",
+      scope: { groupIds: [], ticketIds: [] },
+      policyOverride: {},
+    },
+    {
+      ...base,
+      id: "extra-1",
+      name: "Extra",
+      role: "extra",
+      scope: { groupIds: [made.card.id], ticketIds: [] },
+      policyOverride: {
+        usageLimit: "stop",
+        concurrencyCap: 1,
+        budgetPerGroup: 10,
+      },
+      cardId: hidden.id,
+    },
+  ]);
+  for (const id of [made.card.id, a.id, hidden.id]) {
+    const policy = ownerPolicy(store.getCard(id)!)!;
+    assert.deepEqual(
+      [policy.usageLimit, policy.concurrencyCap, policy.budgetPerGroup],
+      ["stop", 1, 10],
+      id,
+    );
+  }
+  const mainPolicy = ownerPolicy(store.getCard(loose.id)!)!;
+  assert.deepEqual(
+    [
+      mainPolicy.usageLimit,
+      mainPolicy.concurrencyCap,
+      mainPolicy.budgetPerGroup,
+    ],
+    ["wait", 5, 100],
+  );
+  await store.setBoardOrchestrators(SBX, []);
+});

@@ -11,6 +11,7 @@ import {
   ITEM_DESCRIPTION_MAX,
   ITEM_TITLE_MAX,
   MOVABLE_COLUMNS,
+  ORCHESTRATOR_STATE_MAX_BYTES,
   SESSION_INPUT_MAX,
   SHIP_BODY_MAX,
   SHIP_TITLE_MAX,
@@ -24,7 +25,7 @@ export interface McpTool {
   name: string;
   description: string;
   input: z.ZodRawShape;
-  method: "GET" | "POST" | "PATCH";
+  method: "GET" | "POST" | "PATCH" | "PUT";
   path: string;
 }
 
@@ -124,8 +125,11 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "create_ticket",
     description:
-      "Create a local ticket on your board. Text that holds the status marker is refused.",
-    input: { title: titleField, description: descriptionField },
+      "Create a local ticket from one entry of a ticket proposal that the user approved. A proposal that is open, rejected or unknown, and an entry that is already used, are refused.",
+    input: {
+      proposalItemId: z.string().regex(DECISION_ID_RE),
+      index: z.number().int().min(0),
+    },
     method: "POST",
     path: "/tickets",
   },
@@ -269,7 +273,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "create_decision_item",
     description:
-      "Create a decision item for a person to answer. Give 2 to 8 options with distinct ids.",
+      "Create a decision item for a person to answer. Give 2 to 8 options with distinct ids. For the kind ticket_proposal, give 1 to 20 tickets, each with a title and a description.",
     input: {
       cardId: looseId.nullable().optional(),
       kind: z.enum(DECISION_KINDS),
@@ -284,6 +288,11 @@ export const MCP_TOOLS: readonly McpTool[] = [
         .min(2)
         .max(8),
       recommendedOptionId: optionId.optional(),
+      tickets: z
+        .array(z.object({ title: titleField, description: descriptionField }))
+        .min(1)
+        .max(20)
+        .optional(),
     },
     method: "POST",
     path: "/decisions",
@@ -291,7 +300,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "wait_for_event",
     description:
-      "Wait for the next board event after an event id. The wait is 1 to 540 seconds, and the default is 240.",
+      "Wait for the next board event after an event id. The wait is at most 55 seconds, and the default is 55. If no event comes, call it again to keep waiting.",
     input: {
       since: eventId,
       kinds: z
@@ -300,9 +309,28 @@ export const MCP_TOOLS: readonly McpTool[] = [
         .max(20)
         .optional(),
       cardIds: z.array(looseId).min(1).max(50).optional(),
-      timeoutSeconds: z.number().int().min(1).max(540).optional(),
+      timeoutSeconds: z.number().int().min(1).max(55).default(55),
     },
     method: "POST",
     path: "/events/wait",
+  },
+  {
+    name: "read_state",
+    description:
+      "Read your saved state: the markdown, the time it was written and the handoff flag. Call it first, before any action.",
+    input: {},
+    method: "GET",
+    path: "/state",
+  },
+  {
+    name: "write_state",
+    description:
+      "Save your state as markdown, 64 KiB at most. It replaces the earlier state. Set handoffReady to true only when you hand off.",
+    input: {
+      markdown: z.string().max(ORCHESTRATOR_STATE_MAX_BYTES),
+      handoffReady: z.boolean().optional(),
+    },
+    method: "PUT",
+    path: "/state",
   },
 ];

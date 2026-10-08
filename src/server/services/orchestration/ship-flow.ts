@@ -10,8 +10,13 @@ import type {
 } from "../../../shared/types.js";
 import { run } from "../../adapters/exec.js";
 import { boardRepository as store } from "../../store/board-repository.js";
-import { ConflictError, ValidationError } from "../domain/errors.js";
+import {
+  ConflictError,
+  ForbiddenError,
+  ValidationError,
+} from "../domain/errors.js";
 import { checkShipRights } from "../domain/orchestrator-policy.js";
+import { mayShip } from "../domain/orchestrator-rules.js";
 import type { OrchestratorIdentity } from "../domain/orchestrator-scope.js";
 import {
   checksState,
@@ -22,7 +27,7 @@ import {
   repoOfRemote,
 } from "../domain/ship-checks.js";
 import { worktreePath } from "../domain/workspace-paths.js";
-import { dependencyDone, resolveBoard } from "./boards.js";
+import { callerPolicy, dependencyDone, resolveBoard } from "./boards.js";
 import { moveCard } from "./card-move.js";
 import { createDecisionItem } from "./decision-items.js";
 import { enforce } from "./orchestrator-groups.js";
@@ -184,7 +189,12 @@ function assertShippable(
   { repository, branches }: ShipInput,
 ): ShipFlow["rights"] {
   if (card.source !== "group") throw new ValidationError("not-group-card");
-  const policy = resolveBoard(caller.boardKey).policy;
+  if (
+    !mayShip(resolveBoard(caller.boardKey).orchestrators, caller.orchestratorId)
+  ) {
+    throw new ForbiddenError("main-only");
+  }
+  const policy = callerPolicy(caller);
   enforce(checkShipRights(policy));
   if (!card.workspace?.repos.some((r) => r.path === repository)) {
     throw new ValidationError("unknown-repository");

@@ -1,0 +1,46 @@
+{
+  "onStart": [
+    { "tool": "get_policy", "args": {} },
+    {
+      "tool": "list_events",
+      "args": { "since": 0, "limit": 200 },
+      "saveAs": "events"
+    },
+    {
+      "tool": "create_decision_item",
+      "args": {
+        "cardId": "$env.GROUP_ID",
+        "kind": "roadmap_approval",
+        "question": "Approve the roadmap of this group?",
+        "options": [
+          { "id": "approve", "label": "Approve the roadmap" },
+          { "id": "reject", "label": "Do not approve" }
+        ]
+      },
+      "saveAs": "approval"
+    },
+    {
+      "tool": "wait_for_event",
+      "args": {
+        "since": "$events.cursor",
+        "kinds": ["decision_answered"],
+        "cardIds": ["$env.GROUP_ID"],
+        "timeoutSeconds": 55
+      },
+      "expect": { "contains": "decision_answered" }
+    },
+    {
+      "tool": "approve_roadmap",
+      "args": {
+        "cardId": "$env.GROUP_ID",
+        "decisionIds": ["$approval.item.id"]
+      }
+    },
+    {
+      "tool": "write_state",
+      "args": {
+        "markdown": "# Ask approval replay\n\nThe roadmap was approved."
+      }
+    }
+  ]
+}

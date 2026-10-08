@@ -9,10 +9,12 @@ import {
   ForbiddenError,
   HttpError,
   NotFoundError,
+  ValidationError,
 } from "../domain/errors.js";
 import type { OrchestratorIdentity } from "../domain/orchestrator-scope.js";
 import { moveCard } from "./card-move.js";
 import { postComment, type OutboundDeps } from "./linear-outbound.js";
+import { appendToExtraScope } from "./orchestrator-session.js";
 import { createTicket } from "./ticket-create.js";
 
 export const commentOutbound: { deps: OutboundDeps | undefined } = {
@@ -26,15 +28,50 @@ function liveCard(id: string): Card {
   return redactCard(card);
 }
 
-/** Create a local ticket on the orchestrator's board and mark it as created by that orchestrator. */
+/**
+ * Create a local ticket on the orchestrator's board from one entry of an approved proposal.
+ *
+ * @remarks
+ * The index is marked used in one guarded store write before the ticket is created, so two
+ * racing calls cannot both pass. If the create then fails, the index is released again.
+ */
 export async function createOrchestratorTicket(
   caller: OrchestratorIdentity,
-  input: { title: string; fullDescription: string },
+  input: { proposalItemId: string; index: number },
 ): Promise<Card> {
-  const card = await createTicket(caller.boardKey, input);
+  const item = store.getDecisionItem(input.proposalItemId);
+  if (item?.boardKey !== caller.boardKey) {
+    throw new NotFoundError("unknown-proposal");
+  }
+  if (item.kind !== "ticket_proposal" || item.proposal === undefined) {
+    throw new ValidationError("not-a-proposal");
+  }
+  if (item.orchestratorId !== caller.orchestratorId) {
+    throw new ForbiddenError("other-owner");
+  }
+  if (item.state === "open") throw new ConflictError("proposal-open");
+  if (item.answer?.optionId !== "approve") {
+    throw new ConflictError("proposal-rejected");
+  }
+  const entry = item.proposal.tickets[input.index];
+  if (entry === undefined) throw new ValidationError("invalid-index");
+  if (!store.useProposalIndex(item.id, input.index)) {
+    throw new ConflictError("proposal-index-used");
+  }
+  let card: Card;
+  try {
+    card = await createTicket(caller.boardKey, {
+      title: entry.title,
+      fullDescription: entry.description,
+    });
+  } catch (err) {
+    store.releaseProposalIndex(item.id, input.index);
+    throw err;
+  }
   await store.setOrchestratorFields(card.id, {
     createdByOrchestrator: caller.orchestratorId,
   });
+  await appendToExtraScope(caller, "ticketIds", card.id);
   return liveCard(card.id);
 }
 

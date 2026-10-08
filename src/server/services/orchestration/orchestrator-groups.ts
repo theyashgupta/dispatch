@@ -8,6 +8,7 @@ import {
 } from "../../store/board-repository.js";
 import {
   ConflictError,
+  ForbiddenError,
   PolicyError,
   ValidationError,
 } from "../domain/errors.js";
@@ -21,11 +22,13 @@ import {
   type OrchestratorIdentity,
 } from "../domain/orchestrator-scope.js";
 import {
+  callerPolicy,
   dependencyDone,
   isLiveSessionCard,
   isRunningCard,
   resolveBoard,
   runningLoops,
+  scopeTargetOf,
 } from "./boards.js";
 import {
   createGroup,
@@ -34,6 +37,7 @@ import {
   startGroup,
 } from "./group-launch.js";
 import { groupCost } from "./orchestrator-read.js";
+import { appendToExtraScope } from "./orchestrator-session.js";
 
 export const groupStarter: { start: typeof startGroup } = {
   start: startGroup,
@@ -115,8 +119,10 @@ export async function createBaseBranch(
 /**
  * Create a group card on the orchestrator's board with its launch values, without starting it.
  *
- * @remarks The workspace folder is the parent folder of the first repository, the folder a person
- * picks in the start form. Repositories and dependencies are checked before anything is written.
+ * @remarks
+ * The workspace folder is the parent folder of the first repository, the folder a person
+ * picks in the start form. Repositories, member owners and dependencies are checked before anything
+ * is written; a member on another board is left to the 409 of the member check.
  */
 export async function createOrchestratorGroup(
   caller: OrchestratorIdentity,
@@ -124,10 +130,20 @@ export async function createOrchestratorGroup(
 ): Promise<Card> {
   const board = resolveBoard(caller.boardKey);
   for (const repo of input.repos) assertBoardRepository(board, repo.path);
+  for (const id of input.memberIds) {
+    const member = store.getCard(id);
+    const scope = member && checkScope(caller, scopeTargetOf(member));
+    if (scope && !scope.ok && scope.reason === "other-owner") {
+      throw new ForbiddenError("other-owner");
+    }
+  }
   const dependsOn = input.dependsOn ?? [];
   for (const id of dependsOn) {
     const dep = store.getCard(id);
-    if (dep?.source !== "group" || !checkScope(caller, dep).ok) {
+    if (
+      dep?.source !== "group" ||
+      !checkScope(caller, { boardKey: dep.boardKey }).ok
+    ) {
       throw new ValidationError("invalid-dependency");
     }
   }
@@ -142,12 +158,14 @@ export async function createOrchestratorGroup(
   });
   await store.setOrchestratorFields(card.id, {
     createdByOrchestrator: caller.orchestratorId,
+    ownerOrchestrator: caller.orchestratorId,
     launch: {
       direction: input.direction ?? "",
       ...(input.playbook === undefined ? {} : { playbook: input.playbook }),
     },
   });
   await store.setGroupQueue(card.id, { startQueued: false, dependsOn });
+  await appendToExtraScope(caller, "groupIds", card.id);
   return redactCard(store.getCard(card.id) ?? card);
 }
 
@@ -166,7 +184,7 @@ export async function startOrchestratorGroup(
   if (isRunningCard(card) || isLiveSessionCard(card)) {
     throw new ConflictError("already-started");
   }
-  const policy = resolveBoard(caller.boardKey).policy;
+  const policy = callerPolicy(caller);
   enforce(checkCap({ policy, runningLoops: runningLoops(caller.boardKey) }));
   enforce(checkBudget({ policy, cost: groupCost(card) }));
   const waitingOn = (card.dependsOn ?? []).filter((id) => !dependencyDone(id));

@@ -75,3 +75,38 @@ test("the status protocol block is unchanged by the section", () => {
   assert.equal(tail(withImages), tail(without));
   assert.ok(withImages.includes("DISPATCH_STATUS: NEEDS_INPUT"));
 });
+
+test("a hidden orchestrator card gets only the playbook body with its direction", () => {
+  const out = buildKickoff(
+    card({
+      source: "orchestrator",
+      identifier: "LOCAL-9",
+      title: "Orchestrator: Lead",
+      description: "",
+    }),
+    "You are the orchestrator Lead.",
+    [],
+    {
+      playbookBody:
+        "## Extra direction\n{extra}\n\n## Workflow\nCall read_state.",
+    },
+  );
+  assert.equal(
+    out,
+    "## Extra direction\nYou are the orchestrator Lead.\n\n## Workflow\nCall read_state.",
+  );
+  assert.ok(!out.includes("You are working on"));
+  assert.ok(!out.includes("## Workspace"));
+  assert.ok(!out.includes("Vault protocol"));
+  assert.ok(!out.includes("DISPATCH_STATUS"));
+  assert.ok(!out.includes("secrets configured"));
+});
+
+test("a hidden orchestrator card with no playbook gets its direction alone", () => {
+  const out = buildKickoff(
+    card({ source: "orchestrator", description: "" }),
+    "Direction.",
+    [],
+  );
+  assert.equal(out, "Direction.");
+});

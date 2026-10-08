@@ -8,6 +8,8 @@ const env = isolateEnv();
 const schemas = await import("../routes/orchestrator-schemas.js");
 const { COMMENT_BODY_MAX } = await import("../../shared/comment-body.js");
 const limits = await import("../../shared/orchestrator-limits.js");
+const { seedPlaybooks, loadPlaybooks } =
+  await import("../services/infra/playbooks.js");
 after(() => env.cleanup());
 
 interface ServerSide {
@@ -61,6 +63,8 @@ const SERVER: Record<string, ServerSide> = {
   get_ship_state: { params: schemas.sessionCardParamsSchema },
   create_decision_item: { body: schemas.createDecisionBodySchema },
   wait_for_event: { body: schemas.waitBodySchema },
+  read_state: {},
+  write_state: { body: schemas.writeStateBodySchema },
 };
 
 const ID = "A-12";
@@ -78,10 +82,7 @@ const VALID: Record<string, Record<string, unknown>> = {
   read_pane_tail: { cardId: ID, lines: 200 },
   list_events: { since: 0, limit: 200 },
   get_policy: {},
-  create_ticket: {
-    title: "t".repeat(limits.ITEM_TITLE_MAX),
-    description: "d".repeat(limits.ITEM_DESCRIPTION_MAX),
-  },
+  create_ticket: { proposalItemId: "7f8e-41", index: 19 },
   update_ticket: { id: ID, title: "t", description: "d" },
   move_card: { id: ID, column: "inbox" },
   add_comment: { id: ID, body: "hello" },
@@ -104,17 +105,20 @@ const VALID: Record<string, Record<string, unknown>> = {
   get_ship_state: { cardId: ID },
   create_decision_item: {
     cardId: ID,
-    kind: "ruling",
+    kind: "ticket_proposal",
     question: "q",
     options: OPTIONS,
     recommendedOptionId: "a",
+    tickets: [{ title: "t", description: "d" }],
   },
   wait_for_event: {
     since: 0,
     kinds: ["tool_call"],
     cardIds: [ID],
-    timeoutSeconds: 540,
+    timeoutSeconds: 55,
   },
+  read_state: {},
+  write_state: { markdown: "# State", handoffReady: true },
 };
 
 const REFUSED: [string, Record<string, unknown>][] = [
@@ -125,14 +129,9 @@ const REFUSED: [string, Record<string, unknown>][] = [
   ["read_pane_tail", { cardId: ID, lines: 201 }],
   ["list_events", { limit: 0 }],
   ["list_events", { since: -1 }],
-  [
-    "create_ticket",
-    { title: "t".repeat(limits.ITEM_TITLE_MAX + 1), description: "d" },
-  ],
-  [
-    "create_ticket",
-    { title: "t", description: "d".repeat(limits.ITEM_DESCRIPTION_MAX + 1) },
-  ],
+  ["create_ticket", { proposalItemId: "bad id!", index: 0 }],
+  ["create_ticket", { proposalItemId: "7f8e-41", index: -1 }],
+  ["create_ticket", { proposalItemId: "7f8e-41", index: 0.5 }],
   ["update_ticket", { id: ID, title: "t".repeat(limits.ITEM_TITLE_MAX + 1) }],
   ["move_card", { id: ID, column: "nowhere" }],
   ["add_comment", { id: ID, body: "" }],
@@ -202,10 +201,34 @@ const REFUSED: [string, Record<string, unknown>][] = [
       options: OPTIONS,
     },
   ],
+  [
+    "create_decision_item",
+    {
+      kind: "ticket_proposal",
+      question: "q",
+      options: OPTIONS,
+      tickets: [{ title: "", description: "d" }],
+    },
+  ],
+  [
+    "create_decision_item",
+    {
+      kind: "ticket_proposal",
+      question: "q",
+      options: OPTIONS,
+      tickets: Array(21).fill({ title: "t", description: "d" }),
+    },
+  ],
   ["wait_for_event", { since: -1 }],
   ["wait_for_event", { since: 0, timeoutSeconds: 541 }],
   ["wait_for_event", { since: 0, kinds: [] }],
   ["wait_for_event", { since: 0, kinds: ["nope"] }],
+  [
+    "write_state",
+    { markdown: "m".repeat(limits.ORCHESTRATOR_STATE_MAX_BYTES + 1) },
+  ],
+  ["write_state", { markdown: "m", handoffReady: "yes" }],
+  ["write_state", {}],
 ];
 
 const byName = (name: string): McpTool => {
@@ -293,5 +316,40 @@ describe("mcp tool table against the server schemas", () => {
       assert.equal(mcpAccepts(tool, { id: ID, column }), true, column);
       assert.equal(serverAccepts(tool, { id: ID, column }), true, column);
     }
+  });
+});
+
+describe("wait_for_event against the Board Orchestrator playbook", () => {
+  it("caps and defaults the wait at the playbook limit and says so", async () => {
+    await seedPlaybooks();
+    const playbook = (await loadPlaybooks()).find(
+      (p) => p.name === "Board Orchestrator",
+    );
+    assert.ok(playbook);
+    const rule = /set timeoutSeconds to (\d+) or less/.exec(playbook.body);
+    assert.ok(rule, "the playbook names a wait limit");
+    const limit = Number(rule[1]);
+    assert.equal(limit, 55);
+
+    const tool = byName("wait_for_event");
+    const schema = z.object(tool.input);
+    assert.equal(schema.parse({ since: 0 }).timeoutSeconds, limit);
+    assert.equal(mcpAccepts(tool, { since: 0, timeoutSeconds: limit }), true);
+    assert.equal(
+      mcpAccepts(tool, { since: 0, timeoutSeconds: limit + 1 }),
+      false,
+    );
+    assert.ok(tool.description.includes(`at most ${limit} seconds`));
+    assert.ok(tool.description.includes(`the default is ${limit}`));
+    assert.ok(tool.description.includes("call it again to keep waiting"));
+  });
+
+  it("sends the default wait to the route when the call omits it", () => {
+    const tool = byName("wait_for_event");
+    const input = z.object(tool.input).parse({ since: 3 });
+    assert.deepEqual(splitInput(tool, input).rest, {
+      since: 3,
+      timeoutSeconds: 55,
+    });
   });
 });

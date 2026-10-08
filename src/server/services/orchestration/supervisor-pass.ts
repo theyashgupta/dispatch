@@ -3,7 +3,7 @@ import { ALL_BOARDS, DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import { power, type PowerHolder } from "../../adapters/power.js";
 import { getOrchestrationConfig } from "../infra/config-holder.js";
-import { markNeedsInput, record } from "./supervisor-record.js";
+import { markNeedsInput, ownerPolicy, record } from "./supervisor-record.js";
 import {
   dropWatcher,
   noteMachineWake,
@@ -88,7 +88,7 @@ async function startHeldGroups(cards: Card[], deps: PassDeps): Promise<void> {
     if (!card.startQueued || isRunningCard(card)) continue;
     if (!(card.dependsOn ?? []).every(dependencyDone)) continue;
     const key = card.boardKey ?? DEFAULT_BOARD_KEY;
-    const cap = store.getBoard(key)?.policy.concurrencyCap ?? 0;
+    const cap = ownerPolicy(card)?.concurrencyCap ?? 0;
     if (runningLoops(key) >= cap) continue;
     const outcome = deps.startGroup(card.id);
     if (outcome === null) continue;
@@ -124,8 +124,7 @@ async function stopOverBudget(
   memory: PassMemory,
 ): Promise<void> {
   for (const card of cards) {
-    const budget = store.getBoard(card.boardKey ?? DEFAULT_BOARD_KEY)?.policy
-      .budgetPerGroup;
+    const budget = ownerPolicy(card)?.budgetPerGroup;
     const cost = groupCost(card);
     const session = card.sessions?.find((s) => s.id === card.activeSessionId);
     if (

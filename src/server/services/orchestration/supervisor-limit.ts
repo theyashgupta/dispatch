@@ -3,7 +3,6 @@ import {
   type Card,
   type Session,
 } from "../../../shared/types.js";
-import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import { sleep } from "../../adapters/exec.js";
 import { capturePane, sendKeys } from "../../adapters/tmux.js";
@@ -15,11 +14,12 @@ import {
 import { parseResetAt } from "../domain/supervisor-plan.js";
 import { limitSurfaceOf } from "../domain/supervisor-state.js";
 import { getUsage } from "./claude-usage.js";
-import { runFreshSession } from "./supervisor-handoff.js";
+import { isHandoffPending, runFreshSession } from "./supervisor-handoff.js";
 import {
   continueText,
   giveUp,
   markNeedsInput,
+  ownerPolicy,
   record,
 } from "./supervisor-record.js";
 import { sendConfirmed } from "./supervisor-send.js";
@@ -64,7 +64,7 @@ const escaped = new Set<string>();
 function liveSession(cardId: string, sessionId: string) {
   const card = store.getCard(cardId);
   const session = card?.sessions?.find((s) => s.id === sessionId);
-  const policy = store.getBoard(card?.boardKey ?? DEFAULT_BOARD_KEY)?.policy;
+  const policy = card && ownerPolicy(card);
   return card &&
     session?.tmuxSession &&
     session.stateReason === undefined &&
@@ -108,8 +108,7 @@ function scheduleAfterReset(
       escaped.delete(session.id);
       const live = liveSession(card.id, session.id);
       if (live === null) return;
-      if (mode === "fresh" && !live.card.loopProgress?.engine?.handoffPending)
-        return;
+      if (mode === "fresh" && !isHandoffPending(live.card)) return;
       void (async () => {
         if (mode === "fresh") {
           await runFreshSession(live.card, live.session);
@@ -198,9 +197,7 @@ export async function answerLimit(
     result: "answered",
     row: check.row,
   });
-  const policy =
-    store.getBoard(card.boardKey ?? DEFAULT_BOARD_KEY)?.policy.usageLimit ??
-    "wait";
+  const policy = ownerPolicy(card)?.usageLimit ?? "wait";
   if (policy === "stop") {
     await markNeedsInput(card, session, "usage_stop", "limit: policy stop");
     return;
@@ -209,7 +206,7 @@ export async function answerLimit(
     card,
     session,
     pane,
-    card.loopProgress?.engine?.handoffPending ? "fresh" : "continue",
+    isHandoffPending(card) ? "fresh" : "continue",
     deps,
   );
 }

@@ -20,6 +20,7 @@ export interface LoopFacts {
   engineActive: boolean;
   handoffPending: boolean;
   unitPhase: string;
+  orchestrator?: boolean;
 }
 
 export interface PlanMemory {
@@ -105,7 +106,8 @@ export function planActions(input: PlanInput): {
       const wokeRecently =
         input.wokeAt !== null && input.now - input.wokeAt <= SLEEP_CUT_MS;
       if (wokeRecently && from === "working") return once("retry", "sleep_cut");
-      if (loop?.engineActive) return once("restart", "restart");
+      if (loop?.engineActive && loop.orchestrator !== true)
+        return once("restart", "restart");
       return none;
     }
     case "api_error":

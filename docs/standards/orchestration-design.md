@@ -205,7 +205,7 @@ Usage credits are not a value of any field. With `supervisor` off, the board beh
 
 **Status:** accepted
 
-**Decision:** A board has at most one main orchestrator. The user can add extra orchestrators. An extra orchestrator needs a main orchestrator on the same board. The board row holds `orchestrators`: for each, an id, a main flag, a scope, a policy override and its session name. A group card holds `ownerOrchestrator`. Each extra has an explicit scope: a list of group ids or ticket ids. Each group has exactly one owner orchestrator. The main orchestrator owns each group that no extra owns. Only the user moves ownership. A tool call on a card outside the scope of the caller returns 403. Only the main orchestrator ships. The concurrency cap counts all loops on the board, from all orchestrators. An extra can have a policy override that only narrows the board policy. Narrow means a lower `concurrencyCap`, `budgetPerGroup` or `shipRights`, `ask` in place of `rules` or `all`, `rules` in place of `all`, and `stop` in place of `wait`. The model fields have no override. A decision item goes to the owner of its group and shows in the board attention queue. The user answers it, and the answer reaches the owner orchestrator as an event.
+**Decision:** A board has at most one main orchestrator. The user can add extra orchestrators. An extra orchestrator needs a main orchestrator on the same board. The board row holds `orchestrators`: for each, an id, a main flag, a scope, a policy override and its session name. Each extra has an explicit scope: a list of group ids or ticket ids. The scope is the one source of ownership: the owner of a group or ticket is the extra whose scope holds it, else the main orchestrator. A group card also holds `ownerOrchestrator`, the orchestrator that created it, as provenance only. A group or ticket that an extra creates joins its scope. Each group has exactly one owner orchestrator. Only the user moves ownership. A tool call on a card outside the scope of the caller returns 403. Only the main orchestrator ships. The concurrency cap counts all loops on the board, from all orchestrators. An extra can have a policy override that only narrows the board policy. Narrow means a lower `concurrencyCap`, `budgetPerGroup` or `shipRights`, `ask` in place of `rules` or `all`, `rules` in place of `all`, and `stop` in place of `wait`. The model fields have no override. A decision item goes to the owner of its group and shows in the board attention queue. The user answers it, and the answer reaches the owner orchestrator as an event.
 
 **Reason:** one owner per group means two orchestrators never send input to the same loop or ship the same branch.
 
@@ -284,17 +284,18 @@ The server enforces items 1 to 9 and the Done part of item 10: no tool exists fo
 
 ## Tool reference
 
-This section is the reference for the 23 tools. Each tool calls one route under `/api/orchestrator/`. Each call is checked against the board scope and, for a write, the policy (D-6), and is recorded as a `tool_call` row in `orchestration_events`. The owner scope of D-7 is Unit 4 work.
+This section is the reference for the 25 tools. Each tool calls one route under `/api/orchestrator/`. Each call is checked against the board scope and, for a write, the policy (D-6), and is recorded as a `tool_call` row in `orchestration_events`. A tool call on a card that another orchestrator owns (D-7) returns 403 `other-owner`.
 
-| Family    | Tools                                                                                                          | Notes                                                                                |
-| --------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Read      | `list_cards`, `get_card`, `list_sessions`, `get_group_progress`, `read_pane_tail`, `list_events`, `get_policy` | `list_events` takes a `since` cursor                                                 |
-| Tickets   | `create_ticket`, `update_ticket`, `move_card`, `add_comment`                                                   | `update_ticket` closes F25                                                           |
-| Groups    | `create_base_branch`, `create_group`, `start_group`                                                            | `create_group` takes members, base, playbook, direction and `dependsOn`              |
-| Sessions  | `send_input`, `approve_roadmap`, `request_handoff`, `resume_loop`, `stop_session`                              | `send_input` returns `confirmed` or `unconfirmed` (D-4); `resume_loop` per Key rules |
-| Ship      | `start_ship`, `get_ship_state`                                                                                 | D-8                                                                                  |
-| Decisions | `create_decision_item`                                                                                         | the user answers; the answer returns as an event                                     |
-| Wait      | `wait_for_event`                                                                                               | blocks until an event matches a filter or a time limit passes                        |
+| Family    | Tools                                                                                                          | Notes                                                                                    |
+| --------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Read      | `list_cards`, `get_card`, `list_sessions`, `get_group_progress`, `read_pane_tail`, `list_events`, `get_policy` | `list_events` takes a `since` cursor                                                     |
+| Tickets   | `create_ticket`, `update_ticket`, `move_card`, `add_comment`                                                   | `update_ticket` closes F25                                                               |
+| Groups    | `create_base_branch`, `create_group`, `start_group`                                                            | `create_group` takes members, base, playbook, direction and `dependsOn`                  |
+| Sessions  | `send_input`, `approve_roadmap`, `request_handoff`, `resume_loop`, `stop_session`                              | `send_input` returns `confirmed` or `unconfirmed` (D-4); `resume_loop` per Key rules     |
+| Ship      | `start_ship`, `get_ship_state`                                                                                 | D-8                                                                                      |
+| Decisions | `create_decision_item`                                                                                         | the user answers; the answer returns as an event                                         |
+| Wait      | `wait_for_event`                                                                                               | blocks until an event matches a filter or a time limit passes                            |
+| State     | `read_state`, `write_state`                                                                                    | the orchestrator keeps its state in the store, because it has no file write tool (U4-05) |
 
 Every route sits under `/api/orchestrator/`, and the paths below are relative to it. Each tool is one entry of `src/server/bootstrap/mcp-tools.ts`, and each route is declared in `src/server/routes/orchestrator.route.ts`, its handler is in `src/server/routes/orchestrator.handlers.ts` and its zod schema is in `src/server/routes/orchestrator-schemas.ts`. These rules hold for every route, so the entries do not repeat them:
 
@@ -356,10 +357,11 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 
 ### `create_ticket`
 
-- Route: `POST /tickets`.
-- Input: `title` (string, 1 to 300 characters after trimming), `description` (string, 1 to 20000 characters after trimming).
-- Description: "Create a local ticket on your board. Text that holds the status marker is refused."
-- Refusals: 400 `invalid-title`, `invalid-description`, and `content contains the DISPATCH_STATUS marker` for a title or description that holds the status marker. 404 `unknown-board`. 409 `board-archived`.
+- Route: `POST /tickets`. It answers 201 with `{ card }`.
+- Input: `proposalItemId` (id of a `ticket_proposal` decision item), `index` (integer, 0 or more: the position of one ticket in the proposal). A `title` or `description` field is refused.
+- Description: "Create a local ticket from one entry of a ticket proposal that the user approved. A proposal that is open, rejected or unknown, and an entry that is already used, are refused."
+- Refusals: 400 `invalid-proposal-item`, `invalid-index` (also an index outside the list), `unknown-field`, `not-a-proposal` (the item is not a `ticket_proposal`). 403 `other-owner` (another orchestrator raised the item). 404 `unknown-proposal` (the id is unknown or the item is on another board), `unknown-board`. 409 `proposal-open`, `proposal-rejected` (the user answered `reject`), `proposal-index-used`, `board-archived`.
+- The ticket title and description come from the proposal entry. The store marks the index used in one guarded write before the ticket is created, so two calls at the same time create one ticket. If the create fails, the index is free again. The card keeps `createdByOrchestrator`.
 
 ### `update_ticket`
 
@@ -394,7 +396,7 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 - Route: `POST /groups`.
 - Input: `title` (string, 1 to 300 characters after trimming), `memberIds` (array of 2 or more distinct card ids), `repos` (array of 1 or more `{ path, base }`, both strings of 1 character or more), `playbook` (optional string, 1 character or more), `direction` (optional string, at most 10000 characters), `dependsOn` (optional array of at most 50 group card ids).
 - Description: "Create a group card from 2 or more cards. Text that holds the status marker is refused."
-- Refusals: 400 `invalid-title`, `invalid-member-ids`, `invalid-repos`, `invalid-playbook`, `invalid-direction`, `invalid-dependency` (a bad id, or a card that is not a group on your board), `unknown-repository` (a repo path that is not a repository of the board), and `content contains the DISPATCH_STATUS marker` for a title or a direction that holds the status marker. 400 with a text as `error`: `unknown playbook`, `invalid base branch` (a base that starts with `-`), `Can't start: a selected repo is missing`, `orchestration config is not loaded`. 404 `unknown-board`. 409 `some selected cards are no longer eligible to be grouped` with `ineligibleIds` (a card that is unknown, on another board, not in To Do, already grouped or itself a group). 409 `board-archived`.
+- Refusals: 400 `invalid-title`, `invalid-member-ids`, `invalid-repos`, `invalid-playbook`, `invalid-direction`, `invalid-dependency` (a bad id, or a card that is not a group on your board), `unknown-repository` (a repo path that is not a repository of the board), and `content contains the DISPATCH_STATUS marker` for a title or a direction that holds the status marker. 400 with a text as `error`: `unknown playbook`, `invalid base branch` (a base that starts with `-`), `Can't start: a selected repo is missing`, `orchestration config is not loaded`. 403 `other-owner` (a member outside your scope, that another orchestrator owns). A group that an extra creates joins its scope. 404 `unknown-board`. 409 `some selected cards are no longer eligible to be grouped` with `ineligibleIds` (a card that is unknown, on another board, not in To Do, already grouped, itself a group or an orchestrator session card). 409 `board-archived`.
 
 ### `start_group`
 
@@ -459,21 +461,48 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 ### `create_decision_item`
 
 - Route: `POST /decisions`. It answers 201 with `{ item }`.
-- Input: `cardId` (optional, nullable card id), `kind` (one of `roadmap_approval`, `ruling`, `ship_failure`, `other`), `question` (string, 1 to 2000 characters), `options` (array of 2 to 8 `{ id, label }`: `id` matches `[a-z0-9_-]{1,40}` and is distinct, `label` is 1 to 200 characters), `recommendedOptionId` (optional, one of the option ids).
-- Description: "Create a decision item for a person to answer. Give 2 to 8 options with distinct ids."
-- Refusals: 400 `invalid-kind`, `invalid-question`, `invalid-options`, `invalid-recommended-option` (also an id that is not in `options`). The `cardId` rules above apply when `cardId` is set.
+- Input: `cardId` (optional, nullable card id), `kind` (one of `roadmap_approval`, `ruling`, `ship_failure`, `ticket_proposal`, `other`), `question` (string, 1 to 2000 characters), `options` (array of 2 to 8 `{ id, label }`: `id` matches `[a-z0-9_-]{1,40}` and is distinct, `label` is 1 to 200 characters), `recommendedOptionId` (optional, one of the option ids), `tickets` (array of 1 to 20 `{ title, description }`; required for kind `ticket_proposal` and refused for any other kind). A ticket `title` and `description` follow the bounds and the status marker rule of a ticket (title 1 to 300 characters, description 1 to 20000 characters).
+- Description: "Create a decision item for a person to answer. Give 2 to 8 options with distinct ids. For the kind ticket_proposal, give 1 to 20 tickets, each with a title and a description."
+- Refusals: 400 `invalid-kind`, `invalid-question`, `invalid-options`, `invalid-recommended-option` (also an id that is not in `options`), `invalid-tickets` (also `tickets` on a kind other than `ticket_proposal`, or a `ticket_proposal` with no `tickets`), `invalid-title`, `invalid-description`, and `content contains the DISPATCH_STATUS marker`. The `cardId` rules above apply when `cardId` is set.
 - For kind `roadmap_approval` the server sets the options (`approve` "Approve the roadmap", `reject` "Do not approve") and the recommended option `approve`, and ignores the caller options.
+- For kind `ticket_proposal` the server sets the options (`approve` "Create these tickets", `reject` "Do not create") and the recommended option `approve`, and ignores the caller options. The stored item holds `proposal: { tickets, usedIndexes: [] }`. `create_ticket` creates a ticket from an entry of an approved proposal only.
+- The item belongs to the owner orchestrator of its card (D-7), or to the caller when it has no card or the board has no owner rule. The `decision_raised` and `decision_answered` events carry that `orchestratorId`. The user answers in the panel (`POST /api/decisions/:id/answer`), and the answer returns as the `decision_answered` event.
+
+### User routes for intake and sessions
+
+A user route refuses a call that carries an orchestrator token (403 `orchestrator-token-on-user-route`).
+
+- `POST /api/boards/:key/intake` takes `{ goal, requirements? }` (`goal` 1 to 2000 characters, `requirements` 65536 bytes or less). It appends an `intake_submitted` event for the main orchestrator and answers 202 with `{ eventId }`. The event data holds `orchestratorId`, `goal` and `requirements` (or `null`). It creates no ticket. A board with no main orchestrator answers 409 `no-main-orchestrator`.
+- `POST /api/sessions/:cardId/input` takes `{ text }` (1 to 20000 characters), types it into the running session and answers 200 with `{ result }`: `confirmed` or `unconfirmed`. It refuses the four states with no keys (`permission_prompt`, `usage_limit_dialog`, `usage_limit_wait`, `shell_prompt`) with 409 `session-state-refused`, a text that is empty or starts with a mode character with 400 `invalid-text`, a card with no live session with 409 `no-live-session`, and a second call on the same card with 409 `session-busy`. It does not check the budget or a user stop, so the user can reply to a stopped loop.
+- `POST /api/sessions/:cardId/resume-loop` sends the continue text to a session at `needs_input` for any `stateReason`, including `usage_stop` and `budget`. It runs no cap or budget check. It sets the session to `working` when the send is `confirmed` and answers 200 with `{ result }`. A session that is not at `needs_input` answers 409 `not-resumable`.
 
 ### `wait_for_event`
 
 - Route: `POST /events/wait`. It answers 200 with `{ event }`, or with `{ timedOut: true, cursor }` when the time ends.
-- Input: `since` (integer, 0 or more), `kinds` (optional array of 1 to 20 event kinds: `loop_gate`, `supervisor_state`, `supervisor_action`, `pr_state`, `machine_wake`, `tool_call`, `decision_raised`, `decision_answered`), `cardIds` (optional array of 1 to 50 card ids), `timeoutSeconds` (optional integer, 1 to 540, default 240).
-- Description: "Wait for the next board event after an event id. The wait is 1 to 540 seconds, and the default is 240."
+- Input: `since` (integer, 0 or more), `kinds` (optional array of 1 to 20 event kinds: `loop_gate`, `supervisor_state`, `supervisor_action`, `pr_state`, `machine_wake`, `tool_call`, `decision_raised`, `decision_answered`, `intake_submitted`), `cardIds` (optional array of 1 to 50 card ids), `timeoutSeconds` (optional integer, 1 to 55, default 55). The MCP tool sends 55 when the call omits it, because the MCP client cuts a tool call at 60 seconds; the route itself takes 1 to 540, default 240, for a direct client.
+- Description: "Wait for the next board event after an event id. The wait is at most 55 seconds, and the default is 55. If no event comes, call it again to keep waiting."
 - Refusals: 400 `invalid-since`, `invalid-kinds`, `invalid-card-ids`, `invalid-timeout`. A `tool_call` event ends the wait only when `kinds` names it.
+
+### `read_state`
+
+- Route: `GET /state`. It answers 200 with `{ markdown, updatedAt, handoffReady }`. Before the first write, `markdown` is an empty string, `updatedAt` is `null` and `handoffReady` is `false`.
+- Input: none.
+- Description: "Read your saved state: the markdown, the time it was written and the handoff flag. Call it first, before any action."
+- Refusals: 404 `unknown-orchestrator` when the token names an orchestrator that has no record on its board. The call reads the record of the caller only.
+
+### `write_state`
+
+- Route: `PUT /state`. It answers 200 with `{ updatedAt, handoffReady }`. The call replaces the earlier state.
+- Input: `markdown` (string, 65536 bytes or less in UTF-8), `handoffReady` (optional boolean; when it is absent, the flag becomes `false`).
+- Description: "Save your state as markdown, 64 KiB at most. It replaces the earlier state. Set handoffReady to true only when you hand off."
+- Refusals: 400 `invalid-markdown`, `invalid-handoff-ready`, `state-too-large` (the markdown is more than 65536 bytes; the stored state does not change). 404 `unknown-orchestrator` when the token names an orchestrator that has no record on its board. The call writes the record of the caller only.
+
+When `handoffReady` is `true`, the supervisor reads the handoff as pending, as it reads `handoff-pending` in the engine file of a loop. When it sees the line `HANDOFF_READY <orchestratorId>`, it clears the session, sends the resume prompt, and sets `handoffReady` to `false` when the prompt is confirmed.
 
 ### Rules for the orchestrator session (Unit 4)
 
-- The orchestrator session is launched with a tool allowlist that holds the MCP tools and the read-only file tools, and no `Bash`, `Write` or `Edit`. The session then cannot reach the user routes by other means (U3-15). Unit 3 records the rule. Unit 4 implements it.
+- The orchestrator session is launched with `--tools Read Glob Grep` (an allowlist of the read-only built-in tools, so no command or code running tool such as `Monitor`), `--allowedTools mcp__dispatch` (the board tools run without a permission dialog), `--permission-mode manual` (a user `defaultMode` cannot widen it) and `--disallowedTools Bash Write Edit NotebookEdit`, with every bypass flag stripped. The session then cannot reach the user routes by other means (U3-15, U4-04).
+- The user card routes `POST /api/cards/:id/start` and `POST /api/cards/:id/run-claude` refuse a hidden orchestrator card with 409 `orchestrator-card` (reason "use the orchestrator panel"), so only the orchestrator routes start or relaunch it (U4-03).
 - No tool and no route path holds push, merge, credit, vault or a policy change. `get_policy` is the one tool with `policy` in its name, and it only reads. A push and a merge exist only inside the ship flow, behind `shipRights` (U3-13).
 
 ## Scope changes
