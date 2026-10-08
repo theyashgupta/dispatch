@@ -19,6 +19,7 @@ import {
   connectBoardStream,
   latestBoard,
   newestBoardSnapshot,
+  orchestrationKeyOf,
   sameBoard,
   shouldPrefetchBoard,
   tunnelKeys,
@@ -274,6 +275,59 @@ test("activity and tunnel frames route to their callbacks and cache keys", () =>
   assert.deepEqual(h.queryClient.getQueryData(tunnelKeys.state), {
     status: "off",
   });
+  h.dispose();
+});
+
+test("orchestrationKeyOf reads the board key of a frame and refuses an unreadable one", () => {
+  assert.deepEqual(orchestrationKeyOf('{"boardKey":"ACME","lastEventId":4}'), [
+    "orchestration",
+    "ACME",
+  ]);
+  for (const bad of ["not json", "{}", '{"boardKey":7}', "null"]) {
+    assert.equal(orchestrationKeyOf(bad), null, bad);
+  }
+});
+
+test("an orchestration frame invalidates only the orchestration queries of its board", () => {
+  const h = start();
+  const seed = (key: readonly unknown[]) =>
+    h.queryClient.setQueryData(key, { seeded: true });
+  seed(["orchestration", "ACME", "summary"]);
+  seed(["orchestration", "ACME", "events", {}]);
+  seed(["orchestration", "LOCAL", "summary"]);
+  seed(["accounts", "list"]);
+  h.source().emitNamed("orchestration", { boardKey: "ACME", lastEventId: 4 });
+  const stale = (key: readonly unknown[]) =>
+    h.queryClient.getQueryState(key)?.isInvalidated;
+  assert.equal(stale(["orchestration", "ACME", "summary"]), true);
+  assert.equal(stale(["orchestration", "ACME", "events", {}]), true);
+  assert.equal(stale(["orchestration", "LOCAL", "summary"]), false);
+  assert.equal(stale(["accounts", "list"]), false);
+  h.dispose();
+});
+
+test("a reconnect and each successful poll invalidate the orchestration queries of the board", async () => {
+  const h = start();
+  await flush();
+  const key = ["orchestration", "LOCAL", "summary"] as const;
+  const stale = () => h.queryClient.getQueryState(key)?.isInvalidated;
+  h.queryClient.setQueryData(key, { seeded: true });
+  h.source().emitOpen();
+  assert.equal(stale(), false);
+
+  h.source().emitError();
+  mock.timers.tick(0);
+  await flush();
+  assert.equal(stale(), true);
+
+  h.queryClient.setQueryData(key, { seeded: true });
+  mock.timers.tick(1_000);
+  h.source().emitOpen();
+  assert.equal(stale(), true);
+
+  h.queryClient.setQueryData(key, { seeded: true });
+  h.source().emitOpen();
+  assert.equal(stale(), false);
   h.dispose();
 });
 

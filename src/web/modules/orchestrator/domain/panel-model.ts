@@ -1,4 +1,8 @@
-import type { OrchestratorView } from "../../../../shared/types.js";
+import { actionFailedText } from "../../../../shared/decision-view.js";
+import type {
+  OrchestratorView,
+  SupervisorState,
+} from "../../../../shared/types.js";
 
 export type {
   OrchestratorSessionView,
@@ -29,7 +33,7 @@ export interface PanelInput {
 
 export interface PanelModel {
   main: OrchestratorView | null;
-  stateKey: string | null;
+  stateKey: SupervisorState | null;
   transition: "Starting" | "Stopping" | null;
   control: PanelControl | null;
   terminal: TerminalMode;
@@ -181,10 +185,7 @@ export function startErrorCopy(reason: string): string {
   return `The orchestrator did not start: ${stripPeriod(reason)}.`;
 }
 
-/** The error line of a failed action, for example "Stop failed: <error message>.". */
-export function actionErrorCopy(action: string, message: string): string {
-  return `${action} failed: ${stripPeriod(message)}.`;
-}
+export const actionErrorCopy = actionFailedText;
 
 /** The error line of a failed panel load. */
 export function loadErrorCopy(message: string): string {

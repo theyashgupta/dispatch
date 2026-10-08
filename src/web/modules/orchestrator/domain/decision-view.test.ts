@@ -4,12 +4,12 @@ import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import type { Card, DecisionItem } from "../../../../shared/types.js";
 import {
   askedAgo,
+  decisionViews,
+  REPLY_COPY,
+} from "../../../../shared/decision-view.js";
+import {
   attentionRows,
   decisionCount,
-  decisionViews,
-  liveReplyResults,
-  replyKey,
-  REPLY_COPY,
   stoppedLoops,
   stoppedLoopText,
 } from "./decision-view.js";
@@ -145,6 +145,7 @@ test("attention rows: a reply row at needs_input and a prompt row at permission_
     group("GROUP-4", { state: "needs_input", stateReason: "usage_stop" }),
     group("GROUP-5", { state: "needs_input", stateReason: "budget" }),
     group("GROUP-6", { state: "needs_input", stateReason: "stop_session" }),
+    group("GROUP-7", { state: "needs_input", stateReason: "resume_failed" }),
     group("LOCAL-1", { state: "needs_input", source: "linear" }),
     group("HID-1", { state: "needs_input", source: "orchestrator" }),
   ]);
@@ -205,25 +206,4 @@ test("an approval gate item or ticket proposal has no other answer", () => {
       null,
     );
   }
-});
-
-test("a reply result drops when the row question or state changes or the row leaves", () => {
-  const row = {
-    kind: "needs_input" as const,
-    cardId: "GROUP-1",
-    text: "Which branch?",
-    stateSince: "2026-10-08T10:00:00.000Z",
-  };
-  const stored = {
-    "GROUP-1": { result: "confirmed" as const, key: replyKey(row) },
-  };
-  assert.deepEqual(liveReplyResults(stored, [row]), { "GROUP-1": "confirmed" });
-  assert.deepEqual(liveReplyResults(stored, [{ ...row, text: "Again?" }]), {});
-  assert.deepEqual(
-    liveReplyResults(stored, [
-      { ...row, stateSince: "2026-10-08T11:00:00.000Z" },
-    ]),
-    {},
-  );
-  assert.deepEqual(liveReplyResults(stored, []), {});
 });

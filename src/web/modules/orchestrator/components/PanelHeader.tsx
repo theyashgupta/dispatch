@@ -7,12 +7,12 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { StateLabel } from "@/modules/orchestrator/domain/session-state-label";
-import { StateBadge } from "./StateBadge";
+import { SessionStateBadge } from "@/components/badges/SessionStateBadge";
+import type { SupervisorState } from "../../../../shared/types.js";
 
 interface PanelHeaderProps {
   boardName: string;
-  state: StateLabel | null;
+  state: SupervisorState | null;
   transition: string | null;
   staleBadge: string | null;
   loading: boolean;
@@ -40,7 +40,7 @@ export function PanelHeader({
           <Skeleton className="h-4.5 w-20" />
         ) : (
           <>
-            {state !== null && <StateBadge state={state} />}
+            {state !== null && <SessionStateBadge state={state} />}
             {transition !== null && (
               <Badge tone="neutral">
                 <LoaderCircle aria-hidden="true" />

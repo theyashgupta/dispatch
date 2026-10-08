@@ -1,4 +1,5 @@
 import { queryOptions, useQuery } from "@tanstack/react-query";
+import type { BoardList } from "../../shared/types.js";
 import { getBoardCounts, getBoardList } from "./board-list-api.js";
 
 const COUNTS_POLL_MS = 15_000;
@@ -25,8 +26,10 @@ export function boardCountsQueryOptions(poll?: boolean) {
   });
 }
 
-export function useBoardListQuery() {
-  return useQuery(boardListQueryOptions());
+export function useBoardListQuery<T = BoardList>(
+  select?: (data: BoardList) => T,
+) {
+  return useQuery({ ...boardListQueryOptions(), select });
 }
 
 /**

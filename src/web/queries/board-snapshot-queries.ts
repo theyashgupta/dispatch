@@ -16,6 +16,7 @@ import type {
   TunnelState,
 } from "../../shared/types.js";
 import { activityKeys, mergeActivity } from "./activity-queries.js";
+import { orchestrationKey } from "./attention-actions-queries.js";
 import { fetchBoardSnapshot } from "./board-snapshot-api.js";
 
 export const boardSnapshotKeys = {
@@ -177,6 +178,18 @@ export function applyTunnelState(
   queryClient.setQueryData(tunnelKeys.state, state);
 }
 
+/** The orchestration query prefix of the board named in an `orchestration` frame, or null for an unreadable frame. */
+export function orchestrationKeyOf(
+  data: string,
+): ReturnType<typeof orchestrationKey> | null {
+  try {
+    const { boardKey } = JSON.parse(data) as { boardKey?: unknown };
+    return typeof boardKey === "string" ? orchestrationKey(boardKey) : null;
+  } catch {
+    return null;
+  }
+}
+
 interface StreamSource {
   onopen: ((event: Event) => void) | null;
   onmessage: ((event: MessageEvent) => void) | null;
@@ -243,6 +256,10 @@ export function connectBoardStream(
   let pollFailures = 0;
   let idleTimer: ReturnType<typeof setTimeout> | null = null;
   let boardGen = 0;
+  let missedFrames = false;
+
+  const refreshOrchestration = () =>
+    void queryClient.invalidateQueries({ queryKey: orchestrationKey(board) });
 
   const publishSnapshot = (snapshot: BoardSnapshot, fresh: boolean) => {
     options.onBoardUpdate?.(snapshot, fresh);
@@ -256,6 +273,7 @@ export function connectBoardStream(
       es = null;
     }
     setConnection("disconnected");
+    missedFrames = true;
     if (reconnectTimer != null) return;
     const delay = backoffMs;
     backoffMs = Math.min(backoffMs * 2, BACKOFF_MAX_MS);
@@ -293,6 +311,7 @@ export function connectBoardStream(
         const ok = await fetchBoard(true);
         if (disposed || pollTimer == null) return;
         pollFailures = ok ? 0 : pollFailures + 1;
+        if (ok) refreshOrchestration();
         scheduleNextPoll(
           ok ? POLL_MS : Math.min(POLL_MS * 2 ** pollFailures, POLL_MAX_MS),
         );
@@ -321,6 +340,10 @@ export function connectBoardStream(
 
     src.onopen = () => {
       lastEventAt = Date.now();
+      if (missedFrames) {
+        missedFrames = false;
+        refreshOrchestration();
+      }
       setConnection("connected");
     };
     src.onmessage = (e) => {
@@ -354,6 +377,11 @@ export function connectBoardStream(
       const state = JSON.parse(e.data as string) as TunnelState;
       options.onTunnelState?.(state);
       applyTunnelState(queryClient, state);
+    });
+    src.addEventListener("orchestration", (e) => {
+      lastEventAt = Date.now();
+      const queryKey = orchestrationKeyOf(e.data as string);
+      if (queryKey) void queryClient.invalidateQueries({ queryKey });
     });
     src.onerror = () => {
       if (es === src) {

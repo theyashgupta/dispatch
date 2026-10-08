@@ -1,12 +1,17 @@
 import { Empty, EmptyDescription, EmptyHeader } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
-import type {
-  AttentionRow,
-  DecisionView,
-  ReplyResult,
-} from "@/modules/orchestrator/domain/decision-view";
-import { AttentionCard } from "./AttentionCard";
-import { DecisionCard } from "./DecisionCard";
+import { AttentionCard } from "@/components/attention/AttentionCard";
+import { DecisionCard } from "@/components/attention/DecisionCard";
+import {
+  REPLY_COPY,
+  type DecisionView,
+  type ReplyResult,
+} from "../../../../shared/decision-view.js";
+import type { AttentionRow } from "@/modules/orchestrator/domain/decision-view";
+
+function replyText(result: ReplyResult | undefined): string | null {
+  return result === undefined ? null : REPLY_COPY[result];
+}
 
 interface DecisionsListProps {
   views: readonly DecisionView[];
@@ -61,8 +66,11 @@ export function DecisionsList({
       {rows.map((row) => (
         <AttentionCard
           key={row.cardId}
-          row={row}
-          result={results[row.cardId]}
+          kind={row.kind}
+          title={row.cardId}
+          text={row.text}
+          waiting={null}
+          resultText={replyText(results[row.cardId])}
           disabled={disabled}
           onReply={(text) => onReply(row.cardId, text)}
           onOpenTerminal={() => onOpenTerminal(row.cardId)}

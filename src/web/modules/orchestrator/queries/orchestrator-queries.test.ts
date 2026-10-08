@@ -7,16 +7,14 @@ import {
 } from "@tanstack/react-query";
 import { DEFAULT_BOARD_KEY as LOCAL } from "../../../../shared/board-key.js";
 import type { Board, BoardPolicy } from "../../../../shared/types.js";
+import { openDecisionsQueryOptions } from "@/queries/attention-actions-queries";
 import { boardListKeys } from "@/queries/board-list-queries";
 import {
   addExtraMutationOptions,
-  answerMutationOptions,
   boardRecordQueryOptions,
   lifecycleMutationOptions,
   moveGroupsMutationOptions,
-  openDecisionsQueryOptions,
-  replyMutationOptions,
-  resumeLoopMutationOptions,
+  panelDecisionsQueryOptions,
   saveOverridesMutationOptions,
   savePolicyMutationOptions,
   orchestratorKeys,
@@ -233,87 +231,15 @@ function body(index: number): unknown {
   return JSON.parse(calls[index]?.init?.body as string);
 }
 
-test("the open decisions query reads state=open and polls", async () => {
-  const options = openDecisionsQueryOptions(LOCAL);
+test("the panel decisions query polls on the shared decisions key", async () => {
+  const options = panelDecisionsQueryOptions(LOCAL);
+  assert.deepEqual(options.queryKey, openDecisionsQueryOptions(LOCAL).queryKey);
   assert.equal(options.refetchInterval, PANEL_POLL_MS);
+  assert.equal(options.staleTime, 0);
   stubFetch({ status: 200, body: { items: [{ id: "d1" }] } });
   const data = await newClient().fetchQuery(options);
   assert.deepEqual(data, [{ id: "d1" }]);
-  assert.equal(calls[0]?.url, "/api/decisions?state=open");
-});
-
-test("the open decisions query adds the board parameter off the default board", async () => {
-  stubFetch({ status: 200, body: { items: [] } });
-  await newClient().fetchQuery(openDecisionsQueryOptions("DISP" as never));
-  assert.equal(calls[0]?.url, "/api/decisions?state=open&board=DISP");
-});
-
-test("a decision answer posts the option id and the note, and refreshes the decisions", async () => {
-  const client = newClient();
-  client.setQueryData(orchestratorKeys.decisions(LOCAL), []);
-  stubFetch({ status: 200, body: { item: {} } });
-  const result = await new MutationObserver(
-    client,
-    answerMutationOptions(client, LOCAL),
-  ).mutate({ id: "d 1", optionId: "b", note: "use the safe path" });
-  assert.deepEqual(result, { ok: true });
-  assert.equal(calls[0]?.url, "/api/decisions/d%201/answer");
-  assert.equal(calls[0]?.init?.method, "POST");
-  assert.deepEqual(body(0), { optionId: "b", note: "use the safe path" });
-  assert.equal(
-    client.getQueryState(orchestratorKeys.decisions(LOCAL))?.isInvalidated,
-    true,
-  );
-});
-
-test("an option answer sends no note and a refused answer resolves as a reason", async () => {
-  const client = newClient();
-  stubFetch(
-    { status: 200, body: { item: {} } },
-    { status: 409, body: { error: "already-answered" } },
-  );
-  const observer = () =>
-    new MutationObserver(client, answerMutationOptions(client, LOCAL));
-  await observer().mutate({ id: "d1", optionId: "a", note: null });
-  assert.deepEqual(body(0), { optionId: "a" });
-  const refused = await observer().mutate({
-    id: "d1",
-    optionId: "a",
-    note: null,
-  });
-  assert.deepEqual(refused, {
-    ok: false,
-    reason: "the decision is already answered",
-  });
-});
-
-test("the inline reply posts the text and reads the result", async () => {
-  stubFetch(
-    { status: 200, body: { result: "confirmed" } },
-    { status: 200, body: { result: "unconfirmed" } },
-  );
-  const client = newClient();
-  const run = () =>
-    new MutationObserver(client, replyMutationOptions()).mutate({
-      cardId: "GROUP-1",
-      text: "use main",
-    });
-  assert.deepEqual(await run(), { ok: true, result: "confirmed" });
-  assert.equal(calls[0]?.url, "/api/sessions/GROUP-1/input");
-  assert.equal(calls[0]?.init?.method, "POST");
-  assert.deepEqual(body(0), { text: "use main" });
-  assert.deepEqual(await run(), { ok: true, result: "unconfirmed" });
-});
-
-test("Resume loop posts to the user route and reads the result", async () => {
-  stubFetch({ status: 200, body: { result: "confirmed" } });
-  const result = await new MutationObserver(
-    newClient(),
-    resumeLoopMutationOptions(),
-  ).mutate("GROUP-4");
-  assert.deepEqual(result, { ok: true, result: "confirmed" });
-  assert.equal(calls[0]?.url, "/api/sessions/GROUP-4/resume-loop");
-  assert.equal(calls[0]?.init?.method, "POST");
+  assert.equal(calls[0]?.url, "/api/decisions?board=LOCAL&state=open");
 });
 
 test("Save policy puts the ten fields and no credits value, then updates the board list", async () => {

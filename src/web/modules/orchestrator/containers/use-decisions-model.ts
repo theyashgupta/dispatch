@@ -1,14 +1,14 @@
 import { nowMs } from "../../../../shared/format-age.js";
 import type { BoardKey, Card } from "../../../../shared/types.js";
 import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
+import { decisionViews } from "../../../../shared/decision-view.js";
 import {
   attentionRows,
   decisionCount,
-  decisionViews,
   stoppedLoops,
 } from "@/modules/orchestrator/domain/decision-view";
 import type { OrchestratorView } from "@/modules/orchestrator/domain/panel-model";
-import { useOpenDecisionsQuery } from "@/modules/orchestrator/queries/orchestrator-queries";
+import { usePanelDecisionsQuery } from "@/modules/orchestrator/queries/orchestrator-queries";
 
 const NO_CARDS: Card[] = [];
 
@@ -23,7 +23,7 @@ export function useDecisionsModel(
   doneLimit: number,
   orchestrators: readonly OrchestratorView[],
 ) {
-  const decisions = useOpenDecisionsQuery(board);
+  const decisions = usePanelDecisionsQuery(board);
   const cards = useBoardSnapshot(board, doneLimit)?.cards ?? NO_CARDS;
   const names = new Map(orchestrators.map((o) => [o.id, o.name]));
   const views = decisionViews(decisions.data ?? [], names, nowMs());

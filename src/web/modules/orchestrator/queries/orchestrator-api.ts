@@ -1,9 +1,7 @@
-import { withBoard } from "../../../../shared/board-select.js";
 import type {
   Board,
   BoardKey,
   BoardPolicy,
-  DecisionItem,
   OrchestratorScope,
   OrchestratorPolicyOverride,
 } from "../../../../shared/types.js";
@@ -127,10 +125,6 @@ export async function ensureOrchestratorTerminal(
   });
 }
 
-export type ReplyOutcome =
-  | { ok: true; result: "confirmed" | "unconfirmed" }
-  | { ok: false; reason: string };
-
 export type SaveOutcome =
   { ok: true; board: Board } | { ok: false; reason: string };
 
@@ -143,54 +137,6 @@ export interface ExtraInput {
 
 function jsonInit(method: string, body: unknown): RequestInit {
   return { method, headers: JSON_HEADERS, body: JSON.stringify(body) };
-}
-
-/** Read the open decision items of a board: GET /api/decisions?state=open. */
-export async function getOpenDecisions(
-  board: BoardKey,
-): Promise<DecisionItem[]> {
-  const result = await http<{ items: DecisionItem[] }>(
-    withBoard("/api/decisions?state=open", board),
-  );
-  if (!result.ok) {
-    throw new Error(
-      `getOpenDecisions failed: ${result.status} ${result.statusText}`.trim(),
-    );
-  }
-  return result.data.items;
-}
-
-/** Answer a decision item with one of its options and an optional typed note: POST /api/decisions/:id/answer. */
-export function answerDecision(
-  id: string,
-  optionId: string,
-  note: string | null,
-): Promise<ActionResult> {
-  return send(
-    `/api/decisions/${encodeURIComponent(id)}/answer`,
-    jsonInit("POST", note === null ? { optionId } : { optionId, note }),
-  );
-}
-
-/** Type into a loop session as the user: POST /api/sessions/:cardId/input. */
-export async function sendLoopInput(
-  cardId: string,
-  text: string,
-): Promise<ReplyOutcome> {
-  const result = await request<{ result: "confirmed" | "unconfirmed" }>(
-    `/api/sessions/${encodeURIComponent(cardId)}/input`,
-    jsonInit("POST", { text }),
-  );
-  return result.ok ? { ok: true, result: result.data.result } : result;
-}
-
-/** Resume a loop that waits at needs_input, as the user: POST /api/sessions/:cardId/resume-loop. */
-export async function resumeLoop(cardId: string): Promise<ReplyOutcome> {
-  const result = await request<{ result: "confirmed" | "unconfirmed" }>(
-    `/api/sessions/${encodeURIComponent(cardId)}/resume-loop`,
-    { method: "POST", headers: JSON_HEADERS },
-  );
-  return result.ok ? { ok: true, result: result.data.result } : result;
 }
 
 /** Save the board policy: PUT /api/boards/:key/policy with the ten policy fields. */
