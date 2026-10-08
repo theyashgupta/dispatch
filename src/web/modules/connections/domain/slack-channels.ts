@@ -4,7 +4,12 @@ import type {
 } from "../../../../shared/types.js";
 
 export type SlackSetupFailure =
-  "not-a-channel" | "disabled" | "rejected" | "restricted" | "unreachable";
+  | "not-a-channel"
+  | "disabled"
+  | "not-connected"
+  | "rejected"
+  | "restricted"
+  | "unreachable";
 
 export interface SlackChannelRow extends SlackChannelOption {
   notListed: boolean;
@@ -85,8 +90,24 @@ export function samePicked(
 export const SLACK_SETUP_COPY: Record<SlackSetupFailure, string> = {
   "not-a-channel": "Slack could not find that channel. Check the link or ID.",
   disabled: "Turn on Poll Slack to add channels.",
+  "not-connected": "Connect the Slack connector in claude.ai first.",
   rejected: "Slack refused the token. Reconnect Slack and try again.",
   restricted:
     "Listing channels is restricted. Paste a channel link or ID instead.",
   unreachable: "Couldn't reach Slack. Try again.",
 };
+
+/**
+ * Decide whether the channel list request runs.
+ *
+ * @remarks
+ * In `mcp` mode each list is one model call on the user's plan, so it waits for the Load channels
+ * button. Token mode lists on mount.
+ */
+export function slackListEnabled(
+  enabled: boolean,
+  listOnDemand: boolean,
+  requested: boolean,
+): boolean {
+  return enabled && (!listOnDemand || requested);
+}

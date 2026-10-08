@@ -6,6 +6,7 @@ import {
   filterChannelRows,
   mergeChannelRows,
   samePicked,
+  slackListEnabled,
 } from "./slack-channels.js";
 
 const listed = [
@@ -78,4 +79,15 @@ test("addChannelRow inserts a pasted channel as listed and keeps the other rows'
     addChannelRow(next, { id: "C0G6GEN", name: "general" }).length,
     2,
   );
+});
+
+test("the channel list in mcp mode waits for the Load channels press", () => {
+  assert.equal(slackListEnabled(true, true, false), false);
+  assert.equal(slackListEnabled(true, true, true), true);
+});
+
+test("the channel list in token mode loads on mount, and never while Slack is off", () => {
+  assert.equal(slackListEnabled(true, false, false), true);
+  assert.equal(slackListEnabled(false, false, false), false);
+  assert.equal(slackListEnabled(false, true, true), false);
 });
