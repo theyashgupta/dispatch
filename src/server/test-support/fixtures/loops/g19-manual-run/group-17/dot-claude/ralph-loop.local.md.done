@@ -1,0 +1,10 @@
+---
+active: true
+iteration: 9
+session_id: 591ff59d-2a90-43a7-b6d4-dd4e4b4e13bd
+max_iterations: 31
+completion_promise: "ROADMAP COMPLETE g17-boards"
+started_at: "2026-10-07T11:45:47Z"
+---
+
+Execute the roadmap at ROADMAP.md per the roadmap-loop skill, slug g17-boards. Read .roadmap/g17-boards/progress.md, take the lowest incomplete unit, and continue from its recorded position. When and only when every unit's status in progress.md is committed, the trailing test/g17-boards-specs branch exists with the specs committed, and the roadmap's every unit row says built, awaiting /ship, output the phrase ROADMAP COMPLETE g17-boards wrapped in promise tags.

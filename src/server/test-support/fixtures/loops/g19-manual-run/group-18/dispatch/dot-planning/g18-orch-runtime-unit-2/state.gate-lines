@@ -1,0 +1,10 @@
+phase 1 Recorded pane fixtures and the scenario fake claude GREEN 2026-10-06T17:13:11Z gate=pass
+phase 2 Pure state detection and the limit surface GREEN 2026-10-06T17:48:32Z gate=pass
+phase 3 Session fields, transcript, pane sink, registry and state events GREEN 2026-10-06T18:31:01Z gate=pass
+phase 4 The confirmed send GREEN 2026-10-06T18:42:24Z gate=pass
+phase 5 Action planning, restart, API error, prompts and loop close GREEN 2026-10-06T19:18:47Z gate=pass
+phase 6 Context handoff and usage limit GREEN 2026-10-06T20:37:17Z gate=pass
+phase 7 Keep awake, PR events, dependency hold, budget, policy route and hook settings GREEN 2026-10-06T21:12:46Z gate=pass
+phase 8 Architecture and rules documents GREEN 2026-10-06T21:40:14Z gate=pass
+phase 9 Gap Analysis GREEN 2026-10-06T22:45:47Z gate=pass
+phase 10 Test Suite and Real E2E Workflows GREEN 2026-10-07T00:41:45Z gate=pass
