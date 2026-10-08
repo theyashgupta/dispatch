@@ -318,8 +318,7 @@ function calendarResult<T>(
  * List this Mac's calendars: POST /api/calendar/calendars with no body.
  *
  * @remarks
- * A POST, so a cross-site page cannot trigger the macOS Calendars prompt. A 409 carries the read's
- * error code, which the card shows, and other failures throw.
+ * A 409 carries the read's error code, which the card shows, and other failures throw.
  */
 export async function listCalendars(): Promise<
   CalendarResult<CalendarChoice[]>
@@ -346,6 +345,22 @@ export async function putCalendarSettings(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     }),
+    (body) => body as CalendarStatus,
+  );
+}
+
+/**
+ * Check the Calendar permission: POST /api/calendar/access/check with no body.
+ *
+ * @remarks
+ * The server answers the status after the check, which can take up to 125 s while the prompt waits
+ * for an answer.
+ */
+export async function checkCalendarAccess(): Promise<
+  CalendarResult<CalendarStatus>
+> {
+  return calendarResult(
+    await http("/api/calendar/access/check", { method: "POST" }),
     (body) => body as CalendarStatus,
   );
 }
