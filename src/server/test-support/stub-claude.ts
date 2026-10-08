@@ -109,6 +109,7 @@ exit 0
  * uses every allowed tool and answers each with a tool result holding `tool-text.txt` when it is not empty,
  * else the text of `reply.json`. The `mode` file holds `reply`, `toolerror`, `denied`, `mixed` (the third
  * tool answers an error result), `profileonly`, `notools`, `nouse`, `sleep` or `fail`.
+ * @public The Slack connector specs are the callers.
  */
 export function writeConnectorClaude(binDir: string): string {
   const file = path.join(binDir, "claude");
