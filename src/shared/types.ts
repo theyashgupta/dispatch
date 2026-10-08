@@ -1093,13 +1093,32 @@ export type CalendarErrorCode =
   | "ical-invalid"
   | "ical-too-large"
   | "timeout"
-  | "failed";
+  | "failed"
+  | "not-asked"
+  | "restricted"
+  | "write-only"
+  | "prompt-timeout"
+  | "read-timeout"
+  | "calendars-missing"
+  | "unknown";
+
+export type CalendarPermission =
+  | "granted"
+  | "not-asked"
+  | "restricted"
+  | "denied"
+  | "write-only"
+  | "prompt-timeout"
+  | "read-timeout"
+  | "unknown";
 
 export interface CalendarStatus {
   enabled: boolean;
   mode: CalendarMode;
   calendars: string[];
   icalFilled: boolean;
+  permission: CalendarPermission;
+  missingCalendars: string[];
   lastPolledAt?: string;
   lastError?: CalendarErrorCode;
   eventCount?: number;

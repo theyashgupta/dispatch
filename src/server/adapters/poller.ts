@@ -243,11 +243,36 @@ export function stopPollers(): void {
  * enabled.
  */
 export function pollNow(sourceId: string): boolean {
-  const loop = loops.get(sourceId);
-  if (!loop || loop.stopped) return false;
-  stopLoop(loop);
-  void pollOnce(loop);
+  return startPoll(sourceId) !== null;
+}
+
+/**
+ * Poll one source now and wait for that fetch up to `waitMs`.
+ *
+ * @remarks A fetch slower than the wait keeps running; the caller only stops waiting for it.
+ */
+export async function pollNowAndWait(
+  sourceId: string,
+  waitMs: number,
+): Promise<boolean> {
+  const poll = startPoll(sourceId);
+  if (poll === null) return false;
+  let timer: NodeJS.Timeout | undefined;
+  await Promise.race([
+    poll,
+    new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, waitMs);
+    }),
+  ]);
+  clearTimeout(timer);
   return true;
+}
+
+function startPoll(sourceId: string): Promise<void> | null {
+  const loop = loops.get(sourceId);
+  if (!loop || loop.stopped) return null;
+  stopLoop(loop);
+  return pollOnce(loop);
 }
 
 /**
