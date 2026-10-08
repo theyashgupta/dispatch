@@ -2938,6 +2938,7 @@ accepts only the six methods in its frozen `SLACK_READ_METHODS` allowlist (`auth
 `users.info`). A read-only guard test beside the client fails when the allowlist changes or when any
 file under `src/` names a Slack write method. `DISPATCH_SLACK_API_URL` replaces the API base for
 sandbox runs against `scripts/fake-slack.mjs`.
+This section describes `token` mode. Slack Connector Mode below describes `mcp` mode, which calls no Slack API.
 
 The token lives in the Dispatch Vault under `SLACK_USER_TOKEN` (xoxp, preferred) or
 `SLACK_BOT_TOKEN` (xoxb). `services/infra/slack-token.ts#resolveSlackToken` reads the user key,
@@ -3026,6 +3027,91 @@ clears the selection after a successful Promote, Done or snooze preset when that
 selected (`runAction` and `snoozeRow` resolve whether the action succeeded). With Slack off the page shows only a
 notice that links to Settings; with no Slack items it shows only an empty message; an id that is
 not a listed row shows the list (and, when wide, the detail's "Pick a message" state).
+
+### Slack Connector Mode
+
+Slack runs in one of two modes (LOCAL-82), set in `sources.slack.mode`. `token` is the Slack API
+poll above. `mcp` reads Slack through the Slack connector of the user's claude.ai account, with the
+`claude` CLI login, and needs no Slack token. `shared/slack-mode.ts#resolveSlackMode` picks the
+mode. A configured `mcp` or `token` wins. Any other value counts as absent. An absent mode resolves
+to `token` when the Vault holds a Slack token, else to `mcp`. `config-holder.ts#slackMode` reads the
+Vault on each call, and nothing is written to `config.json` until the user picks a mode on the Slack
+card. In `mcp` mode `SlackSource.fetch` returns no items and no `cursors`, so the poller never
+overwrites the round cursor. The registry still enables `slack` from `sources.slack.enabled` only.
+
+The connector state comes from `claude mcp list` (`services/orchestration/connector-list.ts`).
+`pickConnector(stdout, /slack/i)` ranks the matching servers: connected first, then a server named
+`claude.ai ...`, then list order. The Granola parser `parseMcpList` keeps the first match. Only the
+name before the first ": " is matched. The states are connected, needs-auth, failed and not-found.
+The card shows "connected", "needs auth" and "not found". `slackConnector()` caches the read
+for 60 s and shares one read between callers. A failed read answers `failed` and is not cached. A
+round always reads fresh and refreshes the cache. A settings change clears the cache.
+
+The round (`services/orchestration/slack-round.ts`) is one restricted `claude -p` call. The claude
+CLI flags are `restricted`, `output-format stream-json`, `verbose`, `model sonnet`, `tools ""`, `allowedTools <list>`,
+`disallowedTools <list>`, `permission-mode dontAsk`, `permission-prompts none` and `no-session-persistence`.
+The hidden tool list holds every Slack tool of the chosen server that the call does not allow: the 13
+write tools and the nine read tools outside `SLACK_READ_TOOLS`. A hidden tool is never offered to the
+model, so it cannot be denied. The thread call and the channel call hide every Slack tool except their one. The limit is 300 s, with SIGKILL 5 s after SIGTERM. The prompt goes on
+stdin. It gives the window, the user's DMs (the self DM included) and the picked channels, and it
+carries a forbid line: "Never send, post, reply, react, edit, delete, schedule, draft or upload
+anything in Slack." The call sets `CLAUDE_CODE_MCP_STARTUP_WAIT_MS` and `MCP_TIMEOUT` to 60000, so
+it waits for the Slack server to connect. The output is stream-json lines. The init event must list
+an allowed tool and the model must call one, and at least one data read must return a result with no
+error, else the round ends `failed` with no item and no cursor move (`no-slack-tool`). An error result
+or a permission denial does not fail the round. The round logs their count, and the first error text. The
+last `result` event holds a `result` text that is one JSON object (one surrounding code fence is
+stripped), and `is_error` fails the round. The object must have a `messages` array, else the output is
+invalid. `slackMessageSchema` (`services/domain/slack-round-schema.ts`) checks each message
+`{ conversationId, ts, author, text, permalink, isMention, threadTs? }` alone. An invalid message is
+dropped and counted, and the round stands. An invalid output creates no item, keeps the cursor and
+stores `invalid-output` for the card.
+
+The model can read more than the user picked, so the code filters. `selectRoundRecords` keeps a DM
+(conversation id starts with `D`) and a mention in a picked channel, and drops every other record.
+Each kept record goes through `slackItem` with the id `slack:<conversationId>:<ts>`, the id of
+`token` mode, so a mode change creates no duplicate. A record needs its `ts`, as a whole token, in one tool
+result with no error, and its conversation id in that result or in the tool call input (a thread result
+names no channel). Its `ts` must be inside the round window. Any other record is dropped.
+The item url uses the workspace origin. The origin is the first workspace permalink in a search tool
+result, else the origin stored in the cursor. With neither, the url is
+`https://slack.com/app_redirect?channel=<id>`. The model permalink is never used. The cursor lives in `BoardMeta.sourceCursors` for `slack` under the key
+`mcp` and moves only after a valid output. The first round reads the last 24 hours. Later rounds
+start 30 minutes before the last success. A round can miss an item that the model does not extract.
+
+`SLACK_READ_TOOLS` allows five tools, all under `mcp__claude_ai_Slack__`: `slack_read_user_profile`,
+`slack_list_user_channels`, `slack_read_channel`, `slack_search_public_and_private` and
+`slack_read_thread`. A test requires a read word in each name and rejects the write tools of the
+server. `slackAllowedTools(server)` swaps the prefix for the server that `pickConnector` chose. In
+`mcp` mode a thread read and a channel list are separate one-tool calls with a 90 s limit. The
+thread call allows only `slack_read_thread`. `GET /api/slack/thread/:itemId` caches the result for
+10 minutes under `mcp:<channel>:<threadTs>` and runs one call per thread at a time. The channel call
+allows only `slack_list_user_channels` and caches the list for 10 minutes. `POST
+/api/slack/channels/resolve` parses a pasted link locally and makes no model call. These routes also
+answer 409 `not-connected`.
+
+The round runs each `sources.slack.mcpIntervalMinutes` (default 30). The code accepts an integer
+from 5 to 1440 and uses 30 for any other value. The timer runs only while `sources.slack.enabled` is
+true and the mode is `mcp`. At boot the first round runs at once only when the last success is older
+than the interval. `GET /api/slack/mcp` answers the status without model output or stderr.
+`PUT /api/slack/mcp` saves `mode`, `enabled` or both through `setSlackMcpSettings`, then
+`applySlackSettings` re-arms the timer or stops a running round. `POST /api/slack/mcp/run` is "Run
+now". It answers 202 `{ running: true }` after the connector check passes. It answers 409 `running`
+while a round runs, 409 `not-connected` and 409 `disabled`. One round runs at a time.
+
+The guard: no model call runs while the connector is not connected. A round checks the connector
+first, and a failed check stores the state as the last error. A thread read and a channel list check
+the 60 s cached state first.
+
+Costs. In spike attempt 1 one read call took 18 s (8 turns, sonnet) and cost $0.106. A round logs
+its duration and cost. The first real round (2026-10-08, two picked channels, a 24 hour window) took
+54 s in the call (11 turns, sonnet, 65 s from the switch to idle), cost $0.094 and created 6 items.
+
+The account rule: the connector belongs to a claude.ai account. A real call must run with the
+Claude account whose claude.ai Slack connector is connected. Any other account reads "not found".
+
+Known limit: a group DM that the user did not pick as a channel is dropped, because its id has no
+`D` prefix.
 
 ### SSE Transport
 
