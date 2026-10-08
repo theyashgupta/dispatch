@@ -21,6 +21,9 @@ export function BoardsLoading() {
                 <TableCell>
                   <Skeleton className="h-4 w-full" />
                 </TableCell>
+                <TableCell className="w-48">
+                  <Skeleton className="h-4 w-full" />
+                </TableCell>
               </TableRow>
             ))}
           </TableBody>

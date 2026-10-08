@@ -62,6 +62,11 @@ const PAGE_HEADER_VIEWS: Partial<Record<Page, ComponentType>> = {
   boards: lazy(() =>
     import("@/modules/boards").then((m) => ({ default: m.BoardsHeaderView })),
   ),
+  dashboard: lazy(() =>
+    import("@/modules/dashboard").then((m) => ({
+      default: m.DashboardHeaderView,
+    })),
+  ),
   meetings: lazy(() =>
     import("@/modules/meetings").then((m) => ({
       default: m.MeetingsHeaderView,

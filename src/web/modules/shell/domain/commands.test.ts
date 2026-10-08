@@ -60,6 +60,7 @@ test("with no card only the page commands, New ticket and Sync now appear", () =
     "go:inbox",
     "go:board",
     "go:settings",
+    "go:dashboard",
     "new-ticket",
     "meeting-notes",
     "sync-now",
@@ -79,7 +80,7 @@ test("the meeting notes command opens the paste flow", () => {
 });
 
 test("a To Do card puts Start and every allowed Move to first, in column order, never In Progress or Agent Done", () => {
-  const cardIds = ids(card()).slice(0, -8);
+  const cardIds = ids(card()).slice(0, -9);
   assert.deepEqual(cardIds, [
     "start",
     "move:needs_input",
@@ -92,7 +93,7 @@ test("a To Do card puts Start and every allowed Move to first, in column order, 
 test("a Done card with a live session yields Open terminal and Clean up and never a move to its own column", () => {
   const cardIds = ids(
     card({ column: "done", tmuxSession: "dsp-LOCAL-7" }),
-  ).slice(0, -8);
+  ).slice(0, -9);
   assert.deepEqual(cardIds, [
     "open-terminal",
     "move:todo",
@@ -162,7 +163,7 @@ test("filter is a case-insensitive substring over the label that keeps order", (
 });
 
 test("an Inbox card offers only Move to To Do and a grouped member gets no card commands", () => {
-  assert.deepEqual(ids(card({ column: "inbox" })).slice(0, -8), ["move:todo"]);
+  assert.deepEqual(ids(card({ column: "inbox" })).slice(0, -9), ["move:todo"]);
   assert.deepEqual(ids(card({ groupId: "g1" })), ids(null));
 });
 
@@ -187,6 +188,7 @@ test("the palette has Go to Slack only when the filtered nav list keeps the Slac
   assert.deepEqual(goTo(withSlack.slice(0, 1)), [
     "Go to Inbox",
     "Go to Settings",
+    "Go to Dashboard",
   ]);
 });
 
@@ -253,4 +255,13 @@ test("groupCommands splits the Boards group from the ungrouped commands and keep
     sections.flatMap((section) => section.rows.map((row) => row.index)),
     commands.map((_, index) => index),
   );
+});
+
+test("a visible Dashboard nav row adds no second Go to Dashboard", () => {
+  const withDashboard = [
+    ...nav,
+    { page: "dashboard" as const, label: "Dashboard" },
+  ];
+  const commands = buildCommands(ctx().context, withDashboard, null);
+  assert.equal(commands.filter((c) => c.id === "go:dashboard").length, 1);
 });

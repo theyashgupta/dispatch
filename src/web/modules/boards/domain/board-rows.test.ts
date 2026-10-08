@@ -11,8 +11,20 @@ test("boardRows lists active boards with counts, clash and archive action", () =
   const rows = boardRows(
     [board("LOCAL"), board("ACME"), board("OLD", true)],
     [
-      { key: "LOCAL" as BoardKey, running: 3, openGroups: 1, attention: 0 },
-      { key: "ACME" as BoardKey, running: 2, openGroups: 0, attention: 4 },
+      {
+        key: "LOCAL" as BoardKey,
+        running: 3,
+        openGroups: 1,
+        attention: 0,
+        loops: [],
+      },
+      {
+        key: "ACME" as BoardKey,
+        running: 2,
+        openGroups: 0,
+        attention: 4,
+        loops: [],
+      },
     ],
     ["ACME"],
   );

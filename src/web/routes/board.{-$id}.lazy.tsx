@@ -16,7 +16,9 @@ function BoardRoute() {
       panel={<OrchestratorPanelView />}
       open={panel === "orchestrator"}
       onClose={() =>
-        void navigate({ search: (prev) => ({ ...prev, panel: undefined }) })
+        void navigate({
+          search: (prev) => ({ ...prev, panel: undefined, tab: undefined }),
+        })
       }
       title="Orchestrator"
       handleLabel="Resize orchestrator panel"
