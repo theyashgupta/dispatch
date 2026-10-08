@@ -1,0 +1,11 @@
+phase 1 Shared services and typed errors GREEN 2026-10-07T01:15:33Z gate=pass
+phase 2 Tokens, auth, board scope and the activity record GREEN 2026-10-07T01:46:22Z gate=pass
+phase 3 Read routes and the events cursor GREEN 2026-10-07T02:16:21Z gate=pass
+phase 4 Ticket and group write routes with policy checks GREEN 2026-10-07T03:02:40Z gate=pass
+phase 5 Session routes GREEN 2026-10-07T03:46:39Z gate=pass
+phase 6 Decision items and the wait tool GREEN 2026-10-07T04:44:07Z gate=pass
+phase 7 The MCP tool server GREEN 2026-10-07T05:24:40Z gate=pass
+phase 8 The ship flow GREEN 2026-10-07T06:26:42Z gate=pass
+phase 9 Tool reference, architecture docs and the scripted client GREEN 2026-10-07T07:14:41Z gate=pass
+phase 10 Gap Analysis GREEN 2026-10-07T10:14:58Z gate=pass
+phase 11 Test Suite and Real E2E Workflows GREEN 2026-10-07T11:22:44Z gate=pass

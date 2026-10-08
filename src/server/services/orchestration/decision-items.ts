@@ -7,6 +7,7 @@ import {
   ValidationError,
 } from "../domain/errors.js";
 import type { OrchestratorIdentity } from "../domain/orchestrator-scope.js";
+import { scopeTargetOf } from "./boards.js";
 
 interface DecisionInput {
   cardId?: string | null | undefined;
@@ -14,6 +15,7 @@ interface DecisionInput {
   question: string;
   options: DecisionItem["options"];
   recommendedOptionId?: string | undefined;
+  tickets?: NonNullable<DecisionItem["proposal"]>["tickets"] | undefined;
 }
 
 const ROADMAP_OPTIONS: DecisionItem["options"] = [
@@ -21,20 +23,46 @@ const ROADMAP_OPTIONS: DecisionItem["options"] = [
   { id: "reject", label: "Do not approve" },
 ];
 
+const PROPOSAL_OPTIONS: DecisionItem["options"] = [
+  { id: "approve", label: "Create these tickets" },
+  { id: "reject", label: "Do not create" },
+];
+
+/**
+ * Resolve the orchestrator that owns a decision.
+ *
+ * @remarks
+ * A decision about a card goes to that card's owner, who can differ from the caller.
+ */
+function ownerOf(caller: OrchestratorIdentity, cardId: string | null): string {
+  const card = cardId === null ? undefined : store.getCard(cardId);
+  return (card && scopeTargetOf(card).owner) || caller.orchestratorId;
+}
+
 /**
  * Store an open decision item for the caller's board and record `decision_raised`.
  *
- * @remarks The caller checks that `cardId` belongs to the board. The recommended option must be
- * one of the options, else the typed 400 `invalid-recommended-option`. A `roadmap_approval` item gets
- * the server options, so the label the user picks always matches the id `approve_roadmap` checks.
+ * @remarks
+ * The caller checks that `cardId` belongs to the board. The recommended option must be
+ * one of the options, else the typed 400 `invalid-recommended-option`. A `roadmap_approval` or
+ * `ticket_proposal` item gets the server options, so the label the user picks always matches the id
+ * the later tool checks.
  */
 export function createDecisionItem(
   caller: OrchestratorIdentity,
   input: DecisionInput,
 ): DecisionItem {
-  const approval = input.kind === "roadmap_approval";
-  const options = approval ? ROADMAP_OPTIONS : input.options;
-  const recommended = approval
+  const proposal = input.kind === "ticket_proposal";
+  if (proposal !== (input.tickets !== undefined)) {
+    throw new ValidationError("invalid-tickets");
+  }
+  const serverOptions = proposal || input.kind === "roadmap_approval";
+  const options = proposal
+    ? PROPOSAL_OPTIONS
+    : serverOptions
+      ? ROADMAP_OPTIONS
+      : input.options;
+  const recommended = serverOptions
     ? "approve"
     : (input.recommendedOptionId ?? null);
   if (
@@ -47,7 +75,7 @@ export function createDecisionItem(
     id: randomUUID(),
     boardKey: caller.boardKey,
     cardId: input.cardId ?? null,
-    orchestratorId: caller.orchestratorId,
+    orchestratorId: ownerOf(caller, input.cardId ?? null),
     kind: input.kind,
     question: input.question,
     options,
@@ -56,6 +84,9 @@ export function createDecisionItem(
     answer: null,
     createdAt: new Date().toISOString(),
     answeredAt: null,
+    ...(input.tickets === undefined
+      ? {}
+      : { proposal: { tickets: input.tickets, usedIndexes: [] } }),
   };
   store.insertDecisionItem(item);
   store.appendOrchestrationEvent({
@@ -98,6 +129,7 @@ export function answerDecisionItem(
     data: {
       decisionId: id,
       kind: item.kind,
+      orchestratorId: item.orchestratorId,
       optionId: answer.optionId,
       note: answer.note,
     },

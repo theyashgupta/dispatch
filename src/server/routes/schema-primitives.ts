@@ -66,3 +66,11 @@ export function fromResult<T>(
 /** A `true` or `false` query value as a boolean, with `code` as the issue for anything else. */
 export const booleanFilter = (code: string) =>
   z.enum(["true", "false"], code).transform((flag) => flag === "true");
+
+/** The zod error map of a strict object: `unknown-field` for an extra key, else `fallback`. */
+export function unknownFieldError(
+  fallback = "invalid-body",
+): (issue: { code: string }) => string {
+  return (issue) =>
+    issue.code === "unrecognized_keys" ? "unknown-field" : fallback;
+}

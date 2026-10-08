@@ -140,6 +140,10 @@ export interface BoardDb {
     sinceId: number,
     limit: number,
   ): OrchestrationEvent[];
+  listLatestOrchestrationEvents(
+    board: BoardKey,
+    limit: number,
+  ): OrchestrationEvent[];
   /** Revoke every live token of one orchestrator, then store the new token hash as its only live token. */
   replaceOrchestratorToken(row: Omit<OrchestratorTokenRow, "revokedAt">): void;
   /** Revoke every live token of one orchestrator and return how many were revoked. */
@@ -165,6 +169,8 @@ export interface BoardDb {
   ): DecisionItem | null;
   /** Mark one answered, unused item used; whether this call marked it. */
   consumeDecisionItem(id: string, consumedAt: string): boolean;
+  useProposalIndex(id: string, index: number): boolean;
+  releaseProposalIndex(id: string, index: number): void;
   /** Write or replace one archived group row (LOCAL-17); the row id is the group card id. */
   upsertArchive(row: ArchivedGroup): void;
   /** Drop one archived group row; false when no row had that id. */
@@ -292,6 +298,18 @@ function parseEventData(raw: string): Record<string, unknown> {
   }
 }
 
+function toOrchestrationEvent(r: OrchestrationEventRow): OrchestrationEvent {
+  return {
+    id: r.id,
+    boardKey: r.board_key as BoardKey,
+    cardId: r.card_id,
+    sessionId: r.session_id,
+    kind: r.kind as OrchestrationEvent["kind"],
+    data: parseEventData(r.data),
+    ts: r.ts,
+  };
+}
+
 interface BoardRow {
   key: string;
   name: string;
@@ -300,6 +318,7 @@ interface BoardRow {
   linear_team_keys: string;
   last_used_folder: string | null;
   policy: string;
+  orchestrators: string;
   created_at: string;
   archived: number;
 }
@@ -600,6 +619,26 @@ function hasBoardKeyColumn(db: DatabaseSync, table: string): boolean {
   );
 }
 
+/**
+ * Add the `orchestrators` column to the boards table when it is absent.
+ *
+ * @remarks
+ * An added column with a default needs no schema version change, and an older build
+ * keeps the value because its board upsert names its own columns only.
+ */
+function addOrchestratorsColumn(db: DatabaseSync): void {
+  const present = db
+    .prepare(
+      `SELECT 1 AS ok FROM pragma_table_info('boards') WHERE name = 'orchestrators'`,
+    )
+    .get();
+  if (!present) {
+    db.exec(
+      `ALTER TABLE boards ADD COLUMN orchestrators TEXT NOT NULL DEFAULT '[]'`,
+    );
+  }
+}
+
 function persistedSchemaVersion(db: DatabaseSync): number | null {
   const row = db
     .prepare(
@@ -872,6 +911,7 @@ export function openBoardDb(): BoardDb {
   try {
     assertSchemaOpenable(persistedSchemaVersion(db) ?? 0);
     migrateToBoards(db, `${BOARD_DB_PATH}.pre-boards`);
+    addOrchestratorsColumn(db);
   } catch (err) {
     try {
       db.close();
@@ -917,6 +957,10 @@ export function openBoardDb(): BoardDb {
     `SELECT id, board_key, card_id, session_id, kind, data, ts
        FROM orchestration_events WHERE board_key = ? AND id > ? ORDER BY id ASC LIMIT ?`,
   );
+  const selectLatestOrchestrationEvents = db.prepare(
+    `SELECT id, board_key, card_id, session_id, kind, data, ts
+       FROM orchestration_events WHERE board_key = ? ORDER BY id DESC LIMIT ?`,
+  );
   const insertOrchestratorToken = db.prepare(
     `INSERT INTO orchestrator_tokens (token_hash, board_key, orchestrator_id, created_at, revoked_at)
      VALUES (@tokenHash, @boardKey, @orchestratorId, @createdAt, NULL)`,
@@ -953,6 +997,19 @@ export function openBoardDb(): BoardDb {
   const consumeDecisionItem = db.prepare(
     `UPDATE decision_items SET data = json_set(data, '$.consumedAt', @consumedAt)
       WHERE id = @id AND state = 'answered' AND json_extract(data, '$.consumedAt') IS NULL`,
+  );
+  const useProposalIndex = db.prepare(
+    `UPDATE decision_items SET data = json_set(data, '$.proposal.usedIndexes[#]', CAST(@index AS INTEGER))
+      WHERE id = @id AND state = 'answered' AND json_type(data, '$.proposal.usedIndexes') = 'array'
+        AND NOT EXISTS (
+          SELECT 1 FROM json_each(decision_items.data, '$.proposal.usedIndexes')
+           WHERE value = CAST(@index AS INTEGER))`,
+  );
+  const releaseProposalIndex = db.prepare(
+    `UPDATE decision_items SET data = json_set(data, '$.proposal.usedIndexes', json(
+        (SELECT json_group_array(value) FROM json_each(decision_items.data, '$.proposal.usedIndexes')
+          WHERE value != CAST(@index AS INTEGER))))
+      WHERE id = @id AND json_type(data, '$.proposal.usedIndexes') = 'array'`,
   );
   const evictExcessPushSubscriptions = db.prepare(
     `DELETE FROM push_subscriptions
@@ -995,11 +1052,12 @@ export function openBoardDb(): BoardDb {
     `SELECT * FROM boards ORDER BY created_at, key`,
   );
   const upsertBoard = db.prepare(
-    `INSERT INTO boards (key, name, workspace_root, repositories, linear_team_keys, last_used_folder, policy, created_at, archived)
-     VALUES (@key, @name, @workspaceRoot, @repositories, @linearTeamKeys, @lastUsedFolder, @policy, @createdAt, @archived)
+    `INSERT INTO boards (key, name, workspace_root, repositories, linear_team_keys, last_used_folder, policy, orchestrators, created_at, archived)
+     VALUES (@key, @name, @workspaceRoot, @repositories, @linearTeamKeys, @lastUsedFolder, @policy, @orchestrators, @createdAt, @archived)
      ON CONFLICT(key) DO UPDATE SET name = excluded.name, workspace_root = excluded.workspace_root,
        repositories = excluded.repositories, linear_team_keys = excluded.linear_team_keys,
-       last_used_folder = excluded.last_used_folder, policy = excluded.policy, archived = excluded.archived`,
+       last_used_folder = excluded.last_used_folder, policy = excluded.policy,
+       orchestrators = excluded.orchestrators, archived = excluded.archived`,
   );
 
   function persistTxn(
@@ -1019,6 +1077,7 @@ export function openBoardDb(): BoardDb {
           linearTeamKeys: JSON.stringify(board.linearTeamKeys),
           lastUsedFolder: board.lastUsedFolder,
           policy: JSON.stringify(board.policy),
+          orchestrators: JSON.stringify(board.orchestrators),
           createdAt: board.createdAt,
           archived: board.archived ? 1 : 0,
         });
@@ -1097,6 +1156,7 @@ export function openBoardDb(): BoardDb {
         linearTeamKeys: JSON.parse(row.linear_team_keys) as string[],
         lastUsedFolder: row.last_used_folder,
         policy: JSON.parse(row.policy) as Board["policy"],
+        orchestrators: JSON.parse(row.orchestrators) as Board["orchestrators"],
         createdAt: row.created_at,
         archived: row.archived === 1,
       }));
@@ -1132,20 +1192,21 @@ export function openBoardDb(): BoardDb {
       return Number(info.lastInsertRowid);
     },
     listOrchestrationEvents(board, sinceId, limit) {
-      const rows = selectOrchestrationEvents.all(
-        board,
-        sinceId,
-        limit,
-      ) as unknown as OrchestrationEventRow[];
-      return rows.map((r) => ({
-        id: r.id,
-        boardKey: r.board_key as BoardKey,
-        cardId: r.card_id,
-        sessionId: r.session_id,
-        kind: r.kind as OrchestrationEvent["kind"],
-        data: parseEventData(r.data),
-        ts: r.ts,
-      }));
+      return (
+        selectOrchestrationEvents.all(
+          board,
+          sinceId,
+          limit,
+        ) as unknown as OrchestrationEventRow[]
+      ).map(toOrchestrationEvent);
+    },
+    listLatestOrchestrationEvents(board, limit) {
+      return (
+        selectLatestOrchestrationEvents.all(
+          board,
+          limit,
+        ) as unknown as OrchestrationEventRow[]
+      ).map(toOrchestrationEvent);
     },
     replaceOrchestratorToken(row) {
       withTxn(db, () => {
@@ -1207,6 +1268,12 @@ export function openBoardDb(): BoardDb {
     },
     consumeDecisionItem(id, consumedAt) {
       return Number(consumeDecisionItem.run({ id, consumedAt }).changes) > 0;
+    },
+    useProposalIndex(id, index) {
+      return Number(useProposalIndex.run({ id, index }).changes) > 0;
+    },
+    releaseProposalIndex(id, index) {
+      releaseProposalIndex.run({ id, index });
     },
     backupTick(force?: boolean): Promise<void> {
       try {

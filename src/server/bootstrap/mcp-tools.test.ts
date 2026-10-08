@@ -19,6 +19,7 @@ const EXPECTED = [
   "list_sessions",
   "move_card",
   "read_pane_tail",
+  "read_state",
   "request_handoff",
   "resume_loop",
   "send_input",
@@ -27,6 +28,7 @@ const EXPECTED = [
   "stop_session",
   "update_ticket",
   "wait_for_event",
+  "write_state",
 ];
 
 const byName = (name: string): McpTool => {
@@ -42,7 +44,7 @@ const accepts = (name: string, input: unknown) =>
   assert.equal(z.object(byName(name).input).safeParse(input).success, true);
 
 describe("mcp tool table", () => {
-  it("holds exactly the 23 tools", () => {
+  it("holds exactly the 25 tools", () => {
     assert.deepEqual(MCP_TOOLS.map((t) => t.name).sort(), EXPECTED);
   });
 
@@ -74,6 +76,7 @@ describe("mcp tool table", () => {
     refuses("list_sessions", { live: "yes" });
     refuses("list_events", { limit: 0 });
     refuses("create_ticket", { title: "x" });
+    refuses("create_ticket", { proposalItemId: "a", index: -1 });
     refuses("update_ticket", { id: good, title: "x".repeat(301) });
     refuses("move_card", { id: good, column: "nowhere" });
     refuses("add_comment", { id: good, body: "" });
@@ -98,7 +101,7 @@ describe("mcp tool table", () => {
       options: [{ id: "a", label: "A" }],
     });
     refuses("wait_for_event", {});
-    refuses("wait_for_event", { since: 0, timeoutSeconds: 541 });
+    refuses("wait_for_event", { since: 0, timeoutSeconds: 56 });
     accepts("get_policy", {});
   });
 
@@ -128,6 +131,8 @@ describe("mcp tool table", () => {
       get_ship_state: `/groups/${id}/ship`,
       create_decision_item: "/decisions",
       wait_for_event: "/events/wait",
+      read_state: "/state",
+      write_state: "/state",
     };
     for (const tool of MCP_TOOLS) {
       assert.equal(
@@ -139,5 +144,7 @@ describe("mcp tool table", () => {
     assert.equal(byName("update_ticket").method, "PATCH");
     assert.equal(byName("get_ship_state").method, "GET");
     assert.equal(byName("start_ship").method, "POST");
+    assert.equal(byName("read_state").method, "GET");
+    assert.equal(byName("write_state").method, "PUT");
   });
 });

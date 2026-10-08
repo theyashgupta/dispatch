@@ -25,6 +25,7 @@ import {
   type SagaStep,
 } from "./steps.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
+import { isHiddenCard } from "../../../shared/hidden-card.js";
 
 /** Milliseconds after which a transient reattach statusReason is cleared (shared with resume). */
 export const REATTACH_STATUS_CLEAR_MS = 5000;
@@ -247,7 +248,7 @@ export async function startSession(
       if (ctx.warnings.length > 0) {
         await store.setStartWarning(cardId, ctx.warnings.join("; "));
       }
-      if (opts?.playbook !== undefined) {
+      if (opts?.playbook !== undefined && !isHiddenCard(card)) {
         try {
           updateLastUsedPlaybook(opts.playbook);
         } catch (err) {

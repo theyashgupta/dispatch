@@ -7,6 +7,7 @@ import { isolateEnv } from "../../test-support/fixtures.js";
 import { startedGroup } from "../../test-support/group-fixtures.js";
 import {
   ConflictError,
+  ForbiddenError,
   NotFoundError,
   PolicyError,
   ValidationError,
@@ -18,6 +19,8 @@ const { gitOutput, tempRepoWithWorkspace } =
   await import("../../test-support/git-fixtures.js");
 const { resolveBoard } = await import("./boards.js");
 const { setOrchestrationConfig } = await import("../infra/config-holder.js");
+const { appendToExtraScope, editOrchestrator, writeState } =
+  await import("./orchestrator-session.js");
 const {
   createBaseBranch,
   createOrchestratorGroup,
@@ -146,6 +149,7 @@ void test("createOrchestratorGroup stores a group with its launch values and sta
   const stored = store.getCard(card.id)!;
   assert.equal(stored.source, "group");
   assert.equal(stored.createdByOrchestrator, "orc-sbx");
+  assert.equal(stored.ownerOrchestrator, "orc-sbx");
   assert.deepEqual(stored.launch, { direction: "build it" });
   assert.equal(stored.startQueued, false);
   assert.equal(starts.length, startsBefore);
@@ -322,4 +326,235 @@ void test("a start with no orchestration config is refused before the queue flag
   }
   assert.equal(store.getCard(card.id)?.startQueued, true);
   assert.equal(starts.length, startsBefore);
+});
+
+const EXT = parseBoardKey("EXT") as BoardKey;
+await store.createBoard({
+  key: EXT,
+  name: "Extras",
+  workspaceRoot: "/ext/sessions",
+  repositories: [{ path: repo, baseBranch: "main", checkCommand: "" }],
+  linearTeamKeys: [],
+});
+const extOwn = await store.createLocalCard(EXT, "extra ticket", "");
+const extMain = await store.createLocalCard(EXT, "main ticket", "");
+await store.setBoardOrchestrators(EXT, [
+  {
+    id: "main",
+    name: "Main",
+    role: "main",
+    scope: { groupIds: [], ticketIds: [] },
+    policyOverride: {},
+    cardId: null,
+    state: "stopped",
+    createdAt: "2026-10-07T00:00:00.000Z",
+  },
+  {
+    id: "extra-1",
+    name: "Extra 1",
+    role: "extra",
+    scope: { groupIds: [], ticketIds: [extOwn.id] },
+    policyOverride: {},
+    cardId: null,
+    state: "stopped",
+    createdAt: "2026-10-07T00:00:00.000Z",
+  },
+]);
+const EXTRA = { boardKey: EXT, orchestratorId: "extra-1" };
+const MAIN = { boardKey: EXT, orchestratorId: "main" };
+const extGroups = () =>
+  store.listCards(EXT).filter((c) => c.source === "group").length;
+const scopeOf = (id: string) =>
+  store.getBoard(EXT)!.orchestrators.find((r) => r.id === id)!.scope;
+
+void test("create_group refuses a member outside the caller's scope with 403 other-owner, writing nothing", async () => {
+  const before = extGroups();
+  await assert.rejects(
+    createOrchestratorGroup(EXTRA, {
+      title: "takes the main's ticket",
+      memberIds: [extOwn.id, extMain.id],
+      repos: [{ path: repo, base: "main" }],
+    }),
+    (err) => err instanceof ForbiddenError && err.code === "other-owner",
+  );
+  assert.equal(extGroups(), before);
+  assert.equal(store.getCard(extMain.id)?.groupId, undefined);
+});
+
+void test("create_group refuses an orchestrator session card as a member, for the main too", async () => {
+  const hidden = await store.createOrchestratorCard(
+    EXT,
+    "Orchestrator: Main",
+    "main",
+  );
+  const before = extGroups();
+  await assert.rejects(
+    createOrchestratorGroup(EXTRA, {
+      title: "takes a session",
+      memberIds: [hidden.id],
+      repos: [{ path: repo, base: "main" }],
+    }),
+    (err) => err instanceof ForbiddenError && err.code === "other-owner",
+  );
+  await assert.rejects(
+    createOrchestratorGroup(MAIN, {
+      title: "takes a session",
+      memberIds: [hidden.id],
+      repos: [{ path: repo, base: "main" }],
+    }),
+    (err) =>
+      err instanceof ConflictError &&
+      JSON.stringify(err.details?.ineligibleIds) ===
+        JSON.stringify([hidden.id]),
+  );
+  assert.equal(extGroups(), before);
+});
+
+void test("a group an extra creates joins that extra's scope; a group the main creates changes no scope", async () => {
+  const made = await createOrchestratorGroup(EXTRA, {
+    title: "extra group",
+    memberIds: [extOwn.id],
+    repos: [{ path: repo, base: "main" }],
+  });
+  assert.deepEqual(scopeOf("extra-1").groupIds, [made.id]);
+  const loose = await store.createLocalCard(EXT, "main loose", "");
+  await createOrchestratorGroup(MAIN, {
+    title: "main group",
+    memberIds: [loose.id],
+    repos: [{ path: repo, base: "main" }],
+  });
+  assert.deepEqual(scopeOf("extra-1").groupIds, [made.id]);
+  assert.deepEqual(scopeOf("main"), { groupIds: [], ticketIds: [] });
+});
+
+void test("two parallel scope appends by one extra keep both ids", async () => {
+  const x = await store.createLocalCard(EXT, "parallel x", "");
+  const y = await store.createLocalCard(EXT, "parallel y", "");
+  const before = scopeOf("extra-1").ticketIds;
+  await Promise.all([
+    appendToExtraScope(EXTRA, "ticketIds", x.id),
+    appendToExtraScope(EXTRA, "ticketIds", y.id),
+  ]);
+  assert.deepEqual(scopeOf("extra-1").ticketIds, [...before, x.id, y.id]);
+});
+
+void test("a user scope edit and an append queued at the same time both land", async () => {
+  const t7 = await store.createLocalCard(EXT, "user pick", "");
+  const g = await store.createLocalCard(EXT, "appended", "");
+  const scope = scopeOf("extra-1");
+  await Promise.all([
+    writeState(EXTRA, "busy", false),
+    editOrchestrator(store.getBoard(EXT)!, "extra-1", {
+      scope: { ...scope, ticketIds: [...scope.ticketIds, t7.id] },
+    }),
+    appendToExtraScope(EXTRA, "ticketIds", g.id),
+  ]);
+  assert.deepEqual(scopeOf("extra-1").ticketIds, [
+    ...scope.ticketIds,
+    t7.id,
+    g.id,
+  ]);
+});
+
+void test("create_group by an extra with a stale scope id and a stale wider override still answers the group and appends it", async () => {
+  const records = store.getBoard(EXT)!.orchestrators;
+  const cap = store.getBoard(EXT)!.policy.concurrencyCap;
+  await store.setBoardOrchestrators(
+    EXT,
+    records.map((r) =>
+      r.id === "extra-1"
+        ? {
+            ...r,
+            scope: { ...r.scope, groupIds: [...r.scope.groupIds, "EXT-GONE"] },
+            policyOverride: { concurrencyCap: cap + 1 },
+          }
+        : r,
+    ),
+  );
+  const before = scopeOf("extra-1").groupIds;
+  const owned = await store.createLocalCard(EXT, "stale owned", "");
+  await appendToExtraScope(EXTRA, "ticketIds", owned.id);
+  try {
+    const made = await createOrchestratorGroup(EXTRA, {
+      title: "stale extra group",
+      memberIds: [owned.id],
+      repos: [{ path: repo, base: "main" }],
+    });
+    assert.deepEqual(scopeOf("extra-1").groupIds, [...before, made.id]);
+  } finally {
+    await store.setBoardOrchestrators(
+      EXT,
+      store.getBoard(EXT)!.orchestrators.map((r) =>
+        r.id === "extra-1"
+          ? {
+              ...r,
+              scope: {
+                ...r.scope,
+                groupIds: r.scope.groupIds.filter((id) => id !== "EXT-GONE"),
+              },
+              policyOverride: {},
+            }
+          : r,
+      ),
+    );
+  }
+});
+
+void test("the main may depend on a group an extra owns", async () => {
+  const [extraGroup] = scopeOf("extra-1").groupIds;
+  assert.ok(extraGroup);
+  const loose = await store.createLocalCard(EXT, "main waits", "");
+  const made = await createOrchestratorGroup(MAIN, {
+    title: "after the extra",
+    memberIds: [loose.id],
+    repos: [{ path: repo, base: "main" }],
+    dependsOn: [extraGroup],
+  });
+  assert.deepEqual(store.getCard(made.id)?.dependsOn, [extraGroup]);
+});
+
+void test("start_group by an extra with a cap override of 1 is refused while one loop runs, and the main under the board cap starts it", async () => {
+  await store.setBoardPolicy(EXT, {
+    ...store.getBoard(EXT)!.policy,
+    concurrencyCap: 10,
+  });
+  const { g: running } = await startedGroup(store, { board: EXT });
+  await appendToExtraScope(EXTRA, "groupIds", running.id);
+  assert.ok(runningLoops(EXT) >= 1);
+  const owned = await store.createLocalCard(EXT, "capped owned", "");
+  await appendToExtraScope(EXTRA, "ticketIds", owned.id);
+  const held = await createOrchestratorGroup(EXTRA, {
+    title: "capped extra group",
+    memberIds: [owned.id],
+    repos: [{ path: repo, base: "main" }],
+  });
+  const records = store.getBoard(EXT)!.orchestrators;
+  await store.setBoardOrchestrators(
+    EXT,
+    records.map((r) =>
+      r.id === "extra-1" ? { ...r, policyOverride: { concurrencyCap: 1 } } : r,
+    ),
+  );
+  try {
+    const startsBefore = starts.length;
+    await assert.rejects(
+      startOrchestratorGroup(EXTRA, store.getCard(held.id)!),
+      PolicyError,
+    );
+    assert.equal(starts.length, startsBefore);
+    assert.equal(store.getCard(held.id)?.startQueued, false);
+    assert.deepEqual(
+      await startOrchestratorGroup(MAIN, store.getCard(held.id)!),
+      { started: true },
+    );
+  } finally {
+    await store.setBoardOrchestrators(
+      EXT,
+      store
+        .getBoard(EXT)!
+        .orchestrators.map((r) =>
+          r.id === "extra-1" ? { ...r, policyOverride: {} } : r,
+        ),
+    );
+  }
 });

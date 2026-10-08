@@ -13,3 +13,4 @@ export { UnknownProbeBadge } from "./UnknownProbeBadge.js";
 export { unknownProbeCopy } from "./unknown-probe-copy.js";
 export { SessionAccountLabel } from "./SessionAccountLabel.js";
 export { StaleBadge } from "./StaleBadge.js";
+export { SessionStateBadge } from "./SessionStateBadge.js";

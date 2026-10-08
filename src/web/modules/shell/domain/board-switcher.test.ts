@@ -47,8 +47,8 @@ test("showSwitcher keeps the cached list when a refetch failed", () => {
 
 test("switcherItems lists active boards in order with counts and the selected mark", () => {
   const counts = [
-    { key: LOCAL, running: 0, openGroups: 0, attention: 2 },
-    { key: ACME, running: 1, openGroups: 0, attention: 0 },
+    { key: LOCAL, running: 0, openGroups: 0, attention: 2, loops: [] },
+    { key: ACME, running: 1, openGroups: 0, attention: 0, loops: [] },
   ];
   assert.deepEqual(switcherItems(boards, counts, ACME), [
     { key: LOCAL, name: "Dispatch", attention: 2, selected: false },

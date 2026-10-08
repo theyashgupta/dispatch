@@ -168,6 +168,7 @@ The only-shadcn rule does not apply to these families. All other visual code com
 2. The dnd-kit board mechanics in `modules/<feature>/components/dnd/`: droppable columns, draggable card wrappers and the drag overlay. The drag context is in a container, because its handlers start mutations.
 3. The fenced terminal page: `terminal.html` and `terminal-main.ts` (invariant NEW-20).
 4. react-markdown output in `src/web/components/markdown/`, styled with Tailwind typography classes. Typography is not a shadcn registry item.
+5. The segmented group progress bar in `modules/dashboard/components/GroupProgressBar.tsx`: plain list elements with token classes. No shadcn primitive draws one segment for each unit with a pattern for each state (LOCAL-84 U2-07).
 
 ## Providers
 

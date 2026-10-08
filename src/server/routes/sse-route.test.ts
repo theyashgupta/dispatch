@@ -124,6 +124,44 @@ test("two clients on two boards get disjoint snapshots", async () => {
   assert.ok(!cardIds(acme).includes(localCard.id));
 });
 
+test("an orchestration event of ACME reaches only the ACME client, as a frame of the board key and the event id", async () => {
+  const local = await connect("?board=LOCAL");
+  const acme = await connect("?board=ACME");
+  const event = store.appendOrchestrationEvent({
+    boardKey: ACME,
+    cardId: acmeCard.id,
+    sessionId: null,
+    kind: "supervisor_action",
+    data: { secret: "not on the wire" },
+    ts: new Date().toISOString(),
+  });
+  const orchestration = (s: Stream) =>
+    s.frames().filter((f) => f.startsWith("event: orchestration"));
+  await acme.until(() => orchestration(acme).length > 0, "ACME orchestration");
+  assert.deepEqual(orchestration(acme), [
+    `event: orchestration\ndata: ${JSON.stringify({ boardKey: "ACME", lastEventId: event.id })}`,
+  ]);
+  const own = await store.createLocalCard(LOCAL, "after orchestration", "");
+  await local.until(() => local.text().includes(own.id), "LOCAL activity");
+  assert.deepEqual(orchestration(local), []);
+});
+
+test("eleven clients add no store listener and raise no listener warning", async () => {
+  const warnings: string[] = [];
+  const onWarning = (warning: Error) => warnings.push(warning.name);
+  process.on("warning", onWarning);
+  const channels = ["change", "activity", "orchestration"];
+  const before = channels.map((name) => store.listenerCount(name));
+  for (let i = 0; i < 11; i++) await connect("?board=ACME");
+  await new Promise((resolve) => setImmediate(resolve));
+  process.off("warning", onWarning);
+  assert.deepEqual(
+    channels.map((name) => store.listenerCount(name)),
+    before,
+  );
+  assert.deepEqual(warnings, []);
+});
+
 test("an activity of ACME reaches only the ACME client", async () => {
   const local = await connect("?board=LOCAL");
   const acme = await connect("?board=ACME");

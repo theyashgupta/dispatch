@@ -58,7 +58,7 @@ function phase(
   attempts: number,
   passedAt: string | null,
 ): LoopPhase {
-  return { number, name, gate, attempts, passedAt };
+  return { number, name, gate, attempts, passedAt, retryBudget: null };
 }
 
 function pending(number: number, name: string): LoopPhase {

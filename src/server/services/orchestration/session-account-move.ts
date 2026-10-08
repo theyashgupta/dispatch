@@ -310,6 +310,7 @@ export async function moveSessionAccount(
       account,
       attempted ? ["--resume", attempted] : [],
       existingHooks({ ...card, hookToken: session.hookToken }),
+      card,
     );
     await typeLaunchLine(tmuxSession, argv);
     forgetTurnState(card.id, session.id);

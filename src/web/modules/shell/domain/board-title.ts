@@ -11,6 +11,7 @@ export const BOARD_PAGES: readonly Page[] = [
   "flow",
   "activity",
   "archive",
+  "dashboard",
 ];
 
 /** Append the board name to the title of a board page, or return the title unchanged (U3-12). */

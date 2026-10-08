@@ -208,6 +208,9 @@ const LOOP_FORMAT_FILES = [
   /^src\/server\/services\/orchestration\/loop-progress-reader(\.test)?\.ts$/,
   /^src\/server\/services\/orchestration\/loop-progress-model\.test\.ts$/,
   /^src\/server\/test-support\/loop-fixtures\.ts$/,
+  /^src\/server\/services\/orchestration\/g19-manual-run-fixture\.test\.ts$/,
+  /^src\/shared\/(attention-queue|loop-view)\.test\.ts$/,
+  /^src\/web\/modules\/dashboard\/domain\/(activity-rows|attention-rows|progress-rows|time-left)\.test\.ts$/,
 ];
 const LOOP_FORMAT_PATTERNS = new Set([
   "ROADMAP",
@@ -223,8 +226,13 @@ const ROADMAP_TOOL_FILES = [
   /^src\/server\/services\/orchestration\/orchestrator-sessions\.ts$/,
   /^src\/server\/bootstrap\/mcp-tools\.ts$/,
   /^src\/server\/bootstrap\/mcp-tools\.test\.ts$/,
+  /^src\/server\/test-support\/fake-claude-tui\.test\.ts$/,
   /^src\/server\/services\/orchestration\/decision-items\.ts$/,
   /^src\/server\/routes\/decisions-route\.test\.ts$/,
+  /^src\/shared\/session-states(\.test)?\.ts$/,
+  /^src\/server\/services\/infra\/playbooks\.ts$/,
+  /^src\/web\/modules\/orchestrator\/components\/(OverrideFields|PolicyForm)\.tsx$/,
+  /^src\/web\/modules\/orchestrator\/domain\/(ownership|policy-form)(\.test)?\.ts$/,
 ];
 
 /**

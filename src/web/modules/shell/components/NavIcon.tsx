@@ -2,6 +2,7 @@ import {
   Activity,
   Archive,
   ClipboardList,
+  Gauge,
   HardDrive,
   Inbox,
   Kanban,
@@ -41,6 +42,7 @@ export const NAV_ICON: Record<Page, ComponentType<{ size?: number }>> = {
   workspaces: HardDrive,
   flow: Workflow,
   boards: LayoutGrid,
+  dashboard: Gauge,
   settings: Settings,
 };
 

@@ -1,5 +1,6 @@
 import type { Card, Column } from "../../../shared/types.js";
 import { isDemoteEligible } from "../../../shared/demote-eligibility.js";
+import { isHiddenCard } from "../../../shared/hidden-card.js";
 import {
   blocksAgentDoneManualEntry,
   blocksTodoToInProgressManualMove,
@@ -58,6 +59,22 @@ export function actionableCard(id: string): Card {
   if (!card) throw new ValidationError(`unknown card id: ${id}`);
   const groupError = groupedMemberError(card);
   if (groupError != null) throw new ConflictError(groupError);
+  return card;
+}
+
+/**
+ * The card a user start or Run Claude targets: `actionableCard`, plus a 409 for a hidden orchestrator card.
+ *
+ * @remarks Only the orchestrator lifecycle starts or relaunches a hidden card, so its record and
+ * token stay in step with the session.
+ */
+export function launchableCard(id: string): Card {
+  const card = actionableCard(id);
+  if (isHiddenCard(card)) {
+    throw new ConflictError("orchestrator-card", {
+      reason: "use the orchestrator panel",
+    });
+  }
   return card;
 }
 

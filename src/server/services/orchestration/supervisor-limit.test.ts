@@ -335,3 +335,67 @@ void test(
     await assertNoCreditsEnter(s);
   },
 );
+
+/** Put `groupId` in the scope of extra `extra-1` with `override`, beside a main. */
+async function extraOwns(
+  groupId: string,
+  override: { usageLimit?: "wait" | "stop" },
+): Promise<void> {
+  const base = {
+    cardId: null,
+    state: "stopped" as const,
+    createdAt: "2026-10-08T00:00:00.000Z",
+  };
+  await store.setBoardOrchestrators(SBX, [
+    {
+      ...base,
+      id: "main",
+      name: "Main",
+      role: "main",
+      scope: { groupIds: [], ticketIds: [] },
+      policyOverride: {},
+    },
+    {
+      ...base,
+      id: "extra-1",
+      name: "Extra 1",
+      role: "extra",
+      scope: { groupIds: [groupId], ticketIds: [] },
+      policyOverride: override,
+    },
+  ]);
+}
+
+void test(
+  "an extra-owned group with a stop override on a wait board stops at the limit, and without the override waits",
+  { skip: !hasTmux },
+  async () => {
+    setPolicy("wait");
+    const stopped = await startSupervised({
+      tmpRoot: env.root,
+      title: "limit-extra-stop",
+      scenario: { logAllKeys: true, ...limitMenu(0) },
+      group: true,
+    });
+    await extraOwns(stopped.card().id, { usageLimit: "stop" });
+    const stopRun = fakeDeps();
+    await answerLimit(stopped.card(), stopped.session(), stopRun.deps);
+    assert.equal((await stopped.keysSettled(1)).at(-1)?.row, STOP);
+    assert.equal(stopRun.timers.length, 0);
+    assert.equal(stopped.session().stateReason, "usage_stop");
+
+    const waited = await startSupervised({
+      tmpRoot: env.root,
+      title: "limit-extra-wait",
+      scenario: { logAllKeys: true, ...limitMenu(0) },
+      group: true,
+    });
+    await extraOwns(waited.card().id, {});
+    const waitRun = fakeDeps();
+    await answerLimit(waited.card(), waited.session(), waitRun.deps);
+    assert.equal((await waited.keysSettled(1)).at(-1)?.row, STOP);
+    assert.equal(waitRun.timers.length, 1);
+    assert.equal(waited.session().stateReason, undefined);
+    await store.setBoardOrchestrators(SBX, []);
+  },
+);

@@ -137,3 +137,45 @@ void test("a server restart with the session still idle writes no new event", as
     [["idle", "working"]],
   );
 });
+
+void test("an orchestrator's continue budget is keyed by the UTC day, so a new day gets a fresh one", async () => {
+  const hidden = await store.createOrchestratorCard(
+    SBX,
+    "Orchestrator: Main",
+    "main",
+  );
+  await store.completeStart(hidden.id, undefined, {
+    workspacePath: "/tmp/ws-orchestrator",
+    tmuxSession: "dsp-orchestrator-day",
+    branch: "orchestrator",
+  });
+  await store.setBoardOrchestrators(SBX, [
+    {
+      id: "main",
+      name: "Main",
+      role: "main",
+      scope: { groupIds: [], ticketIds: [] },
+      policyOverride: {},
+      cardId: hidden.id,
+      state: "running",
+      createdAt: "2026-10-08T00:00:00.000Z",
+    },
+  ]);
+  const card = store.getCard(hidden.id)!;
+  const ids = {
+    cardId: card.id,
+    sessionId: card.activeSessionId!,
+    tmuxSession: "dsp-orchestrator-day",
+  };
+  const dayOne = Date.UTC(2026, 9, 8, 12);
+  const dayTwo = Date.UTC(2026, 9, 9, 12);
+  for (const now of [dayOne, dayTwo]) {
+    await store.setSessionStateIfSession(ids.cardId, ids.sessionId, "working");
+    await supervisePane({ ...ids, pane: pane("api-error.txt") }, now);
+  }
+  assert.deepEqual(ensureWatcher(ids.tmuxSession).plan.prompts, {
+    "retry:orchestrator/2026-10-08": 1,
+    "retry:orchestrator/2026-10-09": 1,
+  });
+  dropWatcher(ids.tmuxSession);
+});

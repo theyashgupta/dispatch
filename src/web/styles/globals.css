@@ -126,3 +126,21 @@
   --default-transition-duration: var(--motion-hover);
   --default-transition-timing-function: var(--easing-enter);
 }
+
+@layer components {
+  .segment-stripes {
+    background-image: repeating-linear-gradient(
+      45deg,
+      var(--text) 0 3px,
+      transparent 3px 6px
+    );
+  }
+  .segment-dots {
+    background-image: radial-gradient(
+      circle,
+      var(--destructive) 1px,
+      transparent 1.5px
+    );
+    background-size: 5px 5px;
+  }
+}

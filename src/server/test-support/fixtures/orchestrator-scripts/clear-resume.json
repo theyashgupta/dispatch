@@ -1,0 +1,35 @@
+{
+  "onStart": [
+    {
+      "tool": "write_state",
+      "args": {
+        "markdown": "# Clear and resume replay\n\nGroups: $env.GROUP_ID and $env.GROUP2_ID.\nPending decision: $env.DECISION_ID.",
+        "handoffReady": false
+      }
+    },
+    {
+      "statusRows": [
+        "Opus 5.5 · high  │  ██████████  72%  144k/200k",
+        "main  │  $1.25"
+      ]
+    },
+    { "sleepMs": 20000 },
+    {
+      "tool": "write_state",
+      "args": {
+        "markdown": "# Clear and resume replay\n\nGroups: $env.GROUP_ID and $env.GROUP2_ID.\nPending decision: $env.DECISION_ID.",
+        "handoffReady": true
+      }
+    },
+    { "print": "HANDOFF_READY main" }
+  ],
+  "afterClear": [
+    {
+      "tool": "read_state",
+      "args": {},
+      "expect": { "contains": "$env.GROUP_ID" }
+    },
+    { "tool": "list_cards", "args": {} },
+    { "tool": "list_events", "args": { "since": 0, "limit": 50 } }
+  ]
+}

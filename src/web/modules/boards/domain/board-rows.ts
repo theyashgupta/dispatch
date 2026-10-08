@@ -7,7 +7,10 @@ import {
 
 export interface BoardRow {
   board: Board;
-  counts: Pick<BoardCount, "running" | "openGroups" | "attention"> | null;
+  counts: Pick<
+    BoardCount,
+    "running" | "openGroups" | "attention" | "loops"
+  > | null;
   keyClash: boolean;
   archive: ArchiveAction;
 }

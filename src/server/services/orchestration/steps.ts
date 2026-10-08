@@ -31,6 +31,7 @@ import {
   pasteBuffer,
   sendKeys,
   sendLiteral,
+  setSessionEnv,
   wrapWithPtyShim,
 } from "../../adapters/tmux.js";
 import { preSeedTrust } from "../../adapters/claude-trust.js";
@@ -53,6 +54,15 @@ import { HOOK_SETTINGS_PATH } from "../infra/paths.js";
 import { worktreePath as buildWorktreePath } from "../domain/workspace-paths.js";
 import { boardWorkspace } from "../domain/board-workspace.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
+import { isHiddenCard } from "../../../shared/hidden-card.js";
+import { DISPATCH_DATA_DIR } from "../../store/data-dir.js";
+import {
+  orchestratorLaunchArgs,
+  orchestratorMcpConfigPath,
+  orchestratorSessionEnv,
+} from "../domain/orchestrator-launch.js";
+import type { OrchestratorIdentity } from "../domain/orchestrator-scope.js";
+import { mintOrchestratorToken } from "./orchestrator-tokens.js";
 
 /** Linear identifier shape (defense-in-depth; the route also validates before we reach here). */
 const IDENTIFIER_RE = /^[A-Za-z0-9]+-\d+$/;
@@ -500,10 +510,12 @@ export async function launchClaude(input: LaunchClaudeInput): Promise<boolean> {
   const hooks = created
     ? await mintHooks(cardId, sessionId)
     : existingHooks(store.getCard(cardId));
-  const launch = await buildLaunch(account, leadingArgs, hooks);
+  const card = store.getCard(cardId);
+  const launch = await buildLaunch(account, leadingArgs, hooks, card);
   if (created) {
     await newSession(tmuxSession, cwd, [], {
       ...launch.env,
+      ...(card && isHiddenCard(card) ? mintOrchestratorEnv(card) : {}),
       [SHELL_SESSION_ENV]: "1",
     });
     input.onCreated?.();
@@ -512,6 +524,75 @@ export async function launchClaude(input: LaunchClaudeInput): Promise<boolean> {
   await typeLaunchLine(tmuxSession, launch.argv);
   await awaitReplReady(tmuxSession);
   return created;
+}
+
+function orchestratorIdentity(card: Card): OrchestratorIdentity {
+  if (card.ownerOrchestrator === undefined) {
+    throw new StartStepError(
+      "starting claude",
+      "orchestrator card has no orchestrator id",
+      "config",
+    );
+  }
+  return {
+    boardKey: card.boardKey ?? DEFAULT_BOARD_KEY,
+    orchestratorId: card.ownerOrchestrator,
+  };
+}
+
+/**
+ * Mint a fresh orchestrator token and answer the session environment that carries it.
+ *
+ * @remarks
+ * The token reaches the MCP server only through the environment of a session this call
+ * creates, and minting revokes the previous token of the same orchestrator.
+ */
+export function mintOrchestratorEnv(card: Card): Record<string, string> {
+  const port = getHooksRuntime()?.port;
+  if (port === undefined) {
+    throw new StartStepError(
+      "starting claude",
+      "server port is not known",
+      "config",
+    );
+  }
+  const token = mintOrchestratorToken(orchestratorIdentity(card));
+  return orchestratorSessionEnv({ token, port });
+}
+
+/**
+ * Give the shell of a live orchestrator session a fresh token before claude is typed into it.
+ *
+ * @remarks
+ * `tmux set-environment` reaches only processes tmux starts, never a running shell, so
+ * the token goes through a 0600 file that the shell sources and that is removed once the prompt
+ * is back. The typed line names the file, never the token, so the pane holds no secret.
+ */
+export async function primeOrchestratorShell(
+  card: Card,
+  session: string,
+): Promise<void> {
+  const env = mintOrchestratorEnv(card);
+  const { boardKey, orchestratorId } = orchestratorIdentity(card);
+  const dir = path.join(DISPATCH_DATA_DIR, "orchestrators");
+  const file = path.join(dir, `${boardKey}-${orchestratorId}.activate.sh`);
+  await fsp.mkdir(dir, { recursive: true, mode: 0o700 });
+  await fsp.writeFile(
+    file,
+    Object.entries(env)
+      .map(([key, value]) => `export ${key}=${shellQuote([value])}\n`)
+      .join(""),
+    { mode: 0o600 },
+  );
+  try {
+    for (const [key, value] of Object.entries(env)) {
+      await setSessionEnv(`=${session}`, key, value);
+    }
+    await typeAccountEnvLine(session, `. ${shellQuote([file])}`);
+    await awaitShellPrompt(session);
+  } finally {
+    await fsp.rm(file, { force: true });
+  }
 }
 
 /**
@@ -561,6 +642,26 @@ export function existingHooks(card: Card | undefined): LaunchHooks {
     : null;
 }
 
+function orchestratorArgs(
+  card: Card,
+  claudeArgs: string[],
+): { leadingArgs: string[]; claudeArgs: string[] } {
+  const { boardKey, orchestratorId } = orchestratorIdentity(card);
+  const board = store.getBoard(boardKey);
+  if (!board) {
+    throw new StartStepError("starting claude", "unknown board", "config");
+  }
+  return orchestratorLaunchArgs({
+    model: board.policy.orchestratorModel,
+    mcpConfigPath: orchestratorMcpConfigPath(
+      DISPATCH_DATA_DIR,
+      boardKey,
+      orchestratorId,
+    ),
+    claudeArgs,
+  });
+}
+
 /**
  * Build the claude argv and env every launch site shares: the resolved binary, the Settings
  * arguments, the hooks settings layer, and the account config dir.
@@ -569,13 +670,17 @@ export async function buildLaunch(
   account: LaunchAccount,
   leadingArgs: string[],
   hooks: LaunchHooks,
+  card?: Card,
 ): Promise<{ argv: string[]; env: Record<string, string> }> {
+  const configured = parseClaudeArgs(
+    getOrchestrationConfig()?.claudeArgs ?? DEFAULT_CLAUDE_ARGS,
+  );
+  const policy =
+    card && isHiddenCard(card) ? orchestratorArgs(card, configured) : null;
   return buildClaudeLaunch({
     claudePath: (await resolveBinaryPath("claude")) ?? "claude",
-    claudeArgs: parseClaudeArgs(
-      getOrchestrationConfig()?.claudeArgs ?? DEFAULT_CLAUDE_ARGS,
-    ),
-    leadingArgs,
+    claudeArgs: policy?.claudeArgs ?? configured,
+    leadingArgs: [...(policy?.leadingArgs ?? []), ...leadingArgs],
     settingsPath: HOOK_SETTINGS_PATH,
     hooks,
     configDir: account.configDir,
