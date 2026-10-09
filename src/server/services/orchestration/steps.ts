@@ -61,6 +61,7 @@ import {
   orchestratorMcpConfigPath,
   orchestratorSessionEnv,
 } from "../domain/orchestrator-launch.js";
+import { groupLaunchArgs } from "../domain/group-launch.js";
 import type { OrchestratorIdentity } from "../domain/orchestrator-scope.js";
 import { mintOrchestratorToken } from "./orchestrator-tokens.js";
 
@@ -86,18 +87,12 @@ const BYPASS_DIALOG = /Bypass Permissions mode/;
  */
 const RESUME_DIALOG = /Resume from summary|Resume full session as-is/;
 /**
- * REPL-ready footer — present only once the input box is live; absent in the trust dialog.
- * Claude Code changes this hint text between releases (v2.1.200 showed "? for shortcuts";
- * v2.1.201 shows "bypass permissions on (shift+tab to cycle)"), so match ANY known
- * ready-footer signature rather than one version's exact wording. Sessions launch with
- * `config.claudeArgs` (Settings ▸ Models, default `--dangerously-skip-permissions`), so the
- * "bypass permissions on" footer is reliably present only under the default; matching all three
- * signatures keeps readiness detection working whether or not the flag is present. All signatures
- * are footer chrome that the trust dialog never renders, preserving the "not matched until past
- * the trust prompt" property.
+ * Match any known REPL-ready footer, which the trust dialog never renders.
+ *
+ * @remarks Claude Code changes the footer text between releases and with the permission mode, so the regex lists every known footer signature. Each signature is footer chrome, so a match means the session is past the trust prompt.
  */
 export const READY =
-  /\? for shortcuts|bypass permissions on|shift\+tab to cycle/;
+  /\? for shortcuts|bypass permissions on|shift\+tab to cycle|manual mode on/;
 
 /**
  * Claude's refusal when `--resume <id>` or `--continue` names a conversation whose transcript
@@ -662,6 +657,19 @@ function orchestratorArgs(
   });
 }
 
+function cardPolicyArgs(
+  card: Card,
+  claudeArgs: string[],
+): { leadingArgs: string[]; claudeArgs: string[] } | null {
+  if (isHiddenCard(card)) return orchestratorArgs(card, claudeArgs);
+  if (card.source !== "group") return null;
+  const board = store.getBoard(card.boardKey ?? DEFAULT_BOARD_KEY);
+  return groupLaunchArgs({
+    loopModel: board?.policy.loopModel ?? null,
+    claudeArgs,
+  });
+}
+
 /**
  * Build the claude argv and env every launch site shares: the resolved binary, the Settings
  * arguments, the hooks settings layer, and the account config dir.
@@ -675,8 +683,7 @@ export async function buildLaunch(
   const configured = parseClaudeArgs(
     getOrchestrationConfig()?.claudeArgs ?? DEFAULT_CLAUDE_ARGS,
   );
-  const policy =
-    card && isHiddenCard(card) ? orchestratorArgs(card, configured) : null;
+  const policy = card ? cardPolicyArgs(card, configured) : null;
   return buildClaudeLaunch({
     claudePath: (await resolveBinaryPath("claude")) ?? "claude",
     claudeArgs: policy?.claudeArgs ?? configured,

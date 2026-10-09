@@ -496,6 +496,33 @@ void test("the launch of an orchestrator card carries the policy flags and never
   assert.equal(plain.argv.includes("--mcp-config"), false);
 });
 
+void test("the launch of a group card carries the policy loop model and drops the Settings model", async () => {
+  const account = { id: "default", label: "Default" } as never;
+  const policy = board().policy;
+  const launch = async () =>
+    (await buildLaunch(account, [], null, store.getCard(group.id))).argv;
+  assert.equal((await launch()).includes("--effort"), false);
+  await store.setBoardPolicy(SBX, {
+    ...policy,
+    loopModel: "claude-sonnet-5-5:high",
+  });
+  try {
+    const argv = await launch();
+    const at = argv.indexOf("--model");
+    assert.deepEqual(argv.slice(at, at + 4), [
+      "--model",
+      "claude-sonnet-5-5",
+      "--effort",
+      "high",
+    ]);
+    assert.equal(argv.indexOf("--model"), argv.lastIndexOf("--model"));
+    const ticket = (await buildLaunch(account, [], null, loose)).argv;
+    assert.equal(ticket.includes("claude-sonnet-5-5"), false);
+  } finally {
+    await store.setBoardPolicy(SBX, policy);
+  }
+});
+
 void test("a session created for an orchestrator card gets a fresh token and the port, and the old token dies", () => {
   const card = store.getCard(record("lead").cardId as string)!;
   const first = mintOrchestratorEnv(card);

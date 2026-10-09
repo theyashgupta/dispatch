@@ -164,12 +164,16 @@ void test("a supervisor set needs_input holds until a busy sign, a permission pr
     holdsNeedsInput("needs_input", "budget", { state: "lost" }),
     false,
   );
-  for (const state of ["shell_prompt", "lost", "idle", "working"] as const)
+  for (const state of ["shell_prompt", "lost", "working"] as const)
     assert.equal(
       holdsNeedsInput("needs_input", "resume_failed", { state }),
       true,
       state,
     );
+  assert.equal(
+    holdsNeedsInput("needs_input", "resume_failed", { state: "idle" }),
+    false,
+  );
   assert.equal(
     holdsNeedsInput("needs_input", "resume_failed", {
       state: "working",
