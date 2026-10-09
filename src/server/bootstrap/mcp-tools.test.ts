@@ -10,6 +10,7 @@ const EXPECTED = [
   "create_decision_item",
   "create_group",
   "create_ticket",
+  "get_board_workspace",
   "get_card",
   "get_group_progress",
   "get_policy",
@@ -44,7 +45,7 @@ const accepts = (name: string, input: unknown) =>
   assert.equal(z.object(byName(name).input).safeParse(input).success, true);
 
 describe("mcp tool table", () => {
-  it("holds exactly the 25 tools", () => {
+  it("holds exactly the 26 tools", () => {
     assert.deepEqual(MCP_TOOLS.map((t) => t.name).sort(), EXPECTED);
   });
 
@@ -64,7 +65,7 @@ describe("mcp tool table", () => {
   it("words the create_group description as the contract says", () => {
     assert.equal(
       byName("create_group").description,
-      "Create a group card from 2 or more cards. Omit playbook to use the board group playbook; get_policy lists the playbook names. Text that holds the status marker is refused.",
+      "Create a group card from 2 or more cards. Omit repos to use the board repositories with their base branch; get_board_workspace lists them. A repository with no base branch is refused with missing-base; then pass repos with a base. Omit playbook to use the board group playbook; get_policy lists the playbook names. Text that holds the status marker is refused.",
     );
   });
 
@@ -112,6 +113,8 @@ describe("mcp tool table", () => {
     refuses("wait_for_event", {});
     refuses("wait_for_event", { since: 0, timeoutSeconds: 56 });
     accepts("get_policy", {});
+    accepts("get_board_workspace", {});
+    accepts("create_group", { title: "g", memberIds: ["ABC-1", "ABC-2"] });
   });
 
   it("builds the route of each tool from a sample input", () => {
@@ -124,6 +127,7 @@ describe("mcp tool table", () => {
       read_pane_tail: `/sessions/${id}/pane`,
       list_events: "/events",
       get_policy: "/policy",
+      get_board_workspace: "/board-workspace",
       create_ticket: "/tickets",
       update_ticket: `/tickets/${id}`,
       move_card: `/tickets/${id}/move`,

@@ -9,7 +9,11 @@ import {
   writeFakeGh,
   type FakeGhScenario,
 } from "../../test-support/fake-gh.js";
-import { parseBoardKey } from "../../../shared/board-key.js";
+import {
+  DEFAULT_BOARD_KEY,
+  DEFAULT_CHECK_COMMAND,
+  parseBoardKey,
+} from "../../../shared/board-key.js";
 import type {
   BoardKey,
   BoardPolicy,
@@ -1033,6 +1037,45 @@ void test("startShip refuses a repository with no board entry", async () => {
   await store.updateBoard(SBX, { repositories: [] });
   await refusedBranches(stack, ["unit-1"], "unknown-repository");
   assert.deepEqual(calls, []);
+});
+
+void test("a LOCAL group finds the default check command of a workspace folder repository", async () => {
+  const { root, repo, ws } = await shipStack();
+  roots.push(root);
+  const { g } = await startedGroup(store, {
+    workspacePath: ws,
+    repos: [{ path: repo, base: "main" }],
+  });
+  await store.setLoopProgress(
+    g.id,
+    progress(["built, awaiting /ship", "shipped"]),
+  );
+  const gh = writeFakeGh(env.binDir, root);
+  setGhScenario(gh.scenario, { checks: "pass" });
+  calls.length = 0;
+  const before = store.getBoard(DEFAULT_BOARD_KEY)!.policy;
+  await store.setBoardPolicy(DEFAULT_BOARD_KEY, {
+    ...before,
+    shipRights: "merge",
+  });
+  await store.addWorkspaceFolder(DEFAULT_BOARD_KEY, repo);
+  try {
+    await startShipFlow(
+      { boardKey: DEFAULT_BOARD_KEY, orchestratorId: "orc-local" },
+      store.getCard(g.id)!,
+      { repository: repo, branches: [branchInput("unit-1")] },
+    );
+    await finished(g);
+    const checkRun = calls.find((c) => c.cmd === "env");
+    assert.deepEqual(checkRun?.args, [
+      "-u",
+      "NODE_ENV",
+      ...DEFAULT_CHECK_COMMAND.split(" "),
+    ]);
+  } finally {
+    await store.removeWorkspaceFolder(DEFAULT_BOARD_KEY, repo);
+    await store.setBoardPolicy(DEFAULT_BOARD_KEY, before);
+  }
 });
 
 void test("an empty check rollup waits 3 polls, then counts as passed", async () => {

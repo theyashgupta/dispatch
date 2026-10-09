@@ -78,6 +78,17 @@ void test("the body carries no status marker, no em dash and no double hyphen", 
   assert.equal(orchestrator.body.includes("-".repeat(2)), false);
 });
 
+void test("the Board Orchestrator text tells the orchestrator to read the board workspace and ship in agent_done", () => {
+  const body = orchestrator?.body ?? "";
+  for (const sentence of [
+    "Call read_state first. Then call get_board_workspace, list_cards, list_events and get_policy, and read the open decision items from the decision_raised and decision_answered events of list_events. Act only on what the tools return.",
+    "Never ask the user for a repository path or a base branch that get_board_workspace returns. Omit repos in create_group to use the board repositories.",
+    "When your shipRights allow it, ship a group in agent_done without a decision item.",
+  ]) {
+    assert.ok(body.includes(sentence), sentence);
+  }
+});
+
 void test("the Board Orchestrator text tells the orchestrator to wait each turn and to read a wake line", () => {
   const body = orchestrator?.body ?? "";
   assert.ok(

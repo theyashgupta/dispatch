@@ -29,6 +29,7 @@ const SERVER: Record<string, ServerSide> = {
   },
   list_events: { query: schemas.listEventsQuerySchema },
   get_policy: {},
+  get_board_workspace: {},
   create_ticket: { body: schemas.createTicketBodySchema },
   update_ticket: {
     params: schemas.cardParamsSchema,
@@ -82,6 +83,7 @@ const VALID: Record<string, Record<string, unknown>> = {
   read_pane_tail: { cardId: ID, lines: 200 },
   list_events: { since: 0, limit: 200 },
   get_policy: {},
+  get_board_workspace: {},
   create_ticket: { proposalItemId: "7f8e-41", index: 19 },
   update_ticket: { id: ID, title: "t", description: "d" },
   move_card: { id: ID, column: "inbox" },

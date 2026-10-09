@@ -139,7 +139,8 @@ export const createGroupBodySchema = z.object(
         }),
         "invalid-repos",
       )
-      .min(1, "invalid-repos"),
+      .min(1, "invalid-repos")
+      .optional(),
     playbook: z
       .string("invalid-playbook")
       .min(1, "invalid-playbook")

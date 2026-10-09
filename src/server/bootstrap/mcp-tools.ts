@@ -123,6 +123,14 @@ export const MCP_TOOLS: readonly McpTool[] = [
     path: "/policy",
   },
   {
+    name: "get_board_workspace",
+    description:
+      "Read the board workspace: the folder, the repositories with their base branch and check command, the playbook names and the group playbook. This tool changes nothing.",
+    input: {},
+    method: "GET",
+    path: "/board-workspace",
+  },
+  {
     name: "create_ticket",
     description:
       "Create a local ticket from one entry of a ticket proposal that the user approved. A proposal that is open, rejected or unknown, and an entry that is already used, are refused.",
@@ -176,13 +184,14 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "create_group",
     description:
-      "Create a group card from 2 or more cards. Omit playbook to use the board group playbook; get_policy lists the playbook names. Text that holds the status marker is refused.",
+      "Create a group card from 2 or more cards. Omit repos to use the board repositories with their base branch; get_board_workspace lists them. A repository with no base branch is refused with missing-base; then pass repos with a base. Omit playbook to use the board group playbook; get_policy lists the playbook names. Text that holds the status marker is refused.",
     input: {
       title: titleField,
       memberIds: z.array(z.string()).min(2),
       repos: z
         .array(z.object({ path: z.string().min(1), base: z.string().min(1) }))
-        .min(1),
+        .min(1)
+        .optional(),
       playbook: z.string().min(1).optional(),
       direction: z.string().max(DIRECTION_MAX).optional(),
       dependsOn: z.array(looseId).max(50).optional(),

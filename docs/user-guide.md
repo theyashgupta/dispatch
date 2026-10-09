@@ -119,6 +119,10 @@ The server accepts wider number ranges than the form does. The form ranges in th
 
 When the board has no orchestrator record, **Start orchestrator** first adds the main orchestrator. The record has the id `main` and the name "Main orchestrator". Then it starts the orchestrator.
 
+The orchestrator reads the folder and the repositories of the board by itself. It does not ask you for a repository path or a base branch. Set the base branch of each repository in the board settings.
+
+The default board `LOCAL` stores no base branch, so its repositories answer base null. On `LOCAL` the orchestrator passes `repos` with a base to `create_group`. For example, it uses a branch that it makes with `create_base_branch`.
+
 The start does these things:
 
 - It creates a hidden card named "Orchestrator: Main orchestrator". The card holds the session.
@@ -380,14 +384,14 @@ Every seeded playbook has one input: the extra direction. It is the optional tex
 - **When to use:** you do not pick this playbook. Dispatch selects it by name when it starts an orchestrator.
 - **Inputs:** the extra direction. For an orchestrator, Dispatch writes it: "You are the orchestrator "<name>" (id <id>) of board <KEY>. Use the dispatch tools to coordinate the work of this board."
 - **What it does:** it tells the orchestrator to keep its state in the tools and not in memory. The orchestrator follows these steps:
-  1. Call `read_state`, then `list_cards`, `list_events` and `get_policy`. Act only on what the tools return.
+  1. Call `read_state`, then `get_board_workspace`, `list_cards`, `list_events` and `get_policy`. Never ask you for a repository path or a base branch that the board holds.
   2. Turn a goal into a ticket proposal (a decision item of the kind `ticket_proposal`). Wait for your approval. Then create the tickets with `create_ticket`.
   3. Write a direction for each group before it starts.
   4. Start groups only inside the concurrency cap.
   5. Approve or escalate each roadmap as **Roadmap approval** says.
   6. Answer loop inputs with `send_input`.
   7. End every turn with `wait_for_event`. Set `kinds` to `decision_answered`, `group_state` and `intake_submitted`, and `timeoutSeconds` to 55. When it times out, call it again. Never end a turn with only a report.
-  8. Ship in order with `start_ship` when the ship rights allow it.
+  8. Ship in order with `start_ship` when the ship rights allow it. When the ship rights allow it, it ships a group in Agent done without a decision item.
   9. Report to you. Raise a decision item with `create_decision_item` when a person must decide.
   10. Call `write_state` after each decision, with the full state.
 
