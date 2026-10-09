@@ -114,6 +114,30 @@ test("a negative concurrencyCap answers 400 and writes nothing", async () => {
   );
 });
 
+test("loops, handoff and hard handoff keep the ranges of the policy form", async () => {
+  const ok: Partial<BoardPolicy>[] = [
+    { concurrencyCap: 1 },
+    { concurrencyCap: 10 },
+    { handoffPercent: 10, handoffHardPercent: 11 },
+    { handoffPercent: 95, handoffHardPercent: 100 },
+  ];
+  for (const patch of ok) {
+    const got = await put("/boards/PLC/policy", { ...VALID, ...patch });
+    assert.equal(got.status, 200, JSON.stringify(patch));
+  }
+  const refused: [Partial<BoardPolicy>, string][] = [
+    [{ concurrencyCap: 11 }, "invalid-concurrencyCap"],
+    [{ handoffPercent: 9 }, "invalid-handoffPercent"],
+    [{ handoffPercent: 96, handoffHardPercent: 100 }, "invalid-handoffPercent"],
+    [{ handoffPercent: 50, handoffHardPercent: 50 }, "hard-below-handoff"],
+    [{ handoffHardPercent: 101 }, "invalid-handoffHardPercent"],
+    [{ budgetPerGroup: 100_001 }, "invalid-budgetPerGroup"],
+  ];
+  for (const [patch, error] of refused) {
+    await expectRefusal({ ...VALID, ...patch }, 400, error);
+  }
+});
+
 test("handoffPercent 101 answers 400 and writes nothing", async () => {
   await expectRefusal(
     { ...VALID, handoffPercent: 101 },

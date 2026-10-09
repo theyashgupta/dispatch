@@ -24,7 +24,7 @@ const whole = (field: string, min: number, max: number) =>
  * The board policy fields, all required; the fixed supervisor values are not settings.
  *
  * @remarks
- * The two models are checked against the shared list, and `opus` stays valid as the legacy name of Opus 5.5.
+ * The two models are checked against the shared list, and `opus` stays valid as the legacy name of Opus 5.5. The number ranges match the policy form and the user guide.
  */
 const policyBodySchema = z
   .strictObject(
@@ -33,7 +33,7 @@ const policyBodySchema = z
         ["ask", "rules", "all"],
         "invalid-roadmapApproval",
       ),
-      concurrencyCap: whole("concurrencyCap", 1, 20),
+      concurrencyCap: whole("concurrencyCap", 1, 10),
       loopModel: z
         .string("invalid-loopModel")
         .refine(isLoopModel, "invalid-loopModel")
@@ -41,7 +41,7 @@ const policyBodySchema = z
       orchestratorModel: z
         .string("invalid-orchestratorModel")
         .refine(isOrchestratorModel, "invalid-orchestratorModel"),
-      handoffPercent: whole("handoffPercent", 1, 100),
+      handoffPercent: whole("handoffPercent", 10, 95),
       handoffHardPercent: whole("handoffHardPercent", 1, 100),
       usageLimit: z.enum(["wait", "stop"], "invalid-usageLimit"),
       shipRights: z.enum(["none", "open_prs", "merge"], "invalid-shipRights"),
@@ -54,7 +54,7 @@ const policyBodySchema = z
     },
     { error: unknownFieldError("invalid-policy") },
   )
-  .refine((p) => p.handoffHardPercent >= p.handoffPercent, {
+  .refine((p) => p.handoffHardPercent > p.handoffPercent, {
     message: "hard-below-handoff",
     path: ["handoffHardPercent"],
   });
