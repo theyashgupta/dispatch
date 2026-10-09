@@ -21,6 +21,13 @@ test("countLabel words each kind", () => {
   assert.equal(countLabel("attention", 2), "2 need attention");
 });
 
+test("countLabel and repositoryCountLabel add thousands separators", () => {
+  assert.equal(countLabel("attention", 1284), "1,284 need attention");
+  assert.equal(countLabel("running", 12000), "12,000 running");
+  assert.equal(countLabel("openGroups", 1000), "1,000 open groups");
+  assert.equal(repositoryCountLabel(2500), "2,500 repositories");
+});
+
 test("repositoryCountLabel is singular for one", () => {
   assert.equal(repositoryCountLabel(0), "0 repositories");
   assert.equal(repositoryCountLabel(1), "1 repository");

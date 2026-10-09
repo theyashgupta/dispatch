@@ -17,6 +17,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
 
 - [System Overview](#system-overview)
 - [Module Map](#module-map)
+- [API](#api)
 - Cross-Module Invariants
   - [Single Writer Store](#single-writer-store)
   - [Boards](#boards)
@@ -58,6 +59,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
 - [Security Threat Model](#security-threat-model)
 - [Known Residuals](#known-residuals)
 - [Verification Gates](#verification-gates)
+- [Scenario Tests](#scenario-tests)
 - [Orchestration Initiative](#orchestration-initiative)
   - [Loop Progress](#loop-progress)
   - [Session Supervisor](#session-supervisor)
@@ -104,6 +106,9 @@ and roles only, it does not restate the layering policy.
 | Store               | `store/board.store.ts`, `store/board-repository.ts`                                                                                                                                                                                                                                                                                             | Single-writer card store: serialized mutation queue, atomic persist, snapshot ordering.                                                                                                                                                                                                                              |
 | Services (start)    | `services/orchestration/start-session.ts`, `services/orchestration/steps.ts`, `services/infra/kickoff.ts`                                                                                                                                                                                                                                       | Start-saga runner, its do/undo steps, and the infra kickoff-prompt builder.                                                                                                                                                                                                                                          |
 | Services (sessions) | `services/orchestration/cleanup.ts`, `services/infra/config-holder.ts`, `services/domain/workspace-paths.ts`                                                                                                                                                                                                                                    | Teardown saga, the orchestration-config holder (routes read config through it, value-free 400 when unset), and the canonical worktree-path builder.                                                                                                                                                                  |
+| Orchestration       | `services/orchestration/boards.ts`, `services/orchestration/orchestrator-session.ts`, `services/orchestration/orchestrator-groups.ts`, `services/orchestration/loop-progress-reader.ts`, `services/orchestration/ship-flow.ts`                                                                                                                  | Board records and policy, the orchestrator lifecycle with its hidden session card, the group create and start rules for orchestrators, the read-only loop file reader, and the ship flow runner.                                                                                                                     |
+| Supervisor          | `services/orchestration/supervisor-registry.ts`, `services/orchestration/supervisor-pass.ts`, `services/orchestration/supervisor-actions.ts`, `services/orchestration/supervisor-limit.ts`, `services/orchestration/supervisor-handoff.ts`, `adapters/power.ts`                                                                                 | One watcher for each live tmux session, the 60 s pass (keep awake, wake check, PR changes, held group starts, budget stop), the planned actions, the usage limit flow, the handoff, and the keep awake holder.                                                                                                       |
+| Orchestrator API    | `routes/orchestrator.route.ts`, `routes/orchestrator.handlers.ts`, `routes/orchestrators.route.ts`, `routes/boards.route.ts`, `routes/board-policy.route.ts`, `routes/loops.route.ts`                                                                                                                                                           | The token-gated orchestrator tool router and its handlers, the user routes for orchestrator records and boards, the policy route, and the loop gate report route. The API section lists every route.                                                                                                                 |
 | Claude accounts     | `orchestration/claude-accounts.ts`, `domain/claude-launch.ts`, `services/orchestration/claude-login.ts`, `services/orchestration/claude-usage.ts`, `services/orchestration/claude-account-ops.ts`, `adapters/claude-cli.ts`, `adapters/claude-login.ts`, `adapters/claude-usage.ts`, `routes/accounts.route.ts`, `src/server/store/data-dir.ts` | Account registry and config dirs (orchestration); the pure launch builder (domain); the CLI login state machine, the usage poll and cache, and the account operations that compose CLI calls (orchestration); the CLI, login-process and usage adapters; their routes; and the data-dir resolver every layer shares. |
 | Markers             | `adapters/markers/parse.ts`, `adapters/markers/scan-decision.ts`, `adapters/markers/pane-view.ts`, `adapters/markers/watcher.ts`                                                                                                                                                                                                                | Pure marker parser, the pure per-tick decision core, the pane-view helpers, and the I/O-shell pane watcher applying one card decision per tick.                                                                                                                                                                      |
 | Adapters            | `adapters/exec.ts`, `adapters/git.ts`, `adapters/tmux.ts`, `adapters/ttyd.ts`, `adapters/claude-trust.ts`, `adapters/editors.ts`, `adapters/resolve-binary.ts`                                                                                                                                                                                  | The argv-only subprocess chokepoint, the git / tmux / ttyd / claude-trust adapters over it, editor launch, and binary-path resolution.                                                                                                                                                                               |
@@ -111,8 +116,474 @@ and roles only, it does not restate the layering policy.
 | Frontend entry      | `web/main.tsx`, `web/lib/app-store.ts`, `web/lib/query-client.ts`, `web/lib/http.ts`                                                                                                                                                                                                                                                            | The provider stack (QueryClientProvider, ThemeProvider, RouterProvider and the splash), the app store for cross-module UI state, the query client, and the HTTP client that returns 4xx and 5xx responses as typed data.                                                                                             |
 | Frontend routes     | `web/routes/__root.tsx`, `web/routes/board.{-$id}.lazy.tsx`, `web/modules/shell/containers/ShellContainer.tsx`                                                                                                                                                                                                                                  | Hash routes own the URL and its params. The router context gives the query client and the app store to every container. The root route renders the shell view with module views in its slots: the page, the detail panel and the card action dialogs.                                                                |
 | Frontend modules    | `web/modules/board/views/BoardView.tsx`, `web/modules/board/containers/BoardContainer.tsx`, `web/modules/detail/containers/DetailPanelContainer.tsx`, `web/modules/shell/components/AppSidebar.tsx`                                                                                                                                             | One folder per feature under `web/modules/`, with the layers views, containers, components, hooks, domain and queries. A module never imports a sibling module. [frontend-architecture.md](standards/frontend-architecture.md) has the layer rules.                                                                  |
+| Frontend boards     | `web/modules/boards/views/BoardsView.tsx`, `web/modules/boards/containers/BoardsContainer.tsx`, `web/modules/boards/containers/BoardFormContainer.tsx`, `web/modules/shell/components/BoardSwitcher.tsx`                                                                                                                                        | The boards page (list, create, edit, archive, restore) and the sidebar board switcher. The `board` search parameter selects the board.                                                                                                                                                                               |
+| Orchestrator panel  | `web/modules/orchestrator/views/OrchestratorEntryView.tsx`, `web/modules/orchestrator/containers/OrchestratorPanelContainer.tsx`, `web/modules/orchestrator/containers/PolicyContainer.tsx`, `web/modules/orchestrator/containers/OrchestratorsContainer.tsx`                                                                                   | The header entry button and the orchestrator panel with the tabs Terminal, Decisions, Policy and Orchestrators. The policy form is the only place where a user changes a board policy.                                                                                                                               |
 | Frontend dashboard  | `web/routes/dashboard.{-$id}.lazy.tsx`, `web/modules/dashboard/views/DashboardView.tsx`, `web/modules/dashboard/views/DashboardHeaderView.tsx`, `web/modules/dashboard/containers/use-dashboard-data.ts`                                                                                                                                        | The `/dashboard` page of the selected board. Each section container reads its inputs through `use-dashboard-data.ts` and shows its own loading, error and empty state. The shell page header shows the title and the stale badge.                                                                                    |
 | Frontend shared     | `web/components/ui/button.tsx`, `web/components/ui/hooks/use-app-store.ts`, `web/components/ThemeProvider.tsx`, `web/queries/board-snapshot-queries.ts`                                                                                                                                                                                         | The shadcn primitives and app-wide hooks, the shared components, the queries that two or more modules read (the board snapshot and its SSE stream), and the design tokens in `web/styles/tokens.css`.                                                                                                                |
+
+## API
+
+This section lists every HTTP route of the server. Each table covers one router file in `routes/`. The mount prefix comes from `routes/index.ts` and `bootstrap/index.ts`.
+
+The remote auth gate (`routes/remote-auth-gate.ts`) is the first handler of the app. It runs before every `/api` route and before the `/sessions` and `/viewer` mounts. A loopback request passes. A remote request needs a valid session.
+
+The Auth column uses these values:
+
+- **User.** The request passes the gate and has no other credential. The API router refuses a state-changing request on these routes when the request carries an `x-orchestrator-token` header. The refusal is the 403 `orchestrator-token-on-user-route`.
+- **Hook token.** The `x-dispatch-token` header must hold a token of the hook token registry. The token names the card and the session. Ids in the body are ignored.
+- **Orchestrator token.** The `x-orchestrator-token` header must hold the token of an orchestrator. A missing or unknown token gets a 401. Each call, accepted or refused, adds one `tool_call` event.
+- **None.** The route has no credential check.
+
+### `routes/orchestrator.route.ts`
+
+Mount prefix: `/api/orchestrator`.
+
+| Method | Path                                               | Auth               | Purpose                                                                                           |
+| ------ | -------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------- |
+| GET    | `/api/orchestrator/cards`                          | Orchestrator token | Tool `list_cards`: list the cards of the board of the caller, with filters.                       |
+| GET    | `/api/orchestrator/cards/:id`                      | Orchestrator token | Tool `get_card`: read one card of the board with its members.                                     |
+| GET    | `/api/orchestrator/sessions`                       | Orchestrator token | Tool `list_sessions`: list the sessions of the board, only the live ones when asked.              |
+| GET    | `/api/orchestrator/groups/:id/progress`            | Orchestrator token | Tool `get_group_progress`: read the loop progress of one group card.                              |
+| GET    | `/api/orchestrator/sessions/:cardId/pane`          | Orchestrator token | Tool `read_pane_tail`: read the last lines of the terminal of a session.                          |
+| GET    | `/api/orchestrator/events`                         | Orchestrator token | Tool `list_events`: list the board events after a cursor, oldest first.                           |
+| GET    | `/api/orchestrator/policy`                         | Orchestrator token | Tool `get_policy`: read the policy of the caller with the running loop count and the group costs. |
+| POST   | `/api/orchestrator/tickets`                        | Orchestrator token | Tool `create_ticket`: create a local ticket marked as created by the caller.                      |
+| PATCH  | `/api/orchestrator/tickets/:id`                    | Orchestrator token | Tool `update_ticket`: change the title or description of a local ticket.                          |
+| POST   | `/api/orchestrator/tickets/:id/move`               | Orchestrator token | Tool `move_card`: move a card to a column under the manual move rules.                            |
+| POST   | `/api/orchestrator/tickets/:id/comments`           | Orchestrator token | Tool `add_comment`: add a comment to a card, local or on Linear.                                  |
+| POST   | `/api/orchestrator/base-branches`                  | Orchestrator token | Tool `create_base_branch`: create a local base branch in a board repository.                      |
+| POST   | `/api/orchestrator/groups`                         | Orchestrator token | Tool `create_group`: create a group card without starting it.                                     |
+| POST   | `/api/orchestrator/groups/:id/start`               | Orchestrator token | Tool `start_group`: start a group, or queue it behind its dependencies.                           |
+| POST   | `/api/orchestrator/sessions/:cardId/input`         | Orchestrator token | Tool `send_input`: type text into a running session.                                              |
+| POST   | `/api/orchestrator/groups/:cardId/approve-roadmap` | Orchestrator token | Tool `approve_roadmap`: tell a group loop that its plan is approved.                              |
+| POST   | `/api/orchestrator/sessions/:cardId/handoff`       | Orchestrator token | Tool `request_handoff`: ask a session loop to hand off its context.                               |
+| POST   | `/api/orchestrator/sessions/:cardId/resume`        | Orchestrator token | Tool `resume_loop`: resume a loop that `stop_session` or a supervisor give-up stopped.            |
+| POST   | `/api/orchestrator/sessions/:cardId/stop`          | Orchestrator token | Tool `stop_session`: press Escape in a session pane and park it at Needs input.                   |
+| POST   | `/api/orchestrator/decisions`                      | Orchestrator token | Tool `create_decision_item`: raise a decision item for the user to answer.                        |
+| POST   | `/api/orchestrator/events/wait`                    | Orchestrator token | Tool `wait_for_event`: hold the call until a board event matches or the time limit passes.        |
+| POST   | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `start_ship`: start the ship flow of a finished group card.                                  |
+| GET    | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `get_ship_state`: read the stored ship flow of a group card.                                 |
+| GET    | `/api/orchestrator/state`                          | Orchestrator token | Tool `read_state`: read the saved state of the calling orchestrator.                              |
+| PUT    | `/api/orchestrator/state`                          | Orchestrator token | Tool `write_state`: replace the saved state of the calling orchestrator.                          |
+
+### `routes/board.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                              | Auth | Purpose                                                            |
+| ------ | --------------------------------- | ---- | ------------------------------------------------------------------ |
+| GET    | `/api/board`                      | User | Read the board snapshot with the windowed Done page.               |
+| GET    | `/api/search`                     | User | Search the cards of the board.                                     |
+| GET    | `/api/workspace-folders`          | User | List the workspace folders of the board and the last used folder.  |
+| POST   | `/api/workspace-folders`          | User | Add a workspace folder after checking that it is a git repository. |
+| GET    | `/api/workspace-folders/discover` | User | List the git repositories found in a folder.                       |
+| GET    | `/api/fs/dirs`                    | User | List the directories of a path for the folder picker.              |
+| DELETE | `/api/workspace-folders`          | User | Remove a workspace folder, unless it is the last repository.       |
+| GET    | `/api/sources/:source/filters`    | User | Read the filters and the capabilities of a ticket source.          |
+| GET    | `/api/sources/:source/options`    | User | List the filter options of a source for one dimension.             |
+| POST   | `/api/sources/:source/preview`    | User | Count the tickets that a set of filters matches.                   |
+| POST   | `/api/sources/:source/poll`       | User | Start a poll of a source now.                                      |
+| PUT    | `/api/sources/:source/filters`    | User | Save the filters of a source and poll it.                          |
+| GET    | `/api/config/cleanup-delay`       | User | Read the cleanup delay in days.                                    |
+| PUT    | `/api/config/cleanup-delay`       | User | Save the cleanup delay in days.                                    |
+| GET    | `/api/config/archive-retention`   | User | Read the archive retention in days.                                |
+| PUT    | `/api/config/archive-retention`   | User | Save the archive retention in days.                                |
+| GET    | `/api/config/terminal`            | User | Read the terminal appearance.                                      |
+| PUT    | `/api/config/terminal`            | User | Save the terminal appearance.                                      |
+| GET    | `/api/config/claude-args`         | User | Read the Claude arguments of new sessions.                         |
+| PUT    | `/api/config/claude-args`         | User | Save the Claude arguments of new sessions.                         |
+
+### `routes/boards.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                                       | Auth | Purpose                                                                            |
+| ------ | ------------------------------------------ | ---- | ---------------------------------------------------------------------------------- |
+| GET    | `/api/boards`                              | User | List the boards and the known Linear team keys.                                    |
+| GET    | `/api/boards/counts`                       | User | Read the running, open group, attention and loop counts of each board.             |
+| POST   | `/api/boards`                              | User | Create a board.                                                                    |
+| GET    | `/api/boards/:key`                         | User | Read one board.                                                                    |
+| GET    | `/api/boards/:key/orchestration`           | User | Read the orchestration summary of a board.                                         |
+| GET    | `/api/boards/:key/orchestration/events`    | User | List the orchestration events of a board, the latest ones or those after a cursor. |
+| PATCH  | `/api/boards/:key`                         | User | Change the name, sessions folder, repositories or Linear team keys of a board.     |
+| POST   | `/api/boards/:key/archive`                 | User | Archive a board.                                                                   |
+| POST   | `/api/boards/:key/restore`                 | User | Restore an archived board.                                                         |
+| POST   | `/api/boards/:key/orchestrators/:id/token` | User | Mint the token of an orchestrator.                                                 |
+| DELETE | `/api/boards/:key/orchestrators/:id/token` | User | Revoke the token of an orchestrator.                                               |
+
+### `routes/board-policy.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                      | Auth | Purpose                                                              |
+| ------ | ------------------------- | ---- | -------------------------------------------------------------------- |
+| PUT    | `/api/boards/:key/policy` | User | Replace the policy of a board. The body holds all ten policy fields. |
+
+### `routes/orchestrators.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                                        | Auth | Purpose                                                           |
+| ------ | ------------------------------------------- | ---- | ----------------------------------------------------------------- |
+| GET    | `/api/boards/:key/orchestrators`            | User | List the orchestrators of a board with their session views.       |
+| POST   | `/api/boards/:key/orchestrators`            | User | Add an orchestrator record, main or extra.                        |
+| PATCH  | `/api/boards/:key/orchestrators/:id`        | User | Edit the name, scope or policy override of an orchestrator.       |
+| DELETE | `/api/boards/:key/orchestrators/:id`        | User | Remove a stopped orchestrator and revoke its token.               |
+| POST   | `/api/boards/:key/orchestrators/:id/start`  | User | Start the session of a stopped orchestrator.                      |
+| POST   | `/api/boards/:key/orchestrators/:id/stop`   | User | Stop a running orchestrator.                                      |
+| POST   | `/api/boards/:key/orchestrators/:id/resume` | User | Bring an orchestrator back after a lost session or a Claude exit. |
+
+### `routes/intake.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                      | Auth | Purpose                                                                     |
+| ------ | ------------------------- | ---- | --------------------------------------------------------------------------- |
+| POST   | `/api/boards/:key/intake` | User | Submit a goal, with optional requirements, as an intake event of the board. |
+
+### `routes/session-input.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                                | Auth | Purpose                                                     |
+| ------ | ----------------------------------- | ---- | ----------------------------------------------------------- |
+| POST   | `/api/sessions/:cardId/input`       | User | Type a reply of the user into the running Claude of a card. |
+| POST   | `/api/sessions/:cardId/resume-loop` | User | Send a continue prompt to a loop that waits at Needs input. |
+
+### `routes/cards.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                                 | Auth | Purpose                                                                                   |
+| ------ | ------------------------------------ | ---- | ----------------------------------------------------------------------------------------- |
+| GET    | `/api/cards/:id`                     | User | Read one card.                                                                            |
+| GET    | `/api/cards`                         | User | List the cards of a board.                                                                |
+| GET    | `/api/cards/:id/comments`            | User | List the comments of a card.                                                              |
+| POST   | `/api/cards/:id/comment`             | User | Post a comment on a card.                                                                 |
+| POST   | `/api/cards/:id/assign-me`           | User | Assign the Linear issue of a card to the user.                                            |
+| POST   | `/api/cards/:id/linear-state`        | User | Move the Linear issue of a card to a workflow state.                                      |
+| POST   | `/api/cards/:id/move`                | User | Move a card to a column.                                                                  |
+| POST   | `/api/cards/:id/start`               | User | Start a Claude session on a card.                                                         |
+| POST   | `/api/cards/:id/resume`              | User | Resume the lost session of a card.                                                        |
+| POST   | `/api/cards/:id/terminal`            | User | Make sure the terminal of a live session is available.                                    |
+| POST   | `/api/cards/:id/run-claude`          | User | Start Claude in a live session whose terminal is at a shell prompt.                       |
+| POST   | `/api/cards/:id/session/account`     | User | Move a session to another Claude account, or queue the move.                              |
+| PUT    | `/api/cards/:id/session/account-pin` | User | Pin or unpin the Claude account of a session.                                             |
+| POST   | `/api/cards/:id/session`             | User | Switch the active session of a card.                                                      |
+| POST   | `/api/cards/:id/open-editor`         | User | Open the workspace of a card in an editor.                                                |
+| POST   | `/api/cards/:id/cleanup`             | User | Clean up all sessions of a Done card.                                                     |
+| POST   | `/api/cards/:id/unwind`              | User | Take a group apart from the group card or any member.                                     |
+| POST   | `/api/cards/:id/reset`               | User | Undo a start: return the card to the Inbox with no session, workspace or local branch.    |
+| POST   | `/api/cards/group`                   | User | Create a group card from To Do members and start its session.                             |
+| POST   | `/api/cards/draft`                   | User | Generate a ticket draft from a direction and optional images. One request runs at a time. |
+| POST   | `/api/cards/group-title`             | User | Generate a title phrase for a set of group members.                                       |
+| POST   | `/api/cards`                         | User | Create a local ticket on a board.                                                         |
+| GET    | `/api/cards/:id/attachments/:name`   | User | Serve one stored attachment of a card.                                                    |
+| POST   | `/api/cards/:id/sync-linear`         | User | Promote a local card to a Linear issue.                                                   |
+
+### `routes/decisions.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                        | Auth | Purpose                                                     |
+| ------ | --------------------------- | ---- | ----------------------------------------------------------- |
+| GET    | `/api/decisions`            | User | List the decision items of a board, filtered by state.      |
+| POST   | `/api/decisions/:id/answer` | User | Answer a decision item with an option and an optional note. |
+
+### `routes/events.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path          | Auth | Purpose                                                                     |
+| ------ | ------------- | ---- | --------------------------------------------------------------------------- |
+| GET    | `/api/events` | User | Read the card and hook event log, newest first, or the rows after a cursor. |
+
+### `routes/sessions.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path            | Auth | Purpose                                                      |
+| ------ | --------------- | ---- | ------------------------------------------------------------ |
+| GET    | `/api/sessions` | User | List the sessions of a board, only the live ones when asked. |
+
+### `routes/sse.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path          | Auth | Purpose                                                  |
+| ------ | ------------- | ---- | -------------------------------------------------------- |
+| GET    | `/api/stream` | User | Open the server-sent event stream of the board snapshot. |
+
+### `routes/hooks.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path               | Auth       | Purpose                                                                |
+| ------ | ------------------ | ---------- | ---------------------------------------------------------------------- |
+| POST   | `/api/hook/claude` | Hook token | Receive a Claude hook event. The token names the card and the session. |
+
+### `routes/loops.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                | Auth       | Purpose                                                                                                           |
+| ------ | ------------------- | ---------- | ----------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/loops/report` | Hook token | Report a phase gate or unit gate of a loop. The report adds a gate event and starts a new read of the loop files. |
+
+### `routes/setup.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                         | Auth | Purpose                                                   |
+| ------ | ---------------------------- | ---- | --------------------------------------------------------- |
+| GET    | `/api/setup`                 | User | Read the first-run status and the prerequisite checklist. |
+| POST   | `/api/setup/onboarding-done` | User | Record that the setup wizard was closed.                  |
+| POST   | `/api/setup/install`         | User | Install a missing prerequisite: tmux, ttyd or git.        |
+| POST   | `/api/setup`                 | User | Test and save the Linear API key.                         |
+
+### `routes/update.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path              | Auth | Purpose                                                      |
+| ------ | ----------------- | ---- | ------------------------------------------------------------ |
+| GET    | `/api/update`     | User | Read the cached update status.                               |
+| POST   | `/api/update/run` | User | Run the update. Refused unless Dispatch is a global install. |
+
+### `routes/images.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path          | Auth | Purpose                                         |
+| ------ | ------------- | ---- | ----------------------------------------------- |
+| GET    | `/api/images` | User | Proxy an inline image from a Linear upload URL. |
+
+### `routes/playbooks.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                      | Auth | Purpose                                                                                  |
+| ------ | ------------------------- | ---- | ---------------------------------------------------------------------------------------- |
+| GET    | `/api/playbooks`          | User | List the playbooks.                                                                      |
+| GET    | `/api/playbooks/picker`   | User | List the playbooks for the start dialog picker.                                          |
+| POST   | `/api/playbooks`          | User | Create a playbook.                                                                       |
+| PUT    | `/api/playbooks/:slug`    | User | Update a playbook.                                                                       |
+| DELETE | `/api/playbooks/:slug`    | User | Delete a playbook.                                                                       |
+| POST   | `/api/playbooks/generate` | User | Generate a playbook draft from a direction and source paths. One request runs at a time. |
+
+### `routes/remote.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                  | Auth | Purpose                        |
+| ------ | --------------------- | ---- | ------------------------------ |
+| POST   | `/api/remote/enable`  | User | Enable remote access.          |
+| POST   | `/api/remote/disable` | User | Disable remote access.         |
+| GET    | `/api/remote`         | User | Read the remote access status. |
+
+### `routes/vault.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                        | Auth | Purpose                                         |
+| ------ | --------------------------- | ---- | ----------------------------------------------- |
+| GET    | `/api/vault`                | User | List the vault keys and where each key is used. |
+| POST   | `/api/vault/import`         | User | Import the keys of the env vault.               |
+| POST   | `/api/vault`                | User | Create a vault key.                             |
+| PUT    | `/api/vault/:name/value`    | User | Set the value of a vault key.                   |
+| GET    | `/api/vault/:name/value`    | User | Read the current value of a vault key.          |
+| GET    | `/api/vault/:name/previous` | User | Read the previous value of a vault key.         |
+| PATCH  | `/api/vault/:name`          | User | Change the purpose of a vault key.              |
+| DELETE | `/api/vault/:name`          | User | Delete a vault key.                             |
+
+### `routes/archive.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                       | Auth | Purpose                                 |
+| ------ | -------------------------- | ---- | --------------------------------------- |
+| GET    | `/api/archive`             | User | List the archived groups of a board.    |
+| POST   | `/api/archive/:id/restore` | User | Restore an archived group to the board. |
+| DELETE | `/api/archive/:id`         | User | Delete an archived group.               |
+
+### `routes/push.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                    | Auth | Purpose                                     |
+| ------ | ----------------------- | ---- | ------------------------------------------- |
+| GET    | `/api/push/public-key`  | User | Read the public key for push subscriptions. |
+| POST   | `/api/push/subscribe`   | User | Store a push subscription.                  |
+| POST   | `/api/push/unsubscribe` | User | Remove a push subscription.                 |
+
+### `routes/viewer.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path               | Auth | Purpose                                      |
+| ------ | ------------------ | ---- | -------------------------------------------- |
+| GET    | `/api/viewer/file` | User | Read a markdown file inside an allowed root. |
+
+### `routes/accounts.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                              | Auth | Purpose                                                                              |
+| ------ | --------------------------------- | ---- | ------------------------------------------------------------------------------------ |
+| GET    | `/api/accounts`                   | User | List the Claude accounts, the active id, the account sessions and the account chain. |
+| PUT    | `/api/accounts/active`            | User | Set the active account, and optionally apply it to running sessions.                 |
+| PUT    | `/api/accounts/chain/order`       | User | Set the order of the account chain.                                                  |
+| PUT    | `/api/accounts/chain/settings`    | User | Save the account chain settings.                                                     |
+| POST   | `/api/accounts/chain/switch-now`  | User | Fail over to the next account of the chain now.                                      |
+| GET    | `/api/accounts/login`             | User | Read the state of the account login.                                                 |
+| POST   | `/api/accounts/login`             | User | Start the login of an account.                                                       |
+| POST   | `/api/accounts/login/code`        | User | Submit the login code.                                                               |
+| DELETE | `/api/accounts/login`             | User | Cancel the login.                                                                    |
+| POST   | `/api/accounts/:id/usage/refresh` | User | Refresh the usage of an account.                                                     |
+| DELETE | `/api/accounts/:id`               | User | Remove an account and log it out.                                                    |
+
+### `routes/items.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                     | Auth | Purpose                                            |
+| ------ | ------------------------ | ---- | -------------------------------------------------- |
+| GET    | `/api/items`             | User | List the inbox items, filtered by state or source. |
+| POST   | `/api/items/:id/state`   | User | Set the state of an inbox item.                    |
+| POST   | `/api/items/:id/snooze`  | User | Snooze an inbox item until a time.                 |
+| POST   | `/api/items/:id/promote` | User | Promote an inbox item to a card on a board.        |
+
+### `routes/connection.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                              | Auth | Purpose                                                                |
+| ------ | --------------------------------- | ---- | ---------------------------------------------------------------------- |
+| GET    | `/api/sources/:source/connection` | User | Read the connection status of a source and the account behind its key. |
+| PUT    | `/api/sources/:source/key`        | User | Replace the key of a source.                                           |
+| DELETE | `/api/sources/:source/key`        | User | Disconnect a source and remove its key.                                |
+| POST   | `/api/sources/:source/connect`    | User | Connect a source.                                                      |
+| POST   | `/api/sources/:source/disable`    | User | Disable a source.                                                      |
+
+### `routes/github.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                                         | Auth | Purpose                                 |
+| ------ | -------------------------------------------- | ---- | --------------------------------------- |
+| GET    | `/api/github/pr/:owner/:repo/:number`        | User | Read a pull request.                    |
+| POST   | `/api/github/pr/:owner/:repo/:number/review` | User | Submit a review on a pull request.      |
+| POST   | `/api/github/pr/:owner/:repo/:number/merge`  | User | Merge a pull request at a given commit. |
+
+### `routes/profile.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                  | Auth | Purpose                |
+| ------ | --------------------- | ---- | ---------------------- |
+| GET    | `/api/config/profile` | User | Read the user profile. |
+| PUT    | `/api/config/profile` | User | Save the user profile. |
+
+### `routes/linear.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                           | Auth | Purpose                                     |
+| ------ | ------------------------------ | ---- | ------------------------------------------- |
+| GET    | `/api/sources/linear/workflow` | User | Read the Linear workflow states.            |
+| GET    | `/api/config/linear-state-map` | User | Read the map from Linear states to columns. |
+| PUT    | `/api/config/linear-state-map` | User | Save the map from Linear states to columns. |
+
+### `routes/sentry.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                            | Auth | Purpose                                        |
+| ------ | ------------------------------- | ---- | ---------------------------------------------- |
+| GET    | `/api/sentry/issue/:id`         | User | Read a Sentry issue.                           |
+| POST   | `/api/sentry/issue/:id/resolve` | User | Resolve a Sentry issue and mark its item done. |
+
+### `routes/slack.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                          | Auth | Purpose                                           |
+| ------ | ----------------------------- | ---- | ------------------------------------------------- |
+| GET    | `/api/slack/channels`         | User | List the Slack channels that can be watched.      |
+| POST   | `/api/slack/channels/resolve` | User | Resolve a channel name or link to a channel.      |
+| GET    | `/api/sources/slack/channels` | User | Read the watched Slack channels.                  |
+| PUT    | `/api/sources/slack/channels` | User | Save the watched Slack channels and poll Slack.   |
+| GET    | `/api/slack/thread/:itemId`   | User | Read the Slack thread of an inbox item.           |
+| GET    | `/api/slack/mcp`              | User | Read the Slack connector status.                  |
+| PUT    | `/api/slack/mcp`              | User | Save the Slack connector settings and apply them. |
+| POST   | `/api/slack/mcp/run`          | User | Start one Slack read through the connector.       |
+
+### `routes/meetings.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                          | Auth | Purpose                                                          |
+| ------ | ----------------------------- | ---- | ---------------------------------------------------------------- |
+| POST   | `/api/cards/draft-many`       | User | Draft action items from pasted meeting notes. One run at a time. |
+| POST   | `/api/meetings/items`         | User | Create meeting items from kept drafts and store the notes.       |
+| GET    | `/api/meetings/transcript`    | User | Read the stored notes of a meeting.                              |
+| GET    | `/api/meetings/granola`       | User | Read the Granola status and settings.                            |
+| PUT    | `/api/meetings/granola`       | User | Save the Granola settings.                                       |
+| POST   | `/api/meetings/granola/check` | User | Check the Granola connection.                                    |
+| POST   | `/api/meetings/granola/run`   | User | Run a Granola round now.                                         |
+
+### `routes/calendar.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                         | Auth | Purpose                                      |
+| ------ | ---------------------------- | ---- | -------------------------------------------- |
+| GET    | `/api/calendar/status`       | User | Read the calendar status.                    |
+| POST   | `/api/calendar/calendars`    | User | List the calendars that can be used.         |
+| PUT    | `/api/calendar/settings`     | User | Save the calendar settings.                  |
+| POST   | `/api/calendar/access/check` | User | Request calendar access and read the status. |
+
+### `routes/workspaces.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path              | Auth | Purpose                                          |
+| ------ | ----------------- | ---- | ------------------------------------------------ |
+| GET    | `/api/workspaces` | User | Read the inventory of the workspaces of a board. |
+
+### `routes/ask.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path       | Auth | Purpose                                                    |
+| ------ | ---------- | ---- | ---------------------------------------------------------- |
+| POST   | `/api/ask` | User | Answer a question with Claude. One request runs at a time. |
+
+### `routes/terminal-proxy.route.ts`
+
+Mount prefix: `/sessions`.
+
+| Method | Path                                | Auth | Purpose                                                                                                           |
+| ------ | ----------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------------- |
+| GET    | `/sessions/:id/terminal/scrollback` | User | Serve the tmux history of the pane of a card as ANSI text.                                                        |
+| GET    | `/sessions/:id/terminal/markdown`   | User | Resolve a relative markdown path that Claude printed to the workspace of the session.                             |
+| ALL    | `/sessions/:id/terminal{/*rest}`    | User | Serve the terminal page (GET) or forward the request to ttyd (other methods). The card must have a live terminal. |
+
+### `routes/viewer-page.route.ts`
+
+Mount prefix: `/viewer`.
+
+| Method | Path              | Auth | Purpose                               |
+| ------ | ----------------- | ---- | ------------------------------------- |
+| GET    | `/viewer{/*rest}` | User | Serve the built markdown viewer page. |
+
+### `routes/remote-auth-gate.ts`
+
+Mount prefix: none (the router mounts at the app root).
+
+| Method | Path               | Auth | Purpose                                                                           |
+| ------ | ------------------ | ---- | --------------------------------------------------------------------------------- |
+| POST   | `/__remote/verify` | None | Submit the remote access code. This is the one unauthenticated write of the gate. |
 
 ## Cross-Module Invariants
 
@@ -5091,6 +5562,25 @@ permanently fails)`, which runs the same scenario in the configuration where bot
 - **`phase-smoke-tester`** - the only BEHAVIORAL verification this project runs: an agent derives
   and executes smoke cases against the running app after each phase's implementation lands. This
   is the one gate above that cannot be reduced to a grep.
+
+## Scenario Tests
+
+The scenario tests in `tests/e2e` start sandbox servers with a fake `claude` and a fake `gh`. They are not part of `npm run check`. Run them in this order:
+
+1. Install `tmux` and Node 22.5 or later. Scenario 3 needs the `node:sqlite` module.
+2. Run `npm run build`. The tests start the built server of this checkout.
+3. For scenarios 2 and 3, build a v4.2.0 checkout and set `DISPATCH_E2E_V420` to its folder. Without a built `dist/` there, these two scenarios skip with a message.
+4. For scenario 2, run `npx playwright install chromium`.
+5. Optional: set `DISPATCH_E2E_SANDBOX` to the sandbox folder. The default is `.sandbox/e2e` in this checkout, which Git ignores.
+6. Optional: set `DISPATCH_E2E_EVIDENCE` to the folder for run logs, reports and screenshots. The default is `evidence` in the sandbox folder.
+7. Run the three files, or one file:
+
+```sh
+env -u NODE_ENV -u CLAUDE_CONFIG_DIR node --import tsx --test tests/e2e/*.e2e.ts
+env -u NODE_ENV -u CLAUDE_CONFIG_DIR node --import tsx --test tests/e2e/scenario-3-upgrade.e2e.ts
+```
+
+The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
 ## Orchestration Initiative
 

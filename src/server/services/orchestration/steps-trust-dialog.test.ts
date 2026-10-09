@@ -7,7 +7,7 @@ import { IDLE_PANE, installFakeTmux } from "../../test-support/fake-tmux.js";
 
 const env = isolateEnv();
 const fake = installFakeTmux(env);
-const { awaitReplReady } = await import("./steps.js");
+const { awaitReplReady, READY } = await import("./steps.js");
 
 const DIALOG = (first: string, second: string): string =>
   ` Accessing workspace:\n\n Quick safety check: Is this a project you created or one you trust?\n\n ${first}\n   ${second}\n\n Enter to confirm · Esc to cancel\n`;
@@ -40,6 +40,21 @@ void test("a trust dialog that focuses Yes gets Enter only", async () => {
     ),
     ["Enter"],
   );
+});
+
+void test("READY matches every known footer", () => {
+  for (const footer of [
+    "  ? for shortcuts",
+    "  ⏵⏵ bypass permissions on",
+    "  (shift+tab to cycle)",
+    '❯ Try "refactor <filepath>"\n────────────────\n  ⏸ manual mode on · ← for agents',
+  ]) {
+    assert.match(footer, READY);
+  }
+});
+
+void test("READY does not match the trust dialog", () => {
+  assert.doesNotMatch(DIALOG("❯ Yes, I trust this folder", "No, exit"), READY);
 });
 
 void test.after(() => env.cleanup());

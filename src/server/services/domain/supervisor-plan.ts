@@ -50,7 +50,9 @@ export function initialPlanMemory(): PlanMemory {
  *
  * @remarks Only a real busy sign, a permission prompt (a new tool request), a lost session or a
  * shell prompt releases the hold. A `budget` stop holds until a lost session or a shell prompt, and
- * a `resume_failed` hold until a real busy sign, so a failed resume is not planned on every sample.
+ * a `resume_failed` hold until a real busy sign or a confirmed idle prompt, so a failed resume is
+ * not planned on every sample. A confirmed idle needs claude up and quiet for three samples, which
+ * a shell prompt or a dead pane never shows, so it marks a resume that worked after the hold.
  */
 export function holdsNeedsInput(
   stored: SupervisorState | null,
@@ -61,7 +63,10 @@ export function holdsNeedsInput(
   if (reason === "budget")
     return detected.state !== "lost" && detected.state !== "shell_prompt";
   if (reason === "resume_failed")
-    return !(detected.state === "working" && detected.busy === true);
+    return !(
+      detected.state === "idle" ||
+      (detected.state === "working" && detected.busy === true)
+    );
   switch (detected.state) {
     case "lost":
     case "shell_prompt":

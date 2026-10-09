@@ -4,6 +4,7 @@ process.env.DISPATCH_VISUAL_PORT ??= "48471";
 const seededPort = Number(process.env.DISPATCH_VISUAL_PORT);
 const freshPort = seededPort + 1;
 const galleryPort = seededPort + 2;
+const orchestratedPort = seededPort + 3;
 process.env.DISPATCH_VISUAL_NOW ??= "2026-10-01T12:00:00.000Z";
 
 export default defineConfig({
@@ -43,6 +44,13 @@ export default defineConfig({
     {
       command: `node tests/visual/seed.mjs fresh ${freshPort}`,
       url: `http://127.0.0.1:${freshPort}/api/board`,
+      reuseExistingServer: false,
+      timeout: 60_000,
+      gracefulShutdown: { signal: "SIGTERM", timeout: 5_000 },
+    },
+    {
+      command: `node tests/visual/seed.mjs orchestrated ${orchestratedPort}`,
+      url: `http://127.0.0.1:${orchestratedPort}/api/board`,
       reuseExistingServer: false,
       timeout: 60_000,
       gracefulShutdown: { signal: "SIGTERM", timeout: 5_000 },

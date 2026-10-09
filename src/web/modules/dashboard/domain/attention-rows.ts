@@ -130,8 +130,16 @@ const ACTIONS: Partial<Record<AttentionItem["kind"], AttentionAction>> = {
   resume_failed: "retry_resume",
 };
 
+/** The wait of an attention item: minutes under 60, hours under 48, then days. */
+export function waitingText(minutes: number): string {
+  if (minutes < 60) return `waiting ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 48) return `waiting ${hours} h`;
+  return `waiting ${Math.floor(hours / 24)} d`;
+}
+
 function itemRow(item: AttentionItem, ctx: AttentionContext): AttentionRow {
-  const waiting = `waiting ${item.waitMinutes} min`;
+  const waiting = waitingText(item.waitMinutes);
   if (item.kind === "decision") {
     const view = ctx.decisions.find((d) => `decision:${d.id}` === item.id);
     if (view !== undefined) return { type: "decision", id: item.id, view };

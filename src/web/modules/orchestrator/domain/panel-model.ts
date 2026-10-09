@@ -1,4 +1,7 @@
-import { actionFailedText } from "../../../../shared/decision-view.js";
+import {
+  actionFailedText,
+  refusalText,
+} from "../../../../shared/decision-view.js";
 import type {
   OrchestratorView,
   SupervisorState,
@@ -61,20 +64,6 @@ const STOP_BLOCKED_STATES: readonly string[] = [
   "usage_limit_wait",
   "shell_prompt",
 ];
-
-const REFUSALS: Record<string, string> = {
-  "supervisor-off": "the supervisor is off",
-  "orchestrator-running": "it is already running",
-  "orchestrator-session-live": "the session is still open, resume it",
-  "orchestrator-not-resumable": "there is nothing to resume",
-  "orchestrator-not-running": "it is not running",
-  "group-owned": "another extra orchestrator owns one of the groups",
-  "ticket-owned": "another extra orchestrator owns one of the tickets",
-  "wider-override": "an override is wider than the board policy",
-  "extra-needs-scope": "an extra orchestrator needs a group or a ticket",
-  "extra-needs-main": "the main orchestrator has to exist first",
-  "already-answered": "the decision is already answered",
-};
 
 function controlFor(
   main: OrchestratorView | null,
@@ -144,7 +133,8 @@ export function panelModel(input: PanelInput): PanelModel {
     main,
     stateKey: main?.session?.state ?? null,
     transition:
-      main?.state === "starting"
+      main?.state === "starting" ||
+      (main?.state === "running" && main.session?.state == null)
         ? "Starting"
         : main?.state === "stopping"
           ? "Stopping"
@@ -171,14 +161,7 @@ export function panelModel(input: PanelInput): PanelModel {
 }
 
 /** Turn a server refusal code and optional reason into the reason text of an error line. */
-export function refusalReason(
-  code: string | null,
-  reason: string | null,
-): string {
-  const key = code === "policy-refused" ? reason : code;
-  if (key !== null && Object.hasOwn(REFUSALS, key)) return REFUSALS[key];
-  return reason ?? code ?? "the request failed";
-}
+export const refusalReason = refusalText;
 
 /** The error line of a failed start. */
 export function startErrorCopy(reason: string): string {

@@ -1,6 +1,7 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import http from "node:http";
 import os from "node:os";
 import path from "node:path";
 import { isolateEnv } from "./fixtures.js";
@@ -10,8 +11,16 @@ import type { BoardKey, OrchestratorRecord } from "../../shared/types.js";
 
 const env = isolateEnv();
 const { run, spawnPiped } = await import("../adapters/exec.js");
-const { TMUX_SERVER_ARGS, capturePane, sendKeys, sendLiteral } =
-  await import("../adapters/tmux.js");
+const {
+  TMUX_SERVER_ARGS,
+  capturePane,
+  loadBuffer,
+  pasteBuffer,
+  sendKeys,
+  sendLiteral,
+  wrapWithPtyShim,
+} = await import("../adapters/tmux.js");
+const { installPtyShim } = await import("../bootstrap/pty-shim-setup.js");
 const { resolveBinaryPath } = await import("../adapters/resolve-binary.js");
 const hasTmux = (await resolveBinaryPath("tmux")) !== null;
 const { store } = await import("../store/board.store.js");
@@ -19,6 +28,8 @@ const { setOrchestrationConfig } =
   await import("../services/infra/config-holder.js");
 const { mintOrchestratorToken } =
   await import("../services/orchestration/orchestrator-tokens.js");
+const { parseMcpList } =
+  await import("../services/orchestration/connector-list.js");
 const express = (await import("express")).default;
 const { answerDecisionItem, createDecisionItem } =
   await import("../services/orchestration/decision-items.js");
@@ -94,6 +105,7 @@ interface Pane {
 async function startPane(
   name: string,
   scenario: Record<string, unknown>,
+  shim = false,
 ): Promise<Pane> {
   const dir = fs.mkdtempSync(path.join(env.root, "pane-"));
   const transcript = path.join(dir, "transcript.jsonl");
@@ -118,7 +130,7 @@ async function startPane(
     "80",
     "-y",
     "24",
-    `FAKE_CLAUDE_SCENARIO='${scenarioFile}' '${bin}'`,
+    `FAKE_CLAUDE_SCENARIO='${scenarioFile}' ${(shim ? wrapWithPtyShim([bin]) : [bin]).map((a) => `'${a}'`).join(" ")}`,
   ]);
   return { name, transcript, keyLog, screen: () => capturePane(name) };
 }
@@ -671,5 +683,530 @@ void test(
     assert.equal(lines[0]?.isError, true);
     assert.match(String(lines[0]?.excerpt), /other-owner/);
     assert.equal(JSON.stringify(store.getCard(group)), before);
+  },
+);
+
+interface LoopRun {
+  cwd: string;
+  lines: Record<string, unknown>[];
+}
+
+interface LoopOptions {
+  prepare?: (cwd: string) => void;
+  env?: Record<string, string>;
+  scenarioDir?: Record<string, Record<string, unknown>>;
+  drive?: (
+    write: (text: string) => void,
+    log: string,
+    screen: () => string,
+  ) => Promise<void>;
+}
+
+/** Run the fake with a `loop` scenario and no `--mcp-config`, inside its own working folder. */
+async function runLoop(
+  name: string,
+  loop: Record<string, unknown>,
+  opts: LoopOptions = {},
+): Promise<LoopRun> {
+  const dir = fs.mkdtempSync(path.join(env.root, `loop-${name}-`));
+  const cwd = path.join(dir, "cwd");
+  fs.mkdirSync(cwd);
+  opts.prepare?.(cwd);
+  const log = path.join(dir, "replay.jsonl");
+  const scenarioFile = path.join(dir, "scenario.json");
+  fs.writeFileSync(scenarioFile, JSON.stringify({ replayLogPath: log, loop }));
+  const childEnv: Record<string, string> = {
+    ...opts.env,
+    FAKE_CLAUDE_SCENARIO: scenarioFile,
+  };
+  if (opts.scenarioDir) {
+    const scenarios = path.join(dir, "scenarios");
+    fs.mkdirSync(scenarios);
+    for (const [file, own] of Object.entries(opts.scenarioDir)) {
+      fs.writeFileSync(
+        path.join(scenarios, file),
+        JSON.stringify({ replayLogPath: log, loop: own }),
+      );
+    }
+    childEnv.FAKE_CLAUDE_SCENARIO_DIR = scenarios;
+  }
+  const bin = writeFakeClaudeTui(dir);
+  const child = spawnPiped(bin, [], { cwd, env: childEnv });
+  let screen = "";
+  child.stdout?.on("data", (chunk: Buffer) => {
+    screen += chunk.toString("utf8");
+  });
+  child.stderr?.resume();
+  const exited = new Promise<void>((resolve) => child.once("exit", resolve));
+  try {
+    await (opts.drive ?? kickoff)(
+      (text) => child.stdin?.write(text),
+      log,
+      () => screen,
+    );
+    return { cwd, lines: readJsonl(log) };
+  } finally {
+    child.stdin?.write("\x03");
+    await Promise.race([exited, new Promise((r) => setTimeout(r, 3000))]);
+    child.kill("SIGKILL");
+  }
+}
+
+function stageDone(log: string, phase: string): boolean {
+  return readJsonl(log).some((l) => l.done === true && l.phase === phase);
+}
+
+void test(
+  "a loop scenario without --mcp-config writes and appends files in the working folder",
+  { timeout: 60000 },
+  async () => {
+    const { cwd, lines } = await runLoop(
+      "files",
+      {
+        onStart: [
+          {
+            writeFile: "loop/state.md",
+            content: "alpha $env.NAME\n",
+          },
+          { appendFile: "loop/state.md", content: "beta\n" },
+          { print: "files written" },
+        ],
+      },
+      { env: { REPLAY_NAME: "one" } },
+    );
+    assert.equal(
+      fs.readFileSync(path.join(cwd, "loop/state.md"), "utf8"),
+      "alpha one\nbeta\n",
+    );
+    assert.deepEqual(
+      lines.map((l) => [l.step, l.type, l.ok, l.done]),
+      [
+        [1, "writeFile", true, undefined],
+        [2, "appendFile", true, undefined],
+        [undefined, undefined, undefined, true],
+      ],
+    );
+    assert.equal(lines[2]?.stopped, undefined);
+  },
+);
+
+void test(
+  "writeFile refuses a path that leaves the working folder and stops the loop",
+  { timeout: 60000 },
+  async () => {
+    const absolute = path.join(env.root, "absolute-target.txt");
+    for (const target of ["../outside.txt", absolute]) {
+      const { cwd, lines } = await runLoop("escape", {
+        onStart: [
+          { writeFile: target, content: "nope" },
+          { writeFile: "after.txt", content: "later" },
+        ],
+      });
+      assert.equal(fs.existsSync(path.join(cwd, "../outside.txt")), false);
+      assert.equal(fs.existsSync(absolute), false);
+      assert.equal(fs.existsSync(path.join(cwd, "after.txt")), false);
+      assert.deepEqual(
+        lines.map((l) => [l.type, l.ok, l.done, l.stopped]),
+        [
+          ["writeFile", false, undefined, undefined],
+          [undefined, undefined, true, true],
+        ],
+      );
+      assert.match(String(lines[0]?.reason), /leaves the working folder/);
+    }
+  },
+);
+
+void test(
+  "writeFile refuses a path that leaves the working folder through a symlink",
+  { timeout: 60000 },
+  async () => {
+    const outside = fs.mkdtempSync(path.join(env.root, "outside-"));
+    const { lines } = await runLoop(
+      "symlink",
+      { onStart: [{ writeFile: "link/escaped.txt", content: "nope" }] },
+      { prepare: (cwd) => fs.symlinkSync(outside, path.join(cwd, "link")) },
+    );
+    assert.equal(fs.existsSync(path.join(outside, "escaped.txt")), false);
+    assert.equal(lines[0]?.ok, false);
+    assert.match(String(lines[0]?.reason), /leaves the working folder/);
+    assert.equal(lines.at(-1)?.stopped, true);
+  },
+);
+
+void test(
+  "writeFile refuses a dangling symlink that points outside the working folder",
+  { timeout: 60000 },
+  async () => {
+    const outside = fs.mkdtempSync(path.join(env.root, "outside-"));
+    const target = path.join(outside, "dangling.txt");
+    const { lines } = await runLoop(
+      "dangling",
+      { onStart: [{ writeFile: "dl", content: "nope" }] },
+      { prepare: (cwd) => fs.symlinkSync(target, path.join(cwd, "dl")) },
+    );
+    assert.equal(fs.existsSync(target), false);
+    assert.equal(lines[0]?.ok, false);
+    assert.match(String(lines[0]?.reason), /leaves the working folder/);
+  },
+);
+
+void test(
+  "writeFile creates no folder behind a symlink that leaves the working folder",
+  { timeout: 60000 },
+  async () => {
+    const outside = fs.mkdtempSync(path.join(env.root, "outside-"));
+    const { lines } = await runLoop(
+      "mkdir-side-effect",
+      { onStart: [{ writeFile: "link/sub/a.txt", content: "nope" }] },
+      { prepare: (cwd) => fs.symlinkSync(outside, path.join(cwd, "link")) },
+    );
+    assert.equal(fs.existsSync(path.join(outside, "sub")), false);
+    assert.equal(lines[0]?.ok, false);
+    assert.match(String(lines[0]?.reason), /leaves the working folder/);
+  },
+);
+
+void test(
+  "writeFile writes a non-string content as its string form",
+  { timeout: 60000 },
+  async () => {
+    const { cwd, lines } = await runLoop("content", {
+      onStart: [{ writeFile: "num.txt", content: 42 }],
+    });
+    assert.equal(lines[0]?.ok, true);
+    assert.equal(fs.readFileSync(path.join(cwd, "num.txt"), "utf8"), "42");
+  },
+);
+
+void test(
+  "a report step without the hook port or token fails the step and stops the loop",
+  { timeout: 60000 },
+  async () => {
+    const { lines } = await runLoop(
+      "report-env",
+      { onStart: [{ report: { kind: "gate", unit: "u1", result: "pass" } }] },
+      { env: { DISPATCH_HOOK_PORT: "", DISPATCH_HOOK_TOKEN: "" } },
+    );
+    assert.equal(lines[0]?.ok, false);
+    assert.match(String(lines[0]?.reason), /DISPATCH_HOOK_PORT/);
+    assert.equal(lines.at(-1)?.stopped, true);
+  },
+);
+
+void test(
+  "waitKeys with an invalid regex fails the step and stops the loop",
+  { timeout: 60000 },
+  async () => {
+    const { lines } = await runLoop("wait-regex", {
+      onStart: [{ waitKeys: "(" }],
+    });
+    assert.equal(lines[0]?.ok, false);
+    assert.match(String(lines[0]?.reason), /Invalid regular expression/);
+    assert.equal(lines.at(-1)?.stopped, true);
+  },
+);
+
+interface ReportServer {
+  port: number;
+  requests: {
+    method?: string;
+    url?: string;
+    token?: string | string[];
+    contentType?: string;
+    body: unknown;
+  }[];
+  close: () => void;
+}
+
+async function reportServer(status: number): Promise<ReportServer> {
+  const requests: ReportServer["requests"] = [];
+  const server = http.createServer((req, res) => {
+    let raw = "";
+    req.on("data", (chunk: Buffer) => {
+      raw += chunk.toString();
+    });
+    req.on("end", () => {
+      requests.push({
+        method: req.method,
+        url: req.url,
+        token: req.headers["x-dispatch-token"],
+        contentType: req.headers["content-type"],
+        body: JSON.parse(raw),
+      });
+      res.statusCode = status;
+      res.end();
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const port = (server.address() as { port: number }).port;
+  return { port, requests, close: () => server.close() };
+}
+
+void test(
+  "a report step posts the gate to the hook port with the token and logs ok",
+  { timeout: 60000 },
+  async () => {
+    const server = await reportServer(202);
+    const report = {
+      kind: "gate",
+      unit: "u1",
+      phase: "p1",
+      result: "pass",
+      note: "all green",
+    };
+    try {
+      const { lines } = await runLoop(
+        "report",
+        { onStart: [{ report }] },
+        {
+          env: {
+            DISPATCH_HOOK_PORT: String(server.port),
+            DISPATCH_HOOK_TOKEN: "tok-123",
+          },
+        },
+      );
+      assert.deepEqual(server.requests, [
+        {
+          method: "POST",
+          url: "/api/loops/report",
+          token: "tok-123",
+          contentType: "application/json",
+          body: report,
+        },
+      ]);
+      assert.deepEqual(
+        lines.map((l) => [l.type, l.ok, l.status, l.done]),
+        [
+          ["report", true, 202, undefined],
+          [undefined, undefined, undefined, true],
+        ],
+      );
+      assert.ok(!JSON.stringify(lines).includes("tok-123"));
+    } finally {
+      server.close();
+    }
+  },
+);
+
+void test(
+  "a report answered with 401 fails the step and stops the loop",
+  { timeout: 60000 },
+  async () => {
+    const server = await reportServer(401);
+    try {
+      const { cwd, lines } = await runLoop(
+        "report-401",
+        {
+          onStart: [
+            { report: { kind: "gate", unit: "u1", result: "pass" } },
+            { writeFile: "after.txt", content: "later" },
+          ],
+        },
+        {
+          env: {
+            DISPATCH_HOOK_PORT: String(server.port),
+            DISPATCH_HOOK_TOKEN: "tok-123",
+          },
+        },
+      );
+      assert.equal(server.requests.length, 1);
+      assert.equal(lines[0]?.ok, false);
+      assert.match(String(lines[0]?.reason), /401/);
+      assert.equal(lines.at(-1)?.stopped, true);
+      assert.equal(fs.existsSync(path.join(cwd, "after.txt")), false);
+      assert.ok(!JSON.stringify(lines).includes("tok-123"));
+    } finally {
+      server.close();
+    }
+  },
+);
+
+void test(
+  "waitKeys holds the loop until a submitted line matches",
+  { timeout: 60000 },
+  async () => {
+    let early = true;
+    const { cwd, lines } = await runLoop(
+      "wait",
+      {
+        onStart: [
+          { waitKeys: "continue" },
+          { writeFile: "after.txt", content: "go" },
+        ],
+      },
+      {
+        drive: async (write, log, screen) => {
+          const echoed = async (line: string) => {
+            await until(() => screen().includes("> " + line), 20000);
+          };
+          write("kickoff\r");
+          await echoed("kickoff");
+          write("not yet\r");
+          await echoed("not yet");
+          early = readJsonl(log).length > 0;
+          write("please continue\r");
+          await until(() => stageDone(log, "onStart"), 20000);
+        },
+      },
+    );
+    assert.equal(early, false);
+    assert.equal(fs.readFileSync(path.join(cwd, "after.txt"), "utf8"), "go");
+    assert.deepEqual(
+      lines.map((l) => [l.type, l.ok, l.done]),
+      [
+        ["waitKeys", true, undefined],
+        ["writeFile", true, undefined],
+        [undefined, undefined, true],
+      ],
+    );
+  },
+);
+
+void test(
+  "waitKeys fails at its timeout when no line matches and stops the loop",
+  { timeout: 60000 },
+  async () => {
+    const { cwd, lines } = await runLoop("wait-timeout", {
+      onStart: [
+        { waitKeys: "never", timeoutMs: 500 },
+        { writeFile: "after.txt", content: "go" },
+      ],
+    });
+    assert.equal(lines[0]?.type, "waitKeys");
+    assert.equal(lines[0]?.ok, false);
+    assert.match(String(lines[0]?.reason), /timed out after 500 ms/);
+    assert.equal(lines.at(-1)?.stopped, true);
+    assert.equal(fs.existsSync(path.join(cwd, "after.txt")), false);
+  },
+);
+
+void test(
+  "a loop runs onStart on the first submit and afterClear on the first submit after /clear",
+  { timeout: 60000 },
+  async () => {
+    const { cwd, lines } = await runLoop(
+      "clear",
+      {
+        onStart: [{ writeFile: "start.txt", content: "s" }],
+        afterClear: [{ writeFile: "resume.txt", content: "r" }],
+      },
+      {
+        drive: async (write, log) => {
+          write("kickoff\r");
+          await until(() => stageDone(log, "onStart"), 20000);
+          assert.equal(
+            fs.existsSync(path.join(path.dirname(log), "cwd/resume.txt")),
+            false,
+          );
+          write("/clear\r");
+          await new Promise((r) => setTimeout(r, 200));
+          write("resume please\r");
+          await until(() => stageDone(log, "afterClear"), 20000);
+        },
+      },
+    );
+    assert.equal(fs.readFileSync(path.join(cwd, "start.txt"), "utf8"), "s");
+    assert.equal(fs.readFileSync(path.join(cwd, "resume.txt"), "utf8"), "r");
+    assert.deepEqual(
+      lines.map((l) => [l.type ?? l.phase, l.ok ?? l.done]),
+      [
+        ["writeFile", true],
+        ["onStart", true],
+        ["writeFile", true],
+        ["afterClear", true],
+      ],
+    );
+  },
+);
+
+void test(
+  "FAKE_CLAUDE_SCENARIO_DIR picks the card file, then default.json, then FAKE_CLAUDE_SCENARIO",
+  { timeout: 60000 },
+  async () => {
+    const marker = (name: string) => ({
+      onStart: [{ writeFile: name, content: name }],
+    });
+    const scenarios = {
+      "CARD-1.json": marker("card.txt"),
+      "default.json": marker("default.txt"),
+    };
+    const written = (cwd: string) =>
+      ["card.txt", "default.txt", "fallback.txt"].filter((f) =>
+        fs.existsSync(path.join(cwd, f)),
+      );
+    const withCard = await runLoop("dir-card", marker("fallback.txt"), {
+      env: { DISPATCH_CARD_ID: "CARD-1" },
+      scenarioDir: scenarios,
+    });
+    assert.deepEqual(written(withCard.cwd), ["card.txt"]);
+    const withDefault = await runLoop("dir-default", marker("fallback.txt"), {
+      env: { DISPATCH_CARD_ID: "CARD-2" },
+      scenarioDir: scenarios,
+    });
+    assert.deepEqual(written(withDefault.cwd), ["default.txt"]);
+    const withFallback = await runLoop("dir-fallback", marker("fallback.txt"), {
+      env: { DISPATCH_CARD_ID: "CARD-2" },
+      scenarioDir: {},
+    });
+    assert.deepEqual(written(withFallback.cwd), ["fallback.txt"]);
+  },
+);
+
+void test("--version prints a version line marked fake and exits 0 before any TUI work", async () => {
+  const dir = fs.mkdtempSync(path.join(env.root, "version-"));
+  const bin = writeFakeClaudeTui(dir);
+  const out = await run(bin, ["--version"], { timeout: 5000 });
+  assert.match(out.stdout, /^\d+\.\d+\.\d+ \(fake\)\n$/);
+  assert.equal(out.stderr, "");
+});
+
+void test("auth status answers a logged out identity and exits instead of opening the TUI", async () => {
+  const dir = fs.mkdtempSync(path.join(env.root, "auth-"));
+  const bin = writeFakeClaudeTui(dir);
+  const out = await run(bin, ["auth", "status", "--json"], { timeout: 5000 });
+  assert.deepEqual(JSON.parse(out.stdout), { loggedIn: false });
+});
+
+void test("mcp list answers no configured servers and exits instead of opening the TUI", async () => {
+  const dir = fs.mkdtempSync(path.join(env.root, "mcp-"));
+  const bin = writeFakeClaudeTui(dir);
+  const out = await run(bin, ["mcp", "list"], { timeout: 5000 });
+  assert.match(out.stdout, /^No MCP servers configured/);
+  assert.equal(parseMcpList(out.stdout, /slack/i).state, "not-found");
+});
+
+void test(
+  "a 60 line bracketed paste through the pty shim arrives as one user turn holding every line",
+  { skip: !hasTmux, timeout: 30000 },
+  async () => {
+    await installPtyShim();
+    const pane = await startPane(
+      "fake-shim-paste",
+      { statusRows: ["a", "b"] },
+      true,
+    );
+    try {
+      await until(async () => (await pane.screen()).includes("❯"), 8000);
+      const lines = Array.from(
+        { length: 60 },
+        (_, i) => `line ${i} ${"x".repeat(60)}`,
+      );
+      const file = path.join(env.root, "kickoff-paste.txt");
+      fs.writeFileSync(file, lines.join("\n"));
+      await loadBuffer("fake-shim-paste", file);
+      await pasteBuffer("fake-shim-paste", pane.name);
+      await new Promise((r) => setTimeout(r, 500));
+      await sendKeys(pane.name, ["Enter"]);
+      await until(() => readJsonl(pane.transcript).length >= 2, 15000);
+      const users = readJsonl(pane.transcript).filter((e) => e.type === "user");
+      assert.equal(users.length, 1);
+      assert.equal(
+        (users[0]?.message as { content: string }).content,
+        lines.join("\n"),
+      );
+    } finally {
+      await stopPane(pane);
+    }
   },
 );

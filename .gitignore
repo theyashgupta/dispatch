@@ -9,3 +9,4 @@ docs/superpowers/
 */**/.claude/
 test-results/
 playwright-report/
+.sandbox/

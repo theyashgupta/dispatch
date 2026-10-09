@@ -1,4 +1,5 @@
 import { CheckIcon, ChevronDownIcon } from "lucide-react";
+import { formatCount } from "../../../../shared/format-count.js";
 import type { BoardKey } from "../../../../shared/types.js";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -115,7 +116,7 @@ export function BoardSwitcher({
                     tone="neutral"
                     aria-label={attentionLabel(item.attention)}
                   >
-                    {item.attention}
+                    {formatCount(item.attention)}
                   </Badge>
                 ) : null}
               </DropdownMenuItem>

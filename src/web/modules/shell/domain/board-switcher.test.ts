@@ -71,6 +71,7 @@ test("collapsedLabel takes the first two letters of the key", () => {
 test("attentionLabel names the count", () => {
   assert.equal(attentionLabel(3), "3 items need attention");
   assert.equal(attentionLabel(1), "1 item needs attention");
+  assert.equal(attentionLabel(1284), "1,284 items need attention");
 });
 
 test("switcherShortcuts adds the Switch board row only while the switcher shows", () => {

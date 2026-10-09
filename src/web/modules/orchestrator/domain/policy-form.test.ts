@@ -100,6 +100,7 @@ test("the budget is empty or above 0", () => {
     ["  ", true],
     ["0.5", true],
     ["25", true],
+    ["100000", true],
     ["0", false],
     ["-3", false],
     ["abc", false],
@@ -108,6 +109,13 @@ test("the budget is empty or above 0", () => {
     const errors = validatePolicyForm(edit({ budgetPerGroup: text }));
     assert.equal(errors.budgetPerGroup === undefined, ok, text);
     if (!ok) assert.equal(errors.budgetPerGroup, POLICY_ERRORS.budgetPerGroup);
+  }
+});
+
+test("the budget has an upper limit of 100000 with its own error", () => {
+  for (const text of ["100001", "10000000"]) {
+    const errors = validatePolicyForm(edit({ budgetPerGroup: text }));
+    assert.equal(errors.budgetPerGroup, POLICY_ERRORS.budgetPerGroupMax, text);
   }
 });
 

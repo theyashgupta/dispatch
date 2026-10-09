@@ -124,6 +124,19 @@ for (const [state, disabled] of STOP_TABLE) {
   });
 }
 
+test("a running record with no session state yet still shows the Starting badge", () => {
+  const model = panelModel(
+    input({ orchestrators: [main("running", { state: null })] }),
+  );
+  assert.equal(model.stateKey, null);
+  assert.equal(model.transition, "Starting");
+  assert.equal(model.control?.kind, "stop");
+  const working = panelModel(
+    input({ orchestrators: [main("running", { state: "working" })] }),
+  );
+  assert.equal(working.transition, null);
+});
+
 test("starting and stopping records show no control and a transition label", () => {
   const starting = panelModel(
     input({ orchestrators: [main("starting", { hasTmuxSession: false })] }),
@@ -216,8 +229,16 @@ test("refusal codes map to reason text and unknown ones pass through", () => {
     refusalReason("orchestrator-not-resumable", null),
     "there is nothing to resume",
   );
+  assert.equal(
+    refusalReason("invalid-budgetPerGroup", null),
+    "the budget has to be an amount above 0 and at most 100000",
+  );
+  assert.equal(
+    refusalReason("hard-below-handoff", null),
+    "hard handoff has to be a number above the handoff percent, up to 100",
+  );
   assert.equal(refusalReason("weird", "because"), "because");
-  assert.equal(refusalReason("weird", null), "weird");
+  assert.equal(refusalReason("weird", null), "the request failed (weird)");
   assert.equal(refusalReason(null, null), "the request failed");
   assert.equal(refusalReason("policy-refused", "other"), "other");
 });

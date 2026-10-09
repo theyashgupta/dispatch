@@ -38,7 +38,7 @@ const hasLiveSession = (card: Card) =>
 /**
  * The palette's commands for the selected card, then every page, New ticket, Sync now and the boards.
  *
- * @remarks Card commands come first, only with a selected card and only where it can take them:
+ * @remarks "Go to Dashboard" follows the nav list, so it shows only when the sidebar row does. Card commands come first, only with a selected card and only where it can take them:
  * Start from To Do, Open terminal with a live session, Move to every column the manual-move
  * rule allows except the card's own, and Clean up from Done. The "Boards" group comes last:
  * "Switch to board" for each board but the selected one only when `switcher` is given, then
@@ -76,7 +76,7 @@ export function buildCommands(
     ...[
       ...navItems.filter((item) => item.page !== "dashboard"),
       { page: "settings" as const, label: "Settings" },
-      { page: "dashboard" as const, label: "Dashboard" },
+      ...navItems.filter((item) => item.page === "dashboard"),
     ].map((item) => ({
       id: `go:${item.page}`,
       label: `Go to ${item.label}`,

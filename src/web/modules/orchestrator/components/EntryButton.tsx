@@ -19,6 +19,7 @@ export function EntryButton({ entry, onOpen }: EntryButtonProps) {
       id={ENTRY_BUTTON_ID}
       variant="outline"
       size="sm"
+      className="shrink-0"
       aria-label={entry.label}
       onClick={onOpen}
     >

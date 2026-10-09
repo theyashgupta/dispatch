@@ -640,6 +640,7 @@ function addOrchestratorsColumn(db: DatabaseSync): void {
 }
 
 function persistedSchemaVersion(db: DatabaseSync): number | null {
+  if (!hasTable(db, "meta")) return null;
   const row = db
     .prepare(
       "SELECT json_extract(data, '$.schemaVersion') AS v FROM meta WHERE id = 0",
@@ -820,8 +821,9 @@ export function migrateToBoards(
  * @remarks On first open any pre-existing WAL (e.g. from the previous native engine) is folded in via
  * `wal_checkpoint(TRUNCATE)` before any rotation, and `busy_timeout` is set explicitly
  * (node:sqlite defaults to 0) so an hourly snapshot read-lock retries instead of throwing.
- * The boards migration runs before any statement is prepared, and the open throws when that
- * migration cannot write its copy or commit.
+ * The schema version check runs before any table or index is created, so a refused open leaves
+ * the table list unchanged, and the boards migration runs before any statement is prepared.
+ * The open throws when that migration cannot write its copy or commit.
  * @see docs/ARCHITECTURE.md#single-writer-store
  */
 export function openBoardDb(): BoardDb {
@@ -843,6 +845,14 @@ export function openBoardDb(): BoardDb {
         `requires (${(err as Error).message}). Use a standard Node build with JSON1 enabled.`,
       { cause: err },
     );
+  }
+  try {
+    assertSchemaOpenable(persistedSchemaVersion(db) ?? 0);
+  } catch (err) {
+    try {
+      db.close();
+    } catch {}
+    throw err;
   }
   db.exec(`
     CREATE TABLE IF NOT EXISTS cards (
@@ -909,7 +919,6 @@ export function openBoardDb(): BoardDb {
     CREATE INDEX IF NOT EXISTS idx_decision_items_board_state ON decision_items(board_key, state);
   `);
   try {
-    assertSchemaOpenable(persistedSchemaVersion(db) ?? 0);
     migrateToBoards(db, `${BOARD_DB_PATH}.pre-boards`);
     addOrchestratorsColumn(db);
   } catch (err) {

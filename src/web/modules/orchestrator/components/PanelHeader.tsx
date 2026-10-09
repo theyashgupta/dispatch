@@ -32,8 +32,12 @@ export function PanelHeader({
       <h2 className="m-0 shrink-0 text-lg font-semibold text-foreground">
         Orchestrator
       </h2>
-      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-(--space-sm)">
-        <Badge tone="neutral" className="min-w-0 truncate">
+      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-(--space-sm) pr-(--space-sm)">
+        <Badge
+          tone="neutral"
+          title={boardName}
+          className="block min-w-0 shrink truncate"
+        >
           {boardName}
         </Badge>
         {loading ? (

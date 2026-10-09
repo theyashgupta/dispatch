@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   actionFailedText,
   liveReplyResults,
+  refusalText,
   replyKey,
 } from "./decision-view.js";
 
@@ -58,4 +59,109 @@ test("the failed action text ends in one period", () => {
     actionFailedText("Resume loop", "no-live-session"),
     "Resume loop failed: no-live-session.",
   );
+});
+
+test("refusal codes map to plain text and unknown codes never show raw", () => {
+  const codes = [
+    "orchestrator-busy",
+    "unknown-decision",
+    "invalid-option",
+    "session-busy",
+    "no-live-session",
+    "no-loop",
+    "ship-running",
+    "not-resumable",
+  ];
+  for (const code of codes) {
+    const text = refusalText(code, "server wording");
+    assert.notEqual(text, code);
+    assert.notEqual(text, "server wording");
+    assert.doesNotMatch(text, /[a-z]+-[a-z]+/);
+  }
+  assert.equal(
+    refusalText("no-live-session", null),
+    "there is no open session",
+  );
+  assert.equal(
+    refusalText("policy-refused", "supervisor-off"),
+    "the supervisor is off",
+  );
+  assert.equal(refusalText("weird-code", "because"), "because");
+  assert.equal(
+    refusalText("weird-code", null),
+    "the request failed (weird-code)",
+  );
+  assert.equal(refusalText(null, null), "the request failed");
+});
+
+test("every refusal code a user route can return has plain text", () => {
+  const codes = [
+    "supervisor-off",
+    "orchestrator-running",
+    "orchestrator-session-live",
+    "orchestrator-not-resumable",
+    "orchestrator-not-running",
+    "orchestrator-busy",
+    "orchestrator-start-failed",
+    "orchestrator-resume-failed",
+    "unknown-orchestrator",
+    "unknown-board",
+    "unknown-card",
+    "duplicate-id",
+    "main-exists",
+    "extra-needs-main",
+    "main-has-scope",
+    "main-has-override",
+    "extra-needs-scope",
+    "group-owned",
+    "ticket-owned",
+    "wider-override",
+    "empty-patch",
+    "invalid-id",
+    "invalid-orchestrator-id",
+    "invalid-name",
+    "invalid-role",
+    "invalid-groupIds",
+    "invalid-ticketIds",
+    "invalid-card-id",
+    "invalid-roadmapApproval",
+    "invalid-usageLimit",
+    "invalid-shipRights",
+    "invalid-supervisor",
+    "invalid-loopModel",
+    "invalid-orchestratorModel",
+    "invalid-concurrencyCap",
+    "invalid-handoffPercent",
+    "invalid-handoffHardPercent",
+    "hard-below-handoff",
+    "invalid-budgetPerGroup",
+    "invalid-policy",
+    "unknown-field",
+    "invalid-body",
+    "invalid-text",
+    "session-state-refused",
+    "no-live-session",
+    "session-busy",
+    "no-loop",
+    "ship-running",
+    "not-resumable",
+    "unknown-decision",
+    "already-answered",
+    "invalid-option",
+    "invalid-note",
+    "invalid-state",
+    "session is already live",
+    "card has no lost session to resume",
+    "card has no workspace to resume",
+    "a start is in flight for this card",
+  ];
+  for (const code of codes) {
+    const text = refusalText(code, null);
+    assert.ok(!text.startsWith("the request failed"), code);
+    assert.ok(
+      !/\b[a-z]+-[a-z]+\b/i.test(text.replace(/hyphens|open PRs/g, "")),
+      code,
+    );
+    assert.ok(!/\u2014|--/.test(text), code);
+  }
 });

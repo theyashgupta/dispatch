@@ -65,3 +65,12 @@ test("a budget set by an owner override names the owner", () => {
     "$6.00 of $12.00, 50%, budget set by Release extra",
   );
 });
+
+test("spend above 100 percent reads over budget, exactly 100 stays near", () => {
+  assert.equal(row(100, 100).text, "$100.00 of $100.00, 100%, near budget");
+  const over = row(6.4, 0.01);
+  assert.equal(over.percent, 64000);
+  assert.equal(over.text, "$6.40 of $0.01, 64000%, over budget");
+  assert.equal(over.near, true);
+  assert.equal(row(100.01, 100).text, "$100.01 of $100.00, 100%, over budget");
+});

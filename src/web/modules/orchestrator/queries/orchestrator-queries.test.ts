@@ -103,7 +103,10 @@ test("a refused add stops Start before the start call", async () => {
     id: "main",
     hasRecord: false,
   });
-  assert.deepEqual(result, { ok: false, reason: "main-exists" });
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "this board already has a main orchestrator",
+  });
   assert.equal(calls.length, 1);
 });
 
@@ -276,7 +279,10 @@ test("a refused policy save leaves the board list as it was", async () => {
     client,
     savePolicyMutationOptions(client, LOCAL),
   ).mutate(policy);
-  assert.deepEqual(result, { ok: false, reason: "invalid-loopModel" });
+  assert.deepEqual(result, {
+    ok: false,
+    reason: "the loop model is not a supported model",
+  });
   const list = client.getQueryData<{ boards: { policy: BoardPolicy }[] }>(
     boardListKeys.list,
   );

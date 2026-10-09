@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 const seededPort = Number(process.env.DISPATCH_VISUAL_PORT);
 const seeded = `http://127.0.0.1:${seededPort}`;
+const orchestrated = `http://127.0.0.1:${seededPort + 3}`;
 const now = Date.parse(process.env.DISPATCH_VISUAL_NOW ?? "");
 const SETUP_STATUS = {
   needsKey: true,
@@ -59,6 +60,30 @@ const screens: {
       expect(url.searchParams.has("card")).toBe(false);
       expect(url.hash).toBe("#/board");
     },
+  },
+  {
+    name: "boards",
+    url: `${orchestrated}/#/boards`,
+    ready: (page) =>
+      expect(
+        page.getByText("8 need attention").locator("visible=true"),
+      ).toBeVisible(),
+  },
+  {
+    name: "orchestrator-panel",
+    url: `${orchestrated}/#/board?board=ORC&panel=orchestrator&tab=decisions`,
+    ready: (page) =>
+      expect(
+        page.getByText(/Retry the Phase 5 gate now/).first(),
+      ).toBeVisible(),
+  },
+  {
+    name: "dashboard",
+    url: `${orchestrated}/#/dashboard?board=ORC`,
+    ready: (page) =>
+      expect(
+        page.getByText("Allow WebFetch: docs.github.com?").first(),
+      ).toBeVisible(),
   },
   {
     name: "setup-wizard",

@@ -1,11 +1,13 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { parseSeedArgs } from "./seed-args.mjs";
 
+const STRIPPED_PREFIXES = ["DISPATCH_", "CLAUDE_", "ANTHROPIC_"];
+const STRIPPED_NAMES = new Set(["TMUX", "TMUX_PANE", "NODE_ENV"]);
 const ENTRY = join(import.meta.dirname, "../../dist/server/bootstrap/index.js");
 
 const { kind, port, now } = parseSeedArgs(process.argv.slice(2), process.env);
@@ -49,11 +51,19 @@ async function assertNoLiveService() {
  * @remarks
  * HOME points into the folder and the usage URL at a closed loopback port, so no account, usage or vault file of this machine reaches a screenshot and no usage request leaves it.
  * The darwin keychain is not isolated: the server still reads the Claude Code credential from it at boot.
+ * The parent env loses every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable plus the tmux and `NODE_ENV` ones, so no key or account folder of the shell reaches the server.
  */
 function boot(dir, stdio) {
+  const env = {};
+  for (const [key, value] of Object.entries(process.env)) {
+    const stripped =
+      STRIPPED_NAMES.has(key) ||
+      STRIPPED_PREFIXES.some((prefix) => key.startsWith(prefix));
+    if (!stripped) env[key] = value;
+  }
   return spawn(process.execPath, [ENTRY], {
     env: {
-      ...process.env,
+      ...env,
       DISPATCH_DIR: dir,
       DISPATCH_USAGE_URL: "http://127.0.0.1:1",
       HOME: join(dir, "home"),
@@ -141,6 +151,389 @@ function item(id, source, type, title, minutesAgo, meta) {
     state: "unread",
     meta,
   };
+}
+
+/** One ORC board card: a group with loop progress, or a local ticket. */
+function orcCard(id, title, column, minutesAgo, source, extra) {
+  return {
+    id,
+    issueId: id,
+    identifier: id,
+    title,
+    description: null,
+    priority: 0,
+    column,
+    updatedAt: iso(minutesAgo),
+    source,
+    memberIds: [],
+    boardKey: "ORC",
+    ...extra,
+  };
+}
+
+/** One session record with the supervisor state and the meters the dashboard reads. */
+function orcSession(id, minutesAgo, extra) {
+  return {
+    id,
+    createdAt: iso(minutesAgo + 130),
+    updatedAt: iso(minutesAgo),
+    claudeAccountId: "default",
+    stateSince: iso(minutesAgo),
+    model: "opus",
+    metersAt: iso(1),
+    ...extra,
+  };
+}
+
+/** One loop unit whose first `passed` phases hold a passing gate and whose next phase holds a failing one when `failed` is set. */
+function orcUnit(
+  number,
+  title,
+  status,
+  phaseTotal,
+  passed,
+  minutesAgo,
+  failed,
+) {
+  const phases = [];
+  for (let n = 1; n <= passed; n++)
+    phases.push({
+      number: n,
+      name: `Phase ${n}`,
+      gate: "pass",
+      attempts: 1,
+      passedAt: iso(minutesAgo + (passed - n) * 12),
+      retryBudget: 2,
+    });
+  if (failed)
+    phases.push({
+      number: passed + 1,
+      name: `Phase ${passed + 1}`,
+      gate: "fail",
+      attempts: 2,
+      passedAt: null,
+      retryBudget: 3,
+    });
+  return {
+    number,
+    ticket: `ORC-${10 + number}`,
+    title,
+    status,
+    statusText: status,
+    branch: `feat/ORC-${10 + number}-unit-${number}`,
+    commit: null,
+    prdPath: null,
+    phaseTotal,
+    phases,
+  };
+}
+
+/** The loop model of a group card in the shape the progress reader stores. */
+function orcLoop(slug, units, completion, currentUnit, currentPhase, lastGate) {
+  return {
+    slug,
+    roadmapFile: "ROADMAP.md",
+    units,
+    engine: null,
+    completion,
+    summary: {
+      unitsDone: units.filter((u) => u.status === "shipped").length,
+      unitsTotal: units.length,
+      currentUnit,
+      currentPhase,
+      lastGate,
+    },
+    warnings: [],
+    readAt: iso(1),
+  };
+}
+
+/**
+ * Write the second board, ORC, with a main orchestrator, running loops, session states, open decisions, events and costs.
+ *
+ * @remarks The group cards have no workspace path, so the loop progress reader never replaces the stored loop model.
+ */
+function seedOrchestrated(db) {
+  const policy = {
+    roadmapApproval: "ask",
+    concurrencyCap: 3,
+    loopModel: null,
+    orchestratorModel: "opus",
+    handoffPercent: 50,
+    handoffHardPercent: 80,
+    usageLimit: "wait",
+    shipRights: "open_prs",
+    budgetPerGroup: 20,
+    supervisor: "off",
+  };
+  const orchestrators = [
+    {
+      id: "orch-main",
+      name: "Main",
+      role: "main",
+      scope: { groupIds: [], ticketIds: [] },
+      policyOverride: {},
+      cardId: null,
+      state: "stopped",
+      createdAt: iso(600),
+    },
+  ];
+  db.prepare(
+    "INSERT OR REPLACE INTO boards (key, name, workspace_root, repositories, linear_team_keys, last_used_folder, policy, created_at, archived, orchestrators) VALUES ('ORC', 'Orchestrated', NULL, '[]', '[]', NULL, ?, ?, 0, ?)",
+  ).run(JSON.stringify(policy), iso(600), JSON.stringify(orchestrators));
+
+  const gate = (unit, phase, result, minutesAgo) => ({
+    unit,
+    phase,
+    result,
+    at: iso(minutesAgo),
+  });
+  const branch = (name, state, pr, checks) => ({
+    name,
+    title: name,
+    body: "",
+    state,
+    pr,
+    checks,
+    identity: state === "merged" ? "passed" : null,
+    admin: false,
+    tip: null,
+    checked: null,
+  });
+  const group = (id, title, column, minutesAgo, extra) =>
+    orcCard(id, title, column, minutesAgo, "group", extra);
+  const ticket = (id, title, column, minutesAgo, extra = {}) =>
+    orcCard(id, title, column, minutesAgo, "local", extra);
+  const cards = [
+    group("GROUP-21", "Billing migration", "in_progress", 4, {
+      loopProgress: orcLoop(
+        "billing",
+        [
+          orcUnit(1, "Schema", "shipped", 6, 6, 200),
+          orcUnit(2, "Backfill", "in progress", 9, 3, 6),
+          orcUnit(3, "Cutover", "not started", 5, 0, 0),
+        ],
+        "running",
+        2,
+        { number: 4, name: "Phase 4" },
+        gate(2, 3, "pass", 6),
+      ),
+      sessions: [
+        orcSession("s21", 4, {
+          state: "working",
+          cost: 6.4,
+          contextPercent: 42,
+          usage: { fiveHourPercent: 31, sevenDayPercent: 48 },
+        }),
+      ],
+      activeSessionId: "s21",
+    }),
+    group("GROUP-22", "Search indexing", "needs_input", 14, {
+      statusReason: "Reindex the archive first, or ship the new analyzer?",
+      loopProgress: orcLoop(
+        "search",
+        [
+          orcUnit(1, "Analyzer", "in progress", 8, 4, 40, true),
+          orcUnit(2, "Reindex", "not started", 6, 0, 0),
+        ],
+        "running",
+        1,
+        { number: 5, name: "Phase 5" },
+        gate(1, 5, "fail", 20),
+      ),
+      sessions: [
+        orcSession("s22", 14, {
+          state: "needs_input",
+          cost: 11.2,
+          contextPercent: 66,
+          usage: { fiveHourPercent: 31, sevenDayPercent: 48 },
+        }),
+      ],
+      activeSessionId: "s22",
+    }),
+    group("GROUP-23", "Docs overhaul", "in_review", 90, {
+      loopProgress: orcLoop(
+        "docs",
+        [
+          orcUnit(1, "Guide", "shipped", 4, 4, 300),
+          orcUnit(2, "Reference", "built, awaiting /ship", 4, 4, 150),
+        ],
+        "complete",
+        null,
+        null,
+        gate(2, 4, "pass", 150),
+      ),
+      shipFlow: {
+        state: "running",
+        rights: "open_prs",
+        repository: "/tmp/repo",
+        repo: null,
+        orchestratorId: "orch-main",
+        identity: { name: "Dispatch", email: "dispatch@example.invalid" },
+        branches: [
+          branch("feat/ORC-11-unit-1", "merged", 41, "passed"),
+          branch("feat/ORC-12-unit-2", "waiting_checks", 42, "pending"),
+          branch("test/docs-specs", "queued", null, null),
+        ],
+        failedStep: null,
+        reason: null,
+        decisionId: null,
+        startedAt: iso(50),
+        finishedAt: null,
+      },
+      sessions: [orcSession("s23", 90, { cost: 3.5, contextPercent: 18 })],
+      activeSessionId: "s23",
+    }),
+    group("GROUP-24", "Auth cleanup", "in_progress", 35, {
+      loopProgress: orcLoop(
+        "auth",
+        [
+          orcUnit(1, "Tokens", "in progress", 7, 2, 30),
+          orcUnit(2, "Sessions", "not started", 5, 0, 0),
+        ],
+        "running",
+        1,
+        { number: 3, name: "Phase 3" },
+        gate(1, 2, "pass", 30),
+      ),
+      sessions: [
+        orcSession("s24", 35, {
+          state: "stale",
+          cost: 8.9,
+          contextPercent: 38,
+          usage: { fiveHourPercent: 31, sevenDayPercent: 48 },
+        }),
+      ],
+      activeSessionId: "s24",
+    }),
+    group("GROUP-25", "Export service", "needs_input", 25, {
+      sessions: [
+        orcSession("s25", 25, {
+          state: "needs_input",
+          stateReason: "usage_stop",
+          cost: 9.8,
+          contextPercent: 51,
+        }),
+      ],
+      activeSessionId: "s25",
+    }),
+    ticket("ORC-101", "Permission prompt ticket", "in_progress", 21, {
+      sessions: [orcSession("s101", 21, { state: "permission_prompt" })],
+      activeSessionId: "s101",
+    }),
+    ticket("ORC-102", "Todo by the orchestrator", "todo", 60, {
+      createdByOrchestrator: "orch-main",
+    }),
+    ticket("ORC-103", "Plain todo ticket", "todo", 70),
+    ticket("ORC-104", "Agent done ticket", "agent_done", 45, {
+      createdByOrchestrator: "orch-main",
+    }),
+    ticket("ORC-105", "Parked ticket", "parked", 300),
+    ticket("ORC-106", "Done ticket", "done", 500),
+  ];
+  const insertCard = db.prepare(
+    "INSERT OR REPLACE INTO cards (id, data, board_key) VALUES (?, ?, 'ORC')",
+  );
+  for (const c of cards) insertCard.run(c.id, JSON.stringify(c));
+
+  const decision = (id, cardId, question, minutesAgo, recommended) => ({
+    id,
+    boardKey: "ORC",
+    cardId,
+    orchestratorId: "orch-main",
+    kind: "ruling",
+    question,
+    options: [
+      { id: "a", label: "Option A" },
+      { id: "b", label: "Option B" },
+    ],
+    recommendedOptionId: recommended,
+    state: "open",
+    answer: null,
+    createdAt: iso(minutesAgo),
+    answeredAt: null,
+  });
+  const decisions = [
+    decision(
+      "dec-orc-1",
+      "GROUP-22",
+      "Retry the Phase 5 gate now, or send GROUP-22 a fix instruction first?",
+      12,
+      "a",
+    ),
+    decision(
+      "dec-orc-2",
+      "GROUP-21",
+      "Backfill in one pass, or in batches of 10 000 rows?",
+      30,
+      null,
+    ),
+  ];
+  const insertDecision = db.prepare(
+    "INSERT OR REPLACE INTO decision_items (id, board_key, state, data) VALUES (?, 'ORC', 'open', ?)",
+  );
+  for (const d of decisions) insertDecision.run(d.id, JSON.stringify(d));
+
+  const events = [
+    [
+      "GROUP-23",
+      "s23",
+      "loop_gate",
+      { unit: 2, phase: 4, result: "pass" },
+      150,
+    ],
+    ["GROUP-21", "s21", "loop_gate", { unit: 2, phase: 3, result: "pass" }, 6],
+    ["GROUP-22", "s22", "loop_gate", { unit: 1, phase: 5, result: "fail" }, 20],
+    ["GROUP-21", "s21", "supervisor_action", { action: "continue" }, 52],
+    ["GROUP-24", "s24", "supervisor_action", { action: "nudge" }, 33],
+    ["GROUP-25", "s25", "supervisor_action", { action: "limit_wait" }, 25],
+    [
+      "ORC-101",
+      "s101",
+      "supervisor_state",
+      {
+        from: "working",
+        to: "permission_prompt",
+        evidence: "Allow WebFetch: docs.github.com?",
+      },
+      21,
+    ],
+    [
+      "GROUP-22",
+      null,
+      "tool_call",
+      {
+        orchestratorId: "orch-main",
+        tool: "create_decision_item",
+        args: {},
+        status: 201,
+        result: "created",
+      },
+      12,
+    ],
+    ["GROUP-22", null, "decision_raised", { decisionId: "dec-orc-1" }, 12],
+  ];
+  const insertEvent = db.prepare(
+    "INSERT INTO orchestration_events (board_key, card_id, session_id, kind, data, ts) VALUES ('ORC', ?, ?, ?, ?, ?)",
+  );
+  for (const [cardId, sessionId, kind, data, minutesAgo] of events)
+    insertEvent.run(
+      cardId,
+      sessionId,
+      kind,
+      JSON.stringify(data),
+      iso(minutesAgo),
+    );
+}
+
+/** Merge the sync time and the given fields into the store meta row. */
+function writeMeta(db, extra) {
+  const meta = JSON.parse(
+    db.prepare("SELECT data FROM meta WHERE id = 0").get()?.data ?? "{}",
+  );
+  db.prepare(
+    "INSERT INTO meta (id, data) VALUES (0, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data",
+  ).run(JSON.stringify({ ...meta, syncedAt: iso(1), ...extra }));
 }
 
 /** Write the board rows into the schema the warm boot created. */
@@ -237,19 +630,21 @@ function seedRows(dir) {
   );
   for (const i of items)
     insertItem.run(i.id, i.source, i.state, JSON.stringify(i));
-  const meta = JSON.parse(
-    db.prepare("SELECT data FROM meta WHERE id = 0").get()?.data ?? "{}",
-  );
-  db.prepare(
-    "INSERT INTO meta (id, data) VALUES (0, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data",
-  ).run(JSON.stringify({ ...meta, syncedAt: iso(1), groupTicketCounter: 1 }));
+  writeMeta(db, { groupTicketCounter: 1 });
+  db.close();
+}
+
+/** Write the ORC board rows into the schema the warm boot created. */
+function seedOrchestratedRows(dir) {
+  const db = new DatabaseSync(join(dir, "board.db"));
+  seedOrchestrated(db);
+  writeMeta(db, {});
   db.close();
 }
 
 await assertNoLiveService();
 await assertPortFree();
-const dir = join(tmpdir(), "dispatch-visual", kind);
-rmSync(dir, { recursive: true, force: true });
+const dir = mkdtempSync(join(tmpdir(), `dispatch-visual-${kind}-`));
 mkdirSync(join(dir, "home"), { recursive: true });
 const config =
   kind === "fresh"
@@ -269,12 +664,13 @@ writeFileSync(
   },
 );
 
-if (kind === "seeded") {
+if (kind !== "fresh") {
   const warm = boot(dir, "ignore");
   await waitReady();
   warm.kill("SIGTERM");
   await new Promise((r) => warm.once("exit", r));
-  seedRows(dir);
+  if (kind === "seeded") seedRows(dir);
+  else seedOrchestratedRows(dir);
 }
 
 const server = boot(dir, "inherit");

@@ -2,9 +2,30 @@ import fs from "node:fs";
 import path from "node:path";
 
 const FAKE_CLAUDE_SCRIPT = String.raw`import fs from "node:fs";
+import path from "node:path";
 import { spawn } from "node:child_process";
 
-const scenarioPath = process.env.FAKE_CLAUDE_SCENARIO;
+if (process.argv[2] === "--version") {
+  process.stdout.write("2.1.999 (fake)\n");
+  process.exit(0);
+}
+
+if (process.argv[2] === "auth") {
+  process.stdout.write(JSON.stringify({ loggedIn: false }) + "\n");
+  process.exit(0);
+}
+
+if (process.argv[2] === "mcp" && process.argv[3] === "list") {
+  process.stdout.write("No MCP servers configured. Use \`claude mcp add\` to add a server.\n");
+  process.exit(0);
+}
+
+process.stdout._handle?.setBlocking?.(false);
+
+for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) {
+  process.on(signal, () => process.exit(0));
+}
+
 const startedAt = Date.now();
 let scenario = {};
 let stamp = "";
@@ -23,11 +44,24 @@ let replayStopped = false;
 let replayStep = 0;
 let mcp = null;
 const saved = {};
+const waiters = [];
 
-function loadScenario() {
+function scenarioPath() {
+  const dir = process.env.FAKE_CLAUDE_SCENARIO_DIR;
+  if (dir) {
+    const card = process.env.DISPATCH_CARD_ID;
+    const own = card && path.basename(card) === card ? path.join(dir, card + ".json") : "";
+    if (own && fs.existsSync(own)) return own;
+    const fallback = path.join(dir, "default.json");
+    if (fs.existsSync(fallback)) return fallback;
+  }
+  return process.env.FAKE_CLAUDE_SCENARIO;
+}
+
+function loadScenario(file) {
   let text = "";
   try {
-    text = fs.readFileSync(scenarioPath, "utf8");
+    text = fs.readFileSync(file, "utf8");
   } catch {
     text = "";
   }
@@ -100,6 +134,7 @@ function writeEngineSessionId() {
 function submit() {
   const text = input;
   if (text === "") return;
+  notifyWaiters(text);
   if (text === "/clear") {
     wasCleared = true;
     return clearConversation();
@@ -137,8 +172,8 @@ function mcpConfigArg() {
 }
 
 function triggerReplay() {
-  const replay = scenario.replay;
-  if (!replay || typeof replay !== "object" || !mcpConfigArg()) return;
+  const replay = mcpConfigArg() && scenario.replay ? scenario.replay : scenario.loop;
+  if (!replay || typeof replay !== "object") return;
   if (replayStage === 0) {
     replayStage = 1;
     queueSteps("onStart", replay.onStart);
@@ -190,6 +225,109 @@ function expand(value) {
     );
   }
   return value;
+}
+
+function notifyWaiters(text) {
+  for (const waiter of waiters.splice(0)) {
+    if (waiter.re.test(text)) waiter.resolve();
+    else waiters.push(waiter);
+  }
+}
+
+function waitForKeys(step) {
+  const re = new RegExp(step.waitKeys);
+  const timeoutMs = step.timeoutMs ?? 60000;
+  return new Promise((resolve, reject) => {
+    const waiter = {
+      re,
+      resolve: () => {
+        clearTimeout(timer);
+        resolve();
+      },
+    };
+    const timer = setTimeout(() => {
+      const at = waiters.indexOf(waiter);
+      if (at !== -1) waiters.splice(at, 1);
+      reject(new Error("waitKeys timed out after " + timeoutMs + " ms"));
+    }, timeoutMs);
+    waiters.push(waiter);
+  });
+}
+
+function writeFileStep(step, append) {
+  const rel = append ? step.appendFile : step.writeFile;
+  if (typeof rel !== "string" || rel === "") {
+    throw new Error("path must be a non-empty string");
+  }
+  const cwd = process.cwd();
+  const resolved = path.resolve(cwd, rel);
+  if (path.isAbsolute(rel) || path.relative(cwd, resolved).startsWith("..")) {
+    throw new Error("path leaves the working folder: " + rel);
+  }
+  const content = String(expand(step.content ?? ""));
+  const realCwd = fs.realpathSync(cwd);
+  let walked = cwd;
+  for (const part of path.relative(cwd, resolved).split(path.sep)) {
+    walked = path.join(walked, part);
+    let stat;
+    try {
+      stat = fs.lstatSync(walked);
+    } catch {
+      break;
+    }
+    if (!stat.isSymbolicLink()) continue;
+    let real;
+    try {
+      real = fs.realpathSync(walked);
+    } catch {
+      throw new Error("path leaves the working folder: " + rel);
+    }
+    if (path.relative(realCwd, real).startsWith("..")) {
+      throw new Error("path leaves the working folder: " + rel);
+    }
+  }
+  fs.mkdirSync(path.dirname(resolved), { recursive: true });
+  if (append) fs.appendFileSync(resolved, content);
+  else fs.writeFileSync(resolved, content);
+  return { path: rel, bytes: Buffer.byteLength(content) };
+}
+
+async function reportStep(step) {
+  const port = process.env.DISPATCH_HOOK_PORT;
+  const token = process.env.DISPATCH_HOOK_TOKEN;
+  if (!port || !token) {
+    throw new Error("DISPATCH_HOOK_PORT and DISPATCH_HOOK_TOKEN are required");
+  }
+  const res = await fetch("http://127.0.0.1:" + port + "/api/loops/report", {
+    method: "POST",
+    headers: { "content-type": "application/json", "x-dispatch-token": token },
+    body: JSON.stringify(step.report),
+    signal: AbortSignal.timeout(5000),
+  });
+  if (res.status !== 202) throw new Error("report answered " + res.status);
+  return { status: res.status };
+}
+
+const ACTIONS = {
+  writeFile: (step) => writeFileStep(step, false),
+  appendFile: (step) => writeFileStep(step, true),
+  report: reportStep,
+  waitKeys: waitForKeys,
+};
+
+async function actionStep(type, step) {
+  const entry = { step: ++replayStep, type };
+  try {
+    const detail = await ACTIONS[type](step);
+    replayLog({ ...entry, ok: true, ...detail });
+    shown.push("⏺ " + type + " ok");
+    return true;
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    replayLog({ ...entry, ok: false, reason: reason.slice(0, 300) });
+    shown.push("⏺ " + type + " FAILED " + reason);
+    return false;
+  }
 }
 
 function mcpSend(client, method, params, timeoutMs) {
@@ -328,11 +466,7 @@ async function runSteps(phase, steps) {
     if (step.tool) {
       const met = await callStep(step);
       render();
-      if (!met) {
-        replayStopped = true;
-        replayLog({ done: true, phase, stopped: true });
-        return;
-      }
+      if (!met) return halt(phase);
     } else if (typeof step.print === "string") {
       shown.push(step.print);
       render();
@@ -341,9 +475,20 @@ async function runSteps(phase, steps) {
       render();
     } else if (typeof step.sleepMs === "number") {
       await new Promise((r) => setTimeout(r, step.sleepMs));
+    } else {
+      const type = Object.keys(ACTIONS).find((name) => name in step);
+      if (!type) continue;
+      const ok = await actionStep(type, step);
+      render();
+      if (!ok) return halt(phase);
     }
   }
   replayLog({ done: true, phase });
+}
+
+function halt(phase) {
+  replayStopped = true;
+  replayLog({ done: true, phase, stopped: true });
 }
 
 function handleKey(key) {
@@ -370,12 +515,31 @@ function handleKey(key) {
   else if (key.startsWith("char:")) input += key.slice(5);
 }
 
-function keysOf(chunk) {
+const PASTE_START = "\x1b[200~";
+const PASTE_END = "\x1b[201~";
+let pasting = false;
+let carry = "";
+
+function keysOf(data) {
   const arrows = { A: "up", B: "down", C: "right", D: "left" };
   const keys = [];
+  let chunk = carry + data;
+  carry = "";
+  const marker = pasting ? PASTE_END : PASTE_START;
+  for (let n = marker.length - 1; n >= (pasting ? 1 : 3); n--) {
+    if (chunk.endsWith(marker.slice(0, n))) {
+      carry = chunk.slice(-n);
+      chunk = chunk.slice(0, -n);
+      break;
+    }
+  }
   for (let i = 0; i < chunk.length; i++) {
     const c = chunk[i];
-    if (c === "\x1b") {
+    if (chunk.startsWith(pasting ? PASTE_END : PASTE_START, i)) {
+      pasting = !pasting;
+      i += PASTE_START.length - 1;
+    } else if (pasting) keys.push("char:" + (c === "\r" ? "\n" : c));
+    else if (c === "\x1b") {
       const arrow = chunk[i + 1] === "[" ? arrows[chunk[i + 2]] : undefined;
       if (arrow) {
         keys.push(arrow);
@@ -395,16 +559,17 @@ function keysOf(chunk) {
 
 function tick() {
   let next = "";
+  const file = scenarioPath();
   try {
-    const st = fs.statSync(scenarioPath);
-    next = st.mtimeMs + ":" + st.size;
+    const st = fs.statSync(file);
+    next = file + ":" + st.mtimeMs + ":" + st.size;
   } catch {
     next = "";
   }
   const warm = isWarming();
   if (next !== stamp) {
     stamp = next;
-    loadScenario();
+    loadScenario(file);
     lastWarm = isWarming();
     render();
   } else if (warm !== lastWarm) {
@@ -414,6 +579,7 @@ function tick() {
 }
 
 if (process.stdin.isTTY) process.stdin.setRawMode(true);
+process.stdout.write("\x1b[?2004h");
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {
   for (const key of keysOf(chunk)) handleKey(key);
@@ -429,10 +595,9 @@ function shellQuote(value: string): string {
 }
 
 /**
- * Write a fake interactive `claude` driven by the scenario file named in `FAKE_CLAUDE_SCENARIO`.
+ * Write a fake interactive `claude` that reads its scenario from `FAKE_CLAUDE_SCENARIO_DIR` or `FAKE_CLAUDE_SCENARIO`.
  *
- * @remarks Writes a Node script and an sh launcher named `claude` into `binDir` and returns the
- * launcher path. A scenario file that is not a JSON object is read as the two status rows.
+ * @remarks Lookup order is `<dir>/<DISPATCH_CARD_ID>.json`, `<dir>/default.json`, then the variable. A `loop` scenario writes only inside its cwd and reports to the hook port, and the fake is test-only. The fake sets its stdout non-blocking because a blocking write stalls on a full pty during a large paste.
  */
 export function writeFakeClaudeTui(binDir: string): string {
   const script = path.join(binDir, "fake-claude-tui.mjs");

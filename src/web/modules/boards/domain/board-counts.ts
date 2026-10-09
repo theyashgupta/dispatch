@@ -1,3 +1,4 @@
+import { formatCount } from "../../../../shared/format-count.js";
 import type { BoardWorkspaceRepo } from "../../../../shared/types.js";
 
 export type CountKind = "running" | "openGroups" | "attention";
@@ -7,17 +8,17 @@ export function countLabel(kind: CountKind, n: number): string | null {
   if (n === 0) return null;
   switch (kind) {
     case "running":
-      return `${n} running`;
+      return `${formatCount(n)} running`;
     case "openGroups":
-      return n === 1 ? "1 open group" : `${n} open groups`;
+      return n === 1 ? "1 open group" : `${formatCount(n)} open groups`;
     case "attention":
-      return n === 1 ? "1 needs attention" : `${n} need attention`;
+      return n === 1 ? "1 needs attention" : `${formatCount(n)} need attention`;
   }
 }
 
 /** The Repositories cell text at 1024 px. */
 export function repositoryCountLabel(n: number): string {
-  return n === 1 ? "1 repository" : `${n} repositories`;
+  return n === 1 ? "1 repository" : `${formatCount(n)} repositories`;
 }
 
 /** The folder names of a board, joined for the Repositories cell at 1440 px. */

@@ -450,3 +450,29 @@ void test("persist writes the board key column and the boardKey field for each c
   );
   raw.close();
 });
+
+void test("a board stamped with a newer schema version is refused with its table list unchanged", () => {
+  const files = [BOARD_DB_PATH, `${BOARD_DB_PATH}-wal`, `${BOARD_DB_PATH}-shm`];
+  for (const f of files) fs.rmSync(f, { force: true });
+  try {
+    const seed = new DatabaseSync(BOARD_DB_PATH);
+    seed.exec(`
+      CREATE TABLE meta (id INTEGER PRIMARY KEY CHECK (id = 0), data TEXT NOT NULL);
+      INSERT INTO meta (id, data) VALUES (0, '{"schemaVersion":4}');
+    `);
+    seed.close();
+    const objects = () => {
+      const raw = new DatabaseSync(BOARD_DB_PATH, { readOnly: true });
+      const rows = raw
+        .prepare("SELECT type, name FROM sqlite_master ORDER BY name")
+        .all();
+      raw.close();
+      return rows;
+    };
+    const before = objects();
+    assert.throws(() => openBoardDb(), /NEWER version/);
+    assert.deepEqual(objects(), before);
+  } finally {
+    for (const f of files) fs.rmSync(f, { force: true });
+  }
+});
