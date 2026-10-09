@@ -8,8 +8,10 @@ export function parseSeedArgs(argv, env) {
   const [kind, portArg] = argv;
   const port = Number(portArg);
   const now = Date.parse(env.DISPATCH_VISUAL_NOW ?? "");
-  if (kind !== "seeded" && kind !== "fresh")
-    throw new Error("usage: node tests/visual/seed.mjs <seeded|fresh> <port>");
+  if (kind !== "seeded" && kind !== "fresh" && kind !== "orchestrated")
+    throw new Error(
+      "usage: node tests/visual/seed.mjs <seeded|fresh|orchestrated> <port>",
+    );
   if (!Number.isInteger(port) || port <= 48400)
     throw new Error(`port ${portArg} not allowed, use a free port above 48400`);
   if (!Number.isFinite(now))
