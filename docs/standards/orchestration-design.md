@@ -314,18 +314,18 @@ The checks 1 to 3 use no git call. The check 4 reads one file and runs before an
 
 ## Tool reference
 
-This section is the reference for the 25 tools. Each tool calls one route under `/api/orchestrator/`. Each call is checked against the board scope and, for a write, the policy (D-6), and is recorded as a `tool_call` row in `orchestration_events`. A tool call on a card that another orchestrator owns (D-7) returns 403 `other-owner`.
+This section is the reference for the 26 tools. Each tool calls one route under `/api/orchestrator/`. Each call is checked against the board scope and, for a write, the policy (D-6), and is recorded as a `tool_call` row in `orchestration_events`. A tool call on a card that another orchestrator owns (D-7) returns 403 `other-owner`.
 
-| Family    | Tools                                                                                                          | Notes                                                                                    |
-| --------- | -------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Read      | `list_cards`, `get_card`, `list_sessions`, `get_group_progress`, `read_pane_tail`, `list_events`, `get_policy` | `list_events` takes a `since` cursor                                                     |
-| Tickets   | `create_ticket`, `update_ticket`, `move_card`, `add_comment`                                                   | `update_ticket` closes F25                                                               |
-| Groups    | `create_base_branch`, `create_group`, `start_group`                                                            | `create_group` takes members, base, playbook, direction and `dependsOn`                  |
-| Sessions  | `send_input`, `approve_roadmap`, `request_handoff`, `resume_loop`, `stop_session`                              | `send_input` returns `confirmed` or `unconfirmed` (D-4); `resume_loop` per Key rules     |
-| Ship      | `start_ship`, `get_ship_state`                                                                                 | D-8                                                                                      |
-| Decisions | `create_decision_item`                                                                                         | the user answers; the answer returns as an event                                         |
-| Wait      | `wait_for_event`                                                                                               | blocks until an event matches a filter or a time limit passes                            |
-| State     | `read_state`, `write_state`                                                                                    | the orchestrator keeps its state in the store, because it has no file write tool (U4-05) |
+| Family    | Tools                                                                                                                                 | Notes                                                                                    |
+| --------- | ------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Read      | `list_cards`, `get_card`, `list_sessions`, `get_group_progress`, `read_pane_tail`, `list_events`, `get_policy`, `get_board_workspace` | `list_events` takes a `since` cursor                                                     |
+| Tickets   | `create_ticket`, `update_ticket`, `move_card`, `add_comment`                                                                          | `update_ticket` closes F25                                                               |
+| Groups    | `create_base_branch`, `create_group`, `start_group`                                                                                   | `create_group` takes members, optional repos, playbook, direction and `dependsOn`        |
+| Sessions  | `send_input`, `approve_roadmap`, `request_handoff`, `resume_loop`, `stop_session`                                                     | `send_input` returns `confirmed` or `unconfirmed` (D-4); `resume_loop` per Key rules     |
+| Ship      | `start_ship`, `get_ship_state`                                                                                                        | D-8                                                                                      |
+| Decisions | `create_decision_item`                                                                                                                | the user answers; the answer returns as an event                                         |
+| Wait      | `wait_for_event`                                                                                                                      | blocks until an event matches a filter or a time limit passes                            |
+| State     | `read_state`, `write_state`                                                                                                           | the orchestrator keeps its state in the store, because it has no file write tool (U4-05) |
 
 Every route sits under `/api/orchestrator/`, and the paths below are relative to it. Each tool is one entry of `src/server/bootstrap/mcp-tools.ts`, and each route is declared in `src/server/routes/orchestrator.route.ts`, its handler is in `src/server/routes/orchestrator.handlers.ts` and its zod schema is in `src/server/routes/orchestrator-schemas.ts`. These rules hold for every route, so the entries do not repeat them:
 
@@ -387,6 +387,14 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 - Answer: the policy (with `groupPlaybook`), `runningLoops`, `concurrencyCap`, `groups`, and `playbooks`, the sorted names of the playbooks that exist.
 - Refusals: none beyond the rules above.
 
+### `get_board_workspace`
+
+- Route: `GET /board-workspace`.
+- Input: none.
+- Description: "Read the board workspace: the folder, the repositories with their base branch and check command, the playbook names and the group playbook. This tool changes nothing."
+- Answer: `folder` (the workspace folder of the board, or null), `repos` (each repository of the board as `{ path, base, checkCommand }`, and `base` is null when the repository has no base branch), `playbooks` (the sorted names of the playbooks that exist) and `groupPlaybook` (from the policy of the caller, or null).
+- Refusals: none beyond the rules above.
+
 ### `create_ticket`
 
 - Route: `POST /tickets`. It answers 201 with `{ card }`.
@@ -421,14 +429,14 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 - Route: `POST /base-branches`.
 - Input: `repository` (string, a repository path of the board), `name` (string, `base/` followed by a name that matches `[a-z0-9][a-z0-9._/-]{0,60}`), `startPoint` (string, 1 to 200 characters).
 - Description: "Create a base branch in a repository from a start point. A repository that is not known is refused."
-- Refusals: 400 `unknown-repository` (a missing value or a path that is not a repository of the board), `invalid-branch-name` (the pattern, a `..`, a trailing `/` or `.lock`, or a name that `git check-ref-format` refuses), `unknown-start-point` (a start point that starts with `-` or is not a commit). 404 `unknown-board`. 409 `branch-exists`.
+- Refusals: 400 `unknown-repository` (a missing value or a path that is not a repository of the board; on the default board the workspace folders are its repositories for `create_group`, `create_base_branch` and `start_ship`), `invalid-branch-name` (the pattern, a `..`, a trailing `/` or `.lock`, or a name that `git check-ref-format` refuses), `unknown-start-point` (a start point that starts with `-` or is not a commit). 404 `unknown-board`. 409 `branch-exists`.
 
 ### `create_group`
 
 - Route: `POST /groups`.
-- Input: `title` (string, 1 to 300 characters after trimming), `memberIds` (array of 2 or more distinct card ids), `repos` (array of 1 or more `{ path, base }`, both strings of 1 character or more), `playbook` (optional string, 1 character or more; when omitted, the `groupPlaybook` of the board policy applies when a playbook with that name exists, else the group has no playbook), `direction` (optional string, at most 10000 characters), `dependsOn` (optional array of at most 50 group card ids).
-- Description: "Create a group card from 2 or more cards. Omit playbook to use the board group playbook; get_policy lists the playbook names. Text that holds the status marker is refused."
-- Refusals: 400 `invalid-title`, `invalid-member-ids`, `invalid-repos`, `invalid-playbook`, `invalid-direction`, `invalid-dependency` (a bad id, or a card that is not a group on your board), `unknown-repository` (a repo path that is not a repository of the board), and `content contains the DISPATCH_STATUS marker` for a title or a direction that holds the status marker. 400 with a text as `error`: `unknown playbook`, `invalid base branch` (a base that starts with `-`), `Can't start: a selected repo is missing`, `orchestration config is not loaded`. 403 `other-owner` (a member outside your scope, that another orchestrator owns). A group that an extra creates joins its scope. 404 `unknown-board`. 409 `some selected cards are no longer eligible to be grouped` with `ineligibleIds` (a card that is unknown, on another board, not in To Do, already grouped, itself a group or an orchestrator session card). 409 `board-archived`.
+- Input: `title` (string, 1 to 300 characters after trimming), `memberIds` (array of 2 or more distinct card ids), `repos` (optional array of 1 or more `{ path, base }`, both strings of 1 character or more; when omitted, the group uses every repository of the board with its base branch, and `get_board_workspace` lists them), `playbook` (optional string, 1 character or more; when omitted, the `groupPlaybook` of the board policy applies when a playbook with that name exists, else the group has no playbook), `direction` (optional string, at most 10000 characters), `dependsOn` (optional array of at most 50 group card ids).
+- Description: "Create a group card from 2 or more cards. Omit repos to use the board repositories with their base branch; get_board_workspace lists them. A repository with no base branch is refused with missing-base; then pass repos with a base. Omit playbook to use the board group playbook; get_policy lists the playbook names. Text that holds the status marker is refused."
+- Refusals: 400 `invalid-title`, `invalid-member-ids`, `invalid-repos` (also for an omitted `repos` on a board with no repository), `missing-base` with `path` (an omitted `repos` and a board repository with no base branch), `invalid-playbook`, `invalid-direction`, `invalid-dependency` (a bad id, or a card that is not a group on your board), `unknown-repository` (a repo path that is not a repository of the board), and `content contains the DISPATCH_STATUS marker` for a title or a direction that holds the status marker. 400 with a text as `error`: `unknown playbook`, `invalid base branch` (a base that starts with `-`), `Can't start: a selected repo is missing`, `orchestration config is not loaded`. 403 `other-owner` (a member outside your scope, that another orchestrator owns). A group that an extra creates joins its scope. 404 `unknown-board`. 409 `some selected cards are no longer eligible to be grouped` with `ineligibleIds` (a card that is unknown, on another board, not in To Do, already grouped, itself a group or an orchestrator session card). 409 `board-archived`.
 
 ### `start_group`
 
@@ -612,3 +620,9 @@ Change: `start_ship` ships a group with no loop progress when its card is in Age
 Change: a new event kind `group_state` tells the orchestrator about an important change of a group. The event has the group card as `cardId`, and its data is `{ state, reason }`. `state` is one of `agent_done`, `needs_input`, `start_failed`, `shipped`, `ship_stopped`, `loop_error` and `usage_limit`. The server writes it in four places: the `status_agent_done` and `status_needs_input` activity events of a group card, the end of a ship flow (`shipped` or `ship_stopped`), a failed group start, and a supervisor state change of a group card to `api_error`, `stale`, `lost` or `shell_prompt` (`loop_error`) or to `usage_limit_dialog` or `usage_limit_wait` (`usage_limit`). The orchestrator card and a ticket card never write it. A state that repeats the last `group_state` event of the same card, with no other `group_state` event of that card in between and no `supervisor_state` event of that card to `working` after it, is not written. `wait_for_event` takes the kind in `kinds`, and `list_events` returns it.
 
 Change: the Board Orchestrator playbook step 7 tells the orchestrator to end every turn with `wait_for_event` on `decision_answered`, `group_state` and `intake_submitted` with `timeoutSeconds` 55, and a new line says that a message that starts with "Dispatch wake:" comes from Dispatch. The supervisor types that wake line into an idle orchestrator pane (see ARCHITECTURE, Orchestrator Session). Reason: in the G19 real run the orchestrator ended its turn after each action and slept until a person typed.
+
+### LOCAL-97
+
+Change: a new read tool, `get_board_workspace`, answers the folder of the board, its repositories with their base branch and check command, the playbook names and the group playbook. The `repos` input of `create_group` is now optional. When `repos` is omitted, the group uses every repository of the board with its base branch. A repository with no base branch answers 400 `missing-base` with its `path`. The default board stores no base branch, so its repositories answer base null; there the orchestrator passes `repos` with a base, for example a branch that it makes with `create_base_branch`. On the default board the workspace folders are its repositories for `create_group`, `create_base_branch` and `start_ship`. A board with no repository answers 400 `invalid-repos`. Both refusals come before any write. An explicit `repos` keeps its checks. The Board Orchestrator playbook tells the orchestrator to call `get_board_workspace` first, to omit `repos` and to ship a group in Agent done when its `shipRights` allow it. The tool count is 26.
+
+Reason: in the G19 real run the orchestrator asked the user for a repository path and a base branch that the board already held.

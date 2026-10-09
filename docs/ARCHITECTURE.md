@@ -138,33 +138,34 @@ The Auth column uses these values:
 
 Mount prefix: `/api/orchestrator`.
 
-| Method | Path                                               | Auth               | Purpose                                                                                           |
-| ------ | -------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------- |
-| GET    | `/api/orchestrator/cards`                          | Orchestrator token | Tool `list_cards`: list the cards of the board of the caller, with filters.                       |
-| GET    | `/api/orchestrator/cards/:id`                      | Orchestrator token | Tool `get_card`: read one card of the board with its members.                                     |
-| GET    | `/api/orchestrator/sessions`                       | Orchestrator token | Tool `list_sessions`: list the sessions of the board, only the live ones when asked.              |
-| GET    | `/api/orchestrator/groups/:id/progress`            | Orchestrator token | Tool `get_group_progress`: read the loop progress of one group card.                              |
-| GET    | `/api/orchestrator/sessions/:cardId/pane`          | Orchestrator token | Tool `read_pane_tail`: read the last lines of the terminal of a session.                          |
-| GET    | `/api/orchestrator/events`                         | Orchestrator token | Tool `list_events`: list the board events after a cursor, oldest first.                           |
-| GET    | `/api/orchestrator/policy`                         | Orchestrator token | Tool `get_policy`: read the policy of the caller with the running loop count and the group costs. |
-| POST   | `/api/orchestrator/tickets`                        | Orchestrator token | Tool `create_ticket`: create a local ticket marked as created by the caller.                      |
-| PATCH  | `/api/orchestrator/tickets/:id`                    | Orchestrator token | Tool `update_ticket`: change the title or description of a local ticket.                          |
-| POST   | `/api/orchestrator/tickets/:id/move`               | Orchestrator token | Tool `move_card`: move a card to a column under the manual move rules.                            |
-| POST   | `/api/orchestrator/tickets/:id/comments`           | Orchestrator token | Tool `add_comment`: add a comment to a card, local or on Linear.                                  |
-| POST   | `/api/orchestrator/base-branches`                  | Orchestrator token | Tool `create_base_branch`: create a local base branch in a board repository.                      |
-| POST   | `/api/orchestrator/groups`                         | Orchestrator token | Tool `create_group`: create a group card without starting it.                                     |
-| POST   | `/api/orchestrator/groups/:id/start`               | Orchestrator token | Tool `start_group`: start a group, or queue it behind its dependencies.                           |
-| POST   | `/api/orchestrator/sessions/:cardId/input`         | Orchestrator token | Tool `send_input`: type text into a running session.                                              |
-| POST   | `/api/orchestrator/groups/:cardId/approve-roadmap` | Orchestrator token | Tool `approve_roadmap`: tell a group loop that its plan is approved.                              |
-| POST   | `/api/orchestrator/sessions/:cardId/handoff`       | Orchestrator token | Tool `request_handoff`: ask a session loop to hand off its context.                               |
-| POST   | `/api/orchestrator/sessions/:cardId/resume`        | Orchestrator token | Tool `resume_loop`: resume a loop that `stop_session` or a supervisor give-up stopped.            |
-| POST   | `/api/orchestrator/sessions/:cardId/stop`          | Orchestrator token | Tool `stop_session`: press Escape in a session pane and park it at Needs input.                   |
-| POST   | `/api/orchestrator/decisions`                      | Orchestrator token | Tool `create_decision_item`: raise a decision item for the user to answer.                        |
-| POST   | `/api/orchestrator/events/wait`                    | Orchestrator token | Tool `wait_for_event`: hold the call until a board event matches or the time limit passes.        |
-| POST   | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `start_ship`: start the ship flow of a finished group card.                                  |
-| GET    | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `get_ship_state`: read the stored ship flow of a group card.                                 |
-| GET    | `/api/orchestrator/state`                          | Orchestrator token | Tool `read_state`: read the saved state of the calling orchestrator.                              |
-| PUT    | `/api/orchestrator/state`                          | Orchestrator token | Tool `write_state`: replace the saved state of the calling orchestrator.                          |
+| Method | Path                                               | Auth               | Purpose                                                                                             |
+| ------ | -------------------------------------------------- | ------------------ | --------------------------------------------------------------------------------------------------- |
+| GET    | `/api/orchestrator/cards`                          | Orchestrator token | Tool `list_cards`: list the cards of the board of the caller, with filters.                         |
+| GET    | `/api/orchestrator/cards/:id`                      | Orchestrator token | Tool `get_card`: read one card of the board with its members.                                       |
+| GET    | `/api/orchestrator/sessions`                       | Orchestrator token | Tool `list_sessions`: list the sessions of the board, only the live ones when asked.                |
+| GET    | `/api/orchestrator/groups/:id/progress`            | Orchestrator token | Tool `get_group_progress`: read the loop progress of one group card.                                |
+| GET    | `/api/orchestrator/sessions/:cardId/pane`          | Orchestrator token | Tool `read_pane_tail`: read the last lines of the terminal of a session.                            |
+| GET    | `/api/orchestrator/events`                         | Orchestrator token | Tool `list_events`: list the board events after a cursor, oldest first.                             |
+| GET    | `/api/orchestrator/policy`                         | Orchestrator token | Tool `get_policy`: read the policy of the caller with the running loop count and the group costs.   |
+| GET    | `/api/orchestrator/board-workspace`                | Orchestrator token | Tool `get_board_workspace`: read the board folder, repositories, playbook names and group playbook. |
+| POST   | `/api/orchestrator/tickets`                        | Orchestrator token | Tool `create_ticket`: create a local ticket marked as created by the caller.                        |
+| PATCH  | `/api/orchestrator/tickets/:id`                    | Orchestrator token | Tool `update_ticket`: change the title or description of a local ticket.                            |
+| POST   | `/api/orchestrator/tickets/:id/move`               | Orchestrator token | Tool `move_card`: move a card to a column under the manual move rules.                              |
+| POST   | `/api/orchestrator/tickets/:id/comments`           | Orchestrator token | Tool `add_comment`: add a comment to a card, local or on Linear.                                    |
+| POST   | `/api/orchestrator/base-branches`                  | Orchestrator token | Tool `create_base_branch`: create a local base branch in a board repository.                        |
+| POST   | `/api/orchestrator/groups`                         | Orchestrator token | Tool `create_group`: create a group card without starting it.                                       |
+| POST   | `/api/orchestrator/groups/:id/start`               | Orchestrator token | Tool `start_group`: start a group, or queue it behind its dependencies.                             |
+| POST   | `/api/orchestrator/sessions/:cardId/input`         | Orchestrator token | Tool `send_input`: type text into a running session.                                                |
+| POST   | `/api/orchestrator/groups/:cardId/approve-roadmap` | Orchestrator token | Tool `approve_roadmap`: tell a group loop that its plan is approved.                                |
+| POST   | `/api/orchestrator/sessions/:cardId/handoff`       | Orchestrator token | Tool `request_handoff`: ask a session loop to hand off its context.                                 |
+| POST   | `/api/orchestrator/sessions/:cardId/resume`        | Orchestrator token | Tool `resume_loop`: resume a loop that `stop_session` or a supervisor give-up stopped.              |
+| POST   | `/api/orchestrator/sessions/:cardId/stop`          | Orchestrator token | Tool `stop_session`: press Escape in a session pane and park it at Needs input.                     |
+| POST   | `/api/orchestrator/decisions`                      | Orchestrator token | Tool `create_decision_item`: raise a decision item for the user to answer.                          |
+| POST   | `/api/orchestrator/events/wait`                    | Orchestrator token | Tool `wait_for_event`: hold the call until a board event matches or the time limit passes.          |
+| POST   | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `start_ship`: start the ship flow of a finished group card.                                    |
+| GET    | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `get_ship_state`: read the stored ship flow of a group card.                                   |
+| GET    | `/api/orchestrator/state`                          | Orchestrator token | Tool `read_state`: read the saved state of the calling orchestrator.                                |
+| PUT    | `/api/orchestrator/state`                          | Orchestrator token | Tool `write_state`: replace the saved state of the calling orchestrator.                            |
 
 ### `routes/board.route.ts`
 
@@ -5887,7 +5888,7 @@ reads the identity or writes, `assertAheadAndClean` resolves the base once. The 
 `branch-not-ahead`) and the worktree must be clean (409 `worktree-dirty`). A failed git call of
 these two checks answers 409 `no-workspace`. A group with loop progress keeps the D-8 rules.
 
-**MCP server.** `dispatch mcp` serves the 25 tools over stdio. `bootstrap/cli.ts` reads and checks
+**MCP server.** `dispatch mcp` serves the 26 tools over stdio. `bootstrap/cli.ts` reads and checks
 `DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and
 `bootstrap/mcp-tools.ts` holds the zod input and the description of each tool. The dependency
 cruiser rule `mcp-server-isolated` refuses an import of `routes`, `services`, `store`, `adapters`
