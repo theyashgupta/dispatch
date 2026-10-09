@@ -5580,6 +5580,8 @@ env -u NODE_ENV -u CLAUDE_CONFIG_DIR node --import tsx --test tests/e2e/*.e2e.ts
 env -u NODE_ENV -u CLAUDE_CONFIG_DIR node --import tsx --test tests/e2e/scenario-3-upgrade.e2e.ts
 ```
 
+Scenario 4 (tests/e2e/scenario-4-no-loop-ship.e2e.ts) proves that a group with no loop files ships through `start_ship` to the bare origin of its sandbox, with the fake `claude` as orchestrator and as group session and with the fake `gh`.
+
 The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
 ## Orchestration Initiative
@@ -5724,7 +5726,11 @@ after 15 minutes with a busy sign and no transcript growth, one continue prompt 
 phase, send waits of 1.5 s, 10 s and 10 s, a ready wait of 60 s, and a reset wait plus 2 minutes.
 
 **Policy route.** `PUT /api/boards/:key/policy` writes the D-6 policy fields of a board. It is a
-user route; no orchestrator route or tool changes a policy.
+user route; no orchestrator route or tool changes a policy. The `groupPlaybook` field (a playbook name
+or null) is one of these fields. A save that omits `groupPlaybook` keeps the stored value, and a save
+with null clears it. The store reads each stored policy as the defaults of `defaultBoardPolicy` with
+the stored values over them, so a board saved before a new field gets its default. A stored policy
+that is JSON `null` or an array reads as the defaults alone.
 
 ### Orchestrator Control Surface
 
@@ -5816,9 +5822,9 @@ routes above.
 **Ship flow.** `ship-flow.ts` runs the D-8 steps for the branches of a finished group in stack
 order. The branch states are `queued`, `merging_main`, `checking`, `pushing`, `waiting_checks`,
 `waiting_merge` (with `open_prs`) or `merging` (with `merge`), `verifying`, `merged` and `failed`.
-Each branch must be a loop unit branch or `test/<slug>-specs`, with a local `refs/heads/<name>`,
-and never `main`, `master`, `HEAD`, a full ref name or the repository base. The first step checks
-that the worktree is clean, then runs `git fetch origin`, a checkout with the no-guess option and
+Each branch must be a loop unit branch or `test/<slug>-specs` (the session branch of the group for a
+group with no loop progress, D-10), with a local `refs/heads/<name>`, and never `main`, `master`,
+`HEAD`, a full ref name or the repository base. The first step checks that the worktree is clean, then runs `git fetch origin`, a checkout with the no-guess option and
 a merge of `origin/main` with no edit, and records the merged commit as `checked`. The check
 runs on that commit, the push uses the refspec `<checked>:refs/heads/<name>`, and the merge
 passes gh's match head commit option with it; a resumed flow whose HEAD moved stops. Each gh
@@ -5839,6 +5845,19 @@ and raises one `ship_failure` decision item. The identity stop compares the auth
 the new `origin/main` tip with the `git config` identity that the flow read at its start. One flow
 runs on a board at a time. A flow in the state `running` is started again at boot by
 `resumeShipFlows`, and a stopped flow is replaced by a new `start_ship` call.
+
+**Ship gate for a group with no loop progress.** A group with no loop progress has no
+`loopProgress` or zero units (decision record D-10). `assertShippable` refuses 409
+`engine-not-closed` for any group whose engine is active and not closed, whatever its unit count.
+For a group with no loop progress it replaces `loop-not-finished` with 409 `card-not-done`, and
+`assertGroupBranches` allows only the session branch of the card (`branch`, else the identifier).
+`startShip` then refuses 409 `engine-not-closed` when the session root holds the file
+`.claude/ralph-loop.local.md`, before any git call. After the local branch checks, and before it
+reads the identity or writes, `assertAheadAndClean` resolves the base once. The base is
+`refs/remotes/origin/<base>` when that ref exists, else `refs/heads/<base>`. It answers 409
+`unknown-base` for a base that is empty, starts with a hyphen, is not a plain branch name or resolves to neither ref. Each branch must be ahead of that ref (409
+`branch-not-ahead`) and the worktree must be clean (409 `worktree-dirty`). A failed git call of
+these two checks answers 409 `no-workspace`. A group with loop progress keeps the D-8 rules.
 
 **MCP server.** `dispatch mcp` serves the 25 tools over stdio. `bootstrap/cli.ts` reads and checks
 `DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and

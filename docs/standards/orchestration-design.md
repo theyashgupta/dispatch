@@ -282,6 +282,36 @@ The server enforces items 1 to 9 and the Done part of item 10: no tool exists fo
 
 **Evidence:** research section 6 (pitfalls), F9, F18, H05:44.
 
+### D-10: Ship gate for a group with no loop progress
+
+**Date:** 2026-10-09
+
+**Status:** accepted
+
+**Decision:** A group has no loop progress when its card has no `loopProgress` or when `loopProgress` has zero units. This record amends the D-8 precondition for such a group. D-8 keeps its text. One engine rule applies to every group, whatever its unit count: when `loopProgress.engine` is active and not closed, `start_ship` answers 409 `engine-not-closed`. A group with loop progress also keeps `loop-not-finished`, with no other change. For a group with no loop progress, `start_ship` checks these conditions in this order, after the source, main-only, ship rights and repository checks:
+
+1. The group card is in Agent done. Else the call answers 409 `card-not-done`. Member tickets mirror the column of their group, so this check also covers the members.
+2. Each named branch is the session branch of the group. This is the `branch` of the card. When the card has no `branch`, it is the card identifier. A branch of an older session is refused, because that branch lives in another worktree. Else the call answers 400 `invalid-branch-name` with `branch`. The names `main`, `master` and `HEAD`, a name that starts with `refs/` and the repository base stay refused for every group.
+3. Each dependency of the group is merged, and no flow runs on the board, as in D-8.
+4. The session root of the group, which is the workspace path of the card, has no engine file `.claude/ralph-loop.local.md`. A roadmap loop in planning has this file before the reader sees a roadmap. Else the call answers 409 `engine-not-closed`. A card with no workspace path answers 409 `no-workspace` first.
+5. Each named branch exists as a local branch, as in D-8.
+6. Each named branch has at least one commit that its base branch does not have. The session branch is cut from `origin/<base>`, so the server resolves the base once. The base is `refs/remotes/origin/<base>` when that ref exists, else `refs/heads/<base>`. A base that is empty, starts with a hyphen, is not a plain branch name or resolves to neither ref answers 409 `unknown-base` with `branch`. The server counts the commits with `git rev-list --count --end-of-options <ref>..refs/heads/<name>` in the group worktree. A count of 0 answers 409 `branch-not-ahead` with `branch`. A count that is not a number, or a failed git call, answers 409 `no-workspace`.
+7. The group worktree has no uncommitted change. `git status --porcelain` prints nothing. Else the call answers 409 `worktree-dirty`. A failed `git status` call answers 409 `no-workspace`.
+
+The checks 1 to 3 use no git call. The check 4 reads one file and runs before any git call. The checks 5 to 7 run before the git identity is read and before any write, so a refused call stores no flow.
+
+**Reason:** in the G19 Unit 2 real run, group RUN-4 built and tested its code on Sonnet 5.5 for 0.25 USD and left commit 948b54c. `start_ship` refused the group twice with `loop-not-finished`, because no seeded playbook runs a roadmap loop and the group had no loop progress. The gate had no rule for a group of this kind. A review of the first version found a loop in planning with zero units and an active engine, a stale local base and a base that reached the git option parser. The engine rule, check 4 and check 6 close these cases.
+
+**Rejected:**
+
+- Every group runs a roadmap loop: a roadmap loop needs a person for planning and costs more.
+- Run the check command in the gate: ship step 3 runs it on the pinned commit.
+- A separate check that the members are done: the members mirror the group column.
+
+**Governs:** LOCAL-95
+
+**Evidence:** the G19 real run report, Unit 2 (group RUN-4, commit 948b54c).
+
 ## Tool reference
 
 This section is the reference for the 25 tools. Each tool calls one route under `/api/orchestrator/`. Each call is checked against the board scope and, for a write, the policy (D-6), and is recorded as a `tool_call` row in `orchestration_events`. A tool call on a card that another orchestrator owns (D-7) returns 403 `other-owner`.
@@ -353,6 +383,7 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 - Route: `GET /policy`.
 - Input: none.
 - Description: "Read the board limits and the count of running loops. This tool changes nothing."
+- Answer: the policy (with `groupPlaybook`), `runningLoops`, `concurrencyCap`, `groups`, and `playbooks`, the sorted names of the playbooks that exist.
 - Refusals: none beyond the rules above.
 
 ### `create_ticket`
@@ -394,8 +425,8 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 ### `create_group`
 
 - Route: `POST /groups`.
-- Input: `title` (string, 1 to 300 characters after trimming), `memberIds` (array of 2 or more distinct card ids), `repos` (array of 1 or more `{ path, base }`, both strings of 1 character or more), `playbook` (optional string, 1 character or more), `direction` (optional string, at most 10000 characters), `dependsOn` (optional array of at most 50 group card ids).
-- Description: "Create a group card from 2 or more cards. Text that holds the status marker is refused."
+- Input: `title` (string, 1 to 300 characters after trimming), `memberIds` (array of 2 or more distinct card ids), `repos` (array of 1 or more `{ path, base }`, both strings of 1 character or more), `playbook` (optional string, 1 character or more; when omitted, the `groupPlaybook` of the board policy applies when a playbook with that name exists, else the group has no playbook), `direction` (optional string, at most 10000 characters), `dependsOn` (optional array of at most 50 group card ids).
+- Description: "Create a group card from 2 or more cards. Omit playbook to use the board group playbook; get_policy lists the playbook names. Text that holds the status marker is refused."
 - Refusals: 400 `invalid-title`, `invalid-member-ids`, `invalid-repos`, `invalid-playbook`, `invalid-direction`, `invalid-dependency` (a bad id, or a card that is not a group on your board), `unknown-repository` (a repo path that is not a repository of the board), and `content contains the DISPATCH_STATUS marker` for a title or a direction that holds the status marker. 400 with a text as `error`: `unknown playbook`, `invalid base branch` (a base that starts with `-`), `Can't start: a selected repo is missing`, `orchestration config is not loaded`. 403 `other-owner` (a member outside your scope, that another orchestrator owns). A group that an extra creates joins its scope. 404 `unknown-board`. 409 `some selected cards are no longer eligible to be grouped` with `ineligibleIds` (a card that is unknown, on another board, not in To Do, already grouped, itself a group or an orchestrator session card). 409 `board-archived`.
 
 ### `start_group`
@@ -446,7 +477,7 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 - Route: `POST /groups/:cardId/ship`. It answers 202 with `{ flow }`.
 - Input: `cardId` (card id), `repository` (string, a repository path of the group workspace), `branches` (array of 1 to 10 distinct `{ name, title, body }`: `name` 1 to 100 characters that match `[A-Za-z0-9][A-Za-z0-9._/-]{0,99}` with no `..`, `title` 1 to 200 characters after trimming, `body` 1 to 20000 characters after trimming).
 - Description: "Start the ship steps of a finished group card for its branches in stack order. A board with no ship rights is refused."
-- Refusals: 400 `not-group-card`, `unknown-repository` (also a repository with no board repository entry; an entry with an empty `checkCommand` skips step 3), `invalid-branches` (also a repeated branch name), `invalid-branch-name` (also with `branch`: a name that is not the `branch` of a loop unit or `test/<slug>-specs`, a name `main`, `master` or `HEAD`, a name that starts with `refs/`, the repository base branch, or a name with no local `refs/heads/<name>`), `invalid-title`, `invalid-body`, and `content contains the DISPATCH_STATUS marker` for a title or body that holds the status marker. 403 `policy-refused` with `reason` `ship rights are none`. 404 `unknown-board`. 409 `loop-not-finished` (no unit, or a unit that is not `built, awaiting /ship` or `shipped`), `engine-not-closed`, `dependency-not-merged` with `reason` the ids that wait, `ship-flow-running` (a flow runs on the board), `no-workspace` (no workspace path, or no worktree for the repository, checked before any git call), `no-git-identity` (a failed or empty `user.name` or `user.email`).
+- Refusals: 400 `not-group-card`, `unknown-repository` (also a repository with no board repository entry; an entry with an empty `checkCommand` skips step 3), `invalid-branches` (also a repeated branch name), `invalid-branch-name` (also with `branch`: a name that is not the `branch` of a loop unit or `test/<slug>-specs` or, for a group with no loop progress, a name that is not the `branch` of the card (else its identifier), a name `main`, `master` or `HEAD`, a name that starts with `refs/`, the repository base branch, or a name with no local `refs/heads/<name>`), `invalid-title`, `invalid-body`, and `content contains the DISPATCH_STATUS marker` for a title or body that holds the status marker. 403 `policy-refused` with `reason` `ship rights are none`. 404 `unknown-board`. 409 `loop-not-finished` (a group with loop progress and a unit that is not `built, awaiting /ship` or `shipped`), `engine-not-closed` (the engine of any group is active and not closed, or a group with no loop progress holds the engine file `.claude/ralph-loop.local.md` in its session root), `card-not-done` (a group with no loop progress that is not in Agent done), `dependency-not-merged` with `reason` the ids that wait, `ship-flow-running` (a flow runs on the board), `no-workspace` (no workspace path, or no worktree for the repository, checked before any git call; also a failed git call of the ahead or clean check, or a count that is not a number), `branch-not-ahead` with `branch` (a group with no loop progress: the branch has no commit that `origin/<base>`, else the local base, lacks), `unknown-base` with `branch` (the base is empty, starts with a hyphen, is not a plain branch name, or resolves to neither `refs/remotes/origin/<base>` nor `refs/heads/<base>`), `worktree-dirty` (a group with no loop progress: the worktree has an uncommitted or untracked file), `no-git-identity` (a failed or empty `user.name` or `user.email`).
 - Flow stops: the runner reads the board policy before each step and each poll. `shipRights: none` stops the flow with `reason` `ship rights were removed`, and `open_prs` makes the flow wait for the user merge in place of `merging`. A worktree with uncommitted changes stops `merging_main` with `reason` `worktree has uncommitted changes`. Five failed PR polls in a row stop the flow. An empty check rollup is pending for 3 polls and then counts as passed; a completed check with a conclusion outside `SUCCESS`, `NEUTRAL` and `SKIPPED` is failed. A branch reuses an open PR in place of `gh pr create` only when the PR is from the same repository, into `main`, and its head commit is the checked commit.
 - Commit pinning: after `merging_main` the flow records the merged commit (`checked` on the branch). The check runs on it, the push sends `<checked>:refs/heads/<name>`, and the merge passes gh's match head commit option with it. A resumed flow at `checking` or later stops with `reason` `branch moved since the check` when HEAD is not that commit. Every gh call passes gh's repo option with the owner and name of the `origin` remote, read once at the start and stored as `repo` on the flow; an origin whose host is not `github.com` or `ssh.github.com` (an SSH host alias, another host) or a local path gives `repo` null and no repo option. The signature retry of step 6 runs only when every violation clause of the merge error (lines split on sentence ends, commas and semicolons) matches `must have verified signatures`.
 - More stops: a diff hunk under a header that names no file stops `checking` with `reason` `unparsed diff header`. A resumed flow on a card with no workspace path stops with `reason` `group has no workspace`. A runner whose card is gone stops with no write and no decision item; the runner reads the policy of the board it started on. A refused move to Done after the last merge keeps the flow `done` and raises one `ship_failure` item that asks the user to move the group by hand.
@@ -570,3 +601,7 @@ Change: the attention queue also lists `permission_prompt`, and a `lost` or `she
 ### LOCAL-93
 
 Confirmed. The removal note names `watch-loops.zsh`, `resume-loop.zsh`, `resume-after-reset.zsh`, `handoff-request.md` and the `keepawake` tmux session.
+
+### LOCAL-95
+
+Change: `start_ship` ships a group with no loop progress when its card is in Agent done, its branch is the session branch of the group, each branch is ahead of its base and the worktree is clean (D-10). D-8 keeps its text for a group with loop progress. The policy gets one more D-6 field, `groupPlaybook` (a playbook name or null, default null): only the user sets it, and `create_group` uses it when no `playbook` is given and that playbook exists. A policy save that omits `groupPlaybook` keeps the stored value, and a save with `groupPlaybook` null clears it.
