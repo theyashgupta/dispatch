@@ -34,6 +34,7 @@ import {
   type OrchestrationEventRow,
   type Sandbox,
 } from "./harness/sandbox.js";
+import { cardOf, readJsonl, writeRunLog } from "./harness/board-reads.js";
 
 const BOARD = "ORC";
 const RUN_LOG = path.join(EVIDENCE_DIR, "scenario-1-run-log.txt");
@@ -48,23 +49,10 @@ interface Snapshot {
 
 const note = makeNote("scenario-1");
 
-const readJsonl = (file: string): Record<string, unknown>[] =>
-  fs.existsSync(file)
-    ? fs
-        .readFileSync(file, "utf8")
-        .split("\n")
-        .filter((line) => line.trim() !== "")
-        .map((line) => JSON.parse(line) as Record<string, unknown>)
-    : [];
-
 async function snapshot(sb: Sandbox): Promise<Snapshot> {
   const res = await sb.api<Snapshot>("GET", `/api/board?board=${BOARD}`);
   assert.equal(res.status, 200);
   return res.body;
-}
-
-async function cardOf(sb: Sandbox, id: string): Promise<Card | undefined> {
-  return (await snapshot(sb)).cards.find((c) => c.id === id);
 }
 
 function actionsOf(
@@ -246,8 +234,8 @@ async function runScenario(
 
   await waitFor(
     async () => {
-      const a = await cardOf(sb, ALPHA_ID);
-      const b = await cardOf(sb, BETA_ID);
+      const a = await cardOf(sb, BOARD, ALPHA_ID);
+      const b = await cardOf(sb, BOARD, BETA_ID);
       return a?.tmuxSession !== undefined && b?.tmuxSession !== undefined;
     },
     4 * MINUTE,
@@ -256,7 +244,7 @@ async function runScenario(
 
   await waitFor(
     async () => {
-      const card = await cardOf(sb, BETA_ID);
+      const card = await cardOf(sb, BOARD, BETA_ID);
       return card?.loopProgress?.units[0]?.phases[0]?.gate === "pass";
     },
     4 * MINUTE,
@@ -267,7 +255,7 @@ async function runScenario(
 
   const stopped = await waitFor(
     async () => {
-      const card = await cardOf(sb, BETA_ID);
+      const card = await cardOf(sb, BOARD, BETA_ID);
       return card?.state === "needs_input" && card.stateReason === "usage_stop"
         ? card
         : null;
@@ -303,13 +291,13 @@ async function runScenario(
 
   await waitFor(
     async () => {
-      const card = await cardOf(sb, BETA_ID);
+      const card = await cardOf(sb, BOARD, BETA_ID);
       return card?.loopProgress?.units[0]?.phases[2]?.gate === "pass";
     },
     4 * MINUTE,
     "group B phase 3 pass after the resume",
   );
-  const betaAfter = await cardOf(sb, BETA_ID);
+  const betaAfter = await cardOf(sb, BOARD, BETA_ID);
   assert.notEqual(betaAfter?.stateReason, "usage_stop");
 
   const handoff = await waitFor(
@@ -358,7 +346,7 @@ async function runScenario(
 
   await waitFor(
     async () => {
-      const unit = (await cardOf(sb, ALPHA_ID))?.loopProgress?.units[0];
+      const unit = (await cardOf(sb, BOARD, ALPHA_ID))?.loopProgress?.units[0];
       return (
         unit?.phases[1]?.gate === "pass" &&
         unit.phases[2]?.gate === "pass" &&
@@ -368,14 +356,15 @@ async function runScenario(
     4 * MINUTE,
     "group A phases 2 and 3 pass",
   );
-  const lastGate = (await cardOf(sb, ALPHA_ID))?.loopProgress?.summary.lastGate;
+  const lastGate = (await cardOf(sb, BOARD, ALPHA_ID))?.loopProgress?.summary
+    .lastGate;
   assert.equal(lastGate?.result, "pass");
   note("failed gate cleared by a later pass");
 
   for (const id of [ALPHA_ID, BETA_ID]) {
     await waitFor(
       async () => {
-        const progress = (await cardOf(sb, id))?.loopProgress;
+        const progress = (await cardOf(sb, BOARD, id))?.loopProgress;
         return progress?.completion === "complete" && progress.engine?.closed;
       },
       4 * MINUTE,
@@ -420,7 +409,7 @@ async function runScenario(
 
   for (const id of [ALPHA_ID, BETA_ID]) {
     await waitFor(
-      async () => (await cardOf(sb, id))?.shipFlow?.state === "done",
+      async () => (await cardOf(sb, BOARD, id))?.shipFlow?.state === "done",
       8 * MINUTE,
       `${id} ship flow done`,
     );
@@ -460,7 +449,7 @@ async function runScenario(
 function watchFailedGate(sb: Sandbox, signal: AbortSignal) {
   return waitFor(
     async () => {
-      const card = await cardOf(sb, ALPHA_ID).catch(() => undefined);
+      const card = await cardOf(sb, BOARD, ALPHA_ID).catch(() => undefined);
       const gate = card?.loopProgress?.summary.lastGate;
       return gate?.result === "fail" ? gate : null;
     },
@@ -509,18 +498,6 @@ function assertScenarioCoverage(events: OrchestrationEventRow[]): void {
   );
 }
 
-/** Write every orchestration event of the board to the run log, one line each. */
-async function writeRunLog(sb: Sandbox): Promise<OrchestrationEventRow[]> {
-  const events = await sb.orchestrationEvents(BOARD);
-  const lines = events.map(
-    (e) =>
-      `${e.id}\t${e.ts}\t${e.kind}\t${e.cardId ?? "-"}\t${JSON.stringify(e.data)}`,
-  );
-  fs.mkdirSync(path.dirname(RUN_LOG), { recursive: true });
-  fs.writeFileSync(RUN_LOG, `${lines.join("\n")}\n`);
-  return events;
-}
-
 void test("scenario 1: the harness and fixtures name no tmux verb that sends keys", () => {
   const here = path.dirname(import.meta.filename);
   const fixtures = path.join(here, "fixtures", "scenario-1");
@@ -557,12 +534,12 @@ void test(
         /only reads/,
       );
       await runScenario(sb, watcher);
-      const events = await writeRunLog(sb);
+      const events = await writeRunLog(sb, BOARD, RUN_LOG);
       assertScenarioCoverage(events);
     } finally {
       watcher.abort();
       try {
-        await writeRunLog(sb);
+        await writeRunLog(sb, BOARD, RUN_LOG);
       } catch (err) {
         note(
           `run log not written: ${err instanceof Error ? err.message : String(err)}`,
