@@ -152,3 +152,22 @@ void test("an abort answers null and leaves no listener or timer", async () => {
   );
   assert.equal(listeners(), base);
 });
+
+void test("a wait on group_state returns that event, and a wait on other kinds does not end on it", async () => {
+  const base = listeners();
+  const other = waitForEvent(
+    SBX,
+    { since: 0, kinds: ["pr_state"], cardIds: ["g-wait"] },
+    300,
+  );
+  const wait = waitForEvent(
+    SBX,
+    { since: 0, kinds: ["group_state"], cardIds: ["g-wait"] },
+    10_000,
+  );
+  const event = append(SBX, "group_state", "g-wait");
+  assert.deepEqual(await wait, { event });
+  const timedOut = await other;
+  assert.ok(timedOut !== null && "timedOut" in timedOut);
+  assert.equal(listeners(), base);
+});

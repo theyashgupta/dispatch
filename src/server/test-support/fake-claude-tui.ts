@@ -110,6 +110,12 @@ function logKey(key) {
   fs.appendFileSync(scenario.keyLogPath, JSON.stringify(entry) + "\n");
 }
 
+function logStatus(rows) {
+  if (!scenario.statusLogPath) return;
+  const entry = { rows, at: new Date().toISOString() };
+  fs.appendFileSync(scenario.statusLogPath, JSON.stringify(entry) + "\n");
+}
+
 function clearConversation() {
   shown = [];
   input = "";
@@ -472,6 +478,7 @@ async function runSteps(phase, steps) {
       render();
     } else if (Array.isArray(step.statusRows)) {
       statusOverride = step.statusRows;
+      logStatus(step.statusRows);
       render();
     } else if (typeof step.sleepMs === "number") {
       await new Promise((r) => setTimeout(r, step.sleepMs));

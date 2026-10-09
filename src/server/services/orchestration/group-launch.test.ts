@@ -10,8 +10,12 @@ import { ConflictError, ValidationError } from "../domain/errors.js";
 const env = isolateEnv();
 const { store } = await import("../../store/board.store.js");
 const { setOrchestrationConfig } = await import("../infra/config-holder.js");
-const { createGroup, startGroup, requireOrchestrationConfig } =
-  await import("./group-launch.js");
+const {
+  createGroup,
+  recordStartFailure,
+  startGroup,
+  requireOrchestrationConfig,
+} = await import("./group-launch.js");
 
 await store.load();
 const CONFIG = { linearApiKey: "k" } as Config;
@@ -183,4 +187,24 @@ void test("startGroup resolves a failure for a thrown start and for a start erro
     ),
     { ok: false, reason: "start failed at creating worktrees" },
   );
+});
+
+void test("recordStartFailure writes one start_failed group_state event with the reason", async () => {
+  const a = await local("sf-a");
+  const b = await local("sf-b");
+  const card = await createGroup(DEFAULT_BOARD_KEY, {
+    title: "grp",
+    memberIds: [a, b],
+    workspace,
+  });
+  await recordStartFailure(card, false, "start failed at workspace");
+  const rows = store
+    .listOrchestrationEvents(DEFAULT_BOARD_KEY, 0, 500)
+    .filter((e) => e.cardId === card.id && e.kind === "group_state");
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].data, {
+    state: "start_failed",
+    reason: "start failed at workspace",
+  });
+  assert.equal(rows[0].sessionId, null);
 });

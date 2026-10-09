@@ -326,7 +326,7 @@ describe("wait_for_event against the Board Orchestrator playbook", () => {
       (p) => p.name === "Board Orchestrator",
     );
     assert.ok(playbook);
-    const rule = /set timeoutSeconds to (\d+) or less/.exec(playbook.body);
+    const rule = /timeoutSeconds to (\d+)\./.exec(playbook.body);
     assert.ok(rule, "the playbook names a wait limit");
     const limit = Number(rule[1]);
     assert.equal(limit, 55);

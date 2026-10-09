@@ -24,6 +24,7 @@ export interface PolicyFormValues {
   budgetPerGroup: string;
   supervisor: BoardPolicy["supervisor"];
   groupPlaybook: string | null;
+  wakeMinutes: string;
 }
 
 export type PolicyFormErrors = Partial<
@@ -31,6 +32,7 @@ export type PolicyFormErrors = Partial<
     | "concurrencyCap"
     | "handoffPercent"
     | "handoffHardPercent"
+    | "wakeMinutes"
     | "budgetPerGroup",
     string
   >
@@ -66,6 +68,7 @@ export const POLICY_ERRORS = {
   concurrencyCap: "Enter a number from 1 to 10.",
   handoffPercent: "Enter a number from 10 to 95.",
   handoffHardPercent: "Enter a number above the handoff percent.",
+  wakeMinutes: "Enter a whole number from 0 to 1440.",
   budgetPerGroup: "Enter an amount above 0, or leave it empty for no limit.",
   budgetPerGroupMax: "Enter an amount of 100000 or less.",
 } as const;
@@ -123,6 +126,7 @@ export function policyFormValues(policy: BoardPolicy): PolicyFormValues {
       policy.budgetPerGroup === null ? "" : String(policy.budgetPerGroup),
     supervisor: policy.supervisor,
     groupPlaybook: policy.groupPlaybook,
+    wakeMinutes: String(policy.wakeMinutes),
   };
 }
 
@@ -179,6 +183,9 @@ export function validatePolicyForm(values: PolicyFormValues): PolicyFormErrors {
   if (hard === null || hard > 100 || (soft !== null && hard <= soft)) {
     errors.handoffHardPercent = POLICY_ERRORS.handoffHardPercent;
   }
+  if (!inRange(values.wakeMinutes, 0, 1440)) {
+    errors.wakeMinutes = POLICY_ERRORS.wakeMinutes;
+  }
   const budget = budgetAmount(values.budgetPerGroup);
   if (budget !== null && !(budget > 0)) {
     errors.budgetPerGroup = POLICY_ERRORS.budgetPerGroup;
@@ -199,7 +206,7 @@ export function isPolicyDirty(
 }
 
 /**
- * Build the body of the policy save: the eleven policy fields and nothing else.
+ * Build the body of the policy save: the twelve policy fields and nothing else.
  *
  * @remarks
  * `usageLimit` is `wait` or `stop`, so the body never holds a usage credits value.
@@ -217,5 +224,6 @@ export function policyPayload(values: PolicyFormValues): BoardPolicy {
     budgetPerGroup: budgetAmount(values.budgetPerGroup),
     supervisor: values.supervisor,
     groupPlaybook: values.groupPlaybook,
+    wakeMinutes: Number(values.wakeMinutes),
   };
 }

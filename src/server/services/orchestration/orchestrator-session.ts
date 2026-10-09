@@ -191,6 +191,28 @@ function patchRecord(
   });
 }
 
+export function setLastWake(
+  key: BoardKey,
+  id: string,
+  lastWake: { reasons: string[]; at: string },
+): Promise<OrchestratorRecord> {
+  return patchRecord(key, id, { lastWake });
+}
+
+const stopListeners: ((key: BoardKey, id: string) => void)[] = [];
+
+/**
+ * Register a listener that runs when an orchestrator stop begins.
+ *
+ * @remarks The wake service registers here, so a stopped orchestrator drops its queue without this
+ * file importing the service that writes to it.
+ */
+export function onOrchestratorStop(
+  listener: (key: BoardKey, id: string) => void,
+): void {
+  stopListeners.push(listener);
+}
+
 export interface OrchestratorState {
   markdown: string;
   updatedAt: string | null;
@@ -678,6 +700,7 @@ export async function stopOrchestrator(
   const release = lock(board, id);
   try {
     const record = await patchRecord(board.key, id, { state: "stopping" });
+    for (const listener of stopListeners) listener(board.key, id);
     const identity = { boardKey: board.key, orchestratorId: id };
     const settled = (async () => {
       const card = current.cardId ? store.getCard(current.cardId) : undefined;

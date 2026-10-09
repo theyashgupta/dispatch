@@ -1753,6 +1753,7 @@ export interface BoardPolicy {
   budgetPerGroup: number | null;
   supervisor: "on" | "off";
   groupPlaybook: string | null;
+  wakeMinutes: number;
 }
 
 export type OrchestratorPolicyOverride = Partial<
@@ -1783,6 +1784,7 @@ export interface OrchestratorRecord {
   stateMarkdown?: string;
   stateUpdatedAt?: string;
   handoffReady?: boolean;
+  lastWake?: { reasons: string[]; at: string } | null;
 }
 
 export interface OrchestratorSessionView {
@@ -1979,9 +1981,24 @@ export const ORCHESTRATION_EVENT_KINDS = [
   "decision_raised",
   "decision_answered",
   "intake_submitted",
+  "group_state",
 ] as const;
 
 export type OrchestrationEventKind = (typeof ORCHESTRATION_EVENT_KINDS)[number];
+
+export type GroupState =
+  | "agent_done"
+  | "needs_input"
+  | "start_failed"
+  | "shipped"
+  | "ship_stopped"
+  | "loop_error"
+  | "usage_limit";
+
+export type GroupStateData = {
+  state: GroupState;
+  reason: string;
+};
 
 export type SupervisorState =
   | "working"

@@ -146,7 +146,7 @@ test("a form is dirty when any field differs from the saved values", () => {
   }
 });
 
-test("the payload holds the eleven policy fields with numbers, null and the stored model", () => {
+test("the payload holds the twelve policy fields with numbers, null and the stored model", () => {
   const payload = policyPayload(
     edit({
       concurrencyCap: "4",
@@ -166,6 +166,7 @@ test("the payload holds the eleven policy fields with numbers, null and the stor
     "shipRights",
     "supervisor",
     "usageLimit",
+    "wakeMinutes",
   ]);
   assert.equal(payload.concurrencyCap, 4);
   assert.equal(payload.loopModel, "claude-fable-5-1:max");
@@ -263,4 +264,31 @@ test("a stored model outside the list shows the default option and counts as cha
   assert.equal(payload.orchestratorModel, "claude-opus-5-5");
   assert.equal(payload.loopModel, null);
   assert.equal(isPolicyDirty(listedModels(saved), saved), false);
+});
+
+test("the wake timer accepts 0 to 1440 and refuses the rest", () => {
+  const table: [string, boolean][] = [
+    ["0", true],
+    ["15", true],
+    ["1440", true],
+    ["-1", false],
+    ["1441", false],
+    ["1.5", false],
+    ["", false],
+    ["abc", false],
+  ];
+  for (const [text, ok] of table) {
+    const errors = validatePolicyForm(edit({ wakeMinutes: text }));
+    assert.equal(errors.wakeMinutes === undefined, ok, text);
+    if (!ok) {
+      assert.equal(errors.wakeMinutes, "Enter a whole number from 0 to 1440.");
+    }
+  }
+});
+
+test("the wake timer is a form string, a payload number, and counts as a change", () => {
+  assert.equal(saved.wakeMinutes, "15");
+  assert.equal(policyPayload(edit({ wakeMinutes: "0" })).wakeMinutes, 0);
+  assert.equal(policyPayload(edit({ wakeMinutes: "1440" })).wakeMinutes, 1440);
+  assert.equal(isPolicyDirty(edit({ wakeMinutes: "30" }), saved), true);
 });

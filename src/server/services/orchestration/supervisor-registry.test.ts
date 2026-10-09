@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { DEFAULT_BOARD_KEY, parseBoardKey } from "../../../shared/board-key.js";
 import type { BoardKey } from "../../../shared/types.js";
+import { startedGroup } from "../../test-support/group-fixtures.js";
 
 const env = isolateEnv();
 const { store } = await import("../../store/board.store.js");
@@ -177,5 +178,75 @@ void test("an orchestrator's continue budget is keyed by the UTC day, so a new d
     "retry:orchestrator/2026-10-08": 1,
     "retry:orchestrator/2026-10-09": 1,
   });
+  dropWatcher(ids.tmuxSession);
+});
+
+function groupStates(board: BoardKey, cardId: string) {
+  return store
+    .listOrchestrationEvents(board, 0, 500)
+    .filter((e) => e.cardId === cardId && e.kind === "group_state")
+    .map((e) => e.data);
+}
+
+async function groupSession() {
+  const { g } = await startedGroup(store, { board: SBX });
+  const card = store.getCard(g.id)!;
+  return {
+    cardId: card.id,
+    sessionId: card.activeSessionId!,
+    tmuxSession: card.tmuxSession!,
+  };
+}
+
+void test("a group card entering api_error writes one loop_error event, and a repeat sample writes none", async () => {
+  const ids = await groupSession();
+  await supervisePane({ ...ids, pane: pane("working.txt") });
+  await supervisePane({ ...ids, pane: pane("api-error.txt") });
+  await supervisePane({ ...ids, pane: pane("api-error.txt") });
+  assert.deepEqual(groupStates(SBX, ids.cardId), [
+    { state: "loop_error", reason: "api_error" },
+  ]);
+});
+
+void test("a group card at the usage limit dialog writes a usage_limit event", async () => {
+  const ids = await groupSession();
+  await supervisePane({ ...ids, pane: pane("working.txt") });
+  await supervisePane({ ...ids, pane: pane("limit-menu.txt") });
+  await supervisePane({ ...ids, pane: pane("limit-menu.txt") }).catch(
+    () => undefined,
+  );
+  assert.equal(sessionOf(ids.cardId)?.state, "usage_limit_dialog");
+  const states = groupStates(SBX, ids.cardId);
+  assert.equal(states.length, 1);
+  assert.equal(states[0].state, "usage_limit");
+});
+
+void test("a ticket card and the orchestrator card write no group_state event on an error state", async () => {
+  const ticket = await startedCard(SBX, "ticket-error");
+  await supervisePane({ ...ticket, pane: pane("working.txt") });
+  await supervisePane({ ...ticket, pane: pane("api-error.txt") });
+  assert.equal(sessionOf(ticket.cardId)?.state, "api_error");
+  assert.equal(groupStates(SBX, ticket.cardId).length, 0);
+
+  const hidden = await store.createOrchestratorCard(
+    SBX,
+    "Orchestrator: Err",
+    "err",
+  );
+  await store.completeStart(hidden.id, undefined, {
+    workspacePath: "/tmp/ws-orchestrator-err",
+    tmuxSession: "dsp-orchestrator-err",
+    branch: "orchestrator",
+  });
+  const card = store.getCard(hidden.id)!;
+  const ids = {
+    cardId: card.id,
+    sessionId: card.activeSessionId!,
+    tmuxSession: "dsp-orchestrator-err",
+  };
+  await supervisePane({ ...ids, pane: pane("working.txt") });
+  await supervisePane({ ...ids, pane: pane("api-error.txt") });
+  assert.equal(sessionOf(ids.cardId)?.state, "api_error");
+  assert.equal(groupStates(SBX, ids.cardId).length, 0);
   dropWatcher(ids.tmuxSession);
 });

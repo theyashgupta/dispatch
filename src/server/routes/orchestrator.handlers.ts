@@ -21,6 +21,7 @@ import {
 } from "../services/orchestration/orchestrator-read.js";
 import { createDecisionItem } from "../services/orchestration/decision-items.js";
 import { waitForEvent } from "../services/orchestration/orchestrator-wait.js";
+import { recordDelivered } from "../services/orchestration/orchestrator-wake.js";
 import {
   commentOnTicket,
   createOrchestratorTicket,
@@ -175,6 +176,11 @@ export const listEventsHandler: ToolHandler = (req, res, caller, call) => {
     req.query,
   );
   const page = eventsAfter(caller.boardKey, since, limit);
+  recordDelivered(
+    caller.boardKey,
+    caller.orchestratorId,
+    page.events.map((e) => e.id),
+  );
   call.result = `${page.events.length} events`;
   res.status(200).json(page);
 };
@@ -391,6 +397,8 @@ export const waitForEventHandler: ToolHandler = async (
     gone.signal,
   );
   if (outcome === null) return;
+  if ("event" in outcome)
+    recordDelivered(caller.boardKey, caller.orchestratorId, [outcome.event.id]);
   call.result = "event" in outcome ? outcome.event.kind : "timed-out";
   res.status(200).json(outcome);
 };

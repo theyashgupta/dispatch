@@ -10,6 +10,7 @@ import {
   type DetectMemory,
   type Detection,
 } from "../domain/supervisor-state.js";
+import { groupStateOfSupervisor } from "../domain/group-state.js";
 import {
   holdsNeedsInput,
   initialPlanMemory,
@@ -17,6 +18,8 @@ import {
   type LoopFacts,
   type PlanMemory,
 } from "../domain/supervisor-plan.js";
+import { recordGroupState } from "./group-state-events.js";
+import { driveWake, wakeInFlight } from "./orchestrator-wake.js";
 import { runActions } from "./supervisor-actions.js";
 import {
   checkHandoffCancel,
@@ -119,6 +122,9 @@ async function recordTransition(
     },
     "supervisor_state",
   );
+  const groupState = groupStateOfSupervisor(change.state);
+  if (groupState !== null)
+    recordGroupState(card, groupState, change.state, session.id);
   if (change.state === "needs_input")
     await moveToNeedsInput(card, session, change.evidence);
   return from;
@@ -216,10 +222,10 @@ export async function superviseLost(cardId: string): Promise<void> {
 /**
  * Detect the state of one captured pane and record a change once.
  *
- * @remarks Sessions on a board with `supervisor: off` get no watcher, no state and no event.
- * A sample that arrives while the same session is still being sampled is skipped. A group
- * card's loop files are read before its first plan, so a duty right after boot counts under its
- * real unit and phase.
+ * @remarks Sessions on a board with `supervisor: off` get no watcher, no state and no event. A sample
+ * that arrives while the same session is still being sampled, or while a wake line is being typed
+ * into the pane, is skipped. A group card's loop files are read before its first plan, and an orchestrator
+ * card gets the wake duty after the sample's own state work, which a state change skips.
  */
 export async function supervisePane(
   sample: PaneSample,
@@ -234,7 +240,7 @@ export async function supervisePane(
     return;
   }
   const watcher = ensureWatcher(sample.tmuxSession, session.state ?? null);
-  if (watcher.running) return;
+  if (watcher.running || wakeInFlight(card)) return;
   watcher.running = true;
   try {
     if (card.source === "group" && !watcher.progressRead) {
@@ -271,6 +277,8 @@ export async function supervisePane(
       await checkHandoffThreshold(card, session, board.policy);
       await checkHandoffCancel(card, session, now);
     }
+    if (!changed)
+      driveWake(card, session, sample.pane, board.policy.wakeMinutes, now);
   } finally {
     watcher.running = false;
   }

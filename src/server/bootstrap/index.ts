@@ -55,6 +55,9 @@ import {
   startSlackRound,
   stopSlackRound,
 } from "../services/orchestration/slack-round.js";
+import { recordGroupState } from "../services/orchestration/group-state-events.js";
+import { queueWakeReason } from "../services/orchestration/orchestrator-wake.js";
+import { groupStateOfActivity } from "../services/domain/group-state.js";
 import { sendPushForCard } from "../services/orchestration/push-send.js";
 import { startArtifactDetectionLoop } from "../adapters/artifact-detect.js";
 import {
@@ -89,7 +92,7 @@ import { startSupervisorPass } from "../services/orchestration/supervisor-pass.j
 import { resumeShipFlows } from "../services/orchestration/ship-flow.js";
 import { startAccountChain } from "../services/orchestration/account-chain.js";
 import { healServicePlist } from "../services/orchestration/service.js";
-import type { ActivityEvent } from "../../shared/types.js";
+import type { ActivityEvent, OrchestrationEvent } from "../../shared/types.js";
 import {
   DEFAULT_CLEANUP_DELAY_DAYS,
   DEFAULT_ARCHIVE_RETENTION_DAYS,
@@ -480,6 +483,18 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
         );
       },
     );
+  });
+  store.on("activity", (event: ActivityEvent) => {
+    const state = groupStateOfActivity(event.type);
+    if (state === null || event.cardId == null) return;
+    recordGroupState(store.getCard(event.cardId), state, event.reason ?? state);
+  });
+  store.on("orchestration", (event: OrchestrationEvent) => {
+    try {
+      queueWakeReason(event);
+    } catch (err) {
+      console.warn(`[wake] queue failed: ${(err as Error).message}`);
+    }
   });
   startArtifactDetectionLoop(port);
   if (config.updateCheck !== false) startUpdateCheckLoop(config);

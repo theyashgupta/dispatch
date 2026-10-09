@@ -540,6 +540,13 @@ void test("startShip refuses a card with no workspace and a repository with no g
   assert.ok(calls.every((c) => c.args[0] !== "push"));
 });
 
+function groupStatesOf(cardId: string) {
+  return store
+    .listOrchestrationEvents(SBX, 0, 1000)
+    .filter((e) => e.cardId === cardId && e.kind === "group_state")
+    .map((e) => e.data.state);
+}
+
 function decisionsOf(cardId: string) {
   return store
     .listDecisionItems(SBX, "open")
@@ -615,6 +622,7 @@ void test("with merge rights a two unit stack and its specs branch ship in order
     "card in Done",
   );
   assert.equal(decisionsOf(stack.card.id).length, 0);
+  assert.deepEqual(groupStatesOf(stack.card.id), ["shipped"]);
   await assertSafeCalls(stack);
   const checkRuns = calls.filter((c) => c.cmd === "env");
   assert.equal(checkRuns.length, 3);
@@ -743,6 +751,7 @@ void test("a failing check command stops at checking before any push", async () 
   );
   assert.deepEqual(ghCalls(stack), []);
   assert.equal(decisionsOf(stack.card.id).length, 1);
+  assert.deepEqual(groupStatesOf(stack.card.id), ["ship_stopped"]);
 });
 
 void test("a signature rule refusal merges once more as admin and records it", async () => {
@@ -1202,6 +1211,7 @@ void test("a runner that throws in its stop handler is stored as stopped with th
   assert.equal(flow.reason, "decision store is down");
   assert.notEqual(flow.finishedAt, null);
   assert.equal(decisionsOf(stack.card.id).length, 0);
+  assert.deepEqual(groupStatesOf(stack.card.id), ["ship_stopped"]);
 });
 
 /** Store one open PR 7 for `head` in the fake gh state, with the given extra fields. */

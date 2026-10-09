@@ -229,6 +229,7 @@ const policy: BoardPolicy = {
   budgetPerGroup: null,
   supervisor: "on",
   groupPlaybook: null,
+  wakeMinutes: 15,
 };
 
 function body(index: number): unknown {
@@ -246,7 +247,7 @@ test("the panel decisions query polls on the shared decisions key", async () => 
   assert.equal(calls[0]?.url, "/api/decisions?board=LOCAL&state=open");
 });
 
-test("Save policy puts the eleven fields and no credits value, then updates the board list", async () => {
+test("Save policy puts the twelve fields and no credits value, then updates the board list", async () => {
   const client = newClient();
   const stored = { key: LOCAL, policy: { ...policy, concurrencyCap: 4 } };
   client.setQueryData(boardListKeys.list, {
@@ -261,7 +262,7 @@ test("Save policy puts the eleven fields and no credits value, then updates the 
   assert.equal(result.ok, true);
   assert.equal(calls[0]?.url, "/api/boards/LOCAL/policy");
   assert.equal(calls[0]?.init?.method, "PUT");
-  assert.equal(Object.keys(body(0) as object).length, 11);
+  assert.equal(Object.keys(body(0) as object).length, 12);
   assert.equal(/credit/i.test(calls[0]?.init?.body as string), false);
   const list = client.getQueryData<{ boards: { policy: BoardPolicy }[] }>(
     boardListKeys.list,

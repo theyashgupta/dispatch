@@ -4,6 +4,7 @@ import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import type { Card } from "../../../../shared/types.js";
 import {
   movableGroups,
+  lastWakeLabel,
   movePlan,
   nextExtra,
   orchestratorRows,
@@ -173,6 +174,7 @@ test("table rows show the main scope text, the owned groups and the narrowed fie
     scope: "Each group that no extra owns",
     owns: "GROUP-12, GROUP-13, GROUP-16",
     policy: "Board policy",
+    lastWake: "None",
   });
   assert.deepEqual(rows[1], {
     id: "extra-1",
@@ -181,5 +183,42 @@ test("table rows show the main scope text, the owned groups and the narrowed fie
     scope: "GROUP-14, GROUP-15",
     owns: "GROUP-14, GROUP-15",
     policy: "Loops at once: 1",
+    lastWake: "None",
   });
+});
+
+test("the last wake label reads reasons and a 24-hour time, or None", () => {
+  const lastWake = {
+    reasons: ["decision answered", "timer"],
+    at: "2026-10-09T14:05:00.000Z",
+  };
+  assert.equal(
+    lastWakeLabel(lastWake, "UTC"),
+    "decision answered, timer at 14:05",
+  );
+  assert.equal(
+    lastWakeLabel(lastWake, "Asia/Kolkata"),
+    "decision answered, timer at 19:35",
+  );
+  assert.equal(
+    lastWakeLabel(
+      { reasons: ["timer"], at: "2026-10-09T00:07:00.000Z" },
+      "UTC",
+    ),
+    "timer at 00:07",
+  );
+  assert.equal(lastWakeLabel(null), "None");
+  assert.equal(lastWakeLabel(undefined), "None");
+  assert.equal(lastWakeLabel({ reasons: ["timer"], at: "nope" }), "None");
+});
+
+test("table rows carry the last wake label", () => {
+  const woken: OwnerRecord = {
+    ...main,
+    lastWake: { reasons: ["timer"], at: "2026-10-09T14:05:00.000Z" },
+  };
+  assert.equal(
+    orchestratorRows([woken], cards, "UTC")[0]?.lastWake,
+    "timer at 14:05",
+  );
 });

@@ -32,6 +32,7 @@ import { worktreePath } from "../domain/workspace-paths.js";
 import { callerPolicy, dependencyDone, resolveBoard } from "./boards.js";
 import { moveCard } from "./card-move.js";
 import { createDecisionItem } from "./decision-items.js";
+import { recordGroupState } from "./group-state-events.js";
 import { enforce } from "./orchestrator-groups.js";
 
 export const shipTools: { run: typeof run; pollMs: number } = {
@@ -404,6 +405,7 @@ function launch(r: Runner): void {
         `[ship] flow of ${r.cardId} not stored: ${firstLine(again)}`,
       );
     });
+    recordGroupState(store.getCard(r.cardId), "ship_stopped", reason);
   });
 }
 
@@ -806,6 +808,7 @@ async function stop(
   );
   r.flow.decisionId = item.id;
   await persist(r);
+  recordGroupState(store.getCard(r.cardId), "ship_stopped", reason);
 }
 
 /**
@@ -857,6 +860,7 @@ async function runFlow(r: Runner): Promise<void> {
   r.flow.state = "done";
   r.flow.finishedAt = new Date().toISOString();
   await persist(r);
+  recordGroupState(store.getCard(r.cardId), "shipped", "every branch merged");
   if (move) await moveToDone(r);
 }
 
