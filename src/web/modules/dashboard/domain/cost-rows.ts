@@ -14,7 +14,7 @@ export function dollars(value: number): string {
 }
 
 /**
- * Builds the cost bar rows of the groups, with the near budget mark at 80 percent of the budget.
+ * Builds the cost bar rows of the groups, with the near budget mark at 80 percent of the budget and the over budget mark above 100 percent.
  *
  * @remarks A budget that an owner orchestrator override set names that orchestrator, so the user knows where to change it.
  */
@@ -40,7 +40,12 @@ export function costRows(
     const percent = Math.round((cost / budget) * 100);
     const near = cost / budget >= NEAR_RATIO;
     const base = `${dollars(cost)} of ${dollars(budget)}, ${percent}%`;
-    const text = near ? `${base}, near budget` : base;
+    const over = cost > budget;
+    const text = over
+      ? `${base}, over budget`
+      : near
+        ? `${base}, near budget`
+        : base;
     return {
       cardId,
       groupId,

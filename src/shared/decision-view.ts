@@ -117,7 +117,90 @@ export function liveReplyResults<T>(
   return live;
 }
 
-/** The toast or error line of a failed action, for example "Resume loop failed: no-live-session.". */
+/** The toast or error line of a failed action, for example "Resume loop failed: there is no open session.". */
 export function actionFailedText(action: string, message: string): string {
   return `${action} failed: ${message.replace(/\.+$/, "")}.`;
+}
+
+const REFUSALS: Record<string, string> = {
+  "supervisor-off": "the supervisor is off",
+  "orchestrator-running": "it is already running",
+  "orchestrator-session-live": "the session is still open, resume it",
+  "orchestrator-not-resumable": "there is nothing to resume",
+  "orchestrator-not-running": "it is not running",
+  "orchestrator-busy": "the orchestrator is busy, try again in a moment",
+  "orchestrator-start-failed": "the orchestrator did not start",
+  "orchestrator-resume-failed": "the orchestrator did not resume",
+  "unknown-orchestrator": "that orchestrator no longer exists",
+  "unknown-board": "that board no longer exists",
+  "unknown-card": "that card no longer exists",
+  "duplicate-id": "an orchestrator with this id already exists",
+  "main-exists": "this board already has a main orchestrator",
+  "extra-needs-main": "the main orchestrator has to exist first",
+  "main-has-scope": "the main orchestrator cannot have a group or a ticket",
+  "main-has-override": "the main orchestrator cannot have a policy override",
+  "extra-needs-scope": "an extra orchestrator needs a group or a ticket",
+  "group-owned": "another extra orchestrator owns one of the groups",
+  "ticket-owned": "another extra orchestrator owns one of the tickets",
+  "wider-override": "an override is wider than the board policy",
+  "empty-patch": "there is nothing to change",
+  "invalid-id":
+    "the id has to be 2 to 21 characters: a lowercase letter, then lowercase letters, digits or hyphens",
+  "invalid-orchestrator-id": "that orchestrator id is not valid",
+  "invalid-name": "the name has to be 1 to 60 characters",
+  "invalid-role": "the role has to be main or extra",
+  "invalid-groupIds": "the group list is not valid",
+  "invalid-ticketIds": "the ticket list is not valid",
+  "invalid-card-id": "that card id is not valid",
+  "invalid-roadmapApproval": "the approval mode has to be ask, rules or all",
+  "invalid-usageLimit": "usage limit has to be wait or stop",
+  "invalid-shipRights": "ship rights has to be none, open PRs or merge",
+  "invalid-supervisor": "the supervisor has to be on or off",
+  "invalid-loopModel": "the loop model is not a supported model",
+  "invalid-orchestratorModel":
+    "the orchestrator model is not a supported model",
+  "invalid-concurrencyCap": "loops at once has to be a number from 1 to 10",
+  "invalid-handoffPercent": "handoff has to be a number from 10 to 95",
+  "invalid-handoffHardPercent":
+    "hard handoff has to be a number above the handoff percent, up to 100",
+  "hard-below-handoff":
+    "hard handoff has to be a number above the handoff percent, up to 100",
+  "invalid-budgetPerGroup":
+    "the budget has to be an amount above 0 and at most 100000",
+  "invalid-policy": "the policy has a field that is not valid",
+  "unknown-field": "the request has a field that is not allowed",
+  "invalid-body": "the request is not valid",
+  "invalid-text": "the text is empty or starts with a mode character",
+  "session-state-refused": "the session is at a prompt that cannot take text",
+  "no-live-session": "there is no open session",
+  "session-busy": "the session is busy, try again in a moment",
+  "no-loop": "there is no loop for this card",
+  "ship-running": "a ship is running",
+  "not-resumable": "the session is not waiting to be resumed",
+  "unknown-decision": "that decision no longer exists",
+  "already-answered": "the decision is already answered",
+  "invalid-option": "that option is not valid for this decision",
+  "invalid-note": "the note is too long",
+  "invalid-state": "the decision state has to be open or answered",
+  "session is already live": "the session is already open",
+  "card has no lost session to resume": "there is no lost session to resume",
+  "card has no workspace to resume": "the card has no workspace to resume",
+  "a start is in flight for this card": "a start is already running",
+};
+const GENERIC_REFUSAL = "the request failed";
+
+/**
+ * Turn a refusal code and optional server reason into plain text for a toast or an error line.
+ *
+ * @remarks
+ * A mapped code wins over the server reason. An unmapped code with a reason shows the reason, and one without shows a sentence that names the code, so support can trace it.
+ */
+export function refusalText(
+  code: string | null,
+  reason: string | null,
+): string {
+  const key = code === "policy-refused" ? reason : code;
+  if (key !== null && Object.hasOwn(REFUSALS, key)) return REFUSALS[key];
+  if (reason !== null) return reason;
+  return code === null ? GENERIC_REFUSAL : `${GENERIC_REFUSAL} (${code})`;
 }

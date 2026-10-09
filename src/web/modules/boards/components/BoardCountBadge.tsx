@@ -17,5 +17,9 @@ export function BoardCountBadge({ kind, count }: BoardCountBadgeProps) {
   if (label === null) {
     return <span className="text-muted-foreground">0</span>;
   }
-  return <Badge tone="neutral">{label}</Badge>;
+  return (
+    <Badge tone="neutral" title={label} className="overflow-visible">
+      {label}
+    </Badge>
+  );
 }

@@ -7,6 +7,7 @@ import {
   actionFailedText,
   decisionViews,
   liveReplyResults,
+  refusalText,
   replyKey,
   type StoredReply,
 } from "../../../../shared/decision-view.js";
@@ -92,7 +93,9 @@ export function AttentionQueueContainer() {
     const resultText = replyResultText(outcome, row.title, card?.state);
     if (resultText === null) {
       if (!outcome.ok) {
-        toast.error(actionFailedText("Reply", outcome.reason ?? outcome.error));
+        toast.error(
+          actionFailedText("Reply", refusalText(outcome.error, outcome.reason)),
+        );
       }
     } else {
       setReplies((prev) => ({
@@ -111,7 +114,10 @@ export function AttentionQueueContainer() {
     const outcome = await answer.mutateAsync({ id, optionId, note });
     if (!outcome.ok) {
       toast.error(
-        actionFailedText("Decision answer", outcome.reason ?? outcome.error),
+        actionFailedText(
+          "Decision answer",
+          refusalText(outcome.error, outcome.reason),
+        ),
         {
           action: {
             label: "Try again",
@@ -129,7 +135,10 @@ export function AttentionQueueContainer() {
     ).mutateAsync(cardId);
     if (!outcome.ok) {
       toast.error(
-        actionFailedText(ACTION_LABELS[kind], outcome.reason ?? outcome.error),
+        actionFailedText(
+          ACTION_LABELS[kind],
+          refusalText(outcome.error, outcome.reason),
+        ),
         {
           action: {
             label: "Try again",

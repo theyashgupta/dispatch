@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { formatCount } from "../../../../shared/format-count.js";
 import { Badge } from "@/components/ui/badge";
 import type { SectionState } from "@/modules/dashboard/domain/section-state";
 import { SectionError } from "./SectionError";
@@ -27,7 +28,7 @@ export function DashboardSection({
         <h2 className="m-0 text-base font-semibold text-foreground">{title}</h2>
         {count !== null && state.kind === "ready" && (
           <Badge tone="neutral" className="tabular-nums">
-            {count}
+            {typeof count === "number" ? formatCount(count) : count}
           </Badge>
         )}
         {action !== undefined && <div className="ms-auto">{action}</div>}

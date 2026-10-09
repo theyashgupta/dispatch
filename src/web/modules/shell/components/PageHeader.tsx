@@ -11,6 +11,7 @@ export function PageHeader({ title, count, children }: PageHeaderProps) {
   return (
     <header className="flex h-(--page-header-height) min-w-0 shrink-0 items-center gap-2 border-b border-border bg-(--surface-column) px-4 select-none">
       <h1
+        title={title}
         tabIndex={-1}
         className="m-0 min-w-0 truncate font-sans text-lg font-semibold text-foreground outline-none"
       >

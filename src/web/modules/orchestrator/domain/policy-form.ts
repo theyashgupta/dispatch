@@ -65,7 +65,10 @@ export const POLICY_ERRORS = {
   handoffPercent: "Enter a number from 10 to 95.",
   handoffHardPercent: "Enter a number above the handoff percent.",
   budgetPerGroup: "Enter an amount above 0, or leave it empty for no limit.",
+  budgetPerGroupMax: "Enter an amount of 100000 or less.",
 } as const;
+
+export const MAX_BUDGET_PER_GROUP = 100_000;
 
 /** Fill the form values from the stored board policy, with the legacy model name shown as Opus 5.5. */
 export function policyFormValues(policy: BoardPolicy): PolicyFormValues {
@@ -140,6 +143,8 @@ export function validatePolicyForm(values: PolicyFormValues): PolicyFormErrors {
   const budget = budgetAmount(values.budgetPerGroup);
   if (budget !== null && !(budget > 0)) {
     errors.budgetPerGroup = POLICY_ERRORS.budgetPerGroup;
+  } else if (budget !== null && budget > MAX_BUDGET_PER_GROUP) {
+    errors.budgetPerGroup = POLICY_ERRORS.budgetPerGroupMax;
   }
   return errors;
 }

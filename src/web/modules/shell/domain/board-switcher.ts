@@ -1,4 +1,5 @@
 import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
+import { formatCount } from "../../../../shared/format-count.js";
 import {
   hasManyBoards,
   type BoardEntry,
@@ -55,7 +56,9 @@ export function collapsedLabel(key: BoardKey): string {
 
 /** The accessible name of an attention badge. */
 export function attentionLabel(n: number): string {
-  return n === 1 ? "1 item needs attention" : `${n} items need attention`;
+  return n === 1
+    ? "1 item needs attention"
+    : `${formatCount(n)} items need attention`;
 }
 
 /** The global shortcut rows, with "Switch board" added only while the switcher shows. */

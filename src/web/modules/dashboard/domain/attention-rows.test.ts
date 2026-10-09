@@ -6,6 +6,7 @@ import type { Card, ClaudeAccountSummary } from "../../../../shared/types.js";
 import {
   attentionRows,
   replyResultText,
+  waitingText,
   type AttentionContext,
   type AttentionRow,
 } from "./attention-rows.js";
@@ -248,4 +249,13 @@ test("a reply result reads Delivered, Not confirmed, or Not sent with the new st
     ),
     null,
   );
+});
+
+test("waitingText uses minutes under 60, hours under 48, then days", () => {
+  assert.equal(waitingText(0), "waiting 0 min");
+  assert.equal(waitingText(59), "waiting 59 min");
+  assert.equal(waitingText(60), "waiting 1 h");
+  assert.equal(waitingText(47 * 60 + 59), "waiting 47 h");
+  assert.equal(waitingText(48 * 60), "waiting 2 d");
+  assert.equal(waitingText(576002), "waiting 400 d");
 });
