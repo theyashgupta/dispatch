@@ -1990,7 +1990,6 @@ export interface SessionMeters {
   usage: { fiveHourPercent: number | null; sevenDayPercent: number | null };
 }
 
-
 export type SlackMode = "mcp" | "token";
 
 export type SlackConnectorState = GranolaCheckState;
