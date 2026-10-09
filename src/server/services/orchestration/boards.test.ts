@@ -21,6 +21,7 @@ const {
   isLiveSessionCard,
   listBoards,
   restoreBoard,
+  runningLoops,
   updateBoard,
 } = await import("./boards.js");
 
@@ -364,7 +365,20 @@ test("updateBoard LOCAL writes only the workspace folders that differ", async ()
 const RUNNING_LOOP = {
   slug: "loop",
   roadmapFile: "units.md",
-  units: [],
+  units: [
+    {
+      number: 1,
+      ticket: null,
+      title: "unit",
+      status: "not started",
+      statusText: "",
+      branch: null,
+      commit: null,
+      prdPath: null,
+      phaseTotal: null,
+      phases: [],
+    },
+  ],
   engine: null,
   completion: "running",
   summary: {
@@ -377,6 +391,14 @@ const RUNNING_LOOP = {
   warnings: [],
   readAt: "2026-10-06T00:00:00.000Z",
 } satisfies LoopProgress;
+
+async function startCard(id: string): Promise<void> {
+  await store.completeStart(id, undefined, {
+    workspacePath: path.join(env.root, "ws", id),
+    branch: id,
+    tmuxSession: `dsp-${id}`,
+  });
+}
 
 async function startedOn(board: BoardKey, title: string): Promise<Card> {
   const card = await store.createLocalCard(board, title, "");
@@ -443,6 +465,8 @@ test("boardCounts lists the running loops of a board, sorted by group id", async
   ]);
   assert.ok(running.ok && idle.ok && second.ok);
   if (!running.ok || !idle.ok || !second.ok) return;
+  await startCard(second.card.id);
+  await startCard(running.card.id);
   await store.setLoopProgress(second.card.id, RUNNING_LOOP);
   await store.setLoopProgress(running.card.id, RUNNING_LOOP);
   await store.setLoopProgress(idle.card.id, {
@@ -459,6 +483,44 @@ test("boardCounts lists the running loops of a board, sorted by group id", async
   assert.deepEqual(
     boardCounts().counts.find((c) => c.key === "CNTA")?.loops,
     [],
+  );
+});
+
+test("boardCounts lists a running group with no loop progress with a null percent, and the list matches runningLoops", async () => {
+  const board = key("CNTN");
+  await createBoard(input({ key: "CNTN", name: "NoLoop" }), countingReader([]));
+  const members = async (title: string) =>
+    (await store.createLocalCard(board, title, "")).id;
+  const bare = await store.createGroupCard(board, "bare", [
+    await members("b1"),
+    await members("b2"),
+  ]);
+  const finished = await store.createGroupCard(board, "finished", [
+    await members("f1"),
+    await members("f2"),
+  ]);
+  const looped = await store.createGroupCard(board, "looped", [
+    await members("l1"),
+    await members("l2"),
+  ]);
+  assert.ok(bare.ok && finished.ok && looped.ok);
+  if (!bare.ok || !finished.ok || !looped.ok) return;
+  await startCard(bare.card.id);
+  await startCard(looped.card.id);
+  await store.setLoopProgress(looped.card.id, RUNNING_LOOP);
+  await store.setLoopProgress(finished.card.id, {
+    ...RUNNING_LOOP,
+    completion: "complete",
+  });
+  const loops = boardCounts().counts.find((c) => c.key === board)?.loops;
+  assert.equal(loops?.length, runningLoops(board));
+  assert.deepEqual(
+    loops?.find((l) => l.groupId === bare.card.identifier),
+    { groupId: bare.card.identifier, percent: null },
+  );
+  assert.equal(
+    loops?.some((l) => l.groupId === finished.card.identifier),
+    false,
   );
 });
 

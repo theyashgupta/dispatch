@@ -137,3 +137,52 @@ void test("an existing database without the column gains it on open with no sche
   assert.equal(schemaVersion(after), before);
   after.close();
 });
+
+void test("a stored policy with no groupPlaybook reads the default and keeps its other values", () => {
+  const OLD = parseBoardKey("OLD") as BoardKey;
+  const legacy: Record<string, unknown> = {
+    ...defaultBoardPolicy(OLD),
+    concurrencyCap: 7,
+    shipRights: "merge",
+  };
+  delete legacy.groupPlaybook;
+  const conn = raw();
+  conn
+    .prepare(
+      `INSERT INTO boards (key, name, workspace_root, repositories, linear_team_keys, last_used_folder, policy, created_at, archived)
+       VALUES (?, 'Old', NULL, '[]', '[]', NULL, ?, ?, 0)`,
+    )
+    .run(OLD, JSON.stringify(legacy), "2026-10-07T00:00:00.000Z");
+  conn.close();
+  const read = openBoardDb()
+    .readBoards()
+    .find((b) => b.key === OLD);
+  assert.equal(read?.policy.groupPlaybook, null);
+  assert.equal(read?.policy.concurrencyCap, 7);
+  assert.equal(read?.policy.shipRights, "merge");
+});
+
+void test("a stored policy that is JSON null or an array reads back as the defaults", () => {
+  const NUL = parseBoardKey("NUL") as BoardKey;
+  const ARR = parseBoardKey("ARR") as BoardKey;
+  const conn = raw();
+  for (const [key, policy] of [
+    [NUL, "null"],
+    [ARR, "[1,2]"],
+  ] as const) {
+    conn
+      .prepare(
+        `INSERT INTO boards (key, name, workspace_root, repositories, linear_team_keys, last_used_folder, policy, created_at, archived)
+         VALUES (?, 'Odd', NULL, '[]', '[]', NULL, ?, ?, 0)`,
+      )
+      .run(key, policy, "2026-10-07T00:00:00.000Z");
+  }
+  conn.close();
+  const boards = openBoardDb().readBoards();
+  for (const key of [NUL, ARR]) {
+    assert.deepEqual(
+      boards.find((b) => b.key === key)?.policy,
+      defaultBoardPolicy(key),
+    );
+  }
+});

@@ -43,5 +43,6 @@ export function defaultBoardPolicy(key: BoardKey): BoardPolicy {
     shipRights: "none",
     budgetPerGroup: null,
     supervisor: key === DEFAULT_BOARD_KEY ? "off" : "on",
+    groupPlaybook: null,
   };
 }

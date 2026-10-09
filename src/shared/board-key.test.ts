@@ -50,6 +50,7 @@ void test("the default policy has the D-6 values and the supervisor off only on 
     shipRights: "none",
     budgetPerGroup: null,
     supervisor: "off",
+    groupPlaybook: null,
   });
   const acme = parseBoardKey("ACME");
   assert.ok(acme);

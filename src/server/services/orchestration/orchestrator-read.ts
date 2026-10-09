@@ -13,6 +13,7 @@ import {
 import { ConflictError, ValidationError } from "../domain/errors.js";
 import { effectivePolicy } from "../domain/orchestrator-rules.js";
 import type { OrchestratorIdentity } from "../domain/orchestrator-scope.js";
+import { loadPlaybooks } from "../infra/playbooks.js";
 import { runningLoops } from "./boards.js";
 
 export type CapturePane = (target: string) => Promise<string>;
@@ -101,16 +102,22 @@ export function groupCost(card: Card): number {
   );
 }
 
-/** The caller's policy (the board policy narrowed by its override) with the running group count and group costs. */
-export function policySummary({
+/**
+ * The caller's effective policy with the running group count, group costs and playbook names.
+ *
+ * @remarks
+ * The effective policy is the board policy narrowed by the caller's override.
+ */
+export async function policySummary({
   boardKey: board,
   orchestratorId,
-}: OrchestratorIdentity): {
+}: OrchestratorIdentity): Promise<{
   policy: BoardPolicy | null;
   runningLoops: number;
   concurrencyCap: number | null;
   groups: { cardId: string; cost: number; budget: number | null }[];
-} {
+  playbooks: string[];
+}> {
   const stored = store.getBoard(board);
   const policy = stored
     ? effectivePolicy(
@@ -128,5 +135,6 @@ export function policySummary({
       cost: groupCost(card),
       budget: policy?.budgetPerGroup ?? null,
     })),
+    playbooks: (await loadPlaybooks()).map((p) => p.name),
   };
 }

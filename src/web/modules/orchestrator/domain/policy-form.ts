@@ -9,6 +9,7 @@ import {
   loopModelValue,
   SESSION_SETTINGS,
   storedLoopModel,
+  type SelectOption,
 } from "./orchestrator-models.js";
 
 export interface PolicyFormValues {
@@ -22,6 +23,7 @@ export interface PolicyFormValues {
   shipRights: BoardPolicy["shipRights"];
   budgetPerGroup: string;
   supervisor: BoardPolicy["supervisor"];
+  groupPlaybook: string | null;
 }
 
 export type PolicyFormErrors = Partial<
@@ -70,6 +72,42 @@ export const POLICY_ERRORS = {
 
 export const MAX_BUDGET_PER_GROUP = 100_000;
 
+export const NO_GROUP_PLAYBOOK = "__none__";
+
+/**
+ * Build the Group playbook options: None, each playbook name, then the stored name if unlisted.
+ *
+ * @remarks
+ * While `names` is undefined (the picker query is loading or failed) the stored name shows as a plain option.
+ * Once the names are known, an unlisted stored name reads "<name> (not found)", so the select still shows it and a save keeps it.
+ */
+export function groupPlaybookOptions(
+  names: readonly string[] | undefined,
+  stored: string | null,
+): SelectOption[] {
+  const options: SelectOption[] = [
+    { value: NO_GROUP_PLAYBOOK, label: "None" },
+    ...(names ?? []).map((name) => ({ value: name, label: name })),
+  ];
+  if (stored !== null && !names?.includes(stored)) {
+    options.push({
+      value: stored,
+      label: names === undefined ? stored : `${stored} (not found)`,
+    });
+  }
+  return options;
+}
+
+/** Map the stored group playbook to the value of the select item. */
+export function groupPlaybookSelectValue(stored: string | null): string {
+  return stored ?? NO_GROUP_PLAYBOOK;
+}
+
+/** Map the value of the select item back to the group playbook, null for None. */
+export function groupPlaybookFromSelect(value: string): string | null {
+  return value === NO_GROUP_PLAYBOOK ? null : value;
+}
+
 /** Fill the form values from the stored board policy, with the legacy model name shown as Opus 5.5. */
 export function policyFormValues(policy: BoardPolicy): PolicyFormValues {
   return {
@@ -84,6 +122,7 @@ export function policyFormValues(policy: BoardPolicy): PolicyFormValues {
     budgetPerGroup:
       policy.budgetPerGroup === null ? "" : String(policy.budgetPerGroup),
     supervisor: policy.supervisor,
+    groupPlaybook: policy.groupPlaybook,
   };
 }
 
@@ -160,7 +199,7 @@ export function isPolicyDirty(
 }
 
 /**
- * Build the body of the policy save: the ten policy fields and nothing else.
+ * Build the body of the policy save: the eleven policy fields and nothing else.
  *
  * @remarks
  * `usageLimit` is `wait` or `stop`, so the body never holds a usage credits value.
@@ -177,5 +216,6 @@ export function policyPayload(values: PolicyFormValues): BoardPolicy {
     shipRights: values.shipRights,
     budgetPerGroup: budgetAmount(values.budgetPerGroup),
     supervisor: values.supervisor,
+    groupPlaybook: values.groupPlaybook,
   };
 }

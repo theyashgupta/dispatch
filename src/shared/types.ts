@@ -1752,6 +1752,7 @@ export interface BoardPolicy {
   shipRights: "none" | "open_prs" | "merge";
   budgetPerGroup: number | null;
   supervisor: "on" | "off";
+  groupPlaybook: string | null;
 }
 
 export type OrchestratorPolicyOverride = Partial<
@@ -1833,7 +1834,7 @@ export interface BoardCount {
   running: number;
   openGroups: number;
   attention: number;
-  loops: { groupId: string; percent: number }[];
+  loops: { groupId: string; percent: number | null }[];
 }
 
 export interface BoardCounts {

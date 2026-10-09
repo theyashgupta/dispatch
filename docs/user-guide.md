@@ -87,6 +87,7 @@ Only you can change the policy. The orchestrator reads it. No tool can change it
 | **Roadmap approval**                | **Ask me for each roadmap**, **Approve when the rules pass, else ask**, **Approve each roadmap** | **Ask me for each roadmap** |
 | **Loops at once**                   | A whole number from 1 to 10                                                                      | 3                           |
 | **Loop model**                      | **Session settings**, or a model with the effort `high` or `max`                                 | **Session settings**        |
+| **Group playbook**                  | **None**, or a playbook name                                                                     | **None**                    |
 | **Orchestrator model**              | **Opus 5.5**, **Sonnet 5.5**, **Fable 5.1**                                                      | **Opus 5.5**                |
 | **Handoff at context percent**      | A whole number from 10 to 95                                                                     | 50                          |
 | **Hard handoff at context percent** | A whole number above the handoff percent, up to 100                                              | 80                          |
@@ -100,6 +101,7 @@ Notes on the fields:
 - **Roadmap approval** controls how the orchestrator approves the plan of a loop. With **Ask me for each roadmap**, the `approve_roadmap` tool needs your approve answer on a decision item of that group. With the two other values, the tool call is allowed. With **Approve when the rules pass, else ask**, the playbook judges the rules.
 - **Loops at once** is the concurrency cap. Dispatch refuses the orchestrator tool that starts a group above the cap. A group that waits for its dependencies stays queued. The supervisor starts it when the dependencies are done and a slot is free.
 - **Loop model**: The model and effort of the sessions of a group. When you choose a model, Dispatch starts each group session with that model and effort, and it ignores any model or effort in the Settings Claude arguments. When you choose **Session settings**, Dispatch uses the Settings.
+- **Group playbook**: the playbook of a group that the orchestrator creates without one. When the playbook no longer exists, the group starts with no playbook. When the stored name is not in the list of playbooks, the select shows it as "<name> (not found)", and **Save policy** keeps the name.
 - **Supervisor** must be **On** to start an orchestrator. The form says: "The supervisor watches the loops of this board. An orchestrator needs it."
 - Choose **Save policy** to save. The button is off until a field changes. The message "Policy saved." confirms the save.
 - The number fields are text inputs. The form checks the ranges while you type and shows an error under the field. **Save policy** saves nothing while a field has an error.

@@ -187,7 +187,7 @@ export function OrchestratorPanelContainer() {
               stale={stale}
             />
           }
-          policy={<PolicyContainer board={boardKey} />}
+          policy={<PolicyContainer key={boardKey} board={boardKey} />}
           orchestrators={
             <OrchestratorsContainer
               board={boardKey}

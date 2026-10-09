@@ -4,7 +4,7 @@ import type { BoardKey, Card, Config } from "../../../shared/types.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import { ConflictError, ValidationError } from "../domain/errors.js";
 import { getOrchestrationConfig } from "../infra/config-holder.js";
-import { loadPlaybooks } from "../infra/playbooks.js";
+import { playbookExists } from "../infra/playbooks.js";
 import { mapBoardUnavailable } from "./boards.js";
 import { startSession } from "./start-session.js";
 import { restatRepos } from "./workspaces.js";
@@ -73,8 +73,7 @@ export async function createGroup(
   requireOrchestrationConfig();
 
   if (playbook !== undefined) {
-    const known = (await loadPlaybooks()).some((p) => p.name === playbook);
-    if (!known) {
+    if (!(await playbookExists(playbook))) {
       throw new ValidationError("unknown playbook", { variant: "playbook" });
     }
   }

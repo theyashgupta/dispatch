@@ -291,6 +291,7 @@ The segmented bar has one segment per unit. Each segment state has a glyph, a fi
 - Each segment has the accessible name "Unit <n>: <unit name>, <text name>". The bar is a list of segments, not an image.
 - The last gate line: "Phase 3 gate passed 12:41" or "Phase 4 gate failed 13:05, attempt 1 of 2" (the limit is the retry budget of the PRD).
 - The context badge: "Context 38%".
+- A running group with no loop progress has one row (rule added 2026-10-09, LOCAL-95). The row shows the group id, the session state badge, the context badge and the session time. In place of the text label it shows the line "No loop progress". It has no bar, no last gate line and no time left. The empty text shows only when no row exists. The heading count "<n> of <cap> loops running" counts the running groups of the same board snapshot that builds the rows, so a group that moves to Done leaves the count and its row together; the cap comes from the summary.
 
 ### Section 3: Tickets by column
 
@@ -478,3 +479,4 @@ This entry adds to the screens above. It does not change the text of an earlier 
 - **Screen 4, Section 3 (U1-10).** The section gains a collapsible "Show cards" list. A group select and a column select filter the list.
 - **Screen 4, Section 4 (U1-09).** The section gains an actor select with the options All, Orchestrator, Supervisor and You, and a group select.
 - **Screen 1 (R-16).** The boards table gains a "Loops" column after "Attention". Each running loop shows "<group id> <percent>%". The cell shows at most three loops, then "+<n> more". A board with no running loop shows "0". From 768 px to 1279 px, the cell shows only the number of running loops, as the Repositories cell shows a count (U1-30). Below 768 px, each board item gains one more badge line with the same text.
+- **Screen 1, Loops cell (2026-10-09, LOCAL-95).** A running group with no loop progress shows "<group id> no loop progress" in place of "<group id> <percent>%". The cell lists the same groups that the dashboard count "<n> of <cap> loops running" counts.

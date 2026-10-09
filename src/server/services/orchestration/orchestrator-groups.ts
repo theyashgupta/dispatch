@@ -12,6 +12,7 @@ import {
   PolicyError,
   ValidationError,
 } from "../domain/errors.js";
+import { playbookExists } from "../infra/playbooks.js";
 import {
   checkBudget,
   checkCap,
@@ -116,6 +117,15 @@ export async function createBaseBranch(
   return { repository, name, commit };
 }
 
+/** The board group playbook of the caller, or undefined when no playbook has that name. */
+async function boardGroupPlaybook(
+  caller: OrchestratorIdentity,
+): Promise<string | undefined> {
+  const name = callerPolicy(caller).groupPlaybook;
+  if (name === null) return undefined;
+  return (await playbookExists(name)) ? name : undefined;
+}
+
 /**
  * Create a group card on the orchestrator's board with its launch values, without starting it.
  *
@@ -147,10 +157,11 @@ export async function createOrchestratorGroup(
       throw new ValidationError("invalid-dependency");
     }
   }
+  const playbook = input.playbook ?? (await boardGroupPlaybook(caller));
   const card = await createGroup(board.key, {
     title: input.title,
     memberIds: input.memberIds,
-    playbook: input.playbook,
+    playbook,
     workspace: {
       folder: path.dirname(input.repos[0]?.path ?? ""),
       repos: input.repos,
@@ -161,7 +172,7 @@ export async function createOrchestratorGroup(
     ownerOrchestrator: caller.orchestratorId,
     launch: {
       direction: input.direction ?? "",
-      ...(input.playbook === undefined ? {} : { playbook: input.playbook }),
+      ...(playbook === undefined ? {} : { playbook }),
     },
   });
   await store.setGroupQueue(card.id, { startQueued: false, dependsOn });

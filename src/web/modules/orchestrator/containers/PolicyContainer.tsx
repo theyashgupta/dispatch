@@ -8,6 +8,7 @@ import {
 } from "@/modules/orchestrator/domain/orchestrator-models";
 import { actionErrorCopy } from "@/modules/orchestrator/domain/panel-model";
 import {
+  groupPlaybookOptions,
   isPolicyDirty,
   listedModels,
   policyFormValues,
@@ -19,11 +20,13 @@ import {
   useBoardRecordQuery,
   useSavePolicyMutation,
 } from "@/modules/orchestrator/queries/orchestrator-queries";
+import { usePlaybookPickerQuery } from "@/queries/playbook-picker-queries";
 import type { BoardKey } from "../../../../shared/types.js";
 
 export function PolicyContainer({ board }: { board: BoardKey }) {
   const record = useBoardRecordQuery(board).data ?? null;
   const save = useSavePolicyMutation(board);
+  const playbookNames = usePlaybookPickerQuery().data?.valid.map((p) => p.name);
   const [edited, setEdited] = useState<PolicyFormValues | null>(null);
   if (record === null) return <Skeleton className="h-16 w-full" />;
 
@@ -50,6 +53,10 @@ export function PolicyContainer({ board }: { board: BoardKey }) {
       values={values}
       errors={errors}
       loopOptions={loopModelOptions()}
+      playbookOptions={groupPlaybookOptions(
+        playbookNames,
+        values.groupPlaybook,
+      )}
       modelOptions={orchestratorModelOptions()}
       dirty={isPolicyDirty(values, saved)}
       pending={save.isPending}

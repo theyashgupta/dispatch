@@ -28,3 +28,10 @@ test("five loops show three then +2 more", () => {
     "+2 more",
   ]);
 });
+
+test("a null percent reads no loop progress", () => {
+  assert.deepEqual(
+    loopsLabels([loop(1), { groupId: "GROUP-2", percent: null }]),
+    ["GROUP-1 10%", "GROUP-2 no loop progress"],
+  );
+});

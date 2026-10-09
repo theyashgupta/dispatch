@@ -21,6 +21,7 @@ const board: BoardPolicy = {
   shipRights: "merge",
   budgetPerGroup: 20,
   supervisor: "on",
+  groupPlaybook: null,
 };
 
 function values(options: { value: string }[]): string[] {

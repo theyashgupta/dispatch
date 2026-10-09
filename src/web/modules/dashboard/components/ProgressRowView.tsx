@@ -20,7 +20,9 @@ export function ProgressRowView({ row }: ProgressRowViewProps) {
           <span className="font-mono text-xs font-semibold text-foreground">
             {row.groupId}
           </span>
-          <span className="text-xs text-muted-foreground">{row.slug}</span>
+          {row.slug !== null && (
+            <span className="text-xs text-muted-foreground">{row.slug}</span>
+          )}
           {row.state !== null && <SessionStateBadge state={row.state} />}
           {row.context !== null && (
             <Badge tone="neutral" className="tabular-nums">
@@ -39,13 +41,17 @@ export function ProgressRowView({ row }: ProgressRowViewProps) {
           )}
         </div>
         <p className="m-0 text-base text-foreground tabular-nums">
-          {row.view.label}
+          {row.view === null ? "No loop progress" : row.view.label}
         </p>
-        <GroupProgressBar segments={row.view.segments} />
-        {row.view.lastGateText !== null && (
-          <p className="m-0 text-sm text-muted-foreground tabular-nums">
-            {row.view.lastGateText}
-          </p>
+        {row.view !== null && (
+          <>
+            <GroupProgressBar segments={row.view.segments} />
+            {row.view.lastGateText !== null && (
+              <p className="m-0 text-sm text-muted-foreground tabular-nums">
+                {row.view.lastGateText}
+              </p>
+            )}
+          </>
         )}
       </ItemContent>
     </Item>

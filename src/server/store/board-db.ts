@@ -256,6 +256,19 @@ interface EventRow {
   board_key: string;
 }
 
+/**
+ * The board policy of a stored row, over the defaults.
+ *
+ * @remarks A stored value that is JSON `null` or an array is not an object, so the defaults stand alone.
+ */
+function mergedPolicy(row: BoardRow): Board["policy"] {
+  const stored: unknown = JSON.parse(row.policy);
+  const defaults = defaultBoardPolicy(row.key as BoardKey);
+  return typeof stored === "object" && stored !== null && !Array.isArray(stored)
+    ? { ...defaults, ...(stored as Partial<Board["policy"]>) }
+    : defaults;
+}
+
 function toActivityEvent(r: EventRow): ActivityEvent {
   return {
     id: r.id,
@@ -1164,7 +1177,7 @@ export function openBoardDb(): BoardDb {
         repositories: JSON.parse(row.repositories) as Board["repositories"],
         linearTeamKeys: JSON.parse(row.linear_team_keys) as string[],
         lastUsedFolder: row.last_used_folder,
-        policy: JSON.parse(row.policy) as Board["policy"],
+        policy: mergedPolicy(row),
         orchestrators: JSON.parse(row.orchestrators) as Board["orchestrators"],
         createdAt: row.created_at,
         archived: row.archived === 1,

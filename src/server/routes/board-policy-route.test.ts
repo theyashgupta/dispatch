@@ -58,6 +58,7 @@ const VALID: BoardPolicy = {
   shipRights: "open_prs",
   budgetPerGroup: 25.5,
   supervisor: "off",
+  groupPlaybook: null,
 };
 
 function stored(): BoardPolicy | undefined {
@@ -192,5 +193,47 @@ test("the listed models are accepted, with the legacy name opus and a null loop 
     const got = await put("/boards/PLC/policy", body);
     assert.equal(got.status, 200, got.text);
     assert.deepEqual(stored(), body);
+  }
+});
+
+test("groupPlaybook accepts null and a playbook name and reads both back", async () => {
+  for (const groupPlaybook of ["Write code directly", null]) {
+    const got = await put("/boards/PLC/policy", { ...VALID, groupPlaybook });
+    assert.equal(got.status, 200, got.text);
+    assert.equal(got.body.board.policy.groupPlaybook, groupPlaybook);
+    assert.equal(stored()?.groupPlaybook, groupPlaybook);
+  }
+});
+
+test("an omitted groupPlaybook keeps the stored name and an explicit null clears it", async () => {
+  await put("/boards/PLC/policy", { ...VALID, groupPlaybook: "Keep me" });
+  const kept = await put("/boards/PLC/policy", {
+    ...VALID,
+    groupPlaybook: undefined,
+  });
+  assert.equal(kept.status, 200, kept.text);
+  assert.equal(kept.body.board.policy.groupPlaybook, "Keep me");
+  assert.equal(stored()?.groupPlaybook, "Keep me");
+  const cleared = await put("/boards/PLC/policy", {
+    ...VALID,
+    groupPlaybook: null,
+  });
+  assert.equal(cleared.status, 200, cleared.text);
+  assert.equal(cleared.body.board.policy.groupPlaybook, null);
+  assert.equal(stored()?.groupPlaybook, null);
+});
+
+test("an empty, over 200 unit or non-string groupPlaybook answers 400 and writes nothing", async () => {
+  for (const groupPlaybook of [
+    "",
+    "x".repeat(201),
+    "\u{1F600}".repeat(101),
+    5,
+  ]) {
+    await expectRefusal(
+      { ...VALID, groupPlaybook },
+      400,
+      "invalid-groupPlaybook",
+    );
   }
 });

@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import { ENGINE_FILE } from "../domain/loop-progress.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
+import { hasLoopProgress } from "../../../shared/running-group.js";
 import type {
   BoardKey,
   Card,
@@ -43,6 +45,7 @@ const CALL_TIMEOUT_MS = 120_000;
 const NETWORK_TIMEOUT_MS = 300_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
 const MAX_POLL_FAILURES = 5;
+const PLAIN_BASE_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const FINISHED_STATUSES = new Set(["built, awaiting /ship", "shipped"]);
 const RESERVED_BRANCHES = new Set(["main", "master", "HEAD"]);
 const END_OF_OPTIONS = "-".repeat(2);
@@ -140,21 +143,26 @@ function shipTarget(
 }
 
 /**
- * Throw the typed 400 unless each name is a unit branch or the specs branch of the loop.
+ * Throw the typed 400 unless each name is allowed for the group.
  *
- * @remarks `main`, `master`, `HEAD`, a full ref name and the repository base are refused even when
- * a unit names them, so no flow pushes to a protected branch.
+ * @remarks A group with loop progress allows a unit branch or the specs branch of the loop. A group
+ * with no loop progress allows only its session branch, else its identifier. `main`, `master`,
+ * `HEAD`, a full ref name and the repository base are refused for both, so no flow pushes to a
+ * protected branch.
  */
 function assertGroupBranches(
   card: Card,
   repository: string,
   names: string[],
 ): void {
-  const progress = card.loopProgress;
-  const allowed = new Set(
-    (progress?.units ?? []).flatMap((u) => (u.branch ? [u.branch] : [])),
-  );
-  if (progress?.slug) allowed.add(`test/${progress.slug}-specs`);
+  let allowed: Set<string>;
+  if (hasLoopProgress(card)) {
+    const { units, slug } = card.loopProgress;
+    allowed = new Set(units.flatMap((u) => (u.branch ? [u.branch] : [])));
+    if (slug) allowed.add(`test/${slug}-specs`);
+  } else {
+    allowed = new Set([card.branch || card.identifier]);
+  }
   const base = card.workspace?.repos.find((r) => r.path === repository)?.base;
   for (const name of names) {
     if (
@@ -179,9 +187,11 @@ function assertNoRunningFlow(boardKey: BoardKey): void {
 }
 
 /**
- * Check the ship preconditions of a group card in their fixed order, writing nothing.
+ * Check the ship preconditions of a group card in their fixed order, with no git call and no write.
  *
- * @remarks Each refusal is a typed error, so a refused call stores no flow.
+ * @remarks A group whose engine is active and not closed is refused whatever its unit count. A
+ * group with loop progress also needs finished units, and one with no loop progress needs the
+ * Agent done column. A refusal is a typed error, so a refused call stores no flow.
  */
 function assertShippable(
   caller: OrchestratorIdentity,
@@ -199,12 +209,16 @@ function assertShippable(
   if (!card.workspace?.repos.some((r) => r.path === repository)) {
     throw new ValidationError("unknown-repository");
   }
-  const units = card.loopProgress?.units ?? [];
-  if (units.length === 0 || units.some((u) => !FINISHED_STATUSES.has(u.status)))
-    throw new ConflictError("loop-not-finished");
   const engine = card.loopProgress?.engine;
-  if (engine && !engine.closed && engine.active) {
+  if (engine?.active && !engine.closed) {
     throw new ConflictError("engine-not-closed");
+  }
+  if (hasLoopProgress(card)) {
+    if (card.loopProgress.units.some((u) => !FINISHED_STATUSES.has(u.status))) {
+      throw new ConflictError("loop-not-finished");
+    }
+  } else if (card.column !== "agent_done") {
+    throw new ConflictError("card-not-done");
   }
   assertGroupBranches(
     card,
@@ -222,6 +236,59 @@ function assertShippable(
 }
 
 /**
+ * Throw the typed 409 unless each branch is ahead of its base and the worktree is clean.
+ *
+ * @remarks Only a group with no loop progress runs it, because that group has no loop that
+ * vouches for its branches. The base is `origin/<base>` when that ref exists, because the session
+ * branch is cut from it, else the local base. It runs before any write, so a refusal stores no flow.
+ */
+async function assertAheadAndClean(
+  card: Card,
+  input: ShipInput,
+  target: { worktree: string },
+): Promise<void> {
+  const base = card.workspace?.repos.find(
+    (r) => r.path === input.repository,
+  )?.base;
+  const branch = input.branches[0]?.name;
+  if (base === undefined || !PLAIN_BASE_RE.test(base) || base.includes("..")) {
+    throw new ConflictError("unknown-base", { branch });
+  }
+  let baseRef: string | null = null;
+  for (const ref of [`refs/remotes/origin/${base}`, `refs/heads/${base}`]) {
+    const found = await exec(target, "git", [
+      "rev-parse",
+      "--verify",
+      "--quiet",
+      ref,
+    ]).catch(() => null);
+    if (found !== null) {
+      baseRef = ref;
+      break;
+    }
+  }
+  if (baseRef === null) throw new ConflictError("unknown-base", { branch });
+  for (const { name } of input.branches) {
+    const count = await exec(target, "git", [
+      "rev-list",
+      "--count",
+      `${END_OF_OPTIONS}end-of-options`,
+      `${baseRef}..refs/heads/${name}`,
+    ]).catch(() => null);
+    const ahead = count === null ? NaN : Number.parseInt(count, 10);
+    if (!Number.isFinite(ahead)) throw new ConflictError("no-workspace");
+    if (ahead === 0) {
+      throw new ConflictError("branch-not-ahead", { branch: name });
+    }
+  }
+  const status = await exec(target, "git", ["status", "--porcelain"]).catch(
+    () => null,
+  );
+  if (status === null) throw new ConflictError("no-workspace");
+  if (status !== "") throw new ConflictError("worktree-dirty");
+}
+
+/**
  * Check the preconditions, store a running flow and start its runner in the background.
  *
  * @remarks The board is held in an in-memory set from the check to the store write, so two starts
@@ -234,6 +301,10 @@ export async function startShip(
 ): Promise<ShipFlow> {
   const rights = assertShippable(caller, card, input);
   if (!card.workspacePath) throw new ConflictError("no-workspace");
+  const noLoop = !hasLoopProgress(card);
+  if (noLoop && fs.existsSync(path.join(card.workspacePath, ENGINE_FILE))) {
+    throw new ConflictError("engine-not-closed");
+  }
   const target = shipTarget(card, input.repository);
   if (target.checkCommand === null) {
     throw new ValidationError("unknown-repository");
@@ -252,6 +323,7 @@ export async function startShip(
         throw new ValidationError("invalid-branch-name", { branch: name });
       }
     }
+    if (noLoop) await assertAheadAndClean(card, input, target);
     const gitConfig = (key: string) => exec(target, "git", ["config", key]);
     let identity: ShipFlow["identity"];
     try {

@@ -178,6 +178,11 @@ export async function loadPlaybooks(): Promise<Playbook[]> {
   return playbooks;
 }
 
+/** True when a loadable playbook has this name. */
+export async function playbookExists(name: string): Promise<boolean> {
+  return (await loadPlaybooks()).some((p) => p.name === name);
+}
+
 /**
  * Read every `*.md` playbook fresh from disk, returning valid entries alongside malformed ones
  * — a sibling of {@link loadPlaybooks} that never silently skips, for the picker's greyed-out-row

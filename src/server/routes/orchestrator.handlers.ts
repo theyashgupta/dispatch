@@ -179,9 +179,14 @@ export const listEventsHandler: ToolHandler = (req, res, caller, call) => {
   res.status(200).json(page);
 };
 
-/** Answer the board policy with its running loop count and group costs. */
-export const getPolicyHandler: ToolHandler = (_req, res, caller, call) => {
-  const summary = policySummary(caller);
+/** Answer the board policy with its running loop count, group costs and playbook names. */
+export const getPolicyHandler: ToolHandler = async (
+  _req,
+  res,
+  caller,
+  call,
+) => {
+  const summary = await policySummary(caller);
   call.result = `${summary.runningLoops} running`;
   res.status(200).json(summary);
 };
@@ -264,7 +269,7 @@ export const createGroupHandler: ToolHandler = async (
   const input = parseOrThrow(createGroupBodySchema, req.body);
   const card = await createOrchestratorGroup(caller, input);
   call.cardId = card.id;
-  call.result = card.id;
+  call.result = `${card.id} playbook ${card.launch?.playbook ?? "none"}`;
   res.status(201).json({ card });
 };
 

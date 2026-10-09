@@ -1,4 +1,4 @@
-import { Field } from "@/components/ui/field";
+import { Field, FieldDescription } from "@/components/ui/field";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -14,6 +14,7 @@ interface SelectFieldProps {
   label: string;
   value: string;
   options: readonly SelectOption[];
+  description?: string;
   onChange: (value: string) => void;
 }
 
@@ -22,6 +23,7 @@ export function SelectField({
   label,
   value,
   options,
+  description,
   onChange,
 }: SelectFieldProps) {
   return (
@@ -31,14 +33,21 @@ export function SelectField({
         <SelectTrigger id={id} className="w-full">
           <SelectValue />
         </SelectTrigger>
-        <SelectContent>
+        <SelectContent className="max-w-[calc(100vw-2rem)]">
           {options.map((option) => (
-            <SelectItem key={option.value} value={option.value}>
+            <SelectItem
+              key={option.value}
+              value={option.value}
+              className="wrap-anywhere"
+            >
               {option.label}
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
+      {description !== undefined && (
+        <FieldDescription>{description}</FieldDescription>
+      )}
     </Field>
   );
 }
