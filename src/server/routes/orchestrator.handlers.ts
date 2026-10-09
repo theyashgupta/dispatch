@@ -18,6 +18,7 @@ import {
   groupProgress,
   paneTail,
   policySummary,
+  workspaceSummary,
 } from "../services/orchestration/orchestrator-read.js";
 import { createDecisionItem } from "../services/orchestration/decision-items.js";
 import { waitForEvent } from "../services/orchestration/orchestrator-wait.js";
@@ -195,6 +196,18 @@ export const getPolicyHandler: ToolHandler = async (
   const summary = await policySummary(caller);
   call.result = `${summary.runningLoops} running`;
   res.status(200).json(summary);
+};
+
+/** Answer the board folder, repositories, playbook names and group playbook. */
+export const getBoardWorkspaceHandler: ToolHandler = async (
+  _req,
+  res,
+  caller,
+  call,
+) => {
+  const workspace = await workspaceSummary(caller);
+  call.result = `${workspace.repos.length} repos`;
+  res.status(200).json(workspace);
 };
 
 /** Create a local ticket marked as created by the caller. */

@@ -14,7 +14,7 @@ import { ConflictError, ValidationError } from "../domain/errors.js";
 import { effectivePolicy } from "../domain/orchestrator-rules.js";
 import type { OrchestratorIdentity } from "../domain/orchestrator-scope.js";
 import { loadPlaybooks } from "../infra/playbooks.js";
-import { runningLoops } from "./boards.js";
+import { callerPolicy, getBoard, runningLoops } from "./boards.js";
 
 export type CapturePane = (target: string) => Promise<string>;
 
@@ -136,5 +136,25 @@ export async function policySummary({
       budget: policy?.budgetPerGroup ?? null,
     })),
     playbooks: (await loadPlaybooks()).map((p) => p.name),
+  };
+}
+
+/** The board folder, repositories with base branch and check command, playbook names and group playbook. */
+export async function workspaceSummary(caller: OrchestratorIdentity): Promise<{
+  folder: string | null;
+  repos: { path: string; base: string | null; checkCommand: string }[];
+  playbooks: string[];
+  groupPlaybook: string | null;
+}> {
+  const board = getBoard(caller.boardKey);
+  return {
+    folder: board.workspaceRoot,
+    repos: board.repositories.map((r) => ({
+      path: r.path,
+      base: r.baseBranch,
+      checkCommand: r.checkCommand,
+    })),
+    playbooks: (await loadPlaybooks()).map((p) => p.name),
+    groupPlaybook: callerPolicy(caller).groupPlaybook,
   };
 }

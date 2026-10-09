@@ -29,7 +29,12 @@ import {
   repoOfRemote,
 } from "../domain/ship-checks.js";
 import { worktreePath } from "../domain/workspace-paths.js";
-import { callerPolicy, dependencyDone, resolveBoard } from "./boards.js";
+import {
+  callerPolicy,
+  dependencyDone,
+  getBoard,
+  resolveBoard,
+} from "./boards.js";
 import { moveCard } from "./card-move.js";
 import { createDecisionItem } from "./decision-items.js";
 import { recordGroupState } from "./group-state-events.js";
@@ -128,17 +133,18 @@ async function exec(
  * The worktree and check command of a card's ship repository.
  *
  * @remarks The check command is null when the board has no entry for the repository, so a caller
- * can refuse it; an entry with an empty command skips the check.
+ * can refuse it; an entry with an empty command skips the check. The board view is read so the
+ * default board finds the workspace folders as its repositories.
  */
 function shipTarget(
   card: Card,
   repository: string,
 ): { worktree: string; checkCommand: string | null } {
-  const board = store.getBoard(card.boardKey ?? DEFAULT_BOARD_KEY);
+  const board = getBoard(card.boardKey ?? DEFAULT_BOARD_KEY);
   return {
     worktree: worktreePath(card.workspacePath ?? "", repository),
     checkCommand:
-      board?.repositories.find((r) => r.path === repository)?.checkCommand ??
+      board.repositories.find((r) => r.path === repository)?.checkCommand ??
       null,
   };
 }

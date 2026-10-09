@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { isolateEnv, waitFor } from "../test-support/fixtures.js";
 import { startedGroup } from "../test-support/group-fixtures.js";
-import { parseBoardKey } from "../../shared/board-key.js";
+import { DEFAULT_BOARD_KEY, parseBoardKey } from "../../shared/board-key.js";
 import type {
   BoardKey,
   Card,
@@ -19,7 +19,8 @@ const { orchestratorRouter } = await import("./orchestrator.route.js");
 const { boardsRouter } = await import("./boards.route.js");
 const { paneReader } =
   await import("../services/orchestration/orchestrator-read.js");
-const { createPlaybook } = await import("../services/infra/playbooks.js");
+const { createPlaybook, deletePlaybook } =
+  await import("../services/infra/playbooks.js");
 const wake = await import("../services/orchestration/orchestrator-wake.js");
 
 const SBX = parseBoardKey("SBX") as BoardKey;
@@ -446,6 +447,100 @@ void test("get_policy lists the sorted playbook names and the group playbook", a
       ...store.getBoard(SBX)!.policy,
       groupPlaybook: null,
     });
+  }
+});
+
+void test("get_board_workspace answers the folder, the repositories, the sorted playbooks and the group playbook", async () => {
+  const slugs: string[] = [];
+  for (const name of ["Workspace zeta", "Workspace alpha", "Workspace mid"]) {
+    const made = await createPlaybook({ name, body: "## Rules\n{extra}\n" });
+    assert.equal(made.ok, true);
+    if (made.ok && made.playbook.slug) slugs.push(made.playbook.slug);
+  }
+  const original = structuredClone(store.getBoard(SBX)!);
+  const repositories = [
+    { path: "/sbx/sessions/api", baseBranch: "base/a", checkCommand: "npm t" },
+    { path: "/sbx/sessions/web", baseBranch: null, checkCommand: "" },
+  ];
+  await store.updateBoard(SBX, { repositories });
+  await store.setBoardPolicy(SBX, {
+    ...original.policy,
+    groupPlaybook: "Workspace alpha",
+  });
+  try {
+    const { reply, row } = await read("/orchestrator/board-workspace");
+    assert.equal(reply.status, 200);
+    assertNoOth(reply);
+    assert.equal(reply.body.folder, "/sbx/sessions");
+    assert.deepEqual(reply.body.repos, [
+      { path: "/sbx/sessions/api", base: "base/a", checkCommand: "npm t" },
+      { path: "/sbx/sessions/web", base: null, checkCommand: "" },
+    ]);
+    assert.deepEqual(
+      (reply.body.playbooks as string[]).filter((n) =>
+        n.startsWith("Workspace "),
+      ),
+      ["Workspace alpha", "Workspace mid", "Workspace zeta"],
+    );
+    assert.equal(reply.body.groupPlaybook, "Workspace alpha");
+    assert.equal(row.data.tool, "get_board_workspace");
+    assert.equal(row.data.result, "2 repos");
+  } finally {
+    await store.updateBoard(SBX, { repositories: original.repositories });
+    await store.setBoardPolicy(SBX, original.policy);
+    for (const slug of slugs) await deletePlaybook(slug);
+  }
+});
+
+void test("get_board_workspace answers an empty repository list and a null group playbook for a bare board", async () => {
+  const original = structuredClone(store.getBoard(SBX)!);
+  await store.updateBoard(SBX, { repositories: [] });
+  await store.setBoardPolicy(SBX, { ...original.policy, groupPlaybook: null });
+  try {
+    const { reply } = await read("/orchestrator/board-workspace");
+    assert.equal(reply.status, 200);
+    assert.deepEqual(reply.body.repos, []);
+    assert.equal(reply.body.groupPlaybook, null);
+  } finally {
+    await store.updateBoard(SBX, { repositories: original.repositories });
+    await store.setBoardPolicy(SBX, original.policy);
+  }
+});
+
+void test("the default board answers its workspace folders, and create_group with no repos refuses their missing base", async () => {
+  const folder = "/local/sessions/api";
+  await store.addWorkspaceFolder(DEFAULT_BOARD_KEY, folder);
+  const a = await store.createLocalCard(DEFAULT_BOARD_KEY, "local a", "");
+  const b = await store.createLocalCard(DEFAULT_BOARD_KEY, "local b", "");
+  const local = await call(
+    "POST",
+    "/boards/LOCAL/orchestrators/orc-local/token",
+  );
+  const token = local.body.token as string;
+  try {
+    const read = await call("GET", "/orchestrator/board-workspace", token);
+    assert.equal(read.status, 200);
+    assert.deepEqual(
+      (read.body.repos as { path: string; base: string | null }[]).map((r) => [
+        r.path,
+        r.base,
+      ]),
+      [[folder, null]],
+    );
+    const before = store.listCards(DEFAULT_BOARD_KEY).length;
+    const res = await fetch(`${base}/orchestrator/groups`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-orchestrator-token": token,
+      },
+      body: JSON.stringify({ title: "local group", memberIds: [a.id, b.id] }),
+    });
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: "missing-base", path: folder });
+    assert.equal(store.listCards(DEFAULT_BOARD_KEY).length, before);
+  } finally {
+    await store.removeWorkspaceFolder(DEFAULT_BOARD_KEY, folder);
   }
 });
 

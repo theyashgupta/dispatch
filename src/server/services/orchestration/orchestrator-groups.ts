@@ -26,8 +26,8 @@ import {
   callerPolicy,
   dependencyDone,
   isLiveSessionCard,
+  getBoard,
   isRunningCard,
-  resolveBoard,
   runningLoops,
   scopeTargetOf,
 } from "./boards.js";
@@ -49,10 +49,25 @@ const BASE_BRANCH_RE = /^base\/[a-z0-9][a-z0-9._/-]{0,60}$/;
 interface GroupRequest {
   title: string;
   memberIds: string[];
-  repos: { path: string; base: string }[];
+  repos?: { path: string; base: string }[] | undefined;
   playbook?: string | undefined;
   direction?: string | undefined;
   dependsOn?: string[] | undefined;
+}
+
+/** The requested repositories, or every board repository with its base branch when none are requested. */
+function resolveRepos(
+  board: Board,
+  requested: GroupRequest["repos"],
+): { path: string; base: string }[] {
+  if (requested !== undefined) return requested;
+  if (board.repositories.length === 0)
+    throw new ValidationError("invalid-repos");
+  return board.repositories.map((r) => {
+    if (!r.baseBranch)
+      throw new ValidationError("missing-base", { path: r.path });
+    return { path: r.path, base: r.baseBranch };
+  });
 }
 
 /** Throw the typed 400 unless `repository` is a repository path of the board. */
@@ -90,7 +105,7 @@ export async function createBaseBranch(
   input: { repository: string; name: string; startPoint: string },
 ): Promise<{ repository: string; name: string; commit: string }> {
   const { repository, name, startPoint } = input;
-  assertBoardRepository(resolveBoard(caller.boardKey), repository);
+  assertBoardRepository(getBoard(caller.boardKey), repository);
   if (
     !BASE_BRANCH_RE.test(name) ||
     name.includes("..") ||
@@ -138,8 +153,9 @@ export async function createOrchestratorGroup(
   caller: OrchestratorIdentity,
   input: GroupRequest,
 ): Promise<Card> {
-  const board = resolveBoard(caller.boardKey);
-  for (const repo of input.repos) assertBoardRepository(board, repo.path);
+  const board = getBoard(caller.boardKey);
+  const repos = resolveRepos(board, input.repos);
+  for (const repo of repos) assertBoardRepository(board, repo.path);
   for (const id of input.memberIds) {
     const member = store.getCard(id);
     const scope = member && checkScope(caller, scopeTargetOf(member));
@@ -163,8 +179,8 @@ export async function createOrchestratorGroup(
     memberIds: input.memberIds,
     playbook,
     workspace: {
-      folder: path.dirname(input.repos[0]?.path ?? ""),
-      repos: input.repos,
+      folder: path.dirname(repos[0]?.path ?? ""),
+      repos,
     },
   });
   await store.setOrchestratorFields(card.id, {

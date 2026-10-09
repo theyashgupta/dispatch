@@ -1,9 +1,10 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import path from "node:path";
 import { isolateEnv, waitFor } from "../test-support/fixtures.js";
 import { startedGroup } from "../test-support/group-fixtures.js";
-import { parseBoardKey } from "../../shared/board-key.js";
+import { DEFAULT_BOARD_KEY, parseBoardKey } from "../../shared/board-key.js";
 import type {
   BoardKey,
   BoardPolicy,
@@ -318,6 +319,111 @@ void test("create_group refuses a dependency that is not a group of the board an
   assert.equal(foreign.reply.status, 400);
   assert.equal(foreign.reply.body.error, "unknown-repository");
   assert.equal(groups(), before);
+});
+
+void test("create_group with no repos uses the board repositories with their base", async () => {
+  const a = await store.createLocalCard(SBX, "a", "");
+  const b = await store.createLocalCard(SBX, "b", "");
+  const { reply } = await call("/groups", {
+    title: "filled group",
+    memberIds: [a.id, b.id],
+    direction: "go",
+  });
+  assert.equal(reply.status, 201, JSON.stringify(reply.body));
+  const card = store.getCard((reply.body.card as Card).id)!;
+  assert.deepEqual(card.workspace?.repos, [{ path: repo, base: "main" }]);
+  assert.equal(card.workspace?.folder, path.dirname(repo));
+});
+
+/** Replace the SBX repositories, run create_group with no repos, and answer the reply with the group count change. */
+async function createWithBoardRepositories(
+  repositories: {
+    path: string;
+    baseBranch: string | null;
+    checkCommand: string;
+  }[],
+): Promise<{ reply: Reply; written: number }> {
+  const groups = () =>
+    store.listCards(SBX).filter((c) => c.source === "group").length;
+  const before = groups();
+  const original = store.getBoard(SBX)!.repositories;
+  const a = await store.createLocalCard(SBX, "a", "");
+  const b = await store.createLocalCard(SBX, "b", "");
+  try {
+    await store.updateBoard(SBX, { repositories });
+    const { reply } = await call("/groups", {
+      title: "g",
+      memberIds: [a.id, b.id],
+    });
+    return { reply, written: groups() - before };
+  } finally {
+    await store.updateBoard(SBX, { repositories: original });
+  }
+}
+
+void test("create_group with no repos refuses a repository with no base and writes nothing", async () => {
+  const { reply, written } = await createWithBoardRepositories([
+    { path: repo, baseBranch: null, checkCommand: "" },
+  ]);
+  assert.equal(reply.status, 400);
+  assert.equal(reply.body.error, "missing-base");
+  assert.equal(reply.body.path, repo);
+  assert.equal(written, 0);
+});
+
+void test("create_group with no repos refuses a board with no repository and writes nothing", async () => {
+  const { reply, written } = await createWithBoardRepositories([]);
+  assert.equal(reply.status, 400);
+  assert.equal(reply.body.error, "invalid-repos");
+  assert.equal(written, 0);
+});
+
+async function localToken(): Promise<string> {
+  const minted = await raw(
+    "POST",
+    "/boards/LOCAL/orchestrators/orc-local/token",
+  );
+  return minted.body.token as string;
+}
+
+void test("create_group on LOCAL with a workspace folder path stores that repo and base", async () => {
+  await store.addWorkspaceFolder(DEFAULT_BOARD_KEY, repo);
+  try {
+    const a = await store.createLocalCard(DEFAULT_BOARD_KEY, "local a", "");
+    const b = await store.createLocalCard(DEFAULT_BOARD_KEY, "local b", "");
+    const reply = await raw(
+      "POST",
+      "/orchestrator/groups",
+      {
+        title: "local group",
+        memberIds: [a.id, b.id],
+        repos: [{ path: repo, base: "main" }],
+      },
+      await localToken(),
+    );
+    assert.equal(reply.status, 201, JSON.stringify(reply.body));
+    const card = store.getCard((reply.body.card as Card).id)!;
+    assert.deepEqual(card.workspace?.repos, [{ path: repo, base: "main" }]);
+  } finally {
+    await store.removeWorkspaceFolder(DEFAULT_BOARD_KEY, repo);
+  }
+});
+
+void test("create_base_branch on LOCAL with a workspace folder path is not refused as an unknown repository", async () => {
+  await store.addWorkspaceFolder(DEFAULT_BOARD_KEY, repo);
+  try {
+    const reply = await raw(
+      "POST",
+      "/orchestrator/base-branches",
+      { repository: repo, name: "base/local-1", startPoint: "main" },
+      await localToken(),
+    );
+    assert.equal(reply.status, 201, JSON.stringify(reply.body));
+    assert.equal(reply.body.commit, mainSha);
+  } finally {
+    await store.removeWorkspaceFolder(DEFAULT_BOARD_KEY, repo);
+    await git("branch", "-D", "base/local-1");
+  }
 });
 
 void test("start_group under the cap starts with the stored launch values", async () => {

@@ -22,6 +22,7 @@ import {
   createDecisionItemHandler,
   createGroupHandler,
   createTicketHandler,
+  getBoardWorkspaceHandler,
   getCardHandler,
   getGroupProgressHandler,
   getPolicyHandler,
@@ -220,6 +221,10 @@ orchestratorRouter.get(
 );
 orchestratorRouter.get("/events", tool("list_events", listEventsHandler));
 orchestratorRouter.get("/policy", tool("get_policy", getPolicyHandler));
+orchestratorRouter.get(
+  "/board-workspace",
+  tool("get_board_workspace", getBoardWorkspaceHandler),
+);
 orchestratorRouter.post("/tickets", tool("create_ticket", createTicketHandler));
 orchestratorRouter.patch(
   "/tickets/:id",
