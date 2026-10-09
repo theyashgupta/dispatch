@@ -3,13 +3,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { SHIP_IDENTITY } from "../../harness/sandbox.js";
 
-interface SampleRepo {
+export interface SampleRepo {
   repo: string;
   bare: string;
   name: string;
 }
 
-function git(cwd: string, home: string, args: string[]): string {
+export function git(cwd: string, home: string, args: string[]): string {
   return execFileSync("git", args, {
     cwd,
     encoding: "utf8",

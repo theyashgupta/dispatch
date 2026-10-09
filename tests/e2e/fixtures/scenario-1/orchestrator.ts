@@ -1,3 +1,4 @@
+import { call, WAIT_CALL_MS } from "../replay.js";
 import type { Step } from "./loop-files.js";
 import { readyRows } from "./status-rows.js";
 
@@ -8,20 +9,6 @@ interface OrchestratorPlan {
   replayLog: string;
   gateWaits: number;
 }
-
-const CALL_MS = 120_000;
-const WAIT_CALL_MS = 400_000;
-
-const call = (
-  tool: string,
-  args: Record<string, unknown>,
-  rest: Step = {},
-) => ({
-  tool,
-  args,
-  timeoutMs: CALL_MS,
-  ...rest,
-});
 
 function groupSteps(plan: OrchestratorPlan, side: "alpha" | "beta"): Step[] {
   const group = plan[side];
