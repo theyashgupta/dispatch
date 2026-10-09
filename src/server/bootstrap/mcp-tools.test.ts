@@ -54,9 +54,18 @@ describe("mcp tool table", () => {
       assert.doesNotMatch(description, /push|merge|credit|vault/i);
       if (name !== "get_policy") {
         assert.doesNotMatch(name, /policy/i);
+      }
+      if (name !== "get_policy" && name !== "create_group") {
         assert.doesNotMatch(description, /policy/i);
       }
     }
+  });
+
+  it("words the create_group description as the contract says", () => {
+    assert.equal(
+      byName("create_group").description,
+      "Create a group card from 2 or more cards. Omit playbook to use the board group playbook; get_policy lists the playbook names. Text that holds the status marker is refused.",
+    );
   });
 
   it("gives every tool a description", () => {

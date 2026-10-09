@@ -36,7 +36,7 @@ import { moveOrQueue } from "../services/orchestration/session-account-apply.js"
 import { editorPath, launchEditor } from "../adapters/editors.js";
 import { getOrchestrationConfig } from "../services/infra/config-holder.js";
 import {
-  loadPlaybooks,
+  playbookExists,
   hasDispatchMarker,
 } from "../services/infra/playbooks.js";
 import {
@@ -214,8 +214,7 @@ cardsRouter.post("/cards/:id/start", async (req, res) => {
   }
 
   if (playbook !== undefined) {
-    const known = (await loadPlaybooks()).some((p) => p.name === playbook);
-    if (!known) {
+    if (!(await playbookExists(playbook))) {
       throw new ValidationError("unknown playbook", { variant: "playbook" });
     }
   }

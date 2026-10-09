@@ -8,6 +8,11 @@ import {
 } from "../../../shared/board-key.js";
 import { buildAttentionQueue } from "../../../shared/attention-queue.js";
 import { loopView } from "../../../shared/loop-view.js";
+import {
+  hasLiveSession,
+  hasLoopProgress,
+  isActiveCard,
+} from "../../../shared/running-group.js";
 import type {
   Board,
   BoardCount,
@@ -155,22 +160,12 @@ export function mapBoardUnavailable(err: unknown): unknown {
     : new BoardNotFoundError("unknown-board");
 }
 
-/** True for a card the Live chip of the board shows: a session that is neither starting nor lost. */
-export function isLiveSessionCard(card: Card): boolean {
-  return (
-    card.provisioningStep == null &&
-    card.sessionLost !== true &&
-    card.tmuxSession != null
-  );
-}
+export const isLiveSessionCard = hasLiveSession;
 
 /** True for a card that is not Done and has a live session, a provisioning step or a start in flight. */
 export function isRunningCard(card: Card): boolean {
   return (
-    card.column !== "done" &&
-    (isLiveSessionCard(card) ||
-      card.provisioningStep != null ||
-      store.isStarting(card.id))
+    isActiveCard(card) || (card.column !== "done" && store.isStarting(card.id))
   );
 }
 
@@ -260,7 +255,7 @@ export function listBoardSessions(
 /**
  * The counts of every board, from a single pass over the cards of all boards.
  *
- * @remarks `attention` is the length of the attention queue of the board. `loops` lists the group cards whose loop runs.
+ * @remarks `attention` is the length of the attention queue of the board. `loops` lists the running group cards, and a group with no loop progress has a null percent.
  */
 export function boardCounts(): BoardCounts {
   const now = new Date();
@@ -288,10 +283,12 @@ export function boardCounts(): BoardCounts {
     if (card.source === "group" && card.column !== "done") {
       count.openGroups += 1;
     }
-    if (card.loopProgress?.completion === "running") {
+    if (card.source === "group" && isRunningCard(card)) {
       count.loops.push({
         groupId: card.identifier,
-        percent: loopView(card.loopProgress, {}).percent,
+        percent: hasLoopProgress(card)
+          ? loopView(card.loopProgress, {}).percent
+          : null,
       });
     }
   }
@@ -407,12 +404,22 @@ export function getBoard(key: BoardKey): Board {
   return viewOf(resolveBoard(key));
 }
 
-/** Store a board policy and answer the board as the API shows it, or the typed 404 `unknown-board`. */
+/**
+ * Store a board policy and answer the board as the API shows it, or the typed 404 `unknown-board`.
+ *
+ * @remarks An omitted `groupPlaybook` keeps the stored name, and an explicit null clears it.
+ */
 export async function setBoardPolicy(
   key: BoardKey,
-  policy: BoardPolicy,
+  policy: Omit<BoardPolicy, "groupPlaybook"> & {
+    groupPlaybook?: string | null | undefined;
+  },
 ): Promise<Board> {
-  const board = await store.setBoardPolicy(key, policy);
+  const groupPlaybook =
+    policy.groupPlaybook === undefined
+      ? (store.getBoard(key)?.policy.groupPlaybook ?? null)
+      : policy.groupPlaybook;
+  const board = await store.setBoardPolicy(key, { ...policy, groupPlaybook });
   if (!board) throw new BoardNotFoundError("unknown-board");
   return viewOf(board);
 }

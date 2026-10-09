@@ -126,14 +126,21 @@ void test("policySummary lists the groups of the board with the policy budget an
     concurrencyCap: 4,
     budgetPerGroup: 9,
   });
-  const summary = policySummary({ boardKey: SBX, orchestratorId: "orc" });
+  const summary = await policySummary({
+    boardKey: SBX,
+    orchestratorId: "orc",
+  });
   assert.equal(summary.concurrencyCap, 4);
   assert.ok(summary.runningLoops >= 1);
   const entry = summary.groups.find((x) => x.cardId === g.id);
   assert.equal(entry?.budget, 9);
   assert.deepEqual(
-    policySummary({ boardKey: "GONE" as BoardKey, orchestratorId: "orc" })
-      .policy,
+    (
+      await policySummary({
+        boardKey: "GONE" as BoardKey,
+        orchestratorId: "orc",
+      })
+    ).policy,
     null,
   );
 });

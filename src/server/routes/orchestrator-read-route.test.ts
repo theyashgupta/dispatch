@@ -13,6 +13,7 @@ const { orchestratorRouter } = await import("./orchestrator.route.js");
 const { boardsRouter } = await import("./boards.route.js");
 const { paneReader } =
   await import("../services/orchestration/orchestrator-read.js");
+const { createPlaybook } = await import("../services/infra/playbooks.js");
 
 const SBX = parseBoardKey("SBX") as BoardKey;
 const OTH = parseBoardKey("OTH") as BoardKey;
@@ -414,6 +415,31 @@ void test("get_policy counts the running loops and sums the cost per group", asy
   assert.equal(groups[0].budget, policy.budgetPerGroup);
   assert.equal(row.data.tool, "get_policy");
   assert.equal(row.data.result, "1 running");
+});
+
+void test("get_policy lists the sorted playbook names and the group playbook", async () => {
+  for (const name of ["Zeta rules", "Alpha rules"]) {
+    const made = await createPlaybook({ name, body: "## Rules\n{extra}\n" });
+    assert.equal(made.ok, true);
+  }
+  await store.setBoardPolicy(SBX, {
+    ...store.getBoard(SBX)!.policy,
+    groupPlaybook: "Alpha rules",
+  });
+  try {
+    const { reply } = await read("/orchestrator/policy");
+    assert.equal(reply.status, 200);
+    assert.deepEqual(reply.body.playbooks, ["Alpha rules", "Zeta rules"]);
+    assert.equal(
+      (reply.body.policy as { groupPlaybook: string | null }).groupPlaybook,
+      "Alpha rules",
+    );
+  } finally {
+    await store.setBoardPolicy(SBX, {
+      ...store.getBoard(SBX)!.policy,
+      groupPlaybook: null,
+    });
+  }
 });
 
 void test("a read without a token answers 401", async () => {

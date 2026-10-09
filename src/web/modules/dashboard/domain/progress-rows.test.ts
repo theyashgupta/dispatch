@@ -1,15 +1,28 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Card, LoopProgress } from "../../../../shared/types.js";
+import type { Card, LoopProgress, LoopUnit } from "../../../../shared/types.js";
 import { loopsRunningText, progressRows } from "./progress-rows.js";
 
 const NOW = new Date("2026-10-07T12:00:00Z");
+
+const UNIT: LoopUnit = {
+  number: 1,
+  ticket: null,
+  title: "unit",
+  status: "not started",
+  statusText: "",
+  branch: null,
+  commit: null,
+  prdPath: null,
+  phaseTotal: null,
+  phases: [],
+};
 
 function progress(completion: LoopProgress["completion"]): LoopProgress {
   return {
     slug: "demo",
     roadmapFile: "ROADMAP.md",
-    units: [],
+    units: [UNIT],
     engine: null,
     completion,
     summary: {
@@ -32,6 +45,9 @@ function card(identifier: string, loop?: LoopProgress, extra = {}): Card {
     ...extra,
   } as Card;
 }
+
+const groupCard = (identifier: string, extra = {}): Card =>
+  card(identifier, undefined, { source: "group", ...extra });
 
 test("running loops come first by group id, then the other loops, and cards without a loop drop", () => {
   const rows = progressRows(
@@ -120,5 +136,60 @@ test("group ids sort by their number, so GROUP-9 comes before GROUP-10", () => {
   assert.deepEqual(
     rows.map((r) => r.groupId),
     ["GROUP-9", "GROUP-10"],
+  );
+});
+
+test("a running group with no loop progress has exactly one row with a null view", () => {
+  const rows = progressRows(
+    [groupCard("GROUP-4", { tmuxSession: "dsp-4", column: "in_progress" })],
+    NOW,
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.groupId, "GROUP-4");
+  assert.equal(rows[0]?.view, null);
+  assert.equal(rows[0]?.slug, null);
+  assert.equal(rows[0]?.timeLeft, null);
+});
+
+test("a group with no loop progress that is not running has no row", () => {
+  const rows = progressRows(
+    [
+      groupCard("GROUP-1"),
+      groupCard("GROUP-2", { tmuxSession: "dsp-2", column: "done" }),
+      groupCard("GROUP-3", { tmuxSession: "dsp-3", sessionLost: true }),
+    ],
+    NOW,
+  );
+  assert.deepEqual(rows, []);
+});
+
+test("loop progress with zero units counts as no loop progress", () => {
+  const empty = { ...progress("running"), units: [] };
+  const running = progressRows(
+    [groupCard("GROUP-1", { tmuxSession: "dsp-1", loopProgress: empty })],
+    NOW,
+  );
+  assert.equal(running.length, 1);
+  assert.equal(running[0]?.view, null);
+  const idle = progressRows(
+    [groupCard("GROUP-2", { loopProgress: empty })],
+    NOW,
+  );
+  assert.deepEqual(idle, []);
+});
+
+test("a no-loop running row sorts with the running rows, then by group id", () => {
+  const rows = progressRows(
+    [
+      card("GROUP-1", progress("complete")),
+      card("GROUP-7", progress("running")),
+      groupCard("GROUP-10", { tmuxSession: "dsp-10" }),
+      groupCard("GROUP-5", { tmuxSession: "dsp-5" }),
+    ],
+    NOW,
+  );
+  assert.deepEqual(
+    rows.map((r) => r.groupId),
+    ["GROUP-5", "GROUP-7", "GROUP-10", "GROUP-1"],
   );
 });

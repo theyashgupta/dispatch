@@ -37,9 +37,11 @@ export function ProgressSection({
               <ProgressRowView key={row.cardId} row={row} />
             ))}
           </ItemGroup>
-          <div className="px-4 py-3">
-            <SegmentLegend />
-          </div>
+          {rows.some((row) => row.view !== null) && (
+            <div className="px-4 py-3">
+              <SegmentLegend />
+            </div>
+          )}
         </div>
       )}
     </DashboardSection>

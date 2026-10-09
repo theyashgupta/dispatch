@@ -1,41 +1,51 @@
 import { activeSessionView } from "../../../../shared/active-session.js";
 import { loopView, type LoopView } from "../../../../shared/loop-view.js";
-import type { Card, SupervisorState } from "../../../../shared/types.js";
+import {
+  hasLoopProgress,
+  isRunningGroup,
+} from "../../../../shared/running-group.js";
+import type {
+  Card,
+  LoopProgress,
+  SupervisorState,
+} from "../../../../shared/types.js";
 import { sessionTime } from "./session-time.js";
 import { timeLeft } from "./time-left.js";
 
 export interface ProgressRow {
   cardId: string;
   groupId: string;
-  slug: string;
+  slug: string | null;
   state: SupervisorState | null;
   context: string | null;
   sessionTime: string | null;
   timeLeft: string | null;
-  view: LoopView;
+  view: LoopView | null;
 }
 
 /**
- * Builds the Section 2 rows: running loops first by group id, then the other loops by group id.
+ * Builds the Section 2 rows: running groups first by group id, then the other loops by group id.
  *
- * @remarks Only a group card with `loopProgress` has a row. A complete loop has no time left, so
- * its badge is null.
+ * @remarks A card with loop progress that has at least one unit has a loop row. A running group
+ * with no loop progress, or with zero units, has one row with a null view. Any other card has no row.
  */
 export function progressRows(
   cards: readonly Card[],
   now: Date,
   timeZone?: string,
 ): ProgressRow[] {
+  const running = (progress: LoopProgress | null) =>
+    (progress?.completion ?? "running") === "running";
   return cards
-    .flatMap((card) =>
-      card.loopProgress === undefined
-        ? []
-        : [{ card, progress: card.loopProgress }],
-    )
+    .flatMap((card) => {
+      const progress = hasLoopProgress(card) ? card.loopProgress : null;
+      return progress !== null || isRunningGroup(card)
+        ? [{ card, progress }]
+        : [];
+    })
     .sort(
       (a, b) =>
-        Number(b.progress.completion === "running") -
-          Number(a.progress.completion === "running") ||
+        Number(running(b.progress)) - Number(running(a.progress)) ||
         a.card.identifier.localeCompare(b.card.identifier, undefined, {
           numeric: true,
         }),
@@ -46,12 +56,13 @@ export function progressRows(
       return {
         cardId: card.id,
         groupId: card.identifier,
-        slug: progress.slug,
+        slug: progress?.slug ?? null,
         state: session?.state ?? null,
         context: percent == null ? null : `Context ${Math.round(percent)}%`,
         sessionTime: sessionTime(card, now),
-        timeLeft: timeLeft(progress, now)?.text ?? null,
-        view: loopView(progress, { timeZone }),
+        timeLeft:
+          progress === null ? null : (timeLeft(progress, now)?.text ?? null),
+        view: progress === null ? null : loopView(progress, { timeZone }),
       };
     });
 }

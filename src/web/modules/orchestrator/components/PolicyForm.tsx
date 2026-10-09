@@ -5,6 +5,8 @@ import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { SelectOption } from "@/modules/orchestrator/domain/orchestrator-models";
 import {
+  groupPlaybookFromSelect,
+  groupPlaybookSelectValue,
   ROADMAP_APPROVAL_OPTIONS,
   SHIP_RIGHTS_OPTIONS,
   USAGE_LIMIT_OPTIONS,
@@ -19,6 +21,7 @@ interface PolicyFormProps {
   values: PolicyFormValues;
   errors: PolicyFormErrors;
   loopOptions: readonly SelectOption[];
+  playbookOptions: readonly SelectOption[];
   modelOptions: readonly SelectOption[];
   dirty: boolean;
   pending: boolean;
@@ -31,6 +34,7 @@ export function PolicyForm({
   values,
   errors,
   loopOptions,
+  playbookOptions,
   modelOptions,
   dirty,
   pending,
@@ -80,6 +84,16 @@ export function PolicyForm({
         value={values.loopModel}
         options={loopOptions}
         onChange={(loopModel) => onChange({ loopModel })}
+      />
+      <SelectField
+        id="policy-group-playbook"
+        label="Group playbook"
+        value={groupPlaybookSelectValue(values.groupPlaybook)}
+        options={playbookOptions}
+        description="The playbook of a group that the orchestrator creates without one."
+        onChange={(value) =>
+          onChange({ groupPlaybook: groupPlaybookFromSelect(value) })
+        }
       />
       <SelectField
         id="policy-orchestrator-model"

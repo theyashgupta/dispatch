@@ -779,6 +779,11 @@ test("GET /boards/counts still answers for a running loop whose last gate time i
   const b = await store.createLocalCard(board, "b", "");
   const minted = await store.createGroupCard(board, "group", [a.id, b.id]);
   assert.ok(minted.ok);
+  await store.completeStart(minted.card.id, undefined, {
+    workspacePath: `/tmp/${minted.card.id}`,
+    branch: minted.card.id,
+    tmuxSession: `dsp-${minted.card.id}`,
+  });
   await store.setLoopProgress(minted.card.id, {
     ...LOOP_PROGRESS,
     summary: {

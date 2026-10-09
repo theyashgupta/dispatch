@@ -122,13 +122,19 @@ async function setPolicy(patch: Partial<BoardPolicy>): Promise<void> {
 const branches = async () =>
   (await git("branch", "--format=%(refname:short)")).split("\n").sort();
 
-async function newGroup(extra: Record<string, unknown> = {}): Promise<Card> {
+async function groupBody(): Promise<Record<string, unknown>> {
   const a = await store.createLocalCard(SBX, "member a", "");
   const b = await store.createLocalCard(SBX, "member b", "");
-  const { reply } = await call("/groups", {
+  return {
     title: "orchestrated group",
     memberIds: [a.id, b.id],
     repos: [{ path: repo, base: "main" }],
+  };
+}
+
+async function newGroup(extra: Record<string, unknown> = {}): Promise<Card> {
+  const { reply } = await call("/groups", {
+    ...(await groupBody()),
     ...extra,
   });
   assert.equal(reply.status, 201, JSON.stringify(reply.body));
@@ -234,6 +240,54 @@ void test("create_group with a playbook stores it in launch and start_group pass
     card.id,
     { extraDirection: "follow the playbook", playbook: "Orchestrated rules" },
   ]);
+});
+
+void test("create_group with no playbook applies the board group playbook when it exists", async () => {
+  const made = await createPlaybook({
+    name: "Board default",
+    body: "## Extra direction\n{extra}\n",
+  });
+  assert.equal(made.ok, true);
+  await setPolicy({ groupPlaybook: "Board default" });
+  try {
+    const { reply, row } = await call("/groups", await groupBody());
+    assert.equal(reply.status, 201, JSON.stringify(reply.body));
+    const card = reply.body.card as Card;
+    assert.equal(card.launch?.playbook, "Board default");
+    assert.equal(store.getCard(card.id)?.launch?.playbook, "Board default");
+    assert.equal(row.data.result, `${card.id} playbook Board default`);
+  } finally {
+    await setPolicy({ groupPlaybook: null });
+  }
+});
+
+void test("create_group with a board group playbook that no longer exists applies none", async () => {
+  await setPolicy({ groupPlaybook: "Gone playbook" });
+  try {
+    const { reply, row } = await call("/groups", await groupBody());
+    assert.equal(reply.status, 201, JSON.stringify(reply.body));
+    const card = reply.body.card as Card;
+    assert.equal(card.launch?.playbook, undefined);
+    assert.equal(row.data.result, `${card.id} playbook none`);
+  } finally {
+    await setPolicy({ groupPlaybook: null });
+  }
+});
+
+void test("create_group with an explicit unknown playbook answers 400 and creates no card, whatever the board playbook", async () => {
+  await setPolicy({ groupPlaybook: "Board default" });
+  try {
+    const body = await groupBody();
+    const groups = () =>
+      store.listCards(SBX).filter((c) => c.source === "group").length;
+    const before = groups();
+    const { reply } = await call("/groups", { ...body, playbook: "Nope" });
+    assert.equal(reply.status, 400, JSON.stringify(reply.body));
+    assert.equal(reply.body.error, "unknown playbook");
+    assert.equal(groups(), before);
+  } finally {
+    await setPolicy({ groupPlaybook: null });
+  }
 });
 
 void test("create_group refuses a dependency that is not a group of the board and a foreign repository", async () => {

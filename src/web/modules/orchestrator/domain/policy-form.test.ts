@@ -5,8 +5,12 @@ import {
   defaultBoardPolicy,
 } from "../../../../shared/board-key.js";
 import {
+  groupPlaybookFromSelect,
+  groupPlaybookOptions,
+  groupPlaybookSelectValue,
   isPolicyDirty,
   listedModels,
+  NO_GROUP_PLAYBOOK,
   POLICY_ERRORS,
   policyFormValues,
   policyPayload,
@@ -131,6 +135,7 @@ test("a form is dirty when any field differs from the saved values", () => {
     { shipRights: "merge" },
     { budgetPerGroup: "10" },
     { supervisor: saved.supervisor === "on" ? "off" : "on" },
+    { groupPlaybook: "Write code directly" },
   ];
   for (const patch of patches) {
     assert.equal(
@@ -141,7 +146,7 @@ test("a form is dirty when any field differs from the saved values", () => {
   }
 });
 
-test("the payload holds the ten policy fields with numbers, null and the stored model", () => {
+test("the payload holds the eleven policy fields with numbers, null and the stored model", () => {
   const payload = policyPayload(
     edit({
       concurrencyCap: "4",
@@ -152,6 +157,7 @@ test("the payload holds the ten policy fields with numbers, null and the stored 
   assert.deepEqual(Object.keys(payload).sort(), [
     "budgetPerGroup",
     "concurrencyCap",
+    "groupPlaybook",
     "handoffHardPercent",
     "handoffPercent",
     "loopModel",
@@ -167,6 +173,67 @@ test("the payload holds the ten policy fields with numbers, null and the stored 
   assert.equal(policyPayload(saved).loopModel, null);
   assert.equal(policyPayload(saved).budgetPerGroup, null);
   assert.equal(policyPayload(saved).orchestratorModel, "claude-opus-5-5");
+});
+
+test("the form values and the payload keep the group playbook, a name or null", () => {
+  assert.equal(saved.groupPlaybook, null);
+  assert.equal(policyPayload(saved).groupPlaybook, null);
+  const named = policyFormValues({
+    ...defaultBoardPolicy(DEFAULT_BOARD_KEY),
+    groupPlaybook: "Write code directly",
+  });
+  assert.equal(named.groupPlaybook, "Write code directly");
+  assert.equal(policyPayload(named).groupPlaybook, "Write code directly");
+});
+
+test("the group playbook options list None first, then the names in order", () => {
+  assert.deepEqual(groupPlaybookOptions(["B", "A"], null), [
+    { value: NO_GROUP_PLAYBOOK, label: "None" },
+    { value: "B", label: "B" },
+    { value: "A", label: "A" },
+  ]);
+  assert.equal(groupPlaybookOptions(["B", "A"], "A").length, 3);
+});
+
+test("a stored playbook missing from the list adds a not found option and keeps the value", () => {
+  const options = groupPlaybookOptions(["A"], "Gone");
+  assert.deepEqual(options.at(-1), {
+    value: "Gone",
+    label: "Gone (not found)",
+  });
+  assert.equal(options.length, 3);
+  assert.deepEqual(
+    groupPlaybookOptions([], "Gone").map((o) => o.label),
+    ["None", "Gone (not found)"],
+  );
+});
+
+test("while the names are loading a stored playbook shows as a plain option", () => {
+  assert.deepEqual(groupPlaybookOptions(undefined, null), [
+    { value: NO_GROUP_PLAYBOOK, label: "None" },
+  ]);
+  assert.deepEqual(groupPlaybookOptions(undefined, "Gone"), [
+    { value: NO_GROUP_PLAYBOOK, label: "None" },
+    { value: "Gone", label: "Gone" },
+  ]);
+});
+
+test("the sentinel maps to null and a name maps to itself", () => {
+  assert.equal(groupPlaybookFromSelect(NO_GROUP_PLAYBOOK), null);
+  assert.equal(groupPlaybookFromSelect("A"), "A");
+  assert.equal(groupPlaybookSelectValue(null), NO_GROUP_PLAYBOOK);
+  assert.equal(groupPlaybookSelectValue("A"), "A");
+  const picked = edit({ groupPlaybook: groupPlaybookFromSelect("A") });
+  assert.equal(policyPayload(picked).groupPlaybook, "A");
+  const cleared = edit({
+    groupPlaybook: groupPlaybookFromSelect(NO_GROUP_PLAYBOOK),
+  });
+  assert.equal(policyPayload(cleared).groupPlaybook, null);
+});
+
+test("clearing a saved group playbook makes the form dirty", () => {
+  const named = edit({ groupPlaybook: "A" });
+  assert.equal(isPolicyDirty(edit({ groupPlaybook: null }), named), true);
 });
 
 test("no option or payload holds a usage credits value", () => {

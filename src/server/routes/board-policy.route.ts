@@ -21,7 +21,7 @@ const whole = (field: string, min: number, max: number) =>
     .max(max, `invalid-${field}`);
 
 /**
- * The board policy fields, all required; the fixed supervisor values are not settings.
+ * The body of a board policy save.
  *
  * @remarks
  * The two models are checked against the shared list, and `opus` stays valid as the legacy name of Opus 5.5. The number ranges match the policy form and the user guide.
@@ -51,6 +51,12 @@ const policyBodySchema = z
         .max(100_000, "invalid-budgetPerGroup")
         .nullable(),
       supervisor: z.enum(["on", "off"], "invalid-supervisor"),
+      groupPlaybook: z
+        .string("invalid-groupPlaybook")
+        .min(1, "invalid-groupPlaybook")
+        .refine((s) => s.length <= 200, "invalid-groupPlaybook")
+        .nullable()
+        .optional(),
     },
     { error: unknownFieldError("invalid-policy") },
   )
@@ -61,8 +67,8 @@ const policyBodySchema = z
 
 boardPolicyRouter.put("/boards/:key/policy", async (req, res) => {
   const key = parseBoardKeyParam(req.params.key);
-  const policy = parseOrThrow(policyBodySchema, req.body);
-  res.status(200).json({ board: await setBoardPolicy(key, policy) });
+  const body = parseOrThrow(policyBodySchema, req.body);
+  res.status(200).json({ board: await setBoardPolicy(key, body) });
 });
 
 boardPolicyRouter.use(httpErrorHandler);

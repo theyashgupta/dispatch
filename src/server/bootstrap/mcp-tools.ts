@@ -176,7 +176,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "create_group",
     description:
-      "Create a group card from 2 or more cards. Text that holds the status marker is refused.",
+      "Create a group card from 2 or more cards. Omit playbook to use the board group playbook; get_policy lists the playbook names. Text that holds the status marker is refused.",
     input: {
       title: titleField,
       memberIds: z.array(z.string()).min(2),
