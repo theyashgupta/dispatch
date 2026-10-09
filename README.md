@@ -117,6 +117,8 @@ Running from source instead? `git clone`, `npm install`, `npm run dev` — see [
 
 ## Learn more
 
+The [user guide](docs/user-guide.md) explains boards, orchestrators, the dashboard, the attention queue, budgets, handoff and the ship flow, and it lists the seeded playbooks.
+
 Architecture — including the invariants that let the pane watcher survive Claude's TUI chrome, the hooks status channel, and the single access gate — is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The engineering standards are in [docs/standards/](docs/standards/).
 
 ## Status
