@@ -223,3 +223,64 @@ test("an event with an unparseable time gives a row with an empty time", () => {
   assert.equal(rows.length, 1);
   assert.equal(rows[0]?.time, "");
 });
+
+test("a group_state event reads as the Supervisor, the group id and the state label", () => {
+  const states = [
+    "agent_done",
+    "needs_input",
+    "start_failed",
+    "shipped",
+    "ship_stopped",
+    "loop_error",
+    "usage_limit",
+    "mystery",
+  ];
+  const rows = activityRows(
+    states.map((state, i) => event(i + 1, "group_state", "c14", { state })),
+    CARDS,
+    UTC,
+  ).reverse();
+  assert.deepEqual(
+    rows.map((r) => r.text),
+    [
+      "GROUP-14 reached Agent done",
+      "GROUP-14 needs input",
+      "GROUP-14 failed to start",
+      "GROUP-14 shipped",
+      "GROUP-14 ship stopped",
+      "GROUP-14 loop error",
+      "GROUP-14 hit a usage limit",
+      "GROUP-14 mystery",
+    ],
+  );
+  assert.ok(rows.every((r) => r.actor === "Supervisor"));
+  assert.equal(rows[0].line, "Supervisor: GROUP-14 reached Agent done");
+});
+
+test("a wake row reads Woke <orchestrator name>: <reasons>, and falls back to the card identifier", () => {
+  const reasons = ["decision d1 answered", "timer 15 min"];
+  assert.deepEqual(
+    texts([
+      event(1, "supervisor_action", "c14", {
+        action: "orchestrator_wake",
+        orchestrator: "Release",
+        reasons,
+      }),
+      event(2, "supervisor_action", "c14", {
+        action: "orchestrator_wake",
+        reasons,
+      }),
+      event(3, "supervisor_action", "c14", {
+        action: "orchestrator_wake",
+        orchestrator: "Release",
+        reasons,
+        result: "unconfirmed",
+      }),
+    ]),
+    [
+      "Could not wake Release: decision d1 answered, timer 15 min",
+      "Woke GROUP-14: decision d1 answered, timer 15 min",
+      "Woke Release: decision d1 answered, timer 15 min",
+    ],
+  );
+});

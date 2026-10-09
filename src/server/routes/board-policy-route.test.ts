@@ -59,6 +59,7 @@ const VALID: BoardPolicy = {
   budgetPerGroup: 25.5,
   supervisor: "off",
   groupPlaybook: null,
+  wakeMinutes: 15,
 };
 
 function stored(): BoardPolicy | undefined {
@@ -236,4 +237,30 @@ test("an empty, over 200 unit or non-string groupPlaybook answers 400 and writes
       "invalid-groupPlaybook",
     );
   }
+});
+
+test("wakeMinutes accepts 0, 15 and 1440 and reads each back", async () => {
+  for (const wakeMinutes of [0, 15, 1440]) {
+    const got = await put("/boards/PLC/policy", { ...VALID, wakeMinutes });
+    assert.equal(got.status, 200, got.text);
+    assert.equal(got.body.board.policy.wakeMinutes, wakeMinutes);
+    assert.equal(stored()?.wakeMinutes, wakeMinutes);
+  }
+});
+
+test("wakeMinutes of -1, 1441, 1.5 or a string answers 400 and the policy does not change", async () => {
+  for (const wakeMinutes of [-1, 1441, 1.5, "15"]) {
+    await expectRefusal({ ...VALID, wakeMinutes }, 400, "invalid-wakeMinutes");
+  }
+});
+
+test("an omitted wakeMinutes keeps the stored value", async () => {
+  await put("/boards/PLC/policy", { ...VALID, wakeMinutes: 42 });
+  const kept = await put("/boards/PLC/policy", {
+    ...VALID,
+    wakeMinutes: undefined,
+  });
+  assert.equal(kept.status, 200, kept.text);
+  assert.equal(kept.body.board.policy.wakeMinutes, 42);
+  assert.equal(stored()?.wakeMinutes, 42);
 });

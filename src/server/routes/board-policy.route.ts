@@ -57,6 +57,7 @@ const policyBodySchema = z
         .refine((s) => s.length <= 200, "invalid-groupPlaybook")
         .nullable()
         .optional(),
+      wakeMinutes: whole("wakeMinutes", 0, 1440).optional(),
     },
     { error: unknownFieldError("invalid-policy") },
   )

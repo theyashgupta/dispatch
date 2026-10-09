@@ -337,6 +337,11 @@ void test("a NEEDS_INPUT marker quoted inside a sentence is not the marker", () 
   assert.notEqual(feed(text, 1)[0].state, "needs_input");
 });
 
+void test("a NEEDS_INPUT marker after the assistant bullet is the marker", () => {
+  const text = "⏺ DISPATCH_STATUS: NEEDS_INPUT - which size\n❯ \n";
+  assert.equal(feed(text, 1)[0].state, "needs_input");
+});
+
 void test("a stored idle state is held after a restart while the pane stays the same", () => {
   const idle = pane("idle.txt");
   const ds = feed(idle, 4, { memory: initialMemory("idle") });

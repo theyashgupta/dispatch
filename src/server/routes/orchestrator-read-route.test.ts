@@ -1,9 +1,15 @@
 import test, { after } from "node:test";
+import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { isolateEnv, waitFor } from "../test-support/fixtures.js";
 import { startedGroup } from "../test-support/group-fixtures.js";
 import { parseBoardKey } from "../../shared/board-key.js";
-import type { BoardKey, Card, OrchestrationEvent } from "../../shared/types.js";
+import type {
+  BoardKey,
+  Card,
+  OrchestrationEvent,
+  Session,
+} from "../../shared/types.js";
 
 const env = isolateEnv();
 const { store } = await import("../store/board.store.js");
@@ -14,6 +20,7 @@ const { boardsRouter } = await import("./boards.route.js");
 const { paneReader } =
   await import("../services/orchestration/orchestrator-read.js");
 const { createPlaybook } = await import("../services/infra/playbooks.js");
+const wake = await import("../services/orchestration/orchestrator-wake.js");
 
 const SBX = parseBoardKey("SBX") as BoardKey;
 const OTH = parseBoardKey("OTH") as BoardKey;
@@ -69,7 +76,7 @@ for (const [board, cardId] of [
 }
 
 const app = express();
-app.use("/api/orchestrator", orchestratorRouter);
+app.use("/api/orchestrator", express.json(), orchestratorRouter);
 app.use("/api", express.json(), boardsRouter);
 const server = await new Promise<import("node:http").Server>((resolve) => {
   const s = app.listen(0, "127.0.0.1", () => resolve(s));
@@ -456,4 +463,113 @@ void test("list_cards refuses an empty source and an empty text", async () => {
     assert.equal(reply.status, 400, query);
     assert.equal(reply.body.error, error, query);
   }
+});
+
+void test("list_events and wait_for_event drop the queued reason of the events they return and no other", async () => {
+  const orchCard = await store.createOrchestratorCard(SBX, "Main", "orc-sbx");
+  await store.completeStart(orchCard.id, undefined, {
+    workspacePath: "/sbx/orc-sbx",
+    tmuxSession: "dsp-orc-sbx",
+    branch: "orc-sbx",
+  });
+  const liveCard = () => store.getCard(orchCard.id) as Card;
+  const session = liveCard().sessions?.find(
+    (x) => x.id === liveCard().activeSessionId,
+  ) as Session;
+  await store.setBoardOrchestrators(SBX, [
+    {
+      id: "orc-sbx",
+      name: "Main",
+      role: "main",
+      scope: { groupIds: [], ticketIds: [] },
+      policyOverride: {},
+      cardId: orchCard.id,
+      state: "running",
+      createdAt: "2026-10-08T00:00:00.000Z",
+    },
+  ]);
+  const sent: string[] = [];
+  wake.wakeTools.send = (_card, _session, text) => {
+    sent.push(text);
+    return Promise.resolve("confirmed");
+  };
+  const idle = readFileSync(
+    new URL("../test-support/fixtures/panes/idle.txt", import.meta.url),
+    "utf8",
+  );
+  let clock = Date.now();
+  const queued = async (): Promise<string[]> => {
+    clock += 60_000;
+    sent.length = 0;
+    wake.driveWake(liveCard(), session, idle, 0, clock);
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    return sent.map((m) => m.slice("Dispatch wake: ".length).split(".")[0]);
+  };
+  const append = (kind: "decision_answered" | "pr_state", id: string) => {
+    const event = store.appendOrchestrationEvent({
+      boardKey: SBX,
+      cardId: null,
+      sessionId: null,
+      kind,
+      data: { decisionId: id, orchestratorId: "orc-sbx" },
+      ts: new Date().toISOString(),
+    });
+    wake.queueWakeReason(event);
+    return event;
+  };
+  const wait = async (since: number, kinds: string[]) => {
+    const res = await fetch(`${base}/orchestrator/events/wait`, {
+      method: "POST",
+      headers: {
+        "x-orchestrator-token": TOKEN,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ since, kinds, timeoutSeconds: 1 }),
+    });
+    assert.equal(res.status, 200);
+    return (await res.json()) as { timedOut?: boolean };
+  };
+
+  const first = append("decision_answered", "d1");
+  append("pr_state", "p1");
+  const filtered = await wait(first.id, ["pr_state"]);
+  assert.equal(filtered.timedOut, undefined);
+  assert.deepEqual(
+    await queued(),
+    ["decision d1 answered"],
+    "a wait filtered to another kind that returns a later event keeps the earlier reason",
+  );
+
+  const second = append("decision_answered", "d2");
+  await call(
+    "GET",
+    `/orchestrator/events?since=${second.id - 1}&limit=1`,
+    TOKEN,
+  );
+  assert.deepEqual(
+    await queued(),
+    [],
+    "list_events drops the reason of a returned event",
+  );
+
+  append("decision_answered", "d3");
+  await call("GET", `/orchestrator/events?since=${second.id + 1000}`, TOKEN);
+  assert.deepEqual(
+    await queued(),
+    ["decision d3 answered"],
+    "an empty page drops nothing",
+  );
+
+  const fourth = append("decision_answered", "d4");
+  const timedOut = await wait(fourth.id + 1000, ["pr_state"]);
+  assert.equal(timedOut.timedOut, true);
+  assert.deepEqual(await queued(), ["decision d4 answered"]);
+
+  const fifth = append("decision_answered", "d5");
+  await wait(fifth.id - 1, ["decision_answered"]);
+  assert.deepEqual(
+    await queued(),
+    [],
+    "wait_for_event drops the reason of the event it returns",
+  );
 });

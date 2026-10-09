@@ -59,6 +59,7 @@ export function OrchestratorsTable({
               <TableHead>Scope</TableHead>
               <TableHead>Owns</TableHead>
               <TableHead>Policy</TableHead>
+              <TableHead>Last wake</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -108,6 +109,9 @@ export function OrchestratorsTable({
                 </TableCell>
                 <TableCell className="whitespace-normal">
                   {row.policy}
+                </TableCell>
+                <TableCell className="whitespace-normal">
+                  {row.lastWake}
                 </TableCell>
               </TableRow>
             ))}

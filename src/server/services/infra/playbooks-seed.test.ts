@@ -56,9 +56,9 @@ void test("the body holds the duty list, the usage limit check and the rm instru
     "inside the concurrency cap",
     "roadmapApproval",
     "send_input",
-    "Wait with wait_for_event. Never poll and never sleep.",
-    "Always set a kinds filter",
-    "timeoutSeconds to 55 or less",
+    "End every turn with wait_for_event.",
+    "Set kinds to decision_answered, group_state and intake_submitted",
+    "timeoutSeconds to 55",
     "start_ship",
     "Report to the user",
     "Call write_state after each decision",
@@ -76,4 +76,18 @@ void test("the body carries no status marker, no em dash and no double hyphen", 
   assert.equal(hasDispatchMarker(orchestrator.body), false);
   assert.doesNotMatch(orchestrator.body, /\u2014/);
   assert.equal(orchestrator.body.includes("-".repeat(2)), false);
+});
+
+void test("the Board Orchestrator text tells the orchestrator to wait each turn and to read a wake line", () => {
+  const body = orchestrator?.body ?? "";
+  assert.ok(
+    body.includes(
+      "End every turn with wait_for_event. Set kinds to decision_answered, group_state and intake_submitted, and timeoutSeconds to 55. When it times out, call it again. Never end a turn with only a report.",
+    ),
+  );
+  assert.ok(
+    body.includes(
+      'A message that starts with "Dispatch wake:" comes from Dispatch. Read the board state with the dispatch tools and continue.',
+    ),
+  );
 });

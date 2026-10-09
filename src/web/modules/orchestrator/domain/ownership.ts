@@ -13,7 +13,7 @@ import {
 
 export type OwnerRecord = Pick<
   OrchestratorRecord,
-  "id" | "name" | "role" | "scope" | "policyOverride"
+  "id" | "name" | "role" | "scope" | "policyOverride" | "lastWake"
 >;
 
 export interface ScopeRow {
@@ -215,12 +215,36 @@ export interface OrchestratorRow {
   scope: string;
   owns: string;
   policy: string;
+  lastWake: string;
+}
+
+/**
+ * Format the last wake as "<reasons> at <HH:MM>" in 24-hour time, or "None".
+ *
+ * @remarks
+ * `timeZone` is undefined in the app, so the time is local; a test passes a zone to stay deterministic. A time that does not parse reads "None", since Intl throws a RangeError on it.
+ */
+export function lastWakeLabel(
+  lastWake: OwnerRecord["lastWake"],
+  timeZone?: string,
+): string {
+  if (!lastWake) return "None";
+  const at = new Date(lastWake.at);
+  if (Number.isNaN(at.getTime())) return "None";
+  const time = new Intl.DateTimeFormat("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone,
+  }).format(at);
+  return `${lastWake.reasons.join(", ")} at ${time}`;
 }
 
 /** Build the rows of the Orchestrators table. */
 export function orchestratorRows(
   records: readonly OwnerRecord[],
   cards: readonly Card[],
+  timeZone?: string,
 ): OrchestratorRow[] {
   return records.map((record) => {
     const isMain = record.role === "main";
@@ -235,6 +259,7 @@ export function orchestratorRows(
       scope: isMain ? MAIN_SCOPE_TEXT : owned.join(", "),
       owns: owned.length === 0 ? "None" : owned.join(", "),
       policy: policy.length === 0 ? "Board policy" : policy.join(", "),
+      lastWake: lastWakeLabel(record.lastWake, timeZone),
     };
   });
 }

@@ -22,6 +22,7 @@ const board: BoardPolicy = {
   budgetPerGroup: 20,
   supervisor: "on",
   groupPlaybook: null,
+  wakeMinutes: 15,
 };
 
 function values(options: { value: string }[]): string[] {

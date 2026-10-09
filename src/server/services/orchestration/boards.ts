@@ -2,6 +2,7 @@ import path from "node:path";
 import {
   ALL_BOARDS,
   DEFAULT_BOARD_KEY,
+  defaultBoardPolicy,
   identifierPrefix,
   isReservedBoardKey,
   parseBoardKey,
@@ -407,19 +408,29 @@ export function getBoard(key: BoardKey): Board {
 /**
  * Store a board policy and answer the board as the API shows it, or the typed 404 `unknown-board`.
  *
- * @remarks An omitted `groupPlaybook` keeps the stored name, and an explicit null clears it.
+ * @remarks An omitted `groupPlaybook` or `wakeMinutes` keeps the stored value, and an explicit null clears the playbook.
  */
 export async function setBoardPolicy(
   key: BoardKey,
-  policy: Omit<BoardPolicy, "groupPlaybook"> & {
+  policy: Omit<BoardPolicy, "groupPlaybook" | "wakeMinutes"> & {
     groupPlaybook?: string | null | undefined;
+    wakeMinutes?: number | undefined;
   },
 ): Promise<Board> {
+  const stored = store.getBoard(key)?.policy;
   const groupPlaybook =
     policy.groupPlaybook === undefined
-      ? (store.getBoard(key)?.policy.groupPlaybook ?? null)
+      ? (stored?.groupPlaybook ?? null)
       : policy.groupPlaybook;
-  const board = await store.setBoardPolicy(key, { ...policy, groupPlaybook });
+  const wakeMinutes =
+    policy.wakeMinutes ??
+    stored?.wakeMinutes ??
+    defaultBoardPolicy(key).wakeMinutes;
+  const board = await store.setBoardPolicy(key, {
+    ...policy,
+    groupPlaybook,
+    wakeMinutes,
+  });
   if (!board) throw new BoardNotFoundError("unknown-board");
   return viewOf(board);
 }

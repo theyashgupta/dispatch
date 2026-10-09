@@ -5582,6 +5582,8 @@ env -u NODE_ENV -u CLAUDE_CONFIG_DIR node --import tsx --test tests/e2e/scenario
 
 Scenario 4 (tests/e2e/scenario-4-no-loop-ship.e2e.ts) proves that a group with no loop files ships through `start_ship` to the bare origin of its sandbox, with the fake `claude` as orchestrator and as group session and with the fake `gh`.
 
+Scenario 5 (tests/e2e/scenario-5-wake.e2e.ts) proves that the server wakes the orchestrator. The board has one group of two tickets, and the fake orchestrator replays its tool calls under busy status rows and waits under idle rows. The test answers the orchestrator decision item through `POST /api/decisions/:id/answer` and checks that the `Dispatch wake: decision` line reaches the fake in 30 s or less. It then makes the group commit, print the done marker and report Stop, and checks that an Agent done wake line follows at least 20 s after the first, after which the orchestrator calls `start_ship` and the PR merges into the bare origin. The test also checks that every wake line has one confirmed `orchestrator_wake` row and that no wake line or row falls inside a busy status window of the fake. The scenario types no key into any pane, and a static check of its own files enforces that.
+
 The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
 ## Orchestration Initiative
@@ -5709,6 +5711,31 @@ action that finds nothing to do, such as an `Escape` already sent, writes no row
   change after the cost of a group reaches `budgetPerGroup`. The cost of a session is a running
   total: when its status line meter drops (a claude relaunch starts it at 0), the pass adds the
   last value. The total lives in server memory.
+- Group state events (`group-state-events.ts`, `domain/group-state.ts`): `recordGroupState` appends
+  one `group_state` row (`{ state, reason }`) for a group card only, never for the orchestrator card
+  or a ticket card, and skips a state equal to the last `group_state` row of that card, unless that card's session went back to `working` after it. The writers
+  are the `status_agent_done` and `status_needs_input` activity subscription in `bootstrap/index.ts`
+  (`agent_done`, `needs_input`), the ship flow (`shipped`, `ship_stopped`), `recordStartFailure`
+  (`start_failed`) and the supervisor state change (`loop_error` for `api_error`, `stale`, `lost`
+  and `shell_prompt`; `usage_limit` for `usage_limit_dialog` and `usage_limit_wait`).
+- Wake duty (`orchestrator-wake.ts`, `domain/orchestrator-wake.ts`): a running orchestrator gets a
+  typed line when a `decision_answered` or `group_state` event or its timer calls for it. A
+  `decision_answered` event goes to the orchestrator in its `data.orchestratorId`; a `group_state`
+  event goes to the owner of the group by the scope rule, else the main. Each running orchestrator
+  has one in-memory queue of reasons, keyed by event id, that a restart empties. `list_events` and
+  `wait_for_event` record the ids of the events they return, and a queued reason of exactly those events is dropped. A
+  stopped orchestrator has no queue and gets no line. The 2 s pane sample of the orchestrator card
+  runs the duty after its own state work, and sends with the confirmed send, without blocking the
+  sample, when the queue is not empty, no wake send is in flight, the last wake line is 20 s or
+  more old, the pane is ready and not busy, and the hook turn state is not `busy`. The line is
+  `Dispatch wake: <reasons>. Read the board state with the dispatch tools and continue.` with at
+  most 5 reasons (`decision <id> answered`, `<group> <state>`, `timer <n> min`), then `and <n> more`.
+  A reason leaves the queue only on a confirmed send; an unconfirmed send keeps it. Each send writes
+  one `orchestrator_wake` action row with its reasons and result, and a confirmed send sets
+  `lastWake` on the orchestrator record. The timer is the policy field `wakeMinutes` (0 to 1440,
+  default 15, 0 off): when the last confirmed wake, the last `tool_call` of the orchestrator or the
+  server start is that old, the sample queues one `timer <n> min` reason, which waits in the queue
+  without a repeat.
 
 **Hold.** A `needs_input` that the supervisor set with a `stateReason` stays until a busy sign,
 a permission prompt, a lost session or a shell prompt shows. Quiet samples do not plan again.
@@ -5728,7 +5755,8 @@ phase, send waits of 1.5 s, 10 s and 10 s, a ready wait of 60 s, and a reset wai
 **Policy route.** `PUT /api/boards/:key/policy` writes the D-6 policy fields of a board. It is a
 user route; no orchestrator route or tool changes a policy. The `groupPlaybook` field (a playbook name
 or null) is one of these fields. A save that omits `groupPlaybook` keeps the stored value, and a save
-with null clears it. The store reads each stored policy as the defaults of `defaultBoardPolicy` with
+with null clears it. `wakeMinutes` (whole number, 0 to 1440, else 400 `invalid-wakeMinutes`) is optional
+the same way. The store reads each stored policy as the defaults of `defaultBoardPolicy` with
 the stored values over them, so a board saved before a new field gets its default. A stored policy
 that is JSON `null` or an array reads as the defaults alone.
 
@@ -5929,7 +5957,7 @@ routes. `start`, `stop` and `resume` answer 202 with the transitional record (`s
 and finish in the background; the record then holds `running` or `stopped`. A per record lock in
 server memory answers a second call with 409 `orchestrator-running`. Start and resume are refused when
 the board has `supervisor: off`. Start writes the MCP config file, creates the hidden card on the first
-start and runs the start saga with the playbook `Board Orchestrator`. When the tmux session of the
+start and runs the start saga with the playbook `Board Orchestrator`. The playbook tells the orchestrator to end every turn with `wait_for_event`, and the supervisor wake duty types a "Dispatch wake:" line into an idle orchestrator pane for its decision answers, its `group_state` events and its wake timer. When the tmux session of the
 hidden card is still open, start answers 409 `orchestrator-session-live` and resume relaunches claude in
 that session through `runClaude`, with `--resume` of the recorded conversation, and otherwise runs the
 start saga again. Resume accepts a `stopped` record and a `running` record whose session is `lost` or at

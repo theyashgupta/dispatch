@@ -91,6 +91,7 @@ Only you can change the policy. The orchestrator reads it. No tool can change it
 | **Orchestrator model**              | **Opus 5.5**, **Sonnet 5.5**, **Fable 5.1**                                                      | **Opus 5.5**                |
 | **Handoff at context percent**      | A whole number from 10 to 95                                                                     | 50                          |
 | **Hard handoff at context percent** | A whole number above the handoff percent, up to 100                                              | 80                          |
+| **Wake timer (minutes)**            | A whole number from 0 to 1440                                                                    | 15                          |
 | **At a usage limit**                | **Wait for the reset**, **Stop and ask me**                                                      | **Wait for the reset**      |
 | **Ship rights**                     | **None, I ship**, **Open PRs**, **Open and merge PRs**                                           | **None, I ship**            |
 | **Budget per group (USD)**          | An amount above 0 and at most 100000, or empty for **No limit**                                  | Empty (**No limit**)        |
@@ -102,6 +103,7 @@ Notes on the fields:
 - **Loops at once** is the concurrency cap. Dispatch refuses the orchestrator tool that starts a group above the cap. A group that waits for its dependencies stays queued. The supervisor starts it when the dependencies are done and a slot is free.
 - **Loop model**: The model and effort of the sessions of a group. When you choose a model, Dispatch starts each group session with that model and effort, and it ignores any model or effort in the Settings Claude arguments. When you choose **Session settings**, Dispatch uses the Settings.
 - **Group playbook**: the playbook of a group that the orchestrator creates without one. When the playbook no longer exists, the group starts with no playbook. When the stored name is not in the list of playbooks, the select shows it as "<name> (not found)", and **Save policy** keeps the name.
+- **Wake timer (minutes)**: Wakes an idle orchestrator after this many quiet minutes. 0 turns it off. An extra orchestrator cannot override it.
 - **Supervisor** must be **On** to start an orchestrator. The form says: "The supervisor watches the loops of this board. An orchestrator needs it."
 - Choose **Save policy** to save. The button is off until a field changes. The message "Policy saved." confirms the save.
 - The number fields are text inputs. The form checks the ranges while you type and shows an error under the field. **Save policy** saves nothing while a field has an error.
@@ -133,6 +135,8 @@ The panel header shows the state of the session as a badge. The badge uses the s
 - **Needs input**, **Permission prompt**, **Usage limit dialog** and **Waiting for usage reset**. The session waits. Open the **Terminal** tab.
 - **Session lost** and **Claude exited**. The session ended. **Resume orchestrator** shows.
 
+When the orchestrator waits at its prompt, Dispatch wakes it. Dispatch types one line that starts with "Dispatch wake:" when you answer its decision item, when one of its groups reaches Agent done, needs input, fails to start, ships, stops its ship flow, hits a loop error or a usage limit, and when the **Wake timer (minutes)** of the policy runs out. Dispatch never types while the orchestrator works, types at most one line in 20 seconds, and never wakes a stopped orchestrator.
+
 The hidden card and the MCP configuration file do not show in the UI. To confirm a start, check these signs:
 
 1. The badge reads **Working** and the **Stop** button shows.
@@ -147,7 +151,7 @@ The **Terminal** tab shows the live terminal. The panel buttons depend on the st
 - **Stop** interrupts the current turn. The session stays open. The button is off when the session shows a permission prompt, the usage limit dialog or the wait for the usage reset.
 - **Resume orchestrator** shows when the session is lost or Claude exited. It starts Claude again in the open session, or it starts the session again.
 
-The **Decisions** tab lists the open decision items of the board. The **Orchestrators** tab lists the orchestrators. An extra orchestrator needs a scope of groups or tickets, and it needs the main orchestrator first. Choose **Add extra orchestrator** to add one.
+The **Decisions** tab lists the open decision items of the board. The **Orchestrators** tab lists the orchestrators. The **Last wake** column, after **Policy**, shows the reasons and the time of the last wake, for example "timer 15 min at 14:05", or **None** when the orchestrator has not woken. An extra orchestrator needs a scope of groups or tickets, and it needs the main orchestrator first. Choose **Add extra orchestrator** to add one.
 
 ## Groups and loops
 
@@ -382,10 +386,12 @@ Every seeded playbook has one input: the extra direction. It is the optional tex
   4. Start groups only inside the concurrency cap.
   5. Approve or escalate each roadmap as **Roadmap approval** says.
   6. Answer loop inputs with `send_input`.
-  7. Wait with `wait_for_event`. Never poll and never sleep. Always set a `kinds` filter and a `timeoutSeconds` of 55 or less.
+  7. End every turn with `wait_for_event`. Set `kinds` to `decision_answered`, `group_state` and `intake_submitted`, and `timeoutSeconds` to 55. When it times out, call it again. Never end a turn with only a report.
   8. Ship in order with `start_ship` when the ship rights allow it.
   9. Report to you. Raise a decision item with `create_decision_item` when a person must decide.
   10. Call `write_state` after each decision, with the full state.
+
+  A message that starts with "Dispatch wake:" comes from Dispatch. Read the board state with the dispatch tools and continue.
 
   After a usage limit, it checks `get_group_progress` and `read_pane_tail` before it sends input. It tells each loop never to run a dangerous `rm`. It hands off only when asked. The playbook forbids these actions:
 

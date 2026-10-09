@@ -44,5 +44,6 @@ export function defaultBoardPolicy(key: BoardKey): BoardPolicy {
     budgetPerGroup: null,
     supervisor: key === DEFAULT_BOARD_KEY ? "off" : "on",
     groupPlaybook: null,
+    wakeMinutes: 15,
   };
 }

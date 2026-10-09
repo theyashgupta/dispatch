@@ -116,6 +116,14 @@ export function PolicyForm({
         error={errors.handoffHardPercent}
         onChange={(handoffHardPercent) => onChange({ handoffHardPercent })}
       />
+      <TextField
+        id="policy-wake-minutes"
+        label="Wake timer (minutes)"
+        value={values.wakeMinutes}
+        description="Wakes an idle orchestrator after this many quiet minutes. 0 turns it off."
+        error={errors.wakeMinutes}
+        onChange={(wakeMinutes) => onChange({ wakeMinutes })}
+      />
       <Field>
         <Label id="policy-usage-limit-label">At a usage limit</Label>
         <ToggleGroup

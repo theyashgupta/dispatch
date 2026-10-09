@@ -714,7 +714,14 @@ async function runLoop(
   opts.prepare?.(cwd);
   const log = path.join(dir, "replay.jsonl");
   const scenarioFile = path.join(dir, "scenario.json");
-  fs.writeFileSync(scenarioFile, JSON.stringify({ replayLogPath: log, loop }));
+  fs.writeFileSync(
+    scenarioFile,
+    JSON.stringify({
+      replayLogPath: log,
+      statusLogPath: path.join(dir, "status.jsonl"),
+      loop,
+    }),
+  );
   const childEnv: Record<string, string> = {
     ...opts.env,
     FAKE_CLAUDE_SCENARIO: scenarioFile,
@@ -787,6 +794,27 @@ void test(
       ],
     );
     assert.equal(lines[2]?.stopped, undefined);
+  },
+);
+
+void test(
+  "a statusRows step is logged with its rows and time when the scenario names a statusLogPath",
+  { timeout: 60000 },
+  async () => {
+    const { cwd } = await runLoop("status-log", {
+      onStart: [
+        { statusRows: ["busy row", "esc to interrupt"] },
+        { sleepMs: 200 },
+        { statusRows: ["idle row"] },
+      ],
+    });
+    const rows = readJsonl(path.join(cwd, "..", "status.jsonl"));
+    assert.deepEqual(
+      rows.map((r) => r.rows),
+      [["busy row", "esc to interrupt"], ["idle row"]],
+    );
+    const [first, second] = rows.map((r) => Date.parse(String(r.at)));
+    assert.ok(second !== undefined && first !== undefined && second > first);
   },
 );
 

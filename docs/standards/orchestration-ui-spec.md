@@ -480,3 +480,11 @@ This entry adds to the screens above. It does not change the text of an earlier 
 - **Screen 4, Section 4 (U1-09).** The section gains an actor select with the options All, Orchestrator, Supervisor and You, and a group select.
 - **Screen 1 (R-16).** The boards table gains a "Loops" column after "Attention". Each running loop shows "<group id> <percent>%". The cell shows at most three loops, then "+<n> more". A board with no running loop shows "0". From 768 px to 1279 px, the cell shows only the number of running loops, as the Repositories cell shows a count (U1-30). Below 768 px, each board item gains one more badge line with the same text.
 - **Screen 1, Loops cell (2026-10-09, LOCAL-95).** A running group with no loop progress shows "<group id> no loop progress" in place of "<group id> <percent>%". The cell lists the same groups that the dashboard count "<n> of <cap> loops running" counts.
+
+### 2026-10-09 (LOCAL-96)
+
+This entry adds to the screens above. It does not change the text of an earlier section.
+
+- **Policy form, Wake timer (U2-09).** The form gains a text input "Wake timer (minutes)" after "Hard handoff at context percent". It accepts a whole number from 0 to 1440. Any other text shows the error "Enter a whole number from 0 to 1440." and "Save policy" saves nothing. The helper text reads "Wakes an idle orchestrator after this many quiet minutes. 0 turns it off." The override form of an extra orchestrator has no such field.
+- **Orchestrators tab, Last wake column (U2-10).** The table gains a "Last wake" column after "Policy". The value is "<reasons> at <HH:MM>", with the reasons joined by ", " and the time in local 24-hour format, or "None" when the orchestrator has not woken. The cell wraps its text like the other text columns, so the table keeps its columns at 390 px.
+- **Activity, wake row (U2-12).** A `supervisor_action` with `action` `orchestrator_wake` reads "Woke <orchestrator name>: <reasons joined with ', '>". When the event has no orchestrator name, it shows the identifier of the orchestrator card in place of the name. An unconfirmed send reads "Could not wake <orchestrator name>: <reasons>". A `group_state` event reads "<group id> <label>" with the actor "Supervisor"; the labels are "reached Agent done", "needs input", "failed to start", "shipped", "ship stopped", "loop error" and "hit a usage limit".

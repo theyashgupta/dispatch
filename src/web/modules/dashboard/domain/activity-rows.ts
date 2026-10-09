@@ -1,5 +1,6 @@
 import type {
   Card,
+  GroupState,
   OrchestrationEvent,
   OrchestrationEventKind,
   OrchestratorRecord,
@@ -32,6 +33,17 @@ const ACTORS: Record<OrchestrationEventKind, ActorKind> = {
   pr_state: "Supervisor",
   machine_wake: "Supervisor",
   intake_submitted: "You",
+  group_state: "Supervisor",
+};
+
+const GROUP_STATE_LABELS: Record<GroupState, string> = {
+  agent_done: "reached Agent done",
+  needs_input: "needs input",
+  start_failed: "failed to start",
+  shipped: "shipped",
+  ship_stopped: "ship stopped",
+  loop_error: "loop error",
+  usage_limit: "hit a usage limit",
 };
 
 const SUPERVISOR_ACTIONS: Record<string, (g: string) => string> = {
@@ -97,6 +109,13 @@ function textOf(event: OrchestrationEvent, group: string | null): string {
     }
     case "supervisor_action": {
       const action = str(data.action) ?? "action";
+      if (action === "orchestrator_wake") {
+        const reasons = Array.isArray(data.reasons)
+          ? data.reasons.filter((r): r is string => typeof r === "string")
+          : [];
+        const verb = data.result === "unconfirmed" ? "Could not wake" : "Woke";
+        return `${verb} ${str(data.orchestrator) ?? g}: ${reasons.join(", ")}`;
+      }
       return supervisorAction(action)?.(g) ?? `${action} on ${g}`;
     }
     case "decision_raised":
@@ -109,6 +128,14 @@ function textOf(event: OrchestrationEvent, group: string | null): string {
       return "the machine woke";
     case "intake_submitted":
       return "submitted a goal to the orchestrator";
+    case "group_state": {
+      const state = str(data.state);
+      const label =
+        state !== null && Object.hasOwn(GROUP_STATE_LABELS, state)
+          ? GROUP_STATE_LABELS[state as GroupState]
+          : (state ?? "changed state");
+      return `${g} ${label}`;
+    }
   }
 }
 

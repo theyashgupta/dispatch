@@ -6,6 +6,7 @@ import { ConflictError, ValidationError } from "../domain/errors.js";
 import { getOrchestrationConfig } from "../infra/config-holder.js";
 import { playbookExists } from "../infra/playbooks.js";
 import { mapBoardUnavailable } from "./boards.js";
+import { recordGroupState } from "./group-state-events.js";
 import { startSession } from "./start-session.js";
 import { restatRepos } from "./workspaces.js";
 
@@ -163,4 +164,5 @@ export async function recordStartFailure(
     data: { action: "start_group_failed", reason },
     ts: new Date().toISOString(),
   });
+  recordGroupState(card, "start_failed", reason, null);
 }
