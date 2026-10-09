@@ -376,6 +376,7 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 - Route: `GET /events`.
 - Input: `since` (optional integer, 0 or more, default 0), `limit` (optional integer, 1 to 200, default 200).
 - Description: "List the events of your board after an event id. The limit is 1 to 200."
+- Result: the events of every kind, including `group_state`.
 - Refusals: 400 `invalid-since`, `invalid-limit`.
 
 ### `get_policy`
@@ -510,7 +511,7 @@ A user route refuses a call that carries an orchestrator token (403 `orchestrato
 ### `wait_for_event`
 
 - Route: `POST /events/wait`. It answers 200 with `{ event }`, or with `{ timedOut: true, cursor }` when the time ends.
-- Input: `since` (integer, 0 or more), `kinds` (optional array of 1 to 20 event kinds: `loop_gate`, `supervisor_state`, `supervisor_action`, `pr_state`, `machine_wake`, `tool_call`, `decision_raised`, `decision_answered`, `intake_submitted`), `cardIds` (optional array of 1 to 50 card ids), `timeoutSeconds` (optional integer, 1 to 55, default 55). The MCP tool sends 55 when the call omits it, because the MCP client cuts a tool call at 60 seconds; the route itself takes 1 to 540, default 240, for a direct client.
+- Input: `since` (integer, 0 or more), `kinds` (optional array of 1 to 20 event kinds: `loop_gate`, `supervisor_state`, `supervisor_action`, `pr_state`, `machine_wake`, `tool_call`, `decision_raised`, `decision_answered`, `intake_submitted`, `group_state`), `cardIds` (optional array of 1 to 50 card ids), `timeoutSeconds` (optional integer, 1 to 55, default 55). The MCP tool sends 55 when the call omits it, because the MCP client cuts a tool call at 60 seconds; the route itself takes 1 to 540, default 240, for a direct client.
 - Description: "Wait for the next board event after an event id. The wait is at most 55 seconds, and the default is 55. If no event comes, call it again to keep waiting."
 - Refusals: 400 `invalid-since`, `invalid-kinds`, `invalid-card-ids`, `invalid-timeout`. A `tool_call` event ends the wait only when `kinds` names it.
 
@@ -605,3 +606,9 @@ Confirmed. The removal note names `watch-loops.zsh`, `resume-loop.zsh`, `resume-
 ### LOCAL-95
 
 Change: `start_ship` ships a group with no loop progress when its card is in Agent done, its branch is the session branch of the group, each branch is ahead of its base and the worktree is clean (D-10). D-8 keeps its text for a group with loop progress. The policy gets one more D-6 field, `groupPlaybook` (a playbook name or null, default null): only the user sets it, and `create_group` uses it when no `playbook` is given and that playbook exists. A policy save that omits `groupPlaybook` keeps the stored value, and a save with `groupPlaybook` null clears it.
+
+### LOCAL-96
+
+Change: a new event kind `group_state` tells the orchestrator about an important change of a group. The event has the group card as `cardId`, and its data is `{ state, reason }`. `state` is one of `agent_done`, `needs_input`, `start_failed`, `shipped`, `ship_stopped`, `loop_error` and `usage_limit`. The server writes it in four places: the `status_agent_done` and `status_needs_input` activity events of a group card, the end of a ship flow (`shipped` or `ship_stopped`), a failed group start, and a supervisor state change of a group card to `api_error`, `stale`, `lost` or `shell_prompt` (`loop_error`) or to `usage_limit_dialog` or `usage_limit_wait` (`usage_limit`). The orchestrator card and a ticket card never write it. A state that repeats the last `group_state` event of the same card, with no other `group_state` event of that card in between and no `supervisor_state` event of that card to `working` after it, is not written. `wait_for_event` takes the kind in `kinds`, and `list_events` returns it.
+
+Change: the Board Orchestrator playbook step 7 tells the orchestrator to end every turn with `wait_for_event` on `decision_answered`, `group_state` and `intake_submitted` with `timeoutSeconds` 55, and a new line says that a message that starts with "Dispatch wake:" comes from Dispatch. The supervisor types that wake line into an idle orchestrator pane (see ARCHITECTURE, Orchestrator Session). Reason: in the G19 real run the orchestrator ended its turn after each action and slept until a person typed.
