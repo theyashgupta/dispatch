@@ -763,6 +763,7 @@ export default tseslint.config(
       ".claude/worktrees/**",
       "src/web/public/**",
       ".planning/**",
+      ".sandbox/**",
     ],
   },
 
