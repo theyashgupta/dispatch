@@ -1,6 +1,7 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import path from "node:path";
 import { isolateEnv, waitFor } from "../test-support/fixtures.js";
 import { startedGroup } from "../test-support/group-fixtures.js";
 import { setGhScenario, writeFakeGh } from "../test-support/fake-gh.js";
@@ -16,7 +17,8 @@ import type {
 
 const env = isolateEnv();
 const { store } = await import("../store/board.store.js");
-const { shipStack } = await import("../test-support/git-fixtures.js");
+const { gitOutput, shipStack } =
+  await import("../test-support/git-fixtures.js");
 const { setOrchestrationConfig } =
   await import("../services/infra/config-holder.js");
 const express = (await import("express")).default;
@@ -288,4 +290,155 @@ void test("get_ship_state answers 404 without a flow, 401 without a token and 40
   );
   assert.equal(foreign.status, 403);
   assert.equal(foreign.body.error, "other-board");
+});
+
+/** A started SBX group with no loop progress in `column`, its branch ahead of `main` or level. */
+async function noLoopGroup(
+  column: "agent_done" | "needs_input" | null,
+  ahead = true,
+): Promise<Card> {
+  const { g } = await startedGroup(store, {
+    board: SBX,
+    workspacePath: stack.ws,
+    repos: [{ path: stack.repo, base: "main" }],
+  });
+  if (column !== null) {
+    await store.applyMarker(
+      g.id,
+      undefined,
+      column,
+      undefined,
+      `marker-${g.id}`,
+      column === "agent_done" ? "status_agent_done" : "status_needs_input",
+    );
+  }
+  const tip = ahead
+    ? await gitOutput(
+        stack.repo,
+        "commit-tree",
+        await gitOutput(stack.repo, "rev-parse", "unit-1^{tree}"),
+        "-p",
+        "main",
+        "-m",
+        `${g.id} work`,
+      )
+    : "main";
+  await gitOutput(stack.repo, "branch", g.id, tip);
+  return store.getCard(g.id)!;
+}
+
+const shipOf = (card: Card, name: string) =>
+  raw(
+    "POST",
+    `/orchestrator/groups/${card.id}/ship`,
+    { repository: stack.repo, branches: [branch(name)] },
+    TOKEN,
+  );
+
+void test("start_ship answers 202 for a group with no loop progress that is done, ahead and clean", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const card = await noLoopGroup("agent_done");
+  assert.equal(card.loopProgress, undefined);
+  const reply = await shipOf(card, card.id);
+  assert.equal(reply.status, 202, JSON.stringify(reply.body));
+  const flow = reply.body.flow as ShipFlow;
+  assert.equal(flow.state, "running");
+  assert.deepEqual(
+    flow.branches.map((b) => b.name),
+    [card.id],
+  );
+  assert.equal(store.getCard(card.id)?.shipFlow?.state, "running");
+  await waitFor(
+    () =>
+      Promise.resolve(store.getCard(card.id)?.shipFlow?.state !== "running"),
+    30_000,
+    "flow end",
+  );
+});
+
+void test("start_ship answers 409 card-not-done for a group with no loop progress in Needs input and In progress", async () => {
+  await setPolicy({ shipRights: "merge" });
+  for (const column of ["needs_input", null] as const) {
+    const card = await noLoopGroup(column);
+    const reply = await shipOf(card, card.id);
+    assert.equal(reply.status, 409, String(column));
+    assert.equal(reply.body.error, "card-not-done");
+    assert.equal(store.getCard(card.id)?.shipFlow, undefined);
+  }
+});
+
+void test("start_ship answers 400 invalid-branch-name for a group with no loop progress and a branch that is not a session branch", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const card = await noLoopGroup("agent_done");
+  for (const name of ["unit-1", "main", "HEAD", "refs/heads/x"]) {
+    const reply = await shipOf(card, name);
+    assert.equal(reply.status, 400, name);
+    assert.equal(reply.body.error, "invalid-branch-name", name);
+    assert.equal(reply.body.branch, name, name);
+  }
+  await store.setCardWorkspace(card.id, {
+    folder: stack.ws,
+    repos: [{ path: stack.repo, base: card.id }],
+  });
+  const asBase = await shipOf(card, card.id);
+  assert.equal(asBase.status, 400);
+  assert.equal(asBase.body.error, "invalid-branch-name");
+  assert.equal(asBase.body.branch, card.id);
+  assert.equal(store.getCard(card.id)?.shipFlow, undefined);
+});
+
+void test("start_ship answers 409 branch-not-ahead and unknown-base with the branch for a group with no loop progress", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const level = await noLoopGroup("agent_done", false);
+  const notAhead = await shipOf(level, level.id);
+  assert.equal(notAhead.status, 409);
+  assert.equal(notAhead.body.error, "branch-not-ahead");
+  assert.equal(notAhead.body.branch, level.id);
+  const lost = await noLoopGroup("agent_done");
+  await store.setCardWorkspace(lost.id, {
+    folder: stack.ws,
+    repos: [{ path: stack.repo, base: "no-such-base" }],
+  });
+  const unknown = await shipOf(lost, lost.id);
+  assert.equal(unknown.status, 409);
+  assert.equal(unknown.body.error, "unknown-base");
+  assert.equal(unknown.body.branch, lost.id);
+  assert.equal(store.getCard(level.id)?.shipFlow, undefined);
+  assert.equal(store.getCard(lost.id)?.shipFlow, undefined);
+});
+
+void test("start_ship answers 409 worktree-dirty for an untracked file and a modified tracked file", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const card = await noLoopGroup("agent_done");
+  const untracked = path.join(stack.worktree, "stray.txt");
+  const tracked = path.join(stack.worktree, "README.md");
+  const original = fs.readFileSync(tracked, "utf8");
+  try {
+    fs.writeFileSync(untracked, "x\n");
+    const first = await shipOf(card, card.id);
+    assert.equal(first.status, 409);
+    assert.equal(first.body.error, "worktree-dirty");
+    fs.rmSync(untracked);
+    fs.writeFileSync(tracked, `${original}more\n`);
+    const second = await shipOf(card, card.id);
+    assert.equal(second.status, 409);
+    assert.equal(second.body.error, "worktree-dirty");
+  } finally {
+    fs.rmSync(untracked, { force: true });
+    fs.writeFileSync(tracked, original);
+  }
+  assert.equal(store.getCard(card.id)?.shipFlow, undefined);
+});
+
+void test("start_ship answers 409 loop-not-finished for a group with loop progress whose unit is in progress", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const card = await finishedGroup();
+  await store.setLoopProgress(card.id, {
+    ...FINISHED,
+    units: FINISHED.units.map((u) => ({ ...u, status: "in progress" })),
+  });
+  const reply = await shipOf(card, "unit-1");
+  assert.equal(reply.status, 409);
+  assert.equal(reply.body.error, "loop-not-finished");
+  assert.equal(store.getCard(card.id)?.shipFlow, undefined);
 });

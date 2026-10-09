@@ -294,7 +294,7 @@ void test("startShip refuses each failed precondition and writes no flow", async
   );
   await refused(409, "loop-not-finished");
   await store.setLoopProgress(id, progress([]));
-  await refused(409, "loop-not-finished");
+  await refused(409, "card-not-done");
 
   const engine = {
     active: true,
@@ -335,6 +335,186 @@ void test("startShip refuses each failed precondition and writes no flow", async
   await refused(409, "ship-flow-running");
   await store.setShipFlow(other.g.id, { ...running, state: "stopped" });
   assert.deepEqual(calls, []);
+});
+
+let markerCount = 0;
+
+/** The stack card as a group with no loop progress, moved to `column` by a status marker. */
+async function noLoopCard(
+  stack: Stack,
+  column: "agent_done" | "needs_input" = "agent_done",
+): Promise<Card> {
+  markerCount += 1;
+  await store.applyMarker(
+    stack.card.id,
+    undefined,
+    column,
+    undefined,
+    `marker-${markerCount}`,
+    column === "agent_done" ? "status_agent_done" : "status_needs_input",
+  );
+  const card = store.getCard(stack.card.id)!;
+  delete card.loopProgress;
+  return card;
+}
+
+async function refusedCard(
+  card: Card,
+  stack: Stack,
+  name: string,
+  status: number,
+  code: string,
+  branch?: string,
+): Promise<void> {
+  await assert.rejects(
+    startShipFlow(CALLER, card, {
+      repository: stack.repo,
+      branches: [branchInput(name)],
+    }),
+    (err: HttpError) => {
+      assert.equal(err.status, status, name);
+      assert.equal(err.code, code, name);
+      assert.equal(err.details?.branch, branch);
+      return true;
+    },
+  );
+  assert.equal(store.getCard(card.id)?.shipFlow, undefined);
+}
+
+void test("startShip refuses a group with no loop progress outside Agent done and makes no git call", async () => {
+  const stack = await newStack();
+  const inProgress = { ...store.getCard(stack.card.id)! };
+  delete inProgress.loopProgress;
+  const zeroUnits = { ...inProgress, loopProgress: progress([]) };
+  for (const card of [inProgress, zeroUnits]) {
+    await refusedCard(card, stack, "unit-1", 409, "card-not-done");
+  }
+  const waiting = await noLoopCard(stack, "needs_input");
+  await refusedCard(waiting, stack, "unit-1", 409, "card-not-done");
+  assert.deepEqual(calls, []);
+});
+
+void test("startShip passes the branch check for the card branch, else the identifier, and stops at branch-not-ahead", async () => {
+  const stack = await newStack();
+  await store.setCardWorkspace(stack.card.id, {
+    folder: path.dirname(stack.worktree),
+    repos: [{ path: stack.repo, base: "unit-2" }],
+  });
+  const card = await noLoopCard(stack);
+  const session = card.sessions?.[0] as NonNullable<Card["sessions"]>[number];
+  card.branch = "unit-1";
+  session.branch = "group-work";
+  await refusedCard(card, stack, "unit-1", 409, "branch-not-ahead", "unit-1");
+  await refusedCard(
+    card,
+    stack,
+    "group-work",
+    400,
+    "invalid-branch-name",
+    "group-work",
+  );
+  await refusedCard(
+    card,
+    stack,
+    "test/ship-specs",
+    400,
+    "invalid-branch-name",
+    "test/ship-specs",
+  );
+  delete card.branch;
+  Object.assign(card, { identifier: "unit-1" });
+  await refusedCard(card, stack, "unit-1", 409, "branch-not-ahead", "unit-1");
+  await refusedCard(
+    card,
+    stack,
+    "group-work",
+    400,
+    "invalid-branch-name",
+    "group-work",
+  );
+});
+
+void test("startShip answers engine-not-closed for an active engine with zero units and for an engine file in the session root", async () => {
+  const stack = await newStack();
+  const card = await noLoopCard(stack);
+  card.branch = "unit-1";
+  const engine = {
+    active: true,
+    iteration: 1,
+    sessionId: null,
+    handoffPending: false,
+    startedAt: null,
+    closed: false,
+  };
+  card.loopProgress = progress([], engine);
+  await refusedCard(card, stack, "unit-1", 409, "engine-not-closed");
+  delete card.loopProgress;
+  const root = card.workspacePath as string;
+  fs.mkdirSync(path.join(root, ".claude"), { recursive: true });
+  fs.writeFileSync(path.join(root, ".claude", "ralph-loop.local.md"), "---\n");
+  await refusedCard(card, stack, "unit-1", 409, "engine-not-closed");
+  assert.deepEqual(calls, []);
+});
+
+void test("startShip counts ahead against origin when it is ahead of a stale local base", async () => {
+  const stack = await newStack();
+  const card = await noLoopCard(stack);
+  await pushToMain(stack.bare, { "x.txt": "x\n" }, "main moves");
+  await gitOutput(stack.repo, "fetch", "-q", "origin");
+  await gitOutput(stack.repo, "branch", "cut-from-origin", "origin/main");
+  card.branch = "cut-from-origin";
+  await refusedCard(
+    card,
+    stack,
+    "cut-from-origin",
+    409,
+    "branch-not-ahead",
+    "cut-from-origin",
+  );
+});
+
+void test("startShip refuses a base that is not a plain branch name or names no branch as unknown-base", async () => {
+  const stack = await newStack();
+  const card = await noLoopCard(stack);
+  card.branch = "unit-1";
+  for (const base of [
+    "-".repeat(2) + "upload-pack=x",
+    "",
+    "no-such-base",
+    "main^",
+    "main..x",
+  ]) {
+    await store.setCardWorkspace(stack.card.id, {
+      folder: path.dirname(stack.worktree),
+      repos: [{ path: stack.repo, base }],
+    });
+    await refusedCard(card, stack, "unit-1", 409, "unknown-base", "unit-1");
+  }
+});
+
+void test("startShip refuses a dirty worktree of a group with no loop progress before it reads the git identity", async () => {
+  const stack = await newStack();
+  const card = await noLoopCard(stack);
+  const named = { ...card, branch: "unit-1" };
+  const untracked = path.join(stack.worktree, "stray.txt");
+  fs.writeFileSync(untracked, "x\n");
+  calls.length = 0;
+  await assert.rejects(
+    startShipFlow(CALLER, named, {
+      repository: stack.repo,
+      branches: [branchInput("unit-1")],
+    }),
+    (err: HttpError) => {
+      assert.equal(err.status, 409);
+      assert.equal(err.code, "worktree-dirty");
+      return true;
+    },
+  );
+  assert.equal(store.getCard(card.id)?.shipFlow, undefined);
+  assert.equal(
+    calls.some((c) => c.args[0] === "config" || c.args[0] === "push"),
+    false,
+  );
 });
 
 void test("startShip refuses a card with no workspace and a repository with no git identity", async () => {
