@@ -389,7 +389,7 @@ deny(
  * PreToolUse (HOOK-03) is the structural safety net for the same pause class: live-verified
  * (48-DIAGNOSIS.md) to fire reliably on the installed CLI, catching the pause regardless of
  * whether the agent follows the STATUS_PROTOCOL wording (kickoff.ts) that asks it to print a
- * marker line first. SessionStart remains absent, no consumer exists.
+ * marker line first. SessionStart feeds the conversation start order.
  *
  * The vault's `permissions.deny` rule and its second `PreToolUse` guard entry are two layers over
  * two different tools, not two spellings of the same block: the deny rule governs the Read tool
@@ -421,6 +421,7 @@ function hookSettingsJson(): string {
     },
     crossSessionInbound: "refuse",
     hooks: {
+      SessionStart: entry,
       Stop: entry,
       StopFailure: entry,
       UserPromptSubmit: entry,

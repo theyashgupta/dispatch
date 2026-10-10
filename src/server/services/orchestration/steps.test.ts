@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -9,6 +9,7 @@ import {
   writeFakeRepl,
 } from "../../test-support/fixtures.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
+import type { SagaContext } from "./steps.js";
 
 const env = await isolateTmuxEnv();
 fs.writeFileSync(
@@ -17,7 +18,8 @@ fs.writeFileSync(
 );
 const tmux = await import("../../adapters/tmux.js");
 const { store } = await import("../../store/board.store.js");
-const { launchClaude } = await import("./steps.js");
+const { launchClaude, steps } = await import("./steps.js");
+const { projectsDirOf } = await import("../../adapters/transcript.js");
 const { setHooksRuntime, setOrchestrationConfig } =
   await import("../infra/config-holder.js");
 setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
@@ -178,6 +180,122 @@ void test(
       );
     } finally {
       await env.killServer();
+    }
+  },
+);
+
+const stepNamed = (name: string) => steps.find((s) => s.name === name)!;
+
+async function kickoffWithRecordTimer(
+  title: string,
+  runtime: { capable: boolean; statusChannel: "auto" | "pane" },
+) {
+  const argvFile = path.join(env.root, `claude-argv-${title}.txt`);
+  writeFakeRepl(env, argvFile);
+  await store.load();
+  const card = await store.createLocalCard(DEFAULT_BOARD_KEY, title, "");
+  const branch = `${title}-${process.pid}`;
+  const tmuxSession = `dsp-${branch}`;
+  const cwd = path.join(env.root, `worktree-${title}`);
+  fs.mkdirSync(cwd, { recursive: true });
+  await store.completeStart(card.id, undefined, {
+    workspacePath: cwd,
+    tmuxSession,
+    branch,
+  });
+  const folder = projectsDirOf(path.join(env.home, ".claude"), cwd);
+  fs.mkdirSync(folder, { recursive: true });
+  fs.writeFileSync(path.join(folder, "kickoff-conv.jsonl"), "");
+  setHooksRuntime({ ...runtime, port: 1 });
+  const ctx = {
+    card: store.getCard(card.id)!,
+    identifier: card.identifier,
+    sessionName: branch,
+    sessionId: undefined,
+    workspacePath: cwd,
+    extraDirection: "",
+    createdWorkspaceDir: false,
+    createdWorktrees: [],
+    createdBranches: [],
+    tmuxSessionCreated: false,
+    restarted: false,
+    warnings: [],
+  } as unknown as SagaContext;
+  const original = globalThis.setTimeout;
+  const recordTimers: (() => void)[] = [];
+  const spy = mock.method(globalThis, "setTimeout", ((
+    fn: () => void,
+    ms?: number,
+    ...rest: unknown[]
+  ) => {
+    if (ms !== 5000) return original(fn, ms, ...rest);
+    recordTimers.push(fn);
+    return { unref: () => undefined };
+  }) as typeof setTimeout);
+  try {
+    await stepNamed("starting claude").run(ctx);
+    await stepNamed("sending kickoff").run(ctx);
+  } finally {
+    spy.mock.restore();
+  }
+  return {
+    cardId: card.id,
+    recordTimers,
+    mirror: () => store.getCard(card.id)?.claudeSessionId,
+    cleanup: async () => {
+      setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
+      await tmux.killSession(`=${tmuxSession}`);
+      await env.killServer();
+    },
+  };
+}
+
+for (const [title, label, runtime] of [
+  ["silent-pane", "the pane channel", { capable: true, statusChannel: "pane" }],
+  [
+    "silent-auto",
+    "an auto channel with no hook capable CLI",
+    { capable: false, statusChannel: "auto" },
+  ],
+] as const) {
+  void test(
+    `a hook silent kickoff records the newest conversation file 5 s later under ${label}`,
+    { skip: !env.canRunRealTmux },
+    async () => {
+      const run = await kickoffWithRecordTimer(title, runtime);
+      try {
+        assert.equal(run.recordTimers.length, 1);
+        assert.equal(
+          run.mirror(),
+          undefined,
+          "nothing is recorded before the delay",
+        );
+        run.recordTimers[0]();
+        await waitFor(
+          () => Promise.resolve(run.mirror() === "kickoff-conv"),
+          5000,
+          "the folder read to record the conversation",
+        );
+      } finally {
+        await run.cleanup();
+      }
+    },
+  );
+}
+
+void test(
+  "a hook capable kickoff schedules no folder read",
+  { skip: !env.canRunRealTmux },
+  async () => {
+    const run = await kickoffWithRecordTimer("capable-kickoff", {
+      capable: true,
+      statusChannel: "auto",
+    });
+    try {
+      assert.equal(run.recordTimers.length, 0);
+      assert.equal(run.mirror(), undefined);
+    } finally {
+      await run.cleanup();
     }
   },
 );

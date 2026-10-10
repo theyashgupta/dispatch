@@ -173,6 +173,12 @@ export interface BoardRepository {
     sessionId: string | undefined,
     sid: string,
   ): Promise<void>;
+  startClaudeSession(
+    id: string,
+    sessionId: string | undefined,
+    sid: string,
+    at: string,
+  ): Promise<void>;
   markClaudeSessionMissing(
     id: string,
     sessionId: string | undefined,

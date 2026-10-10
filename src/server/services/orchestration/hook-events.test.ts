@@ -175,6 +175,37 @@ void test("a UserPromptSubmit hook moves a parked card to in_progress", async ()
   assert.equal(store.getCard(cardId)?.column, "in_progress");
 });
 
+void test("SessionStart ranks conversations by start: a late Stop of an older one keeps the newer, a resume start brings the older back", async () => {
+  const { cardId, sessionId } = await cardWithSession("hook-start-order");
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "SessionStart",
+    session_id: "conv-a",
+    source: "startup",
+  });
+  await new Promise((r) => setTimeout(r, 2));
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "SessionStart",
+    session_id: "conv-b",
+    source: "clear",
+  });
+  await new Promise((r) => setTimeout(r, 2));
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "Stop",
+    session_id: "conv-a",
+    last_assistant_message: "late",
+  });
+  assert.equal(store.getCard(cardId)?.claudeSessionId, "conv-b");
+  assert.ok(nodesOf(cardId, sessionId)?.every((n) => n.startedAt != null));
+
+  await new Promise((r) => setTimeout(r, 2));
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "SessionStart",
+    session_id: "conv-a",
+    source: "resume",
+  });
+  assert.equal(store.getCard(cardId)?.claudeSessionId, "conv-a");
+});
+
 void test("UserPromptSubmit, Stop and StopFailure set the turn state; the pane channel records none", async () => {
   const { recordedTurnState } = await import("./session-turn.js");
   const { cardId, sessionId } = await cardWithSession("hook-turn");
@@ -200,6 +231,67 @@ void test("UserPromptSubmit, Stop and StopFailure set the turn state; the pane c
       hook_event_name: "UserPromptSubmit",
     });
     assert.equal(recordedTurnState(cardId, sessionId), "limit");
+    await applyHookEvent(cardId, sessionId, {
+      hook_event_name: "SessionStart",
+      session_id: "conv-pane",
+    });
+    assert.equal(nodesOf(cardId, sessionId)?.length ?? 0, 0);
+  } finally {
+    setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
+  }
+});
+
+void test("the first SessionStart latches hook routing for its own session only, so the pane watcher yields at startup", async () => {
+  const { cardId, sessionId } = await cardWithSession("hook-latch");
+  const reserved = await store.reserveNewSession(
+    cardId,
+    store.getCard(cardId)!.identifier,
+  );
+  await store.mintHookChannel(
+    cardId,
+    "latch-token-primary-0123456789",
+    sessionId,
+  );
+  await store.mintHookChannel(
+    cardId,
+    "latch-token-reserved-0123456789",
+    reserved!.sessionId,
+  );
+  const latchOf = (id: string) =>
+    store.getCard(cardId)?.sessions?.find((s) => s.id === id)?.hookRoutedAt;
+  assert.equal(latchOf(sessionId), undefined);
+
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "SessionStart",
+    session_id: "conv-latch",
+    source: "startup",
+  });
+  const stamped = latchOf(sessionId);
+  assert.equal(typeof stamped, "string");
+  assert.equal(latchOf(reserved!.sessionId), undefined);
+
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "Stop",
+    session_id: "conv-latch",
+  });
+  assert.equal(latchOf(sessionId), stamped, "the latch is written once");
+});
+
+void test("a SessionStart under the pane channel latches nothing", async () => {
+  const { cardId, sessionId } = await cardWithSession("hook-latch-pane");
+  await store.mintHookChannel(cardId, "latch-token-pane-0123456789", sessionId);
+  try {
+    setHooksRuntime({ capable: true, port: 1, statusChannel: "pane" });
+    await applyHookEvent(cardId, sessionId, {
+      hook_event_name: "SessionStart",
+      session_id: "conv-latch-pane",
+      source: "startup",
+    });
+    assert.equal(
+      store.getCard(cardId)?.sessions?.find((s) => s.id === sessionId)
+        ?.hookRoutedAt,
+      undefined,
+    );
   } finally {
     setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
   }

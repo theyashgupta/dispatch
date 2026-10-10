@@ -1,5 +1,6 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { CLAUDE_SESSION_ID } from "../../shared/claude-session-id.js";
 
 const TAIL_BYTES = 256 * 1024;
 const SESSION_ID = /^[\w-]{1,256}$/;
@@ -46,6 +47,51 @@ export async function newestJsonl(dir: string): Promise<string | null> {
   return best?.file ?? null;
 }
 
+/** The folder Claude Code keeps the conversation files of one working directory in. */
+export function projectsDirOf(configDir: string, cwd: string): string {
+  return path.join(configDir, "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+}
+
+/**
+ * List the conversations in a project folder: the top level `.jsonl` files, each with the time
+ * its file was born.
+ *
+ * @remarks
+ * The birth time stands for the start of a conversation because a resumed conversation keeps its
+ * file and only moves its modified time. A file system with no birth time reports 0, and the
+ * modified time is used instead. Top level `agent-*.jsonl` files are Claude subagent transcripts and
+ * are left out because `--resume` refuses them.
+ */
+export async function listConversations(
+  dir: string,
+): Promise<{ id: string; bornAtMs: number }[]> {
+  const names = await fsp.readdir(dir).catch(() => []);
+  const found = await Promise.all(
+    names
+      .filter(
+        (name) =>
+          name.endsWith(".jsonl") &&
+          !name.startsWith("agent-") &&
+          CLAUDE_SESSION_ID.test(name.slice(0, -".jsonl".length)),
+      )
+      .map(async (name) => {
+        try {
+          const stat = await fsp.stat(path.join(dir, name));
+          return stat.isFile()
+            ? {
+                id: name.slice(0, -".jsonl".length),
+                bornAtMs:
+                  stat.birthtimeMs > 0 ? stat.birthtimeMs : stat.mtimeMs,
+              }
+            : undefined;
+        } catch {
+          return undefined;
+        }
+      }),
+  );
+  return found.filter((entry) => entry !== undefined);
+}
+
 /**
  * Find the transcript file of one session: the stored hook path, else the file named by the
  * Claude session id in the project folder of `cwd`, else the newest `.jsonl` in that folder.
@@ -58,11 +104,7 @@ export async function resolveTranscriptPath(input: {
 }): Promise<string | null> {
   if (input.stored !== undefined && (await isFile(input.stored)))
     return input.stored;
-  const dir = path.join(
-    input.configDir,
-    "projects",
-    input.cwd.replace(/[^a-zA-Z0-9]/g, "-"),
-  );
+  const dir = projectsDirOf(input.configDir, input.cwd);
   const sid = input.claudeSessionId;
   if (sid !== undefined && SESSION_ID.test(sid)) {
     const named = path.join(dir, `${sid}.jsonl`);
