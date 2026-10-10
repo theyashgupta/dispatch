@@ -41,6 +41,7 @@ export function StartContainer({
     open,
     requestClose,
     pending: start.isPending,
+    allowNoRepository: true,
     focusRef: textareaRef,
     send: (picks) =>
       start.mutateAsync(
