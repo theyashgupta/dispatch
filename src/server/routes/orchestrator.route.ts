@@ -26,7 +26,9 @@ import {
   getCardHandler,
   getGroupProgressHandler,
   getPolicyHandler,
+  getRulebookHandler,
   getShipStateHandler,
+  listPlaybooksHandler,
   listCardsHandler,
   listEventsHandler,
   listSessionsHandler,
@@ -36,6 +38,7 @@ import {
   requestHandoffHandler,
   resumeLoopHandler,
   sendInputHandler,
+  startCardHandler,
   startGroupHandler,
   startShipHandler,
   stopSessionHandler,
@@ -285,5 +288,14 @@ orchestratorRouter.get(
 );
 orchestratorRouter.get("/state", tool("read_state", readStateHandler));
 orchestratorRouter.put("/state", tool("write_state", writeStateHandler));
+orchestratorRouter.get(
+  "/playbooks",
+  tool("list_playbooks", listPlaybooksHandler),
+);
+orchestratorRouter.get("/rulebook", tool("get_rulebook", getRulebookHandler));
+orchestratorRouter.post(
+  "/cards/:cardId/start",
+  tool("start_card", startCardHandler),
+);
 
 orchestratorRouter.use(httpErrorHandler);
