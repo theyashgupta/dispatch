@@ -152,10 +152,6 @@ export async function startSession(
     const stored = opts?.playbook === undefined ? card.startIntent : undefined;
     const playbookName = opts?.playbook ?? stored?.playbook;
 
-    if (opts?.playbook !== undefined) {
-      await store.setStartIntent(cardId, { playbook: opts.playbook });
-    }
-
     const activeRecord = card.sessions?.find(
       (s) => s.id === card.activeSessionId,
     );
@@ -200,6 +196,10 @@ export async function startSession(
         REATTACH_STATUS_CLEAR_MS,
       );
       return;
+    }
+
+    if (opts?.playbook !== undefined) {
+      await store.setStartIntent(cardId, { playbook: opts.playbook });
     }
 
     const playbookBody = playbookName
