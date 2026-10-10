@@ -2,6 +2,7 @@ import type { Playbook } from "../../../../shared/types.js";
 
 const SEED_SLUG_ORDER = [
   "prd-ralph-loop",
+  "roadmap-loop",
   "superpowers",
   "gsd",
   "write-code-directly",

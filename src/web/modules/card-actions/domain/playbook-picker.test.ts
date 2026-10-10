@@ -14,6 +14,7 @@ const pb = (name: string, slug?: string): Playbook => ({
   slug,
 });
 
+const roadmap = pb("Roadmap Loop", "roadmap-loop");
 const gsd = pb("GSD", "gsd");
 const ralph = pb("PRD + Ralph Loop", "prd-ralph-loop");
 const direct = pb("Write code directly", "write-code-directly");
@@ -22,6 +23,15 @@ const custom = pb("Custom", "custom");
 test("seed rows follow the fixed seed order, not the input order", () => {
   assert.deepEqual(orderSeedRows([direct, custom, gsd, ralph]), [
     ralph,
+    gsd,
+    direct,
+  ]);
+});
+
+test("roadmap-loop is the second seed row", () => {
+  assert.deepEqual(orderSeedRows([direct, gsd, roadmap, custom, ralph]), [
+    ralph,
+    roadmap,
     gsd,
     direct,
   ]);

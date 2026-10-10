@@ -39,7 +39,14 @@ export function PlaybookPickerSection({
       textValue={row.name}
       className="cursor-pointer"
     >
-      <span className="min-w-0 flex-auto truncate">{row.name}</span>
+      <span className="flex min-w-0 flex-auto flex-col">
+        <span className="truncate [contain:inline-size]">{row.name}</span>
+        {row.when && (
+          <span className="text-sm font-normal wrap-anywhere whitespace-normal text-muted-foreground">
+            {row.when}
+          </span>
+        )}
+      </span>
       {row.name === lastUsed && (
         <span className="text-sm leading-(--line-label) font-normal text-muted-foreground">
           Default
@@ -69,7 +76,7 @@ export function PlaybookPickerSection({
         >
           <SelectValue placeholder="None selected">{selected}</SelectValue>
         </SelectTrigger>
-        <SelectContent className="max-h-60 rounded-md">
+        <SelectContent className="max-h-60 max-w-[min(28rem,calc(100vw-20px))] rounded-md">
           {seedRows.map(renderRow)}
           {seedRows.length > 0 && restRows.length > 0 && <SelectSeparator />}
           {restRows.map(renderRow)}
