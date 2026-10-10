@@ -421,7 +421,7 @@ void test("two parallel start_card calls on one card answer one 202 and one 409 
     );
     assert.deepEqual(replies.map((r) => r.status).sort(), [202, 409]);
     const won = replies.findIndex((r) => r.status === 202);
-    assert.equal(replies[1 - won]!.body.error, "already-started");
+    assert.equal(replies[1 - won].body.error, "already-started");
     assert.deepEqual(starts.slice(startsBefore), [card.id]);
     assert.equal(store.getCard(card.id)?.launch?.playbook, playbooks[won]);
     const rows = toolCalls().slice(rowsBefore);
