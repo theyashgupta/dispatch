@@ -116,7 +116,7 @@ Global bans:
 - Every `.ts` file in `src/web/` is kebab-case. A file in a `hooks/` folder that exports a React hook is `use-<name>.ts`, for example `use-drag-reorder.ts` exports `useDragReorder`. A file that exports no React hook has no `use-` prefix. A `*-queries.ts` file keeps its name.
 - A view name ends in `View`, and no other name does. A container name ends in `Container`, and no other name does.
 - A module `queries/` folder holds `<feature>-api.ts` for the fetch glue and `<feature>-queries.ts` for the key factory, `queryOptions` and query hooks. `src/web/queries/` uses the same pattern with the data name, for example `board-api.ts` and `board-queries.ts`.
-- Routes use TanStack Router file-based routing. A file under `src/web/routes/` is `__root.tsx`, `<page>.{-$id}.tsx` or `<page>.{-$id}.lazy.tsx` (the optional id segment, and a lazy split file), with `<page>` in kebab-case. Since 2026-10-07 a lint pattern enforces these three forms (U4-14), so a file such as `index.tsx` or `$param.tsx` fails lint. The generated file `src/web/routeTree.gen.ts` is exempt from naming and lint rules.
+- Routes use TanStack Router file-based routing. A file under `src/web/routes/` is `__root.tsx`, `<page>.{-$id}.tsx` or `<page>.{-$id}.lazy.tsx` (the optional id segment, and a lazy split file), with `<page>` in kebab-case. Since 2026-10-07 a lint pattern enforces these three forms (U4-14), so a file such as `index.tsx` or `$param.tsx` fails lint. Since 2026-10-10 (LOCAL-102) the pattern also allows the forms `<page>.$key.settings.tsx` and `<page>.$key.settings.lazy.tsx`, for the route `/boards/$key/settings`. That route has only the lazy file. The generated file `src/web/routeTree.gen.ts` is exempt from naming and lint rules.
 
 ## Tests
 
