@@ -19,6 +19,7 @@ import {
   addCommentHandler,
   approveRoadmapHandler,
   createBaseBranchHandler,
+  createBoardHandler,
   createDecisionItemHandler,
   createGroupHandler,
   createTicketHandler,
@@ -225,6 +226,7 @@ orchestratorRouter.get(
   "/board-workspace",
   tool("get_board_workspace", getBoardWorkspaceHandler),
 );
+orchestratorRouter.post("/boards", tool("create_board", createBoardHandler));
 orchestratorRouter.post("/tickets", tool("create_ticket", createTicketHandler));
 orchestratorRouter.patch(
   "/tickets/:id",

@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { boardLink } from "../../shared/board-key.js";
 import { isHiddenCard } from "../../shared/hidden-card.js";
 import type { Card } from "../../shared/types.js";
 import { ForbiddenError, NotFoundError } from "../services/domain/errors.js";
@@ -8,8 +9,10 @@ import {
   type ScopeTarget,
 } from "../services/domain/orchestrator-scope.js";
 import {
+  createBoardForOrchestrator,
   listBoardCards,
   listBoardSessions,
+  repositoryEntry,
   scopeTargetOf,
 } from "../services/orchestration/boards.js";
 import {
@@ -52,6 +55,7 @@ import {
   baseBranchBodySchema,
   cardParamsSchema,
   commentBodySchema,
+  createBoardToolBodySchema,
   createDecisionBodySchema,
   createGroupBodySchema,
   createTicketBodySchema,
@@ -68,7 +72,7 @@ import {
   waitBodySchema,
   writeStateBodySchema,
 } from "./orchestrator-schemas.js";
-import { parseOrThrow } from "./parse-input.js";
+import { parseBoardBody, parseOrThrow } from "./parse-input.js";
 
 export interface ToolCall {
   tool: string;
@@ -208,6 +212,28 @@ export const getBoardWorkspaceHandler: ToolHandler = async (
   const workspace = await workspaceSummary(caller);
   call.result = `${workspace.repos.length} repos`;
   res.status(200).json(workspace);
+};
+
+/**
+ * Create a board from a name through the same service as `POST /boards`.
+ *
+ * @remarks Any valid token may call it, because the new board is not a board of the caller.
+ */
+export const createBoardHandler: ToolHandler = async (
+  req,
+  res,
+  _caller,
+  call,
+) => {
+  const input = parseBoardBody(createBoardToolBodySchema, req.body);
+  const board = await createBoardForOrchestrator({
+    name: input.name,
+    workspaceRoot: input.folder,
+    repositories: input.repositories.map((path) => repositoryEntry(path, null)),
+    linearTeamKeys: [],
+  });
+  call.result = board.key;
+  res.status(201).json({ board, link: boardLink(board.key) });
 };
 
 /** Create a local ticket marked as created by the caller. */

@@ -125,10 +125,22 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "get_board_workspace",
     description:
-      "Read the board workspace: the folder, the repositories with their base branch and check command, the playbook names and the group playbook. This tool changes nothing.",
+      "Read the board workspace: the folder, the repositories with their base branch and check command, the playbook names and the group playbook. It also lists all boards with their key, name, archived flag and link. This tool changes nothing.",
     input: {},
     method: "GET",
     path: "/board-workspace",
+  },
+  {
+    name: "create_board",
+    description:
+      "Create a board from a name. The key comes from the name. When you give no folder, the folder is made below the workspaces root. The answer holds the board, with its key, and the link. A blank name is refused.",
+    input: {
+      name: z.string().min(1).max(ITEM_TITLE_MAX),
+      folder: z.string().min(1).optional(),
+      repositories: z.array(z.string().min(1)).optional(),
+    },
+    method: "POST",
+    path: "/boards",
   },
   {
     name: "create_ticket",
