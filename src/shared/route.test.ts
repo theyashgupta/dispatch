@@ -103,6 +103,18 @@ test("routeHash encodes an id with reserved characters", () => {
   assert.deepEqual(route, { page: "settings", id: "a b/c" });
 });
 
+test("routeHash keeps the slashes of a boards id and encodes the rest of each segment", () => {
+  assert.equal(
+    routeHash({ page: "boards", id: "ACME/settings" }),
+    "#/boards/ACME/settings",
+  );
+  assert.equal(routeHash({ page: "boards", id: "a b/c" }), "#/boards/a%20b/c");
+  assert.deepEqual(parseRoute("#/boards/ACME/settings"), {
+    page: "boards",
+    id: "ACME/settings",
+  });
+});
+
 test("an Ask route is remembered without its prefilled question", () => {
   assert.equal(
     rememberedHash(routeHash({ page: "ask", id: "Tell me about LOCAL-1" })),

@@ -19,6 +19,16 @@ test("a page leaf with an id yields the page and the id", () => {
   );
 });
 
+test("the board settings leaf yields the boards page with no id", () => {
+  assert.deepEqual(
+    routeFromMatch(
+      { routeId: "/boards/$key/settings", params: { key: "ACME" } },
+      "/boards/ACME/settings",
+    ),
+    { page: "boards" },
+  );
+});
+
 test("an encoded-id leaf keeps the decoded param as given", () => {
   assert.deepEqual(
     routeFromMatch(

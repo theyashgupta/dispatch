@@ -46,6 +46,9 @@ const WorkspaceChar123IdChar125LazyRouteImport =
   createFileRoute('/workspace/{-$id}')()
 const WorkspacesChar123IdChar125LazyRouteImport =
   createFileRoute('/workspaces/{-$id}')()
+const BoardsKeySettingsLazyRouteImport = createFileRoute(
+  '/boards/$key/settings',
+)()
 
 const AccountsChar123IdChar125LazyRoute =
   AccountsChar123IdChar125LazyRouteImport.update({
@@ -209,6 +212,13 @@ const WorkspacesChar123IdChar125LazyRoute =
   } as any).lazy(() =>
     import('./routes/workspaces.{-$id}.lazy').then((d) => d.Route),
   )
+const BoardsKeySettingsLazyRoute = BoardsKeySettingsLazyRouteImport.update({
+  id: '/boards/$key/settings',
+  path: '/boards/$key/settings',
+  getParentRoute: () => rootRouteImport,
+} as any).lazy(() =>
+  import('./routes/boards.$key.settings.lazy').then((d) => d.Route),
+)
 
 export interface FileRoutesByFullPath {
   '/board/{-$id}': typeof BoardChar123IdChar125Route
@@ -233,6 +243,7 @@ export interface FileRoutesByFullPath {
   '/vault/{-$id}': typeof VaultChar123IdChar125LazyRoute
   '/workspace/{-$id}': typeof WorkspaceChar123IdChar125LazyRoute
   '/workspaces/{-$id}': typeof WorkspacesChar123IdChar125LazyRoute
+  '/boards/$key/settings': typeof BoardsKeySettingsLazyRoute
 }
 export interface FileRoutesByTo {
   '/board/{-$id}': typeof BoardChar123IdChar125Route
@@ -257,6 +268,7 @@ export interface FileRoutesByTo {
   '/vault/{-$id}': typeof VaultChar123IdChar125LazyRoute
   '/workspace/{-$id}': typeof WorkspaceChar123IdChar125LazyRoute
   '/workspaces/{-$id}': typeof WorkspacesChar123IdChar125LazyRoute
+  '/boards/$key/settings': typeof BoardsKeySettingsLazyRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -282,6 +294,7 @@ export interface FileRoutesById {
   '/vault/{-$id}': typeof VaultChar123IdChar125LazyRoute
   '/workspace/{-$id}': typeof WorkspaceChar123IdChar125LazyRoute
   '/workspaces/{-$id}': typeof WorkspacesChar123IdChar125LazyRoute
+  '/boards/$key/settings': typeof BoardsKeySettingsLazyRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -308,6 +321,7 @@ export interface FileRouteTypes {
     | '/vault/{-$id}'
     | '/workspace/{-$id}'
     | '/workspaces/{-$id}'
+    | '/boards/$key/settings'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/board/{-$id}'
@@ -332,6 +346,7 @@ export interface FileRouteTypes {
     | '/vault/{-$id}'
     | '/workspace/{-$id}'
     | '/workspaces/{-$id}'
+    | '/boards/$key/settings'
   id:
     | '__root__'
     | '/board/{-$id}'
@@ -356,6 +371,7 @@ export interface FileRouteTypes {
     | '/vault/{-$id}'
     | '/workspace/{-$id}'
     | '/workspaces/{-$id}'
+    | '/boards/$key/settings'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -381,6 +397,7 @@ export interface RootRouteChildren {
   VaultChar123IdChar125LazyRoute: typeof VaultChar123IdChar125LazyRoute
   WorkspaceChar123IdChar125LazyRoute: typeof WorkspaceChar123IdChar125LazyRoute
   WorkspacesChar123IdChar125LazyRoute: typeof WorkspacesChar123IdChar125LazyRoute
+  BoardsKeySettingsLazyRoute: typeof BoardsKeySettingsLazyRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -539,6 +556,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspacesChar123IdChar125LazyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/boards/$key/settings': {
+      id: '/boards/$key/settings'
+      path: '/boards/$key/settings'
+      fullPath: '/boards/$key/settings'
+      preLoaderRoute: typeof BoardsKeySettingsLazyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -565,6 +589,7 @@ const rootRouteChildren: RootRouteChildren = {
   VaultChar123IdChar125LazyRoute: VaultChar123IdChar125LazyRoute,
   WorkspaceChar123IdChar125LazyRoute: WorkspaceChar123IdChar125LazyRoute,
   WorkspacesChar123IdChar125LazyRoute: WorkspacesChar123IdChar125LazyRoute,
+  BoardsKeySettingsLazyRoute: BoardsKeySettingsLazyRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

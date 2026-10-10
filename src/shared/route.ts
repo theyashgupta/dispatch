@@ -65,11 +65,19 @@ export function rememberedHash(hash: string): string {
   return routeHash(route.page === "ask" ? { page: route.page } : route);
 }
 
-/** Serializes a route to the hash `parseRoute` reads back, always with the leading `#/`. */
+/**
+ * Serializes a route to the hash `parseRoute` reads back, always with the leading `#/`.
+ *
+ * @remarks The boards page keeps the slashes of its id, because its child paths such as
+ * `/boards/ACME/settings` are real segments. Other pages encode the id whole, since a pull request id can hold a slash.
+ */
 export function routeHash(route: Route): string {
-  return route.id == null || route.id === ""
-    ? `#/${route.page}`
-    : `#/${route.page}/${encodeURIComponent(route.id)}`;
+  if (route.id == null || route.id === "") return `#/${route.page}`;
+  const id =
+    route.page === "boards"
+      ? route.id.split("/").map(encodeURIComponent).join("/")
+      : encodeURIComponent(route.id);
+  return `#/${route.page}/${id}`;
 }
 
 /**
@@ -114,7 +122,12 @@ export function notFoundTarget(pathname: string): string {
  */
 export function routeFromMatch(
   leaf:
-    { routeId: string; params: { id?: string }; status?: string } | undefined,
+    | {
+        routeId: string;
+        params: Record<string, string | undefined>;
+        status?: string;
+      }
+    | undefined,
   pathname: string,
 ): Route {
   if (
