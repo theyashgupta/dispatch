@@ -1057,10 +1057,13 @@ do not move onto the session record and are not projected from it.
 
 **`claudeSessionId` is itself derived (LOCAL-13).** A session record holds `claudeSessions`, one
 node per Claude conversation id the hooks reported in its pane (`{ id, createdAt, lastActiveAt,
-missingAt? }`, oldest first, never removed). The record's `claudeSessionId` is always the newest
-node by `lastActiveAt` that carries no `missingAt`, re-derived through `setActiveSession` by the two
-node mutators `setClaudeSessionId` and `markClaudeSessionMissing` (`src/server/store/claude-sessions.ts`
-holds the pure resolution and upsert). The card's flat field then mirrors the active record as
+startedAt?, missingAt? }`, oldest first, never removed). The record's `claudeSessionId` is always the
+node with the newest start (`startedAt`, else `createdAt`) that carries no `missingAt`, re-derived
+through `setActiveSession` by the three node mutators `startClaudeSession`, `setClaudeSessionId` and
+`markClaudeSessionMissing` (`src/server/store/claude-sessions.ts` holds the pure resolution and
+upsert). A `SessionStart` hook sets `startedAt` for every source (`startup`, `resume`, `clear`,
+`compact`). Any other hook event changes only `lastActiveAt`, so a late event of an old conversation
+never changes which node Resume opens (LOCAL-99). The card's flat field then mirrors the active record as
 before, so every reader of `claudeSessionId` is unchanged. The tree a ticket forms is card, then
 session records (branches), then conversation nodes. `claudeSessions` never rides the wire:
 `redactCard` drops `sessions` wholesale and field-picks `SessionSummary`. Boot migration schema
@@ -1834,6 +1837,18 @@ mutation sets `tmuxSession` and clears `sessionLost` but DELIBERATELY never writ
 `completeStart`/`attachExistingSession`, which force `in_progress`. This is how Resume coexists with
 the [Resilience and Reconcile](#resilience-and-reconcile) `IN-03` hazard: a column-preserving
 mutation performs no promotion and is therefore safe in every column.
+
+**Resume reads the conversation folder before each launch (LOCAL-99).** The relaunch path of
+`resumeSession` calls `resolveResumeTarget`, which lists the top level `.jsonl` files of the folder
+`<config dir>/projects/<cwd with each non alphanumeric character replaced by "-">` (the config dir of
+the session account, the cwd of the launch) and passes them with the stored node to the pure
+`chooseResumeTarget` (`services/domain/resume-target.ts`). A file born after the stored start wins,
+and the store records it with `startClaudeSession` before the launch. Else the stored id resumes when
+its file exists. Else Resume launches `--continue` and never passes an id that has no file. The
+"No conversation found" fallback stays as the last net. A launch with no hooks (pane mode, or `auto`
+below the hooks floor) records the newest file of the folder after the kickoff and after a Resume.
+`GET /api/cards/:id/resume-target` returns the same choice and writes nothing; the detail panel shows
+it beside the Resume button.
 
 In Review's opposite in-edge/out-edge asymmetry versus Agent Done, and the full trigger-by-trigger
 spec, are homed in [Column Transition Specification](#column-transition-specification) (`BOARD-06`).
@@ -4047,7 +4062,8 @@ the resolved session record: an unseen id appends a node (this is how a `/clear`
 the new conversation started from a handoff prompt, become visible), a known id bumps that node's
 `lastActiveAt`. The store peeks with the pure `touchClaudeSession` before enqueueing, so a bump on
 the node that is already newest is dropped for 60 seconds and never persists or broadcasts; a
-switch to any other node persists at once because it changes what Resume opens. There is no
+bump on any other node persists at once. A `SessionStart` event (registered in the hook settings
+since LOCAL-99) goes to `store.startClaudeSession` instead and sets the start that ranks the nodes. There is no
 "session_id mismatch" log any more: a differing id is a new node, not an error. Nodes are never
 deleted; a conversation Claude refuses on `--resume` is stamped `missingAt` and skipped.
 

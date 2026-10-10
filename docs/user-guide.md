@@ -283,6 +283,14 @@ Claude shows a usage limit dialog when the account reaches its limit. The field 
 
 Only you resume a loop that stopped at a usage limit or a budget.
 
+## Resume a lost session
+
+When the tmux session of a card ends, for example after a shutdown, the card shows **Resume**. Resume starts Claude again in the card workspace and opens the newest conversation of the card.
+
+- Dispatch reads the conversation folder of the card before each Resume. When a newer conversation is on disk than the stored one, Resume opens the newer conversation.
+- When the stored conversation has no file on disk, Resume continues the newest conversation of the workspace.
+- The detail panel shows the line "Resume: <id>, started <time>" beside **Resume**, or "Resume: newest conversation in the workspace". When Dispatch replaced the stored conversation, a tooltip on the line gives the stored id and the reason.
+
 ## Handoff
 
 A handoff gives the loop a fresh conversation and keeps its place in the roadmap. The supervisor starts a handoff when the context of the session fills.
