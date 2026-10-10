@@ -271,6 +271,30 @@ void test("two overlapping starts of queued groups under a cap of one start one 
   await setPolicy({ concurrencyCap: 10 });
 });
 
+void test("two overlapping starts of one group start it once and refuse the other as already-started", async () => {
+  await setPolicy({ concurrencyCap: 10, budgetPerGroup: null });
+  const created = await createOrchestratorGroup(CALLER, {
+    title: "same group",
+    memberIds: await members(),
+    repos: [{ path: repo, base: "main" }],
+  });
+  const card = store.getCard(created.id)!;
+  const startsBefore = starts.length;
+  const results = await Promise.allSettled([
+    startOrchestratorGroup(CALLER, card),
+    startOrchestratorGroup(CALLER, card),
+  ]);
+  assert.deepEqual(
+    results.map((r) => r.status),
+    ["fulfilled", "rejected"],
+  );
+  const refused = results[1] as PromiseRejectedResult;
+  assert.ok(refused.reason instanceof ConflictError);
+  assert.equal(refused.reason.status, 409);
+  assert.equal(refused.reason.code, "already-started");
+  assert.deepEqual(starts.slice(startsBefore), [card.id]);
+});
+
 void test("a failed start restores the queue flag, records one event and answers 409 start-failed", async () => {
   await setPolicy({ concurrencyCap: 10, budgetPerGroup: null });
   const card = await createOrchestratorGroup(CALLER, {
