@@ -38,7 +38,9 @@
   },
   "scripts": {
     "dev": "concurrently -k -n api,web -c blue,magenta \"tsx watch src/server/bootstrap/index.ts\" \"vite\"",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p src/web/tsconfig.json",
+    "typecheck": "node scripts/with-check-slot.mjs npm run typecheck:tsgo",
+    "typecheck:tsgo": "tsgo --noEmit --tsBuildInfoFile node_modules/.cache/tsgo/root.tsbuildinfo && tsgo --noEmit -p src/web/tsconfig.json --tsBuildInfoFile node_modules/.cache/tsgo/web.tsbuildinfo",
+    "typecheck:tsc": "tsc --noEmit && tsc --noEmit -p src/web/tsconfig.json",
     "test": "node --import tsx --test 'src/server/**/*.test.ts' 'src/shared/**/*.test.ts' && TSX_TSCONFIG_PATH=src/web/tsconfig.json node --import tsx --test 'src/web/**/*.test.ts' && node --import tsx --test 'eslint-local/**/*.test.ts'",
     "terminal-e2e": "node scripts/terminal-appearance-e2e.mjs",
     "format": "prettier --write .",
@@ -108,6 +110,7 @@
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "@types/write-file-atomic": "4.0.3",
+    "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "@vitejs/plugin-react": "6.0.3",
     "@xterm/addon-fit": "0.10.0",
     "@xterm/addon-web-links": "0.11.0",
