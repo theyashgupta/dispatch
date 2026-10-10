@@ -170,13 +170,38 @@ export function isRunningCard(card: Card): boolean {
   );
 }
 
-/** The number of running group loops on a board, without the card `exceptId` when given. */
+/**
+ * The number of loops that hold a cap slot on a board, without the card `exceptId` when given.
+ *
+ * @remarks A loop is a running group, or a running ticket card that an orchestrator launched, so it
+ * carries `launch`. A card in Agent done is waiting on the user and holds no slot.
+ */
 export function runningLoops(board: BoardKey, exceptId?: string): number {
   return store
     .listCards(board)
     .filter(
-      (c) => c.source === "group" && c.id !== exceptId && isRunningCard(c),
+      (c) =>
+        (c.source === "group" || c.launch !== undefined) &&
+        c.id !== exceptId &&
+        c.column !== "agent_done" &&
+        isRunningCard(c),
     ).length;
+}
+
+let capChain: Promise<unknown> = Promise.resolve();
+
+/**
+ * Run `fn` after every earlier cap-locked call has settled, one at a time.
+ *
+ * @remarks Two overlapping starts then cannot both read the last free slot. The lock is enough only
+ * because every store write inside a lock body resolves on microtasks, so a timer-driven supervisor
+ * pass cannot run between a cap check and `beginStart`. ponytail: one chain for the whole process, a
+ * per-board lock if start throughput ever matters.
+ */
+export function withCapLock<T>(fn: () => Promise<T>): Promise<T> {
+  const run = capChain.then(fn);
+  capChain = run.catch(() => undefined);
+  return run;
 }
 
 /** True for a dependency group in Done, or with at least one PR and every PR merged. */

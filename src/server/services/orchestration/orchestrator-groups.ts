@@ -30,12 +30,14 @@ import {
   isRunningCard,
   runningLoops,
   scopeTargetOf,
+  withCapLock,
 } from "./boards.js";
 import {
   createGroup,
   recordStartFailure,
   requireOrchestrationConfig,
   startGroup,
+  type GroupStartOutcome,
 } from "./group-launch.js";
 import { groupCost } from "./orchestrator-read.js";
 import { appendToExtraScope } from "./orchestrator-session.js";
@@ -56,7 +58,7 @@ interface GroupRequest {
 }
 
 /** The requested repositories, or every board repository with its base branch when none are requested. */
-function resolveRepos(
+export function resolveRepos(
   board: Board,
   requested: GroupRequest["repos"],
 ): { path: string; base: string }[] {
@@ -71,7 +73,7 @@ function resolveRepos(
 }
 
 /** Throw the typed 400 unless `repository` is a repository path of the board. */
-function assertBoardRepository(board: Board, repository: string): void {
+export function assertBoardRepository(board: Board, repository: string): void {
   if (!board.repositories.some((r) => r.path === repository)) {
     throw new ValidationError("unknown-repository");
   }
@@ -200,8 +202,8 @@ export async function createOrchestratorGroup(
  * Start a group under the board's cap and budget, or hold it until its dependencies are done.
  *
  * @remarks Every refusal throws before the first write, so a refused start leaves no queue flag and
- * no session. The cap check and the start run in one tick, so two overlapping calls cannot both
- * take the last slot; a failed start restores the queue flag and answers 409 `start-failed`.
+ * no session. The cap check and the start call run inside the cap lock, so two overlapping calls
+ * cannot both take the last slot; a failed start restores the queue flag and answers 409 `start-failed`.
  */
 export async function startOrchestratorGroup(
   caller: OrchestratorIdentity,
@@ -212,25 +214,38 @@ export async function startOrchestratorGroup(
     throw new ConflictError("already-started");
   }
   const policy = callerPolicy(caller);
-  enforce(checkCap({ policy, runningLoops: runningLoops(caller.boardKey) }));
-  enforce(checkBudget({ policy, cost: groupCost(card) }));
-  const waitingOn = (card.dependsOn ?? []).filter((id) => !dependencyDone(id));
-  if (waitingOn.length > 0) {
-    await store.setGroupQueue(card.id, { startQueued: true });
-    return { queued: true, waitingOn };
-  }
-  const config = requireOrchestrationConfig();
-  const wasQueued = card.startQueued === true;
-  const outcome = groupStarter.start(
-    card.id,
-    {
-      extraDirection: card.launch?.direction,
-      playbook: card.launch?.playbook,
-    },
-    config,
-  );
+  const launched = await withCapLock<
+    | { queued: true; waitingOn: string[] }
+    | { outcome: Promise<GroupStartOutcome>; wasQueued: boolean }
+  >(async () => {
+    const current = store.getCard(card.id);
+    if (!current || isRunningCard(current) || isLiveSessionCard(current)) {
+      throw new ConflictError("already-started");
+    }
+    enforce(checkCap({ policy, runningLoops: runningLoops(caller.boardKey) }));
+    enforce(checkBudget({ policy, cost: groupCost(current) }));
+    const waitingOn = (current.dependsOn ?? []).filter(
+      (id) => !dependencyDone(id),
+    );
+    if (waitingOn.length > 0) {
+      await store.setGroupQueue(current.id, { startQueued: true });
+      return { queued: true, waitingOn };
+    }
+    const config = requireOrchestrationConfig();
+    const outcome = groupStarter.start(
+      current.id,
+      {
+        extraDirection: current.launch?.direction,
+        playbook: current.launch?.playbook,
+      },
+      config,
+    );
+    return { outcome, wasQueued: current.startQueued === true };
+  });
+  if ("queued" in launched) return launched;
+  const { wasQueued } = launched;
   if (wasQueued) await store.setGroupQueue(card.id, { startQueued: false });
-  const result = await outcome;
+  const result = await launched.outcome;
   if (!result.ok) {
     await recordStartFailure(card, wasQueued, result.reason);
     throw new ConflictError("start-failed", { reason: result.reason });

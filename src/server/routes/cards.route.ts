@@ -11,12 +11,11 @@ import {
   redactCard,
   boardRepository as store,
 } from "../store/board-repository.js";
-import { startSession } from "../services/orchestration/start-session.js";
+import { startCardFromDialog } from "../services/orchestration/start-session.js";
 import {
   createGroup,
   startGroup,
 } from "../services/orchestration/group-launch.js";
-import { restatRepos } from "../services/orchestration/workspaces.js";
 import { createTicket } from "../services/orchestration/ticket-create.js";
 import {
   reconnectTerminal,
@@ -34,11 +33,7 @@ import { resetCard } from "../services/orchestration/reset.js";
 import { runClaude } from "../services/orchestration/run-claude.js";
 import { moveOrQueue } from "../services/orchestration/session-account-apply.js";
 import { editorPath, launchEditor } from "../adapters/editors.js";
-import { getOrchestrationConfig } from "../services/infra/config-holder.js";
-import {
-  playbookExists,
-  hasDispatchMarker,
-} from "../services/infra/playbooks.js";
+import { hasDispatchMarker } from "../services/infra/playbooks.js";
 import {
   ConflictError,
   HttpError,
@@ -155,91 +150,10 @@ cardsRouter.post("/cards/:id/move", async (req, res) => {
   res.status(204).end();
 });
 
-/**
- * `inheritFrom`, when present, is client-supplied and ultimately selects a git ref for
- * `createWorktrees`' `baseRef` (via the parent session's own persisted `branch`). It is
- * re-validated here against membership in THIS card's `card.sessions` — never trusted as a ref
- * itself and never checked against the global session space — the same argument-injection
- * surface the `base.startsWith("-")` guard in `steps.ts` exists to stop. Requiring `newSession`
- * alongside it means a caller can never believe it inherited when the field was silently dropped.
- */
-function inheritFromError(
-  card: Card,
-  newSession: boolean,
-  inheritFrom: string | undefined,
-): string | null {
-  if (inheritFrom === undefined) return null;
-  if (!newSession) return "inheritance requires a new session";
-  if (!card.sessions?.some((s) => s.id === inheritFrom))
-    return "unknown session to inherit from";
-  return null;
-}
-
 cardsRouter.post("/cards/:id/start", async (req, res) => {
   const { id } = req.params;
-  const { extraDirection, playbook, newSession, inheritFrom, workspace } =
-    parseOrThrow(startBodySchema, req.body);
-
-  const card = launchableCard(id);
-
-  if (card.column === "done") {
-    throw new ConflictError("cannot start a session for a Done card");
-  }
-
-  if (card.column === "inbox") {
-    throw new ConflictError(
-      "cannot start a session from the Inbox: promote to To Do first",
-    );
-  }
-
-  if (!/^[A-Za-z0-9]+-\d+$/.test(card.identifier)) {
-    throw new ValidationError(`invalid ticket identifier: ${card.identifier}`);
-  }
-
-  if (
-    newSession &&
-    !card.sessions?.some((s) => s.id === card.activeSessionId)
-  ) {
-    throw new ConflictError("no existing session to start another from");
-  }
-
-  const inheritError = inheritFromError(card, newSession, inheritFrom);
-  if (inheritError != null) throw new ConflictError(inheritError);
-
-  const config = getOrchestrationConfig();
-  if (!config) {
-    throw new ValidationError("orchestration config is not loaded", {
-      variant: "config",
-    });
-  }
-
-  if (playbook !== undefined) {
-    if (!(await playbookExists(playbook))) {
-      throw new ValidationError("unknown playbook", { variant: "playbook" });
-    }
-  }
-
-  if (workspace) {
-    if (workspace.repos.some((r) => r.base.startsWith("-"))) {
-      throw new ValidationError("invalid base branch", { variant: "config" });
-    }
-    if (!(await restatRepos(workspace.repos))) {
-      throw new ValidationError("Can't start: a selected repo is missing", {
-        variant: "config",
-      });
-    }
-    await store.setCardWorkspace(id, workspace);
-  } else if (!card.workspace) {
-    throw new ValidationError("No workspace selected for this ticket", {
-      variant: "config",
-    });
-  }
-
-  void startSession(id, extraDirection, config, {
-    playbook,
-    newSession,
-    inheritFrom,
-  });
+  const input = parseOrThrow(startBodySchema, req.body);
+  await startCardFromDialog(id, input);
   res.status(202).json({ started: true });
 });
 

@@ -100,7 +100,7 @@ Only you can change the policy. The orchestrator reads it. No tool can change it
 Notes on the fields:
 
 - **Roadmap approval** controls how the orchestrator approves the plan of a loop. With **Ask me for each roadmap**, the `approve_roadmap` tool needs your approve answer on a decision item of that group. With the two other values, the tool call is allowed. With **Approve when the rules pass, else ask**, the playbook judges the rules.
-- **Loops at once** is the concurrency cap. Dispatch refuses the orchestrator tool that starts a group above the cap. A group that waits for its dependencies stays queued. The supervisor starts it when the dependencies are done and a slot is free.
+- **Loops at once** is the concurrency cap. It covers groups and the ticket cards that the orchestrator starts. Dispatch refuses the orchestrator tools that start a group or a card above the cap. A card or group in Agent done frees its slot. A group that waits for its dependencies stays queued. The supervisor starts it when the dependencies are done and a slot is free.
 - **Loop model**: The model and effort of the sessions of a group. When you choose a model, Dispatch starts each group session with that model and effort, and it ignores any model or effort in the Settings Claude arguments. When you choose **Session settings**, Dispatch uses the Settings.
 - **Group playbook**: the playbook of a group that the orchestrator creates without one. When the playbook no longer exists, the group starts with no playbook. When the stored name is not in the list of playbooks, the select shows it as "<name> (not found)", and **Save policy** keeps the name.
 - **Wake timer (minutes)**: Wakes an idle orchestrator after this many quiet minutes. 0 turns it off. An extra orchestrator cannot override it.
@@ -156,6 +156,31 @@ The **Terminal** tab shows the live terminal. The panel buttons depend on the st
 - **Resume orchestrator** shows when the session is lost or Claude exited. It starts Claude again in the open session, or it starts the session again.
 
 The **Decisions** tab lists the open decision items of the board. The **Orchestrators** tab lists the orchestrators. The **Last wake** column, after **Policy**, shows the reasons and the time of the last wake, for example "timer 15 min at 14:05", or **None** when the orchestrator has not woken. An extra orchestrator needs a scope of groups or tickets, and it needs the main orchestrator first. Choose **Add extra orchestrator** to add one.
+
+## How the orchestrator judges and starts work
+
+The orchestrator loads the rule book [`docs/orchestration/rulebook.md`](orchestration/rulebook.md) with the tool `get_rulebook`. It loads it at the start of a session and again after each handoff.
+
+For each ticket or set of tickets, the orchestrator chooses one of three paths. The rule book gives these criteria:
+
+- "Write code directly: one known fix of a few lines with no new surface"
+- "PRD + Ralph Loop: one ticket or one feature of one module, up to a few hundred lines, with phases, QA and a gap analysis"
+- "a group with the Roadmap Loop: two or more related tickets with an order or shared files, or any ticket that spans server, web and docs across modules"
+
+The orchestrator reads the playbooks with the tool `list_playbooks`. The tool gives the name, the when line and the source (seeded or user) of each playbook. The start dialog shows the when line under the name of the playbook. Dispatch seeds a when line for each seeded playbook. A user playbook can have a `when:` line in its front matter. The line must have 300 characters or fewer. The playbook editor keeps the line when you save the playbook.
+
+The orchestrator writes one plan for the whole intake. The plan is a decision item with the options approve and reject. The plan has one line for each ticket or group, with the playbook, the order and the size. With **Ask me for each roadmap**, you approve the plan with one click in the **Decisions** tab. The orchestrator starts no work until you approve.
+
+After the approval, the orchestrator starts the work:
+
+- For a single ticket card, it calls `start_card`. The tool starts the card the way the start dialog does, with a playbook and a direction.
+- For a group, it calls `create_group` and then `start_group`.
+
+The cards that the orchestrator starts count against **Loops at once** together with groups. A card or group in Agent done frees its slot. At the cap, the orchestrator waits for a slot.
+
+A line that you type in the **Terminal** tab of the orchestrator is a direction. The orchestrator handles it like a new intake.
+
+Dispatch updates a seeded playbook file that you never edited at the next start of Dispatch. Dispatch keeps a file that you edited.
 
 ## Groups and loops
 
@@ -346,7 +371,7 @@ When a branch fails, the flow stops. The block shows "Stopped at <step>: <reason
 
 ## Playbook reference
 
-A playbook is a markdown file with a name. Dispatch gives its text to Claude when a session starts. Dispatch seeds five playbooks on the first boot of a machine. Each seeded playbook is a file in the `playbooks` folder of the Dispatch data folder. Dispatch seeds a name once. If you delete a seeded playbook, it stays deleted. Open **Playbooks** in the sidebar, group **System**, to edit, copy or delete playbooks.
+A playbook is a markdown file with a name. Dispatch gives its text to Claude when a session starts. Dispatch seeds six playbooks on the first boot of a machine. Each seeded playbook is a file in the `playbooks` folder of the Dispatch data folder. Dispatch seeds a name once. If you delete a seeded playbook, it stays deleted. Open **Playbooks** in the sidebar, group **System**, to edit, copy or delete playbooks.
 
 Every seeded playbook has one input: the extra direction. It is the optional text that you type in the start dialog. The token `{extra}` in the playbook marks where the text goes. When you type nothing, Dispatch removes the block that holds the token.
 
@@ -378,26 +403,28 @@ Every seeded playbook has one input: the extra direction. It is the optional tex
 - **Inputs:** the extra direction.
 - **What it does:** it adds no workflow text. The session gets your extra direction. Dispatch still adds its standard kickoff text, such as the workspace orientation and the status protocol.
 
+### Roadmap Loop
+
+- **File:** `roadmap-loop.md`
+- **When to use:** two or more related tickets with an order or shared files, or any ticket that spans server, web and docs across modules.
+- **Inputs:** the extra direction.
+- **What it does:** it tells Claude to read every ticket of the group first. In part 1, Claude uses the write-roadmap skill on the whole group and stops for roadmap approval. After the approval, Claude uses the grill-me skill and then the write-prd skill for each unit in order. In part 2, Claude uses the roadmap-loop skill to run every unit. Claude commits each unit to a stacked local branch. Claude never pushes, tags, opens a PR or merges.
+
 ### Board Orchestrator
 
 - **File:** `board-orchestrator.md`
 - **When to use:** you do not pick this playbook. Dispatch selects it by name when it starts an orchestrator.
 - **Inputs:** the extra direction. For an orchestrator, Dispatch writes it: "You are the orchestrator "<name>" (id <id>) of board <KEY>. Use the dispatch tools to coordinate the work of this board."
 - **What it does:** it tells the orchestrator to keep its state in the tools and not in memory. The orchestrator follows these steps:
-  1. Call `read_state`, then `get_board_workspace`, `list_cards`, `list_events` and `get_policy`. Never ask you for a repository path or a base branch that the board holds.
-  2. Turn a goal into a ticket proposal (a decision item of the kind `ticket_proposal`). Wait for your approval. Then create the tickets with `create_ticket`.
-  3. Write a direction for each group before it starts.
-  4. Start groups only inside the concurrency cap.
-  5. Approve or escalate each roadmap as **Roadmap approval** says.
-  6. Answer loop inputs with `send_input`.
-  7. End every turn with `wait_for_event`. Set `kinds` to `decision_answered`, `group_state` and `intake_submitted`, and `timeoutSeconds` to 55. When it times out, call it again. Never end a turn with only a report.
-  8. Ship in order with `start_ship` when the ship rights allow it. When the ship rights allow it, it ships a group in Agent done without a decision item.
-  9. Report to you. Raise a decision item with `create_decision_item` when a person must decide.
-  10. Call `write_state` after each decision, with the full state.
+  1. Call `read_state`. Then call `get_rulebook` and follow the rule book. Call `get_rulebook` again after each handoff.
+  2. Handle a line that you type in the terminal as a direction, like a new intake.
+  3. Read a message that starts with "Dispatch wake:" as a message from Dispatch. Read the board state with the dispatch tools and continue.
+  4. End every turn with `wait_for_event`. Never end a turn with only a report.
+  5. Call `write_state` after each decision, with the full state.
 
-  A message that starts with "Dispatch wake:" comes from Dispatch. Read the board state with the dispatch tools and continue.
+  The rule book holds the rules for intake, playbook choice, grouping, the plan, starts, directions, monitoring, ship and release (see "How the orchestrator judges and starts work").
 
-  After a usage limit, it checks `get_group_progress` and `read_pane_tail` before it sends input. It tells each loop never to run a dangerous `rm`. It hands off only when asked. The playbook forbids these actions:
+  The rule book tells the orchestrator to check `get_group_progress` and `read_pane_tail` after a usage limit, before it sends input. It tells each loop never to run a dangerous `rm`. The orchestrator hands off only when asked. The playbook forbids these actions:
 
   - Write or edit code or any file in a repository.
   - Commit, push, merge or rebase outside the ship flow.

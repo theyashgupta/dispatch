@@ -314,18 +314,19 @@ The checks 1 to 3 use no git call. The check 4 reads one file and runs before an
 
 ## Tool reference
 
-This section is the reference for the 26 tools. Each tool calls one route under `/api/orchestrator/`. Each call is checked against the board scope and, for a write, the policy (D-6), and is recorded as a `tool_call` row in `orchestration_events`. A tool call on a card that another orchestrator owns (D-7) returns 403 `other-owner`.
+This section is the reference for the 29 tools. Each tool calls one route under `/api/orchestrator/`. Each call is checked against the board scope and, for a write, the policy (D-6), and is recorded as a `tool_call` row in `orchestration_events`. A tool call on a card that another orchestrator owns (D-7) returns 403 `other-owner`.
 
-| Family    | Tools                                                                                                                                 | Notes                                                                                    |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Read      | `list_cards`, `get_card`, `list_sessions`, `get_group_progress`, `read_pane_tail`, `list_events`, `get_policy`, `get_board_workspace` | `list_events` takes a `since` cursor                                                     |
-| Tickets   | `create_ticket`, `update_ticket`, `move_card`, `add_comment`                                                                          | `update_ticket` closes F25                                                               |
-| Groups    | `create_base_branch`, `create_group`, `start_group`                                                                                   | `create_group` takes members, optional repos, playbook, direction and `dependsOn`        |
-| Sessions  | `send_input`, `approve_roadmap`, `request_handoff`, `resume_loop`, `stop_session`                                                     | `send_input` returns `confirmed` or `unconfirmed` (D-4); `resume_loop` per Key rules     |
-| Ship      | `start_ship`, `get_ship_state`                                                                                                        | D-8                                                                                      |
-| Decisions | `create_decision_item`                                                                                                                | the user answers; the answer returns as an event                                         |
-| Wait      | `wait_for_event`                                                                                                                      | blocks until an event matches a filter or a time limit passes                            |
-| State     | `read_state`, `write_state`                                                                                                           | the orchestrator keeps its state in the store, because it has no file write tool (U4-05) |
+| Family    | Tools                                                                                                                                                                   | Notes                                                                                    |
+| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Read      | `list_cards`, `get_card`, `list_sessions`, `get_group_progress`, `read_pane_tail`, `list_events`, `get_policy`, `get_board_workspace`, `list_playbooks`, `get_rulebook` | `list_events` takes a `since` cursor                                                     |
+| Tickets   | `create_ticket`, `update_ticket`, `move_card`, `add_comment`                                                                                                            | `update_ticket` closes F25                                                               |
+| Groups    | `create_base_branch`, `create_group`, `start_group`                                                                                                                     | `create_group` takes members, optional repos, playbook, direction and `dependsOn`        |
+| Cards     | `start_card`                                                                                                                                                            | starts one ticket card with a playbook and a direction                                   |
+| Sessions  | `send_input`, `approve_roadmap`, `request_handoff`, `resume_loop`, `stop_session`                                                                                       | `send_input` returns `confirmed` or `unconfirmed` (D-4); `resume_loop` per Key rules     |
+| Ship      | `start_ship`, `get_ship_state`                                                                                                                                          | D-8                                                                                      |
+| Decisions | `create_decision_item`                                                                                                                                                  | the user answers; the answer returns as an event                                         |
+| Wait      | `wait_for_event`                                                                                                                                                        | blocks until an event matches a filter or a time limit passes                            |
+| State     | `read_state`, `write_state`                                                                                                                                             | the orchestrator keeps its state in the store, because it has no file write tool (U4-05) |
 
 Every route sits under `/api/orchestrator/`, and the paths below are relative to it. Each tool is one entry of `src/server/bootstrap/mcp-tools.ts`, and each route is declared in `src/server/routes/orchestrator.route.ts`, its handler is in `src/server/routes/orchestrator.handlers.ts` and its zod schema is in `src/server/routes/orchestrator-schemas.ts`. These rules hold for every route, so the entries do not repeat them:
 
@@ -440,7 +441,7 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 
 ### `start_group`
 
-- Route: `POST /groups/:id/start`. It answers 202 with `{ started: true }` after the session start ends, or with `{ queued: true, waitingOn }` at once when a dependency is not done. The cap check and the start run in one tick, so two calls at the same time cannot both take the last slot.
+- Route: `POST /groups/:id/start`. It answers 202 with `{ started: true }` after the session start ends, or with `{ queued: true, waitingOn }` at once when a dependency is not done. The cap check and the start call run inside the cap lock, so two calls at the same time cannot both take the last slot, and the answer waits for the outcome of the start.
 - Input: `id` (card id).
 - Description: "Start the session of a group card. A group that is already started is refused."
 - Refusals: 400 `not-group-card`, `orchestration config is not loaded` (before the queue flag changes). 403 `policy-refused` with `reason` `concurrency cap reached: <running> of <cap> loops running` or `budget reached: cost <cost> of <budget>`. 404 `unknown-board`. 409 `already-started` when the group runs or has a live session. 409 `start-failed` with `reason` `start failed at <step>` or `start failed` when the session start fails; the queue flag goes back to its value before the call and one `supervisor_action` event with `action` `start_group_failed` is recorded. A held start that the supervisor pass makes and that fails goes back in the queue with the same event.
@@ -539,6 +540,28 @@ A user route refuses a call that carries an orchestrator token (403 `orchestrato
 
 When `handoffReady` is `true`, the supervisor reads the handoff as pending, as it reads `handoff-pending` in the engine file of a loop. When it sees the line `HANDOFF_READY <orchestratorId>`, it clears the session, sends the resume prompt, and sets `handoffReady` to `false` when the prompt is confirmed.
 
+### `list_playbooks`
+
+- Route: `GET /playbooks`. It answers 200 with `{ playbooks }`. Each entry is `{ name, when, source }`, and `source` is `seeded` or `user`.
+- Input: none.
+- Description: "List the playbooks with the name, the when line and the source, seeded or user. Choose a playbook by its when line. This tool changes nothing."
+- Refusals: none beyond the rules above.
+
+### `get_rulebook`
+
+- Route: `GET /rulebook`. It answers 200 with `{ markdown, bytes }`. The text is the file `docs/orchestration/rulebook.md` of the package.
+- Input: none.
+- Description: "Read the orchestration rule book. Call it after read_state at the start and after each handoff, and follow it. This tool changes nothing."
+- Refusals: 500 `rulebook-unreadable` when the file cannot be read.
+
+### `start_card`
+
+- Route: `POST /cards/:cardId/start`. It answers 202 with `{ started: true, cardId, playbook }` when the session start began, not when the worktree exists. The cap check, the write of `launch` and the start run in one cap-locked step, so two calls at the same time cannot both take the last slot.
+- Input: `cardId` (card id), `playbook` (string, 1 to 200 characters), `direction` (optional string, with the same limit and marker rule as the `create_group` direction), `folder` (optional string, 1 character or more), `repos` (optional list of `{ path, base }`, 1 entry or more).
+- Description: "Start the session of one ticket card with a playbook and a direction, the way the start dialog does. Omit repos to use the stored workspace of the card, else the board repositories with their base branch. A group card, a running card, a card in Done or Inbox, the Board Orchestrator playbook and a start at the concurrency cap are refused."
+- Refusals: 400 `invalid-playbook`, `invalid-direction`, `invalid-folder`, `invalid-repos`, `not-ticket-card` (the card is a group card), `orchestrator-playbook` (the playbook is Board Orchestrator), `unknown-playbook`, and the marker reason of `create_group`. 403 `policy-refused` with `reason` `concurrency cap reached: <running> of <cap> loops running`. 409 `already-started` when the card runs or has a live session. 409 for a card in Done or Inbox. 409 `a session start is already in progress` when a start of the card is running. Every refusal comes before the first write, so a refused call leaves no `launch` and no session.
+- The tool writes `launch` on the card with the playbook and the direction, so the card counts as a running loop until it reaches Agent done or Done.
+
 ### Rules for the orchestrator session (Unit 4)
 
 - The orchestrator session is launched with `--tools Read Glob Grep` (an allowlist of the read-only built-in tools, so no command or code running tool such as `Monitor`), `--allowedTools mcp__dispatch` (the board tools run without a permission dialog), `--permission-mode manual` (a user `defaultMode` cannot widen it) and `--disallowedTools Bash Write Edit NotebookEdit`, with every bypass flag stripped. The session then cannot reach the user routes by other means (U3-15, U4-04).
@@ -626,3 +649,15 @@ Change: the Board Orchestrator playbook step 7 tells the orchestrator to end eve
 Change: a new read tool, `get_board_workspace`, answers the folder of the board, its repositories with their base branch and check command, the playbook names and the group playbook. The `repos` input of `create_group` is now optional. When `repos` is omitted, the group uses every repository of the board with its base branch. A repository with no base branch answers 400 `missing-base` with its `path`. The default board stores no base branch, so its repositories answer base null; there the orchestrator passes `repos` with a base, for example a branch that it makes with `create_base_branch`. On the default board the workspace folders are its repositories for `create_group`, `create_base_branch` and `start_ship`. A board with no repository answers 400 `invalid-repos`. Both refusals come before any write. An explicit `repos` keeps its checks. The Board Orchestrator playbook tells the orchestrator to call `get_board_workspace` first, to omit `repos` and to ship a group in Agent done when its `shipRights` allow it. The tool count is 26.
 
 Reason: in the G19 real run the orchestrator asked the user for a repository path and a base branch that the board already held.
+
+### LOCAL-103
+
+Date: 2026-10-10.
+
+Change: a rule book, `docs/orchestration/rulebook.md`, tells the orchestrator how to triage an intake, judge the playbook of each ticket, group tickets, write one plan, start work, write directions, monitor, ship and release. It ships in the package. Two read tools, `get_rulebook` and `list_playbooks`, give the rule book and the playbooks with their when lines. A new tool, `start_card`, starts one ticket card with a playbook and a direction, the way the start dialog does. The tool count is 29.
+
+Change: the concurrency cap of D-6 now counts a running group and a running ticket card that an orchestrator launched. A card or group in Agent done holds no slot. This amends the meaning of the cap in D-6, which counted groups only.
+
+Change: a playbook can have a `when` line in its front matter, 300 characters or fewer. The seeded playbooks carry one. A seeded file gets the current seed when the SHA-256 hash of its content is in the retired set of its slug, so a file that the user edited stays as it is. A new seeded playbook, Roadmap Loop, runs several related tickets as one stack. The Board Orchestrator playbook now loads the rule book and holds only the loader steps and the rules of D-9. Part 2 follows: monitoring of a single card, and ship and release of a single card.
+
+Reason: the G19 and G20 real runs, and the user note of 2026-10-10.
