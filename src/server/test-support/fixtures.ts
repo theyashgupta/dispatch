@@ -184,7 +184,7 @@ export function isolateEnv(): IsolatedEnv {
       if (value === undefined) delete process.env[key];
       else process.env[key] = value;
     }
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 5 });
   };
   return { root, home, dispatchDir, binDir, keychainDir, cleanup };
 }
