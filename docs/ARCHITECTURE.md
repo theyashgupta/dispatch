@@ -148,6 +148,7 @@ Mount prefix: `/api/orchestrator`.
 | GET    | `/api/orchestrator/events`                         | Orchestrator token | Tool `list_events`: list the board events after a cursor, oldest first.                             |
 | GET    | `/api/orchestrator/policy`                         | Orchestrator token | Tool `get_policy`: read the policy of the caller with the running loop count and the group costs.   |
 | GET    | `/api/orchestrator/board-workspace`                | Orchestrator token | Tool `get_board_workspace`: read the board folder, repositories, playbook names and group playbook. |
+| POST   | `/api/orchestrator/boards`                         | Orchestrator token | Tool `create_board`: create a board from a name and answer the key and the link.                    |
 | POST   | `/api/orchestrator/tickets`                        | Orchestrator token | Tool `create_ticket`: create a local ticket marked as created by the caller.                        |
 | PATCH  | `/api/orchestrator/tickets/:id`                    | Orchestrator token | Tool `update_ticket`: change the title or description of a local ticket.                            |
 | POST   | `/api/orchestrator/tickets/:id/move`               | Orchestrator token | Tool `move_card`: move a card to a column under the manual move rules.                              |
@@ -207,6 +208,7 @@ Mount prefix: `/api`.
 | GET    | `/api/boards/:key/orchestration`           | User | Read the orchestration summary of a board.                                         |
 | GET    | `/api/boards/:key/orchestration/events`    | User | List the orchestration events of a board, the latest ones or those after a cursor. |
 | PATCH  | `/api/boards/:key`                         | User | Change the name, sessions folder, repositories or Linear team keys of a board.     |
+| POST   | `/api/boards/:key/repositories/init`       | User | Make a local repository in the folder of the board and add it to the board.        |
 | POST   | `/api/boards/:key/archive`                 | User | Archive a board.                                                                   |
 | POST   | `/api/boards/:key/restore`                 | User | Restore an archived board.                                                         |
 | POST   | `/api/boards/:key/orchestrators/:id/token` | User | Mint the token of an orchestrator.                                                 |
@@ -702,7 +704,12 @@ does not clash with `/api/boards/counts`.
 `knownLinearTeamKeys` holds the identifier prefixes of the Linear cards in the store, plus the
 Linear team keys when Linear is on. The server logs a failed Linear read once and does not read again for 60
 seconds. `POST /api/boards` creates a board and returns `201` with
-`{ board }`. `GET /api/boards/:key` and `PATCH /api/boards/:key` return `{ board }`. A patch accepts
+`{ board, link }`, where `link` is `/boards/<key>`. Only `name` is required. The server derives the
+key from the name. The default folder is `<workspaces root>/<key>`, and the server makes it on
+create. Repositories are optional. `POST /api/boards/:key/repositories/init` makes a local
+repository in `<board folder>/<lowercase key>` and adds it to the board. The MCP tool `create_board`
+calls the same service through `POST /api/orchestrator/boards`. The tool `get_board_workspace` lists
+all boards. `GET /api/boards/:key` and `PATCH /api/boards/:key` return `{ board }`. A patch accepts
 only `name`, `workspaceRoot`, `repositories` and `linearTeamKeys`, and the key never changes. A
 patch of `LOCAL` writes `workspaceRoot` to `config.json` and the repository paths to the workspace
 folders. `POST /api/boards/:key/archive` and `POST /api/boards/:key/restore` set and clear the

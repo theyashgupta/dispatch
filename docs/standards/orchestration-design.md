@@ -39,6 +39,8 @@ Term rule: in this codebase, "orchestration" also names the session start saga (
 
 **Decision:** A board is the project. No project level holds boards. A board row has these fields: `key` (also the board id, set at creation, never changed), `name`, `workspaceRoot`, `repositories` (each a path, a base branch and a check command, default `npm run check`, which the server runs with `NODE_ENV` unset as in SI:18), `linearTeamKeys` (optional), `lastUsedFolder`, `policy` (D-6), `orchestrators` (D-7), `createdAt`, `archived`. The default board takes its workspace root and repositories from the `Config` fields `workspaceRoot`, `repoPaths` and `baseBranches`, as today. So `Config` and `config.json` keep every field ("Do Not Change" contract items 1 and 4). An edit of the default board writes these `Config` fields. A new board stores these values on its own row. Cards, events and archive rows carry the board key. These stay global: Claude accounts, the vault, connections, the inbox sources and their items, playbooks, push subscriptions, and the settings that are not a board field. An inbox item has no board. When the user promotes an item, the new card goes to the selected board. The Inbox page shows the global items plus the Inbox-column cards of the selected board. The Linear poller puts a new card on the board whose `linearTeamKeys` holds the team key of the issue, else on the default board. The `Card` type and the `BoardSnapshot` gain the board key. That is a deliberate change of the "Do Not Change" contract item 1, and the ticket that makes it updates the contract text in the same change.
 
+**Amendment (LOCAL-102):** `name` is the only required field of a board create. The server derives the key from the name. The repository list is optional and can be empty. The default folder is `<workspaces root>/<key>`, and the server makes it on create. The MCP tool `create_board` creates a board from a name through the same service. `get_board_workspace` lists all boards.
+
 **Reason:** the manual run was one project per board in practice (each group payload had one `folder` and one `repos` entry, H25:96-104), and one level keeps every route, query key and URL to one scope parameter.
 
 **Rejected:**
@@ -314,11 +316,12 @@ The checks 1 to 3 use no git call. The check 4 reads one file and runs before an
 
 ## Tool reference
 
-This section is the reference for the 26 tools. Each tool calls one route under `/api/orchestrator/`. Each call is checked against the board scope and, for a write, the policy (D-6), and is recorded as a `tool_call` row in `orchestration_events`. A tool call on a card that another orchestrator owns (D-7) returns 403 `other-owner`.
+This section is the reference for the 27 tools. Each tool calls one route under `/api/orchestrator/`. Each call is checked against the board scope and, for a write, the policy (D-6), and is recorded as a `tool_call` row in `orchestration_events`. A tool call on a card that another orchestrator owns (D-7) returns 403 `other-owner`.
 
 | Family    | Tools                                                                                                                                 | Notes                                                                                    |
 | --------- | ------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | Read      | `list_cards`, `get_card`, `list_sessions`, `get_group_progress`, `read_pane_tail`, `list_events`, `get_policy`, `get_board_workspace` | `list_events` takes a `since` cursor                                                     |
+| Boards    | `create_board`                                                                                                                        | any valid token may call it; the new board is not a board of the caller                  |
 | Tickets   | `create_ticket`, `update_ticket`, `move_card`, `add_comment`                                                                          | `update_ticket` closes F25                                                               |
 | Groups    | `create_base_branch`, `create_group`, `start_group`                                                                                   | `create_group` takes members, optional repos, playbook, direction and `dependsOn`        |
 | Sessions  | `send_input`, `approve_roadmap`, `request_handoff`, `resume_loop`, `stop_session`                                                     | `send_input` returns `confirmed` or `unconfirmed` (D-4); `resume_loop` per Key rules     |
@@ -391,9 +394,18 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 
 - Route: `GET /board-workspace`.
 - Input: none.
-- Description: "Read the board workspace: the folder, the repositories with their base branch and check command, the playbook names and the group playbook. This tool changes nothing."
-- Answer: `folder` (the workspace folder of the board, or null), `repos` (each repository of the board as `{ path, base, checkCommand }`, and `base` is null when the repository has no base branch), `playbooks` (the sorted names of the playbooks that exist) and `groupPlaybook` (from the policy of the caller, or null).
+- Description: "Read the board workspace: the folder, the repositories with their base branch and check command, the playbook names and the group playbook. It also lists all boards with their key, name, archived flag and link. This tool changes nothing."
+- Answer: `folder` (the workspace folder of the board, or null), `repos` (each repository of the board as `{ path, base, checkCommand }`, and `base` is null when the repository has no base branch), `playbooks` (the sorted names of the playbooks that exist), `groupPlaybook` (from the policy of the caller, or null) and `boards` (every board as `{ key, name, archived, link }`, where `link` is `/boards/<key>`).
 - Refusals: none beyond the rules above.
+
+### `create_board`
+
+- Route: `POST /boards`. It answers 201 with `{ board, link }`, where `link` is `/boards/<key>`. The key is in `board.key`.
+- Input: `name` (string, 1 to 300 characters), `folder` (optional absolute path of an existing folder), `repositories` (optional array of absolute repository paths). The key is not an input: the server derives it from the name.
+- Description: "Create a board from a name. The key comes from the name. When you give no folder, the folder is made below the workspaces root. The answer holds the board, with its key, and the link. A blank name is refused."
+- Scope: any valid orchestrator token may call it, because the new board is not a board of the caller. The call is recorded under the board of the caller.
+- Service: the route calls the service of `POST /api/boards`, so one rule set applies. The tool refuses a folder or a repository that is not inside the home folder. Each repository takes base branch null and the default check command.
+- Refusals: 400 `missing-name`, `folder-missing`, `invalid-repository`, `no-free-key` and `no-workspaces-root`. 403 `outside-home`.
 
 ### `create_ticket`
 

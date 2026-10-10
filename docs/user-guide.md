@@ -34,9 +34,9 @@ A group is one session that works on several tickets. A loop is a roadmap that a
 4. Choose **Create board**. The dialog closes and the message "Board <name> created." shows. You stay on the boards page. The board switcher still shows the old board.
 5. Open the new board. In its row, choose **Board actions**, then **Open board**. Or choose the new board in the board switcher.
 
-These fields are required: **Key**, **Name**, **Sessions folder** and the path of one repository. The form shows an error under a field that is empty or wrong. **Base branch**, **Check command** and **Linear team keys** are optional. An empty **Check command** becomes `npm run check`. Enter the sessions folder and the repository path as absolute paths.
+Only **Name** is required. Dispatch derives the key from the name when you give no key. When you give no folder, Dispatch makes the folder `<workspaces root>/<key>`. The form shows an error under a field that is empty or wrong. **Key**, **Sessions folder**, **Repository path**, **Base branch**, **Check command** and **Linear team keys** are optional. An empty **Check command** becomes `npm run check`. Enter the sessions folder and the repository path as absolute paths.
 
-The key must be new. Dispatch refuses a key that another board or a Linear team already uses. A board needs at least one repository.
+The key must be new. Dispatch refuses a key that another board or a Linear team already uses. A board can have no repository. Add a repository later in the board settings. The server can also make a local repository in `<board folder>/<lowercase key>`.
 
 ### Switch boards
 
@@ -118,6 +118,8 @@ The server accepts wider number ranges than the form does. The form ranges in th
 4. Choose **Start orchestrator**.
 
 When the board has no orchestrator record, **Start orchestrator** first adds the main orchestrator. The record has the id `main` and the name "Main orchestrator". Then it starts the orchestrator.
+
+The orchestrator can create a board with the tool `create_board`. It gives a name, and the tool answers the key and the link. The tool `get_board_workspace` lists all boards.
 
 The orchestrator reads the folder and the repositories of the board by itself. It does not ask you for a repository path or a base branch. Set the base branch of each repository in the board settings.
 
