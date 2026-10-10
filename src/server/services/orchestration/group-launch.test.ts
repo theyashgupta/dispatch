@@ -68,6 +68,43 @@ void test("createGroup refuses an ineligible member with every offending id and 
   assert.equal(store.getCard(a)?.groupId, undefined);
 });
 
+void test("createGroup refuses a workspace with no repository and mints nothing", async () => {
+  const a = await local("no-repo-a");
+  const b = await local("no-repo-b");
+  const before = groupCount();
+  await assert.rejects(
+    createGroup(DEFAULT_BOARD_KEY, {
+      title: "grp",
+      memberIds: [a, b],
+      workspace: { folder: repo, repos: [] },
+    }),
+    (err: unknown) =>
+      err instanceof ValidationError &&
+      err.status === 400 &&
+      err.details?.code === "no-repositories",
+  );
+  assert.equal(groupCount(), before);
+  assert.equal(store.getCard(a)?.groupId, undefined);
+});
+
+void test("createGroup answers no workspace for an empty selection on a board with repositories", async () => {
+  const a = await local("sel-a");
+  const b = await local("sel-b");
+  await store.addWorkspaceFolder(DEFAULT_BOARD_KEY, repo);
+  try {
+    await assert.rejects(
+      createGroup(DEFAULT_BOARD_KEY, {
+        title: "grp",
+        memberIds: [a, b],
+        workspace: { folder: repo, repos: [] },
+      }),
+      { message: "No workspace selected for this group" },
+    );
+  } finally {
+    await store.removeWorkspaceFolder(DEFAULT_BOARD_KEY, repo);
+  }
+});
+
 void test("createGroup refuses an unknown playbook", async () => {
   const a = await local("d");
   const b = await local("e");

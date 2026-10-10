@@ -84,7 +84,7 @@ function countingReader(keys: string[] | null) {
   return reader;
 }
 
-test("createBoard runs the key, name, folder and repository checks in form order", async () => {
+test("createBoard runs the name, key, folder and repository checks in form order", async () => {
   const reader = countingReader([]);
   const cases: [Record<string, unknown>, string, string][] = [
     [
@@ -104,7 +104,6 @@ test("createBoard runs the key, name, folder and repository checks in form order
       "folder-missing",
       "This folder does not exist.",
     ],
-    [{ repositories: [] }, "no-repositories", "Add at least one repository."],
     [
       {
         repositories: [{ path: sessions, baseBranch: null, checkCommand: "x" }],
@@ -114,6 +113,11 @@ test("createBoard runs the key, name, folder and repository checks in form order
     ],
     [
       { key: "bad", name: "", workspaceRoot: "/gone", repositories: [] },
+      "missing-name",
+      "Enter a name.",
+    ],
+    [
+      { key: "bad", workspaceRoot: "/gone", repositories: [] },
       "invalid-key",
       "Use 2 to 6 capital letters or digits, starting with a letter.",
     ],
@@ -162,13 +166,15 @@ test("createBoard skips the Linear team check when the read answers null, and ch
   assert.equal(board.policy.supervisor, "on");
 });
 
-test("createBoard refuses a duplicate key without a Linear read and maps a store key-in-use refusal", async () => {
-  const reader = countingReader([]);
+test("createBoard refuses a duplicate key with a suggestion that skips team keys and maps a store key-in-use refusal", async () => {
+  const reader = countingReader(["PLAT2"]);
   await assert.rejects(
     createBoard(input({ key: "PLAT", name: "Second" }), reader),
-    refusal(400, "duplicate-key", "Board Plat uses this key."),
+    refusal(400, "duplicate-key", "Board Plat uses this key.", {
+      suggestion: "PLAT3",
+    }),
   );
-  assert.equal(reader.calls, 0);
+  assert.equal(reader.calls, 1, "the suggestion skips the team keys");
   await assert.rejects(
     createBoard(input({ key: "OPS", name: "Ops" }), reader),
     refusal(400, "linear-team-key", "Linear team OPS uses this key."),
@@ -249,10 +255,9 @@ test("updateBoard checks before it writes, and the default board writes Config a
     ).workspaceRoot,
     other,
   );
-  await assert.rejects(
-    updateBoard(key("PLAT"), { repositories: [] }),
-    refusal(400, "no-repositories", "Add at least one repository."),
-  );
+  const emptied = await updateBoard(key("PLAT"), { repositories: [] });
+  assert.deepEqual(emptied.repositories, []);
+  assert.deepEqual(getBoard(key("PLAT")).repositories, []);
   await assert.rejects(
     updateBoard(key("NOPE"), { name: "x" }),
     (err) =>
@@ -530,4 +535,197 @@ test("boardCounts keeps an archived board with empty attention and loops", async
   const count = boardCounts().counts.find((c) => c.key === "CNTX");
   assert.equal(count?.attention, 0);
   assert.deepEqual(count?.loops, []);
+});
+
+async function inRoot<T>(
+  label: string,
+  run: (root: string) => Promise<T>,
+): Promise<T> {
+  const root = path.join(env.root, label);
+  fs.mkdirSync(root, { recursive: true });
+  setOrchestrationConfig({ linearApiKey: "", workspaceRoot: root });
+  try {
+    return await run(root);
+  } finally {
+    setOrchestrationConfig({ linearApiKey: "", workspaceRoot: sessions });
+  }
+}
+
+const nameOnly = (name: string) => ({
+  name,
+  repositories: [],
+  linearTeamKeys: [],
+});
+
+const refuseOnce = (
+  times: number,
+  reason: "key-in-use" | "duplicate-key" = "key-in-use",
+) =>
+  mock.method(
+    store,
+    "createBoard",
+    () =>
+      Promise.resolve(
+        reason === "key-in-use"
+          ? { ok: false as const, reason, source: "linear" }
+          : { ok: false as const, reason, boardName: "Other" },
+      ),
+    { times },
+  );
+
+test("createBoard with a name only derives the key and makes the folder below the workspaces root", () =>
+  inRoot("derived-root", async (root) => {
+    const board = await createBoard(nameOnly("Payments"), countingReader([]));
+    assert.equal(board.key, "PAYMEN");
+    assert.equal(board.workspaceRoot, path.join(root, "PAYMEN"));
+    assert.deepEqual(board.repositories, []);
+    assert.ok(fs.statSync(path.join(root, "PAYMEN")).isDirectory());
+
+    const second = await createBoard(nameOnly("Payments"), countingReader([]));
+    assert.equal(second.key, "PAYME2");
+    assert.ok(fs.statSync(path.join(root, "PAYME2")).isDirectory());
+  }));
+
+test("createBoard skips a derived key that a Linear team uses, reading the team keys once", async () => {
+  const reader = countingReader(["QUEUES"]);
+  const board = await inRoot("queues-root", () =>
+    createBoard(nameOnly("Queues"), reader),
+  );
+  assert.equal(board.key, "QUEUE2");
+  assert.equal(reader.calls, 1);
+});
+
+test("createBoard skips a derived key that a Linear card prefix uses", async () => {
+  const board = await inRoot("prefix-root", () =>
+    createBoard(nameOnly("Ops"), countingReader([])),
+  );
+  assert.equal(board.key, "OPS2");
+});
+
+test("createBoard refuses with no-free-key when every candidate is taken", async () => {
+  const candidates = ["QX"];
+  for (let d = 2; d <= 9; d++) candidates.push(`QX${d}`);
+  for (let n = 10; n <= 99; n++) candidates.push(`QX${n}`);
+  await inRoot("nofree-root", async (root) => {
+    await assert.rejects(
+      createBoard(nameOnly("Qx"), countingReader(candidates)),
+      refusal(
+        400,
+        "no-free-key",
+        "No free key for this name. Enter a key in Advanced.",
+      ),
+    );
+    assert.deepEqual(fs.readdirSync(root), []);
+  });
+});
+
+test("createBoard retries a derived key after a store key-in-use refusal and removes the empty folder of the refused key", () =>
+  inRoot("retry-root", async (root) => {
+    const refused = refuseOnce(1);
+    try {
+      const board = await createBoard(nameOnly("Retry"), countingReader([]));
+      assert.equal(board.key, "RETRY2");
+      assert.equal(refused.mock.callCount(), 1);
+    } finally {
+      refused.mock.restore();
+    }
+    assert.equal(fs.existsSync(path.join(root, "RETRY")), false);
+    assert.ok(fs.statSync(path.join(root, "RETRY2")).isDirectory());
+  }));
+
+test("createBoard stops a derived key after 3 store refusals and removes every empty folder it made", () =>
+  inRoot("tries-root", async (root) => {
+    const refused = refuseOnce(3);
+    try {
+      await assert.rejects(
+        createBoard(nameOnly("Tries"), countingReader([])),
+        refusal(400, "linear-team-key", "Linear team TRIES3 uses this key."),
+      );
+      assert.equal(refused.mock.callCount(), 3);
+    } finally {
+      refused.mock.restore();
+    }
+    assert.deepEqual(fs.readdirSync(root), []);
+  }));
+
+test("createBoard keeps a default folder that existed before a store refusal", () =>
+  inRoot("keep-root", async (root) => {
+    fs.mkdirSync(path.join(root, "KEEPER"));
+    const refused = refuseOnce(1);
+    try {
+      const board = await createBoard(nameOnly("Keeper"), countingReader([]));
+      assert.equal(board.key, "KEEPE2");
+    } finally {
+      refused.mock.restore();
+    }
+    assert.ok(fs.statSync(path.join(root, "KEEPER")).isDirectory());
+  }));
+
+test("createBoard removes the empty folder it made when an explicit key is refused by the store", () =>
+  inRoot("explicit-root", async (root) => {
+    const refused = refuseOnce(1, "duplicate-key");
+    try {
+      await assert.rejects(
+        createBoard(
+          { ...nameOnly("Explicit"), key: "EXPL" },
+          countingReader([]),
+        ),
+        refusal(400, "duplicate-key", "Board Other uses this key.", {
+          suggestion: "EXPL",
+        }),
+      );
+    } finally {
+      refused.mock.restore();
+    }
+    assert.equal(fs.existsSync(path.join(root, "EXPL")), false);
+  }));
+
+test("createBoard refuses a taken explicit key with a free suggestion and makes no folder", () =>
+  inRoot("taken-root", async (root) => {
+    await createBoard(
+      { ...nameOnly("Taken"), key: "TAKEN" },
+      countingReader([]),
+    );
+    await assert.rejects(
+      createBoard({ ...nameOnly("Again"), key: "TAKEN" }, countingReader([])),
+      refusal(400, "duplicate-key", "Board Taken uses this key.", {
+        suggestion: "TAKEN2",
+      }),
+    );
+    assert.equal(fs.existsSync(path.join(root, "TAKEN2")), false);
+  }));
+
+test("createBoard refuses an explicit folder that is missing and stores nothing", () =>
+  inRoot("gone-root", async (root) => {
+    const before = store.listBoards().length;
+    await assert.rejects(
+      createBoard(
+        {
+          ...nameOnly("Gone"),
+          workspaceRoot: path.join(env.root, "gone"),
+        },
+        countingReader([]),
+      ),
+      refusal(400, "folder-missing", "This folder does not exist.", {
+        field: "workspaceRoot",
+      }),
+    );
+    assert.equal(store.listBoards().length, before);
+    assert.equal(fs.existsSync(path.join(root, "GONE")), false);
+  }));
+
+test("createBoard refuses with no-workspaces-root when no folder is given and Config has none", async () => {
+  setOrchestrationConfig({ linearApiKey: "", workspaceRoot: "" });
+  try {
+    await assert.rejects(
+      createBoard(nameOnly("Nowhere"), countingReader([])),
+      refusal(
+        400,
+        "no-workspaces-root",
+        "Set the Dispatch workspaces root in Settings.",
+      ),
+    );
+  } finally {
+    setOrchestrationConfig({ linearApiKey: "", workspaceRoot: sessions });
+  }
 });

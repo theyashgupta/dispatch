@@ -61,7 +61,7 @@ function isCleanAbsolutePath(raw: string): boolean {
   return bare !== "" && path.resolve(raw) === bare;
 }
 
-const folderPathSchema = z
+export const folderPathSchema = z
   .string("folder-missing")
   .refine(isCleanAbsolutePath, "folder-missing")
   .transform((raw) => path.resolve(raw));
@@ -90,7 +90,7 @@ const repositorySchema = z.object(
 );
 
 const repositoriesSchema = z
-  .array(repositorySchema, "no-repositories")
+  .array(repositorySchema, "invalid-repository")
   .transform((repos) => [
     ...new Map(repos.map((repo) => [repo.path, repo])).values(),
   ]);
@@ -109,17 +109,17 @@ const linearTeamKeysSchema = z
  * The `POST /boards` body.
  *
  * @remarks A schema message is a board variant (`missing-name`, `folder-missing`,
- * `no-repositories`, `reserved-key`) or a plain error code. The key rule and the name check stay in the service,
- * so one place decides them.
+ * `reserved-key`) or a plain error code. Only `name` is required; the key rule and the name check
+ * stay in the service, so one place decides them.
  */
 export const createBoardBodySchema = z.preprocess(
   fieldsOf,
   z.object(
     {
-      key: z.string("invalid-key"),
+      key: z.string("invalid-key").optional(),
       name: z.string("missing-name"),
-      workspaceRoot: folderPathSchema,
-      repositories: repositoriesSchema,
+      workspaceRoot: folderPathSchema.optional(),
+      repositories: repositoriesSchema.optional().transform((r) => r ?? []),
       linearTeamKeys: linearTeamKeysSchema.optional().transform((k) => k ?? []),
     },
     "invalid-key",

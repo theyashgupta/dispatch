@@ -5,6 +5,7 @@ import {
   type Request,
   type Response,
 } from "express";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 import type { Card } from "../../shared/types.js";
 import {
   redactArchivedGroup,
@@ -84,6 +85,7 @@ import { httpErrorHandler } from "./error-handler.js";
 import { parseOrThrow } from "./parse-input.js";
 import { forceBodySchema } from "./schema-primitives.js";
 import {
+  getBoard,
   listBoardCards,
   resolveBoard,
   resolveBoardForCreate,
@@ -175,12 +177,28 @@ function inheritFromError(
   return null;
 }
 
+/**
+ * The workspace a start body names, or undefined when the card keeps its saved one.
+ *
+ * @remarks A workspace with no repository counts only on a board with no repository. On a board
+ * with repositories it is a stale client body, so the saved workspace decides.
+ */
+function bodyWorkspace(
+  card: Card,
+  workspace: Card["workspace"],
+): Card["workspace"] {
+  if (workspace === undefined || workspace.repos.length > 0) return workspace;
+  const board = getBoard(card.boardKey ?? DEFAULT_BOARD_KEY);
+  return board.repositories.length === 0 ? workspace : undefined;
+}
+
 cardsRouter.post("/cards/:id/start", async (req, res) => {
   const { id } = req.params;
-  const { extraDirection, playbook, newSession, inheritFrom, workspace } =
-    parseOrThrow(startBodySchema, req.body);
+  const parsed = parseOrThrow(startBodySchema, req.body);
+  const { extraDirection, playbook, newSession, inheritFrom } = parsed;
 
   const card = launchableCard(id);
+  const workspace = bodyWorkspace(card, parsed.workspace);
 
   if (card.column === "done") {
     throw new ConflictError("cannot start a session for a Done card");

@@ -224,7 +224,7 @@ test("the workspace folder routes read and write the folders of the board only",
   assert.deepEqual(await folders("/workspace-folders"), [localFolder]);
 });
 
-test("a folder of a board other than LOCAL must hold .git, and the last repository cannot go", async () => {
+test("a folder of a board other than LOCAL must hold .git, and its last repository can go", async () => {
   const acmeRepo = path.join(acmeFolder, "repo");
   const before = JSON.stringify(store.getWorkspaceFolders(ACME));
   const parent = await call("POST", "/workspace-folders?board=ACME", {
@@ -237,11 +237,12 @@ test("a folder of a board other than LOCAL must hold .git, and the last reposito
   const last = await call("DELETE", "/workspace-folders?board=ACME", {
     path: acmeRepo,
   });
-  assert.equal(last.status, 400);
-  assert.deepEqual(last.json, {
-    error: "Add at least one repository.",
-    code: "no-repositories",
+  assert.equal(last.status, 200, last.text);
+  assert.deepEqual(store.getWorkspaceFolders(ACME).folders, []);
+  const readded = await call("POST", "/workspace-folders?board=ACME", {
+    path: acmeRepo,
   });
+  assert.equal(readded.status, 200, readded.text);
   assert.equal(JSON.stringify(store.getWorkspaceFolders(ACME)), before);
 
   const absent = await call("DELETE", "/workspace-folders?board=ACME", {

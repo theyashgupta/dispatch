@@ -23,6 +23,7 @@ import {
   type OrchestratorIdentity,
 } from "../domain/orchestrator-scope.js";
 import {
+  boardRefusal,
   callerPolicy,
   dependencyDone,
   isLiveSessionCard,
@@ -61,8 +62,7 @@ function resolveRepos(
   requested: GroupRequest["repos"],
 ): { path: string; base: string }[] {
   if (requested !== undefined) return requested;
-  if (board.repositories.length === 0)
-    throw new ValidationError("invalid-repos");
+  if (board.repositories.length === 0) throw boardRefusal("no-repositories");
   return board.repositories.map((r) => {
     if (!r.baseBranch)
       throw new ValidationError("missing-base", { path: r.path });
@@ -70,8 +70,9 @@ function resolveRepos(
   });
 }
 
-/** Throw the typed 400 unless `repository` is a repository path of the board. */
+/** Throw the typed 400 `no-repositories` on a board with no repository, else `unknown-repository` unless `repository` is one of them. */
 function assertBoardRepository(board: Board, repository: string): void {
+  if (board.repositories.length === 0) throw boardRefusal("no-repositories");
   if (!board.repositories.some((r) => r.path === repository)) {
     throw new ValidationError("unknown-repository");
   }
