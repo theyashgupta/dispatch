@@ -1,14 +1,12 @@
 import { Router } from "express";
-import type { z } from "zod";
-import { ValidationError } from "../services/domain/errors.js";
+import { boardLink } from "../../shared/board-key.js";
 import type { OrchestratorIdentity } from "../services/domain/orchestrator-scope.js";
+import { initBoardRepository } from "../services/orchestration/board-repository-init.js";
 import {
   archiveBoard,
   boardCounts,
-  boardRefusal,
   createBoard,
   getBoard,
-  isStaticBoardVariant,
   listBoards,
   resolveBoard,
   resolveOpenBoard,
@@ -28,24 +26,10 @@ import {
 } from "./boards-schemas.js";
 import { httpErrorHandler } from "./error-handler.js";
 import { orchestratorIdSchema } from "./orchestrator-schemas.js";
-import { parseOrThrow } from "./parse-input.js";
+import { parseBoardBody, parseOrThrow } from "./parse-input.js";
 import { boardRepository } from "../store/board-repository.js";
 
 export const boardsRouter = Router({ caseSensitive: true });
-
-/**
- * Parse a board body, turning a schema issue that names a fixed-copy variant into its typed error.
- *
- * @remarks Any other schema issue stays a plain 400 with the issue message as the code.
- */
-function parseBoardBody<T>(schema: z.ZodType<T>, body: unknown): T {
-  const result = schema.safeParse(body);
-  if (result.success) return result.data;
-  const message = result.error.issues[0]?.message ?? "invalid";
-  throw isStaticBoardVariant(message)
-    ? boardRefusal(message)
-    : new ValidationError(message);
-}
 
 boardsRouter.get("/boards", async (_req, res) => {
   res.status(200).json(await listBoards());
@@ -57,7 +41,8 @@ boardsRouter.get("/boards/counts", (_req, res) => {
 
 boardsRouter.post("/boards", async (req, res) => {
   const input = parseBoardBody(createBoardBodySchema, req.body);
-  res.status(201).json({ board: await createBoard(input) });
+  const board = await createBoard(input);
+  res.status(201).json({ board, link: boardLink(board.key) });
 });
 
 boardsRouter.get("/boards/:key", (req, res) => {
@@ -88,6 +73,11 @@ boardsRouter.patch("/boards/:key", async (req, res) => {
   const key = parseBoardKeyParam(req.params.key);
   const patch = parseBoardBody(patchBoardBodySchema, req.body);
   res.status(200).json({ board: await updateBoard(key, patch) });
+});
+
+boardsRouter.post("/boards/:key/repositories/init", async (req, res) => {
+  const key = parseBoardKeyParam(req.params.key);
+  res.status(200).json({ board: await initBoardRepository(key) });
 });
 
 boardsRouter.post("/boards/:key/archive", async (req, res) => {

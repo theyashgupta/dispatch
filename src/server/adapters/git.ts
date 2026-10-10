@@ -292,3 +292,51 @@ export async function isMainCheckout(dir: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * True when `dir` is the top folder of a git working tree.
+ *
+ * @remarks A folder inside another repository answers false, so a board subfolder under a parent
+ * repository still gets its own repository. `--show-cdup` is empty at the top, so no path compare
+ * is needed.
+ */
+export async function isRepositoryTop(dir: string): Promise<boolean> {
+  try {
+    const { stdout } = await run("git", ["rev-parse", "--show-cdup"], {
+      cwd: dir,
+    });
+    return stdout.trim() === "";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Make a repository in `dir` with `main` checked out.
+ */
+export async function initMainRepository(dir: string): Promise<void> {
+  await run("git", ["init", "-b", "main"], { cwd: dir });
+}
+
+/**
+ * Add one empty commit in `dir`.
+ *
+ * @remarks A new repository needs a commit before a worktree can be cut from its branch. The commit
+ * uses the git identity of the user, and git fails when none is set. Signing and hooks are off,
+ * so a signing prompt or a hook cannot fail this local init commit.
+ */
+export async function commitEmpty(dir: string): Promise<void> {
+  await run(
+    "git",
+    [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "--allow-empty",
+      "--no-verify",
+      "-m",
+      "Initial commit",
+    ],
+    { cwd: dir },
+  );
+}
