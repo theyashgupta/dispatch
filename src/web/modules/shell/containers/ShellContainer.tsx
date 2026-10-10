@@ -21,6 +21,7 @@ import {
   shouldPollCounts,
   staleCountsLabel,
 } from "../../../../shared/board-select.js";
+import { createdBoardText } from "../../../../shared/board-create.js";
 import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import { inboxFeed, isListedError } from "../../../../shared/feed-items.js";
 import { nowMs } from "../../../../shared/format-age.js";
@@ -88,6 +89,7 @@ import { useUndoToast } from "@/modules/shell/hooks/use-undo-toast";
 import { useViewportNav } from "@/modules/shell/hooks/use-viewport-nav";
 import { CommandPaletteContainer } from "@/modules/shell/containers/CommandPaletteContainer";
 import { UpdateBannerContainer } from "@/modules/shell/containers/UpdateBannerContainer";
+import { useCreateBoardMutation } from "@/queries/board-create-queries";
 import {
   useBoardCountsQuery,
   useBoardListQuery,
@@ -222,12 +224,17 @@ export function ShellContainer({
     [router],
   );
 
-  const newBoard = useCallback(() => {
-    void router.navigate({
-      to: "/boards/{-$id}",
-      search: { ...boardSearch(boardKey), dialog: "new" as const },
-    });
-  }, [router, boardKey]);
+  const createBoardMutation = useCreateBoardMutation();
+  const createBoard = async (name: string) => {
+    const result = await createBoardMutation.mutateAsync({ name });
+    if (!result.ok) {
+      toast.error(result.error);
+      return;
+    }
+    toast.success(createdBoardText(result.board));
+    closeOverlay(appStore, () => setPaletteOpen(false), true);
+    switchBoard(result.board.key);
+  };
 
   const [liveBoard, setLiveBoard] = useState<BoardSnapshot | null>(null);
   const { connection } = useBoardLiveUpdates(boardKey, doneLimit, {
@@ -417,7 +424,7 @@ export function ShellContainer({
           appStore.notice,
         ),
       switchBoard,
-      newBoard,
+      createBoard,
     },
     navItems,
     selectedCardOf(board.cards, selectedCardId, pinned),

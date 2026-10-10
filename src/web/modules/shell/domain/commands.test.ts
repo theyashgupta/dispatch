@@ -42,7 +42,10 @@ function ctx() {
     meetingNotes: () => calls.push("meeting-notes"),
     syncNow: () => calls.push("sync"),
     switchBoard: (key) => calls.push(`switch ${key}`),
-    newBoard: () => calls.push("new-board"),
+    createBoard: async (name) => {
+      calls.push(`create-board ${name}`);
+      await Promise.resolve();
+    },
   };
   return { context, calls };
 }
@@ -64,7 +67,7 @@ test("with no card only the page commands, New ticket and Sync now appear", () =
     "meeting-notes",
     "sync-now",
     "manage-boards",
-    "new-board",
+    "create-board",
   ]);
 });
 
@@ -225,19 +228,21 @@ test("with one board or no switcher there is no Switch to board entry", () => {
   }
 });
 
-test("Manage boards and New board show with and without the switcher", () => {
+test("Manage boards and Create board show with and without the switcher", async () => {
   for (const switcher of [null, twoBoards]) {
     const { context, calls } = ctx();
     const commands = buildCommands(context, nav, card(), switcher);
     const manage = commands.find((c) => c.id === "manage-boards");
-    const create = commands.find((c) => c.id === "new-board");
+    const create = commands.find((c) => c.id === "create-board");
     assert.equal(manage?.label, "Manage boards");
-    assert.equal(create?.label, "New board");
+    assert.equal(create?.label, "Create board");
+    assert.equal(create?.prompt?.placeholder, "Board name");
+    assert.equal(create?.prompt?.hint, "Press Enter to create");
     assert.equal(manage?.group, "Boards");
     assert.equal(create?.group, "Boards");
     void manage?.run();
-    void create?.run();
-    assert.deepEqual(calls, ["go boards", "new-board"]);
+    await create?.prompt?.submit("Payments");
+    assert.deepEqual(calls, ["go boards", "create-board Payments"]);
   }
 });
 

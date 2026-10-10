@@ -3,11 +3,49 @@ import { test } from "node:test";
 import { INITIAL_PALETTE, paletteReducer, rowAt } from "./palette-state.js";
 
 test("a query change resets the highlight to the first row", () => {
-  const moved = { query: "in", highlight: 3 };
+  const moved = { ...INITIAL_PALETTE, query: "in", highlight: 3 };
   assert.deepEqual(paletteReducer(moved, { type: "query", query: "inb" }), {
     query: "inb",
     highlight: 0,
+    promptId: null,
   });
+});
+
+const PROMPT = "create-board";
+const prompting = paletteReducer(
+  { ...INITIAL_PALETTE, query: "cre", highlight: 2 },
+  { type: "enter-prompt", commandId: PROMPT },
+);
+
+test("entering a prompt clears the query and the highlight and keeps the prompt id", () => {
+  assert.deepEqual(prompting, { query: "", highlight: 0, promptId: PROMPT });
+});
+
+test("typing in prompt mode keeps the prompt id", () => {
+  assert.deepEqual(
+    paletteReducer(prompting, { type: "query", query: "Payments" }),
+    { query: "Payments", highlight: 0, promptId: PROMPT },
+  );
+});
+
+test("leaving a prompt returns to an empty command list", () => {
+  const typed = paletteReducer(prompting, { type: "query", query: "Pay" });
+  assert.deepEqual(
+    paletteReducer(typed, { type: "leave-prompt" }),
+    INITIAL_PALETTE,
+  );
+  assert.deepEqual(
+    paletteReducer(INITIAL_PALETTE, { type: "leave-prompt" }),
+    INITIAL_PALETTE,
+  );
+});
+
+test("a move in prompt mode keeps the prompt and the query", () => {
+  const typed = paletteReducer(prompting, { type: "query", query: "Pay" });
+  assert.deepEqual(
+    paletteReducer(typed, { type: "move", delta: 1, count: 1 }),
+    typed,
+  );
 });
 
 test("moves clamp to the rendered rows at both ends", () => {
