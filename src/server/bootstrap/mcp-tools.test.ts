@@ -14,9 +14,11 @@ const EXPECTED = [
   "get_card",
   "get_group_progress",
   "get_policy",
+  "get_rulebook",
   "get_ship_state",
   "list_cards",
   "list_events",
+  "list_playbooks",
   "list_sessions",
   "move_card",
   "read_pane_tail",
@@ -24,6 +26,7 @@ const EXPECTED = [
   "request_handoff",
   "resume_loop",
   "send_input",
+  "start_card",
   "start_group",
   "start_ship",
   "stop_session",
@@ -45,7 +48,7 @@ const accepts = (name: string, input: unknown) =>
   assert.equal(z.object(byName(name).input).safeParse(input).success, true);
 
 describe("mcp tool table", () => {
-  it("holds exactly the 26 tools", () => {
+  it("holds exactly the 29 tools", () => {
     assert.deepEqual(MCP_TOOLS.map((t) => t.name).sort(), EXPECTED);
   });
 
@@ -128,6 +131,9 @@ describe("mcp tool table", () => {
       list_events: "/events",
       get_policy: "/policy",
       get_board_workspace: "/board-workspace",
+      list_playbooks: "/playbooks",
+      get_rulebook: "/rulebook",
+      start_card: `/cards/${id}/start`,
       create_ticket: "/tickets",
       update_ticket: `/tickets/${id}`,
       move_card: `/tickets/${id}/move`,

@@ -40,6 +40,11 @@ const eventId = z.number().int().min(0);
 const limitField = z.number().int().min(1).max(200);
 const optionId = z.string().regex(DECISION_OPTION_ID_RE);
 
+const reposField = z
+  .array(z.object({ path: z.string().min(1), base: z.string().min(1) }))
+  .min(1)
+  .optional();
+
 const seg = (value: unknown) => encodeURIComponent(String(value));
 
 /**
@@ -188,10 +193,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
     input: {
       title: titleField,
       memberIds: z.array(z.string()).min(2),
-      repos: z
-        .array(z.object({ path: z.string().min(1), base: z.string().min(1) }))
-        .min(1)
-        .optional(),
+      repos: reposField,
       playbook: z.string().min(1).optional(),
       direction: z.string().max(DIRECTION_MAX).optional(),
       dependsOn: z.array(looseId).max(50).optional(),
@@ -341,5 +343,35 @@ export const MCP_TOOLS: readonly McpTool[] = [
     },
     method: "PUT",
     path: "/state",
+  },
+  {
+    name: "list_playbooks",
+    description:
+      "List the playbooks with the name, the when line and the source, seeded or user. Choose a playbook by its when line. This tool changes nothing.",
+    input: {},
+    method: "GET",
+    path: "/playbooks",
+  },
+  {
+    name: "get_rulebook",
+    description:
+      "Read the orchestration rule book. Call it after read_state at the start and after each handoff, and follow it. This tool changes nothing.",
+    input: {},
+    method: "GET",
+    path: "/rulebook",
+  },
+  {
+    name: "start_card",
+    description:
+      "Start the session of one ticket card with a playbook and a direction, the way the start dialog does. Omit repos to use the stored workspace of the card, else the board repositories with their base branch. A group card, a running card, a card in Done or Inbox, the Board Orchestrator playbook and a start at the concurrency cap are refused.",
+    input: {
+      ...cardIdParam,
+      playbook: z.string().min(1).max(200),
+      direction: z.string().max(DIRECTION_MAX).optional(),
+      folder: z.string().min(1).optional(),
+      repos: reposField,
+    },
+    method: "POST",
+    path: "/cards/:cardId/start",
   },
 ];

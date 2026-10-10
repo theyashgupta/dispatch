@@ -4,7 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { isolateTmuxEnv, writeFakeRepl } from "../../test-support/fixtures.js";
 import { tempRepoWithWorkspace } from "../../test-support/git-fixtures.js";
-import { parseBoardKey } from "../../../shared/board-key.js";
+import { DEFAULT_BOARD_KEY, parseBoardKey } from "../../../shared/board-key.js";
 import type { Config } from "../../../shared/types.js";
 
 const env = await isolateTmuxEnv();
@@ -45,6 +45,42 @@ void test(
         workspaceRoot: path.join(env.root, "local"),
       } as Config);
       assert.equal(store.getCard(card.id)?.workspacePath, workspacePath);
+    } finally {
+      await tmux.killSession(`=${tmuxSession}`);
+    }
+  },
+);
+
+void test(
+  "a reattach leaves the stored start intent playbook unchanged",
+  { skip: !env.canRunRealTmux },
+  async () => {
+    await store.load();
+    const card = await store.createLocalCard(
+      DEFAULT_BOARD_KEY,
+      "reattach intent",
+      "",
+    );
+    const workspacePath = path.join(env.root, "local", card.identifier);
+    fs.mkdirSync(workspacePath, { recursive: true });
+    const tmuxSession = `dsp-${card.identifier}`;
+    await tmux.newSession(tmuxSession, workspacePath, ["sleep", "60"]);
+    try {
+      await store.setStartIntent(card.id, { playbook: "A" });
+      await store.completeStart(card.id, undefined, {
+        workspacePath,
+        branch: card.identifier,
+        tmuxSession,
+      });
+      await startSession(
+        card.id,
+        "",
+        { workspaceRoot: path.join(env.root, "local") } as Config,
+        { playbook: "B" },
+      );
+      const after = store.getCard(card.id);
+      assert.equal(after?.tmuxSession, tmuxSession);
+      assert.equal(after?.startIntent?.playbook, "A");
     } finally {
       await tmux.killSession(`=${tmuxSession}`);
     }

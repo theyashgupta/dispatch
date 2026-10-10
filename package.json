@@ -30,7 +30,8 @@
     "node": ">=22.22"
   },
   "files": [
-    "dist"
+    "dist",
+    "docs/orchestration"
   ],
   "type": "module",
   "bin": {

@@ -6,9 +6,9 @@ import os from "node:os";
 import path from "node:path";
 import type { Card, Config } from "../../../shared/types.js";
 import { run } from "../../adapters/exec.js";
-import { steps, type SagaContext } from "./steps.js";
+import { steps, withRepoLock, type SagaContext } from "./steps.js";
 
-async function initRepo(repo: string): Promise<void> {
+async function initRepo(repo: string, withRemote = true): Promise<void> {
   fs.mkdirSync(repo, { recursive: true });
   const git = (...args: string[]) => run("git", args, { cwd: repo });
   await git("init", "-q", "-b", "main");
@@ -23,7 +23,7 @@ async function initRepo(repo: string): Promise<void> {
     "-qm",
     "init",
   );
-  await git("remote", "add", "origin", repo);
+  if (withRemote) await git("remote", "add", "origin", repo);
 }
 
 void test("createWorktrees skips a saved repo entry that is a worktree of an earlier entry, with one warning", async () => {
@@ -82,4 +82,101 @@ void test("createWorktrees skips a saved repo entry that is a worktree of an ear
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+const PARALLEL_STARTS = 6;
+
+void test("createWorktrees of concurrent sagas in one repository all succeed", async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "dispatch-worktrees-"));
+  try {
+    const folder = path.join(root, "folder");
+    const repo = path.join(folder, "a");
+    await initRepo(repo, false);
+    const createWorktrees = steps.find((s) => s.name === "creating worktrees");
+    assert.ok(createWorktrees);
+    const ctxs = Array.from(
+      { length: PARALLEL_STARTS },
+      (_, i): SagaContext => {
+        const identifier = `LOCAL-${100 + i}`;
+        const workspacePath = path.join(root, "ws", identifier);
+        fs.mkdirSync(workspacePath, { recursive: true });
+        return {
+          card: {
+            id: identifier,
+            boardKey: DEFAULT_BOARD_KEY,
+            issueId: identifier,
+            identifier,
+            title: "t",
+            description: null,
+            priority: 0,
+            column: "in_progress",
+            updatedAt: "2026-09-29T00:00:00.000Z",
+            workspace: { folder, repos: [{ path: repo, base: "main" }] },
+          },
+          identifier,
+          sessionName: identifier,
+          sessionId: undefined,
+          workspacePath,
+          extraDirection: "",
+          config: {} as Config,
+          createdWorkspaceDir: true,
+          createdWorktrees: [],
+          createdBranches: [],
+          tmuxSessionCreated: false,
+          restarted: false,
+          warnings: [],
+        };
+      },
+    );
+    await Promise.all(ctxs.map((ctx) => createWorktrees.run(ctx)));
+    const { stdout: branches } = await run(
+      "git",
+      ["branch", "--format=%(refname:short)"],
+      { cwd: repo },
+    );
+    for (const ctx of ctxs) {
+      assert.ok(
+        fs.existsSync(path.join(ctx.workspacePath, "a", "README.md")),
+        `${ctx.sessionName} worktree exists`,
+      );
+      assert.ok(
+        branches.split("\n").includes(ctx.sessionName),
+        `${ctx.sessionName} branch exists`,
+      );
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+void test("withRepoLock runs one key at a time in call order and different keys in parallel", async () => {
+  const events: string[] = [];
+  let releaseA: () => void = () => {};
+  const aHeld = new Promise<void>((resolve) => {
+    releaseA = resolve;
+  });
+  const a = withRepoLock("one", async () => {
+    events.push("a:start");
+    await aHeld;
+    events.push("a:end");
+  });
+  const b = withRepoLock("one", () => {
+    events.push("b:start");
+    return Promise.resolve();
+  });
+  await withRepoLock("two", () => {
+    events.push("c:run");
+    return Promise.resolve();
+  });
+  assert.deepEqual(events, ["a:start", "c:run"]);
+  releaseA();
+  await Promise.all([a, b]);
+  assert.deepEqual(events, ["a:start", "c:run", "a:end", "b:start"]);
+});
+
+void test("withRepoLock lets the next holder run after a failed one", async () => {
+  const failed = withRepoLock("k", () => Promise.reject(new Error("boom")));
+  const next = withRepoLock("k", () => Promise.resolve("ok"));
+  await assert.rejects(failed, /boom/);
+  assert.equal(await next, "ok");
 });

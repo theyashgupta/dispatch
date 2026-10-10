@@ -30,6 +30,8 @@ const { invalidateWorkflow } =
   await import("../services/orchestration/linear-outbound.js");
 const { setOrchestrationConfig } =
   await import("../services/infra/config-holder.js");
+const { sessionStarter } =
+  await import("../services/orchestration/start-session.js");
 const { ATTACHMENTS_DIR } = await import("../services/infra/paths.js");
 const express = (await import("express")).default;
 const { cardsRouter } = await import("./cards.route.js");
@@ -552,6 +554,32 @@ test("POST /cards/:id/start answers 400 for the config, playbook and workspace c
       none,
       JSON.stringify(body),
     );
+  }
+});
+
+test("POST /cards/:id/start answers 409 while a session start is in progress and starts once", async (t) => {
+  const id = await local("start twice");
+  const repo = path.join(env.binDir, "start-twice-repo");
+  fs.mkdirSync(path.join(repo, ".git"), { recursive: true });
+  const start = t.mock.method(sessionStarter, "start", (cardId: string) => {
+    store.beginStart(cardId);
+    return Promise.resolve();
+  });
+  const body = { folder: env.binDir, repos: [{ path: repo, base: "main" }] };
+  try {
+    await expectReply(
+      call("POST", `/cards/${id}/start`, body),
+      202,
+      '{"started":true}',
+    );
+    await expectReply(
+      call("POST", `/cards/${id}/start`, body),
+      409,
+      err("a session start is already in progress"),
+    );
+    assert.equal(start.mock.callCount(), 1);
+  } finally {
+    store.endStart(id);
   }
 });
 

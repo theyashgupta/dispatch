@@ -253,6 +253,105 @@ const prepareWorkspace: SagaStep = {
   },
 };
 
+async function repoLockKey(repoPath: string): Promise<string> {
+  return (await gitCommonDir(repoPath)) ?? path.resolve(repoPath);
+}
+
+const repoLocks = new Map<string, Promise<void>>();
+
+/**
+ * Run `fn` after every earlier holder of `key` has settled, so one repository sees one saga's git calls at a time.
+ *
+ * @remarks Concurrent `git worktree add -b` calls in one repository fail on the lock of `.git/config`. A failed holder does not block the next one, and the map entry is deleted once the chain is idle. ponytail: in-process only, a second Dispatch process on the same repository is not covered.
+ */
+export async function withRepoLock<T>(
+  key: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const held = (repoLocks.get(key) ?? Promise.resolve()).then(fn);
+  const tail = held.then(
+    () => {},
+    () => {},
+  );
+  repoLocks.set(key, tail);
+  try {
+    return await held;
+  } finally {
+    if (repoLocks.get(key) === tail) repoLocks.delete(key);
+  }
+}
+
+async function createRepoWorktree(
+  ctx: SagaContext,
+  repoPath: string,
+  base: string,
+): Promise<void> {
+  await worktreePrune(repoPath);
+
+  const worktreePath = buildWorktreePath(ctx.workspacePath, repoPath);
+
+  if (await worktreeRegistered(repoPath, worktreePath)) {
+    return;
+  }
+
+  let baseRef: string;
+  const inheritedLocally =
+    ctx.inheritBaseRef != null &&
+    (await revParseVerify(repoPath, "refs/heads/" + ctx.inheritBaseRef));
+  if (inheritedLocally) {
+    baseRef = ctx.inheritBaseRef as string;
+  } else {
+    if (ctx.inheritBaseRef != null) {
+      ctx.warnings.push(
+        `inherited branch ${ctx.inheritBaseRef} not found in ${path.basename(repoPath)}, cut from ${base}`,
+      );
+    }
+    try {
+      await fetchBase(repoPath, base);
+      baseRef = "origin/" + base;
+    } catch (err) {
+      ctx.warnings.push(
+        `git fetch origin ${base} failed in ${path.basename(repoPath)}, cut from local ${base}`,
+      );
+      const hasLocalBase = await revParseVerify(repoPath, "refs/heads/" + base);
+      if (!hasLocalBase) {
+        throw new StartStepError("creating worktrees", stderrOf(err), "config");
+      }
+      baseRef = base;
+    }
+  }
+
+  if (await branchExists(repoPath, ctx.sessionName)) {
+    try {
+      await worktreeAddExistingBranch(repoPath, worktreePath, ctx.sessionName);
+    } catch (err) {
+      const raw = stderrOf(err);
+      if (raw.includes("is already used by worktree at")) {
+        throw new StartStepError(
+          "creating worktrees",
+          `Branch ${ctx.sessionName} is attached to another worktree.\n${raw}`,
+          "branch-conflict",
+        );
+      }
+      throw new StartStepError("creating worktrees", raw, "generic");
+    }
+    ctx.createdWorktrees.push({ repoPath, worktreePath });
+  } else {
+    try {
+      await worktreeAddNewBranch(
+        repoPath,
+        worktreePath,
+        ctx.sessionName,
+        baseRef,
+      );
+    } catch (err) {
+      throw new StartStepError("creating worktrees", stderrOf(err), "generic");
+    }
+    ctx.createdWorktrees.push({ repoPath, worktreePath });
+    ctx.createdBranches.push({ repoPath, branch: ctx.sessionName });
+  }
+}
+
 /**
  * Saga Step 2: create the per-repo worktrees, recording each creation onto `ctx` so undo can
  * compensate in reverse.
@@ -308,93 +407,21 @@ const createWorktrees: SagaStep = {
         }
         seenCommonDirs.add(commonDir);
       }
-      await worktreePrune(repoPath);
-
-      const worktreePath = buildWorktreePath(ctx.workspacePath, repoPath);
-
-      if (await worktreeRegistered(repoPath, worktreePath)) {
-        continue;
-      }
-
-      let baseRef: string;
-      const inheritedLocally =
-        ctx.inheritBaseRef != null &&
-        (await revParseVerify(repoPath, "refs/heads/" + ctx.inheritBaseRef));
-      if (inheritedLocally) {
-        baseRef = ctx.inheritBaseRef as string;
-      } else {
-        if (ctx.inheritBaseRef != null) {
-          ctx.warnings.push(
-            `inherited branch ${ctx.inheritBaseRef} not found in ${path.basename(repoPath)}, cut from ${base}`,
-          );
-        }
-        try {
-          await fetchBase(repoPath, base);
-          baseRef = "origin/" + base;
-        } catch (err) {
-          ctx.warnings.push(
-            `git fetch origin ${base} failed in ${path.basename(repoPath)}, cut from local ${base}`,
-          );
-          const hasLocalBase = await revParseVerify(
-            repoPath,
-            "refs/heads/" + base,
-          );
-          if (!hasLocalBase) {
-            throw new StartStepError(
-              "creating worktrees",
-              stderrOf(err),
-              "config",
-            );
-          }
-          baseRef = base;
-        }
-      }
-
-      if (await branchExists(repoPath, ctx.sessionName)) {
-        try {
-          await worktreeAddExistingBranch(
-            repoPath,
-            worktreePath,
-            ctx.sessionName,
-          );
-        } catch (err) {
-          const raw = stderrOf(err);
-          if (raw.includes("is already used by worktree at")) {
-            throw new StartStepError(
-              "creating worktrees",
-              `Branch ${ctx.sessionName} is attached to another worktree.\n${raw}`,
-              "branch-conflict",
-            );
-          }
-          throw new StartStepError("creating worktrees", raw, "generic");
-        }
-        ctx.createdWorktrees.push({ repoPath, worktreePath });
-      } else {
-        try {
-          await worktreeAddNewBranch(
-            repoPath,
-            worktreePath,
-            ctx.sessionName,
-            baseRef,
-          );
-        } catch (err) {
-          throw new StartStepError(
-            "creating worktrees",
-            stderrOf(err),
-            "generic",
-          );
-        }
-        ctx.createdWorktrees.push({ repoPath, worktreePath });
-        ctx.createdBranches.push({ repoPath, branch: ctx.sessionName });
-      }
+      await withRepoLock(commonDir ?? path.resolve(repoPath), () =>
+        createRepoWorktree(ctx, repoPath, base),
+      );
     }
   },
   async undo(ctx) {
     for (const { repoPath, worktreePath } of ctx.createdWorktrees) {
-      await worktreeRemove(repoPath, worktreePath).catch(() => {});
+      await withRepoLock(await repoLockKey(repoPath), () =>
+        worktreeRemove(repoPath, worktreePath).catch(() => {}),
+      );
     }
     for (const { repoPath, branch } of ctx.createdBranches) {
-      await branchDelete(repoPath, branch).catch(() => {});
+      await withRepoLock(await repoLockKey(repoPath), () =>
+        branchDelete(repoPath, branch).catch(() => {}),
+      );
     }
   },
 };

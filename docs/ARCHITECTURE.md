@@ -166,6 +166,9 @@ Mount prefix: `/api/orchestrator`.
 | GET    | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `get_ship_state`: read the stored ship flow of a group card.                                   |
 | GET    | `/api/orchestrator/state`                          | Orchestrator token | Tool `read_state`: read the saved state of the calling orchestrator.                                |
 | PUT    | `/api/orchestrator/state`                          | Orchestrator token | Tool `write_state`: replace the saved state of the calling orchestrator.                            |
+| GET    | `/api/orchestrator/playbooks`                      | Orchestrator token | Tool `list_playbooks`: list the playbooks with the name, the when line and the source.              |
+| GET    | `/api/orchestrator/rulebook`                       | Orchestrator token | Tool `get_rulebook`: read the orchestration rule book.                                              |
+| POST   | `/api/orchestrator/cards/:cardId/start`            | Orchestrator token | Tool `start_card`: start the session of one ticket card with a playbook and a direction.            |
 
 ### `routes/board.route.ts`
 
@@ -5585,6 +5588,8 @@ Scenario 4 (tests/e2e/scenario-4-no-loop-ship.e2e.ts) proves that a group with n
 
 Scenario 5 (tests/e2e/scenario-5-wake.e2e.ts) proves that the server wakes the orchestrator. The board has one group of two tickets, and the fake orchestrator replays its tool calls under busy status rows and waits under idle rows. The test answers the orchestrator decision item through `POST /api/decisions/:id/answer` and checks that the `Dispatch wake: decision` line reaches the fake in 30 s or less. It then makes the group commit, print the done marker and report Stop, and checks that an Agent done wake line follows at least 20 s after the first, after which the orchestrator calls `start_ship` and the PR merges into the bare origin. The test also checks that every wake line has one confirmed `orchestrator_wake` row and that no wake line or row falls inside a busy status window of the fake. The scenario types no key into any pane, and a static check of its own files enforces that.
 
+Scenario 6 (tests/e2e/scenario-6-intake-judgment.e2e.ts) proves that the orchestrator judges an intake and starts three loops inside a cap of 2. The board has four tickets (a quick fix, a single feature and two related tickets), the policy **Ask me for each roadmap** and a cap of 2. The fake orchestrator reads the rule book and the playbooks, raises one plan decision item and waits for it. The test answers the plan through `POST /api/decisions/:id/answer`. The orchestrator then calls `start_card` for the quick fix with "Write code directly" and for the single feature with "PRD + Ralph Loop", and creates a group of the two related tickets with "Roadmap Loop". The test checks that the accepted `start_card` and `start_group` rows are in that order, that each card and the group carry their playbook, and that the first `start_group` answers 403 `policy-refused` and starts no session. The test then makes the quick fix card reach Agent done with a Stop hook, which frees a slot, and checks that the second `start_group` starts the group. A watcher checks that no more than 2 cards or groups hold a slot at any time. The scenario types no key into any pane, and a static check of its own files enforces that.
+
 The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
 ## Orchestration Initiative
@@ -5888,7 +5893,7 @@ reads the identity or writes, `assertAheadAndClean` resolves the base once. The 
 `branch-not-ahead`) and the worktree must be clean (409 `worktree-dirty`). A failed git call of
 these two checks answers 409 `no-workspace`. A group with loop progress keeps the D-8 rules.
 
-**MCP server.** `dispatch mcp` serves the 26 tools over stdio. `bootstrap/cli.ts` reads and checks
+**MCP server.** `dispatch mcp` serves the 29 tools over stdio. `bootstrap/cli.ts` reads and checks
 `DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and
 `bootstrap/mcp-tools.ts` holds the zod input and the description of each tool. The dependency
 cruiser rule `mcp-server-isolated` refuses an import of `routes`, `services`, `store`, `adapters`
@@ -5972,6 +5977,8 @@ hidden card, links the card to the record, leaves the record `stopped` and answe
 seed (`board-orchestrator` in `playbooks.ts`) that holds the duties, the ten rules of D-9 and the two
 rules of F13 and F18. It tells the session to act on an `intake_submitted` or `decision_answered` event
 only when `data.orchestratorId` names its own id, so an extra ignores the intake of the main.
+
+**Playbook when line and seed upgrade.** A playbook can have a `when` line in its front matter, 300 characters or fewer, and `list_playbooks` and the start dialog picker show it. A seeded playbook without the line gets the `when` line of its seed. `seedPlaybooks` rewrites a seeded file only when the SHA-256 hash of its content is in the retired set of its slug, so a file that the user edited stays as it is. The rule book `docs/orchestration/rulebook.md` ships in the package, and `get_rulebook` reads it. The Board Orchestrator playbook tells the session to load it.
 
 **Remove and boot.** Remove revokes the token. It is refused with 409 `orchestrator-running` unless the
 record is `stopped`, and with 409 `orchestrator-session-live` while the tmux session of the hidden card is

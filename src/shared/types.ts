@@ -972,6 +972,7 @@ export interface Playbook {
   body: string;
   /** On-disk filename stem (no `.md`), used ONLY for CRUD addressing — kickoff/picker resolution stays name-keyed. */
   slug?: string;
+  when?: string;
 }
 
 /** A playbook file that failed to load, paired with a fixed-vocabulary reason safe to render client-side. */

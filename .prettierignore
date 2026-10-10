@@ -7,5 +7,6 @@ docs/superpowers/
 .claude/worktrees/**
 src/web/routeTree.gen.ts
 src/server/test-support/fixtures/loops/
+src/server/test-support/fixtures/playbooks/
 src/server/adapters/markers/fixtures/
 src/server/test-support/fixtures/panes/

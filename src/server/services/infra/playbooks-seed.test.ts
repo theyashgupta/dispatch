@@ -1,11 +1,26 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import { createHash } from "node:crypto";
 import { isolateEnv } from "../../test-support/fixtures.js";
 
 const env = isolateEnv();
 const { seedPlaybooks, loadPlaybooks, hasDispatchMarker } =
   await import("./playbooks.js");
 after(() => env.cleanup());
+
+const playbooksDir = path.join(env.dispatchDir, "playbooks");
+const fixturePath = path.join(
+  import.meta.dirname,
+  "../../test-support/fixtures/playbooks/board-orchestrator-v450.md",
+);
+const sha256 = (text: string): string =>
+  createHash("sha256").update(text, "utf8").digest("hex");
+const read = (slug: string): string =>
+  fs.readFileSync(path.join(playbooksDir, `${slug}.md`), "utf8");
+const write = (slug: string, text: string): void =>
+  fs.writeFileSync(path.join(playbooksDir, `${slug}.md`), text);
 
 const D9_RULES = [
   "1. Writes or edits product code or any file in a repository.",
@@ -24,8 +39,8 @@ await seedPlaybooks();
 const all = await loadPlaybooks();
 const orchestrator = all.find((p) => p.name === "Board Orchestrator");
 
-void test("the seed adds the Board Orchestrator to the four earlier playbooks", () => {
-  assert.equal(all.length, 5);
+void test("the seed adds the Roadmap Loop and the Board Orchestrator to the four earlier playbooks", () => {
+  assert.equal(all.length, 6);
   assert.ok(orchestrator);
   assert.equal(orchestrator.slug, "board-orchestrator");
 });
@@ -44,28 +59,19 @@ void test("the body introduces the ten D-9 rules with An orchestrator never: and
   assert.deepEqual(lines.slice(at + 1, at + 11), D9_RULES);
 });
 
-void test("the body holds the duty list, the usage limit check and the rm instruction", () => {
+void test("the body holds the loader duties", () => {
   assert.ok(orchestrator);
   const body = orchestrator.body;
   for (const part of [
     "Call read_state first.",
     "Your state lives in the tools, never in your memory.",
-    "ticket proposal",
-    "Wait for the approval of the user",
-    "Write a direction for each group",
-    "inside the concurrency cap",
-    "roadmapApproval",
-    "send_input",
+    "get_rulebook",
+    "A user turn typed in your terminal is a direction from the user.",
+    "Dispatch wake:",
     "End every turn with wait_for_event.",
-    "Set kinds to decision_answered, group_state and intake_submitted",
-    "timeoutSeconds to 55",
-    "start_ship",
-    "Report to the user",
-    "Call write_state after each decision",
-    "After a usage limit, check get_group_progress and read_pane_tail",
-    "never run a dangerous rm, and stop and report instead",
-    "You do not change product code.",
-    "Act on an intake_submitted or decision_answered event only when its data.orchestratorId is your orchestrator id.",
+    "HANDOFF_READY",
+    "write_state",
+    "data.orchestratorId",
   ]) {
     assert.ok(body.includes(part), part);
   }
@@ -78,27 +84,93 @@ void test("the body carries no status marker, no em dash and no double hyphen", 
   assert.equal(orchestrator.body.includes("-".repeat(2)), false);
 });
 
-void test("the Board Orchestrator text tells the orchestrator to read the board workspace and ship in agent_done", () => {
-  const body = orchestrator?.body ?? "";
-  for (const sentence of [
-    "Call read_state first. Then call get_board_workspace, list_cards, list_events and get_policy, and read the open decision items from the decision_raised and decision_answered events of list_events. Act only on what the tools return.",
-    "Never ask the user for a repository path or a base branch that get_board_workspace returns. Omit repos in create_group to use the board repositories.",
-    "When your shipRights allow it, ship a group in agent_done without a decision item.",
-  ]) {
-    assert.ok(body.includes(sentence), sentence);
-  }
+const currentOrchestrator = read("board-orchestrator");
+const currentPrd = read("prd-ralph-loop");
+
+void test("each seeded playbook has a non-empty when", () => {
+  for (const p of all) assert.ok(p.when && p.when.length > 0, p.name);
 });
 
-void test("the Board Orchestrator text tells the orchestrator to wait each turn and to read a wake line", () => {
-  const body = orchestrator?.body ?? "";
+void test("the Roadmap Loop seed sits before the Board Orchestrator and holds its workflow", () => {
+  const roadmap = all.find((p) => p.name === "Roadmap Loop");
+  assert.equal(roadmap?.slug, "roadmap-loop");
   assert.ok(
-    body.includes(
-      "End every turn with wait_for_event. Set kinds to decision_answered, group_state and intake_submitted, and timeoutSeconds to 55. When it times out, call it again. Never end a turn with only a report.",
-    ),
+    roadmap?.body.includes("Run the roadmap-loop skill on the roadmap."),
   );
-  assert.ok(
-    body.includes(
-      'A message that starts with "Dispatch wake:" comes from Dispatch. Read the board state with the dispatch tools and continue.',
-    ),
+});
+
+void test("a v4.5.0 Board Orchestrator file is rewritten with the current seed", async () => {
+  const old = fs.readFileSync(fixturePath, "utf8");
+  assert.equal(
+    sha256(old),
+    "20ec6f18f070b4abd7a6677127bcd9955140bb7a465f6a08253e88772c75f057",
   );
+  write("board-orchestrator", old);
+  await seedPlaybooks();
+  assert.equal(read("board-orchestrator"), currentOrchestrator);
+});
+
+void test("an edited seed file stays byte for byte", async () => {
+  const edited = `${currentPrd}\nMy own extra line.\n`;
+  write("prd-ralph-loop", edited);
+  await seedPlaybooks();
+  assert.equal(read("prd-ralph-loop"), edited);
+  write("prd-ralph-loop", currentPrd);
+});
+
+void test("a user file at the roadmap-loop slug before the first seed stays as it is", async () => {
+  const mine = "---\nname: My roadmap\n---\nMine.";
+  fs.unlinkSync(path.join(playbooksDir, "roadmap-loop.md"));
+  const tombstone = path.join(playbooksDir, ".seeded.json");
+  const slugs = (
+    JSON.parse(fs.readFileSync(tombstone, "utf8")) as string[]
+  ).filter((s) => s !== "roadmap-loop");
+  fs.writeFileSync(tombstone, JSON.stringify(slugs));
+  write("roadmap-loop", mine);
+  await seedPlaybooks();
+  assert.equal(read("roadmap-loop"), mine);
+});
+
+void test("a second seed call rewrites nothing", async () => {
+  const names = fs.readdirSync(playbooksDir).filter((n) => n.endsWith(".md"));
+  const before = names.map(
+    (n) => fs.statSync(path.join(playbooksDir, n)).mtimeMs,
+  );
+  const contents = names.map((n) =>
+    fs.readFileSync(path.join(playbooksDir, n), "utf8"),
+  );
+  await seedPlaybooks();
+  assert.deepEqual(
+    names.map((n) => fs.statSync(path.join(playbooksDir, n)).mtimeMs),
+    before,
+  );
+  assert.deepEqual(
+    names.map((n) => fs.readFileSync(path.join(playbooksDir, n), "utf8")),
+    contents,
+  );
+});
+
+void test("a retired seed file whose upgrade write fails does not reject the seed and logs a warning", async (t) => {
+  if (process.getuid?.() === 0) {
+    t.skip("root ignores directory permissions");
+    return;
+  }
+  const old = fs.readFileSync(fixturePath, "utf8");
+  write("board-orchestrator", old);
+  const warn = t.mock.method(console, "warn", () => undefined);
+  fs.chmodSync(playbooksDir, 0o555);
+  try {
+    await seedPlaybooks();
+  } finally {
+    fs.chmodSync(playbooksDir, 0o700);
+  }
+  assert.equal(read("board-orchestrator"), old);
+  const messages = warn.mock.calls.map((c) => String(c.arguments[0]));
+  assert.equal(
+    messages.filter((m) =>
+      m.startsWith("[playbooks] could not upgrade seed board-orchestrator"),
+    ).length,
+    1,
+  );
+  write("board-orchestrator", currentOrchestrator);
 });
