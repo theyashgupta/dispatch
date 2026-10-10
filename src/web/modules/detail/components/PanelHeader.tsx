@@ -27,6 +27,8 @@ import { VsCodeMark } from "@/components/icons/brands/VsCodeMark";
 import { LoadingButton } from "@/components/LoadingButton";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { ResumeTargetLine } from "./ResumeTargetLine";
+import type { ResumeLine } from "../domain/resume-target";
 import { UnwindPicker } from "./UnwindPicker";
 
 interface PanelHeaderProps {
@@ -49,6 +51,7 @@ interface PanelHeaderProps {
   onResetRequest?: (id: string) => void;
   onSyncRequest?: (id: string) => void;
   onAskRequest?: (card: CardModel) => void;
+  resumeLine?: ResumeLine;
 }
 
 const ICON_BUTTON_CLASS = "text-muted-foreground hover:text-muted-foreground";
@@ -73,6 +76,7 @@ export function PanelHeader({
   onResetRequest,
   onSyncRequest,
   onAskRequest,
+  resumeLine,
 }: PanelHeaderProps) {
   const c = card;
   const unwindIdentifier = c?.source === "group" ? c.identifier : c?.groupId;
@@ -99,6 +103,7 @@ export function PanelHeader({
       </div>
 
       <div className="flex flex-[0_1_auto] flex-wrap items-center justify-end gap-(--space-sm)">
+        {resumeLine && <ResumeTargetLine {...resumeLine} />}
         {hasLiveSession && (
           <Button
             variant="outline"

@@ -38,6 +38,7 @@ import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
 import { getCard, unwindGroup } from "@/queries/cards-api";
 import {
   useResumeCardMutation,
+  useResumeTargetQuery,
   useStartCardMutation,
 } from "@/queries/cards-queries";
 import { useSessionAccountMove } from "@/queries/session-account-queries";
@@ -56,6 +57,11 @@ import {
   PanelReference,
   PanelRow,
 } from "@/modules/detail/components/PanelFrame";
+import {
+  resumeLine as buildResumeLine,
+  RESUME_TARGET_ERROR,
+  RESUME_TARGET_LOADING,
+} from "@/modules/detail/domain/resume-target";
 import { PanelHeader } from "@/modules/detail/components/PanelHeader";
 import { PanelResizeHandle } from "@/modules/detail/components/PanelResizeHandle";
 import { PreviewRow } from "@/modules/detail/components/PreviewRow";
@@ -329,6 +335,15 @@ export function DetailPanelContainer() {
 
   const hasLiveSession = !!(c?.tmuxSession && !c.sessionLost);
   const activeSessionLost = c?.activeSessionId != null && !c.tmuxSession;
+  const resumeTarget = useResumeTargetQuery(c?.id ?? "", activeSessionLost);
+  const resumeLine =
+    !activeSessionLost || !c?.workspacePath
+      ? undefined
+      : resumeTarget.isError
+        ? { text: RESUME_TARGET_ERROR }
+        : resumeTarget.data
+          ? buildResumeLine(resumeTarget.data, resumeTarget.dataUpdatedAt)
+          : { text: RESUME_TARGET_LOADING };
 
   if (!hasLiveSession && (fullscreen || detailsExpanded)) {
     setFullscreen(false);
@@ -410,6 +425,7 @@ export function DetailPanelContainer() {
             onResetRequest={onResetRequest}
             onSyncRequest={onSyncRequest}
             onAskRequest={onAskRequest}
+            resumeLine={resumeLine}
           />
 
           {sessionAccount != null && (
@@ -516,6 +532,7 @@ export function DetailPanelContainer() {
                   <SessionLostSection
                     card={c}
                     resume={(id) => resumeCard({ id })}
+                    resumeLine={resumeLine}
                     onRestart={(lost) => {
                       if (lost.workspace) {
                         startCard({
