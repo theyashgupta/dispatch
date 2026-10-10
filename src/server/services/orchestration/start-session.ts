@@ -1,5 +1,6 @@
 import path from "node:path";
 import type {
+  Card,
   Config,
   SessionFields,
   StartError,
@@ -10,8 +11,14 @@ import {
 } from "../../store/board-repository.js";
 import { hasSession } from "../../adapters/tmux.js";
 import { registerHookToken } from "./hook-tokens.js";
-import { loadPlaybooks } from "../infra/playbooks.js";
-import { updateLastUsedPlaybook } from "../infra/config-holder.js";
+import { loadPlaybooks, playbookExists } from "../infra/playbooks.js";
+import {
+  getOrchestrationConfig,
+  updateLastUsedPlaybook,
+} from "../infra/config-holder.js";
+import { ConflictError, ValidationError } from "../domain/errors.js";
+import { launchableCard } from "./card-move.js";
+import { restatRepos } from "./workspaces.js";
 import {
   columnChangesSince,
   pushColumnChanges,
@@ -273,4 +280,133 @@ export async function startSession(
   } finally {
     store.endStart(cardId);
   }
+}
+
+export interface CardStartInput {
+  extraDirection: string;
+  playbook?: string | undefined;
+  newSession?: boolean | undefined;
+  inheritFrom?: string | undefined;
+  workspace?: NonNullable<Card["workspace"]> | undefined;
+}
+
+export const sessionStarter: { start: typeof startSession } = {
+  start: startSession,
+};
+
+/**
+ * The reason a start cannot inherit from a session, or null when it can.
+ *
+ * @remarks `inheritFrom` is client-supplied and ends as a git ref for the new worktree, so it must
+ * name a session of this card and come with `newSession`.
+ */
+function inheritFromError(
+  card: Card,
+  newSession: boolean | undefined,
+  inheritFrom: string | undefined,
+): string | null {
+  if (inheritFrom === undefined) return null;
+  if (!newSession) return "inheritance requires a new session";
+  if (!card.sessions?.some((s) => s.id === inheritFrom))
+    return "unknown session to inherit from";
+  return null;
+}
+
+/**
+ * Run every check of a card start and answer what the commit needs, writing nothing.
+ *
+ * @remarks The start dialog route and the orchestrator `start_card` tool both call it, so the two
+ * paths cannot drift.
+ */
+export async function prepareCardStart(
+  id: string,
+  input: CardStartInput,
+): Promise<Config> {
+  const { playbook, newSession, inheritFrom, workspace } = input;
+  const card = launchableCard(id);
+
+  if (card.column === "done") {
+    throw new ConflictError("cannot start a session for a Done card");
+  }
+
+  if (card.column === "inbox") {
+    throw new ConflictError(
+      "cannot start a session from the Inbox: promote to To Do first",
+    );
+  }
+
+  if (!/^[A-Za-z0-9]+-\d+$/.test(card.identifier)) {
+    throw new ValidationError(`invalid ticket identifier: ${card.identifier}`);
+  }
+
+  if (
+    newSession &&
+    !card.sessions?.some((s) => s.id === card.activeSessionId)
+  ) {
+    throw new ConflictError("no existing session to start another from");
+  }
+
+  const inheritError = inheritFromError(card, newSession, inheritFrom);
+  if (inheritError != null) throw new ConflictError(inheritError);
+
+  const config = getOrchestrationConfig();
+  if (!config) {
+    throw new ValidationError("orchestration config is not loaded", {
+      variant: "config",
+    });
+  }
+
+  if (playbook !== undefined && !(await playbookExists(playbook))) {
+    throw new ValidationError("unknown playbook", { variant: "playbook" });
+  }
+
+  if (workspace) {
+    if (workspace.repos.some((r) => r.base.startsWith("-"))) {
+      throw new ValidationError("invalid base branch", { variant: "config" });
+    }
+    if (!(await restatRepos(workspace.repos))) {
+      throw new ValidationError("Can't start: a selected repo is missing", {
+        variant: "config",
+      });
+    }
+  } else if (!card.workspace) {
+    throw new ValidationError("No workspace selected for this ticket", {
+      variant: "config",
+    });
+  }
+
+  return config;
+}
+
+/**
+ * Store the workspace of a prepared start, run `beforeStart`, then begin the session start.
+ *
+ * @remarks A start already in progress for the card is refused before any write, so no caller
+ * answers success for a start that did not begin.
+ */
+export async function commitCardStart(
+  id: string,
+  config: Config,
+  input: CardStartInput,
+  beforeStart?: () => Promise<void>,
+): Promise<void> {
+  if (store.isStarting(id)) {
+    throw new ConflictError("a session start is already in progress");
+  }
+  if (input.workspace) await store.setCardWorkspace(id, input.workspace);
+  await beforeStart?.();
+  void sessionStarter.start(id, input.extraDirection, config, {
+    playbook: input.playbook,
+    newSession: input.newSession,
+    inheritFrom: input.inheritFrom,
+  });
+}
+
+/** Run every start check, then store the workspace and begin the session, for the start dialog route. */
+export async function startCardFromDialog(
+  id: string,
+  input: CardStartInput,
+): Promise<void> {
+  const config = await prepareCardStart(id, input);
+  await commitCardStart(id, config, input);
 }
