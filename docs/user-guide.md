@@ -41,9 +41,13 @@ The key must be new. Dispatch refuses a key that another board or a Linear team 
 
 ### Switch boards
 
-The sidebar shows the board switcher when more than one board is active. Choose the switcher, or press `B`, and select a board. The switcher shows the number of items that need attention for each board.
+The sidebar has a **Boards** section at its end, after the System group. It lists every active board, in list order. The board you are on is marked. Each row shows the number of items that need attention and the number of running loops. Select a row to open the kanban board of that board. The last row, **Create board**, opens the create dialog.
 
-The palette also has **Switch to board** commands, **Manage boards** and **Create board**.
+Select the label **Boards** to fold or unfold the section. Press `Enter` or `Space` on the label to do the same. When the sidebar is narrow, the section is one icon that opens the boards page. On a phone, the section shows in the sidebar sheet, and the sheet closes when you select a board.
+
+Press `B` to open the command palette with the boards only. Type to filter the boards. The palette lists **Switch to board** for each active board except the current one, then **Manage boards** and **Create board**. `B` does nothing while you type in a text field or while a dialog is open. Select a board in the palette to show the same page on that board.
+
+The address of a board page holds the board key. The pages with a keyed address are the board (`/boards/<key>`), the dashboard (`/boards/<key>/dashboard`), the inbox (`/boards/<key>/inbox`), the sessions (`/boards/<key>/sessions`) and the board settings (`/boards/<key>/settings`). The other pages keep the `board` search parameter, for example `/tickets?board=<key>`. The old addresses, such as `/board`, `/inbox` and `/dashboard?board=<key>`, still open the same pages.
 
 ### Create a board from the palette
 
@@ -65,7 +69,7 @@ The row menu **Board actions** has three items.
 
 - **Open board** opens the board.
 - **Edit** opens the board settings page (see "Board settings"). You can change the name, the team keys and the repositories. The key and the folder do not change.
-- **Archive** hides the board from the switcher. The cards and sessions stay. The item is off while sessions run on the board. Restore the board from **Archived boards** with **Restore**.
+- **Archive** hides the board from the **Boards** section. The cards and sessions stay. The item is off while sessions run on the board. Restore the board from **Archived boards** with **Restore**.
 
 ### Board settings
 
@@ -100,7 +104,7 @@ Add the repositories when you create the board, or choose **Edit** later. Each r
 To open the policy form of a board:
 
 1. If the board does not exist, create it (see "Create a board").
-2. Select the board in the board switcher (see "Switch boards").
+2. Select the board in the **Boards** section (see "Switch boards").
 3. Open the board page.
 4. Choose **Orchestrator**, or **Add orchestrator** when the board has none. The panel has four tabs: **Terminal**, **Decisions**, **Policy** and **Orchestrators**.
 5. Open **Policy**. The form is called **Policy for** and the board name.
@@ -137,7 +141,7 @@ The server accepts wider number ranges than the form does. The form ranges in th
 
 ## Add and start an orchestrator
 
-1. Select the board in the board switcher. Open the board page. Every board has its own button. `LOCAL` has one too, and its supervisor starts **Off**.
+1. Select the board in the **Boards** section. Open the board page. Every board has its own button. `LOCAL` has one too, and its supervisor starts **Off**.
 2. Choose **Add orchestrator** in the page header. When the board already has an orchestrator, the button reads **Orchestrator**. The orchestrator panel opens as a side panel over the board. Its header shows the board name.
 3. Make sure the supervisor is **On** in the **Policy** tab. With the supervisor **Off**, the panel shows: "Turn on the supervisor in Policy to start an orchestrator."
 4. Choose **Start orchestrator**.
@@ -224,7 +228,7 @@ The loop also reports each phase gate and unit gate to Dispatch. The report uses
 
 ## The dashboard
 
-Open the dashboard from the sidebar row **Dashboard** (group **Work**), or from the palette command **Go to Dashboard**. The sidebar row and the palette command show only when the board has a main orchestrator. The dashboard shows the board that is selected in the switcher.
+Open the dashboard from the sidebar row **Dashboard** (group **Work**), or from the palette command **Go to Dashboard**. The sidebar row and the palette command show only when the board has a main orchestrator. The dashboard shows the board that is selected in the **Boards** section.
 
 The page has six sections in a fixed order. Each section shows its own loading state and its own error. A section error has the button **Try again**. The other sections stay.
 
