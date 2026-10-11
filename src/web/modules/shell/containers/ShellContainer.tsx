@@ -18,7 +18,6 @@ import {
 import { toast } from "sonner";
 import {
   boardSearch,
-  shouldPollCounts,
   staleCountsLabel,
 } from "../../../../shared/board-select.js";
 import { createdBoardText } from "../../../../shared/board-create.js";
@@ -34,14 +33,16 @@ import {
 } from "../../../../shared/pinned-card.js";
 import { buildPrRows } from "../../../../shared/pr-rows.js";
 import {
+  pageLocation,
   routeFromMatch,
-  routeHash,
+  switchBoardLocation,
   type Page,
   type Route,
 } from "../../../../shared/route.js";
 import { flattenSessions } from "../../../../shared/sessions.js";
 import {
   BOARD_SHORTCUTS,
+  GLOBAL_SHORTCUTS,
   INBOX_SHORTCUTS,
   SESSIONS_SHORTCUTS,
   bindShortcuts,
@@ -71,16 +72,11 @@ import { useShortcuts } from "@/components/ui/hooks/use-shortcuts";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { ActivityDrawer } from "@/modules/shell/components/ActivityDrawer";
-import type { BoardSwitcherData } from "@/modules/shell/components/BoardSwitcher";
 import { CheatSheet } from "@/modules/shell/components/CheatSheet";
 import { ShellFrame } from "@/modules/shell/components/ShellFrame";
-import {
-  showSwitcher,
-  switcherItems,
-  switcherShortcuts,
-} from "@/modules/shell/domain/board-switcher";
+import { switcherItems } from "@/modules/shell/domain/board-switcher";
 import { boardPageTitle } from "@/modules/shell/domain/board-title";
-import { buildCommands } from "@/modules/shell/domain/commands";
+import { BOARDS_GROUP, buildCommands } from "@/modules/shell/domain/commands";
 import { NAV_ITEMS, visibleNavItems } from "../../../../shared/nav-items.js";
 import { sidebarOpen } from "@/modules/shell/domain/nav-open";
 import { useNavPreference } from "@/modules/shell/hooks/use-nav-preference";
@@ -128,6 +124,7 @@ const PANEL_FREE_PAGES: ReadonlySet<Page> = new Set([
   "ask",
   "flow",
   "boards",
+  "board-settings",
 ]);
 
 const PAGE_TITLES: Record<Page, string> = {
@@ -153,6 +150,7 @@ const PAGE_TITLES: Record<Page, string> = {
   flow: "Flow",
   boards: "Boards",
   dashboard: "Dashboard",
+  "board-settings": "Board settings",
 };
 
 const NO_EVENTS: ActivityEvent[] = [];
@@ -174,6 +172,7 @@ export function ShellContainer({
   const { appStore } = useRouteContext({ from: "__root__" });
   const router = useRouter();
   const route = useCommittedRoute();
+  const routePage = route.page;
   const { theme } = useThemeState();
   const { preference, setPreference } = useNavPreference();
   const { carousel } = useViewportNav();
@@ -190,38 +189,54 @@ export function ShellContainer({
   const boardList = list.data;
   const listFailed =
     list.isError || (boardList === undefined && list.errorUpdateCount > 0);
-  const showBoards = showSwitcher(boardList?.boards, listFailed, boardKey);
-  const counts = useBoardCountsQuery(
-    shouldPollCounts(boardList?.boards ?? [], route.page === "boards"),
-  );
+  const counts = useBoardCountsQuery(boardList !== undefined);
   const boardItems =
-    showBoards && boardList !== undefined
+    boardList !== undefined
       ? switcherItems(boardList.boards, counts.data?.counts, boardKey)
       : null;
-  const boardName = boardItems?.find((item) => item.selected)?.name ?? null;
-  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const boardName =
+    boardItems !== null && boardItems.length > 1
+      ? (boardItems.find((item) => item.selected)?.name ?? null)
+      : null;
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteGroup, setPaletteGroup] = useState<string | undefined>();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
 
   const navigate = useCallback(
     (page: Page, id?: string, options?: { replace?: boolean }) => {
       void router.navigate({
-        href: routeHash({ page, id }).slice(1),
+        href: pageLocation({ page, id }, boardKey),
         replace: options?.replace,
       });
+    },
+    [router, boardKey],
+  );
+
+  const openBoard = useCallback(
+    (key: BoardKey) => {
+      void router.navigate({ href: pageLocation({ page: "board" }, key) });
     },
     [router],
   );
 
+  const openCreateBoard = useCallback(() => {
+    void router.navigate({ to: "/boards", search: { dialog: "new" } });
+  }, [router]);
+
   const switchBoard = useCallback(
     (key: BoardKey) => {
+      const href = switchBoardLocation({ page: routePage }, key);
+      if (href !== null) {
+        void router.navigate({ href });
+        return;
+      }
       void router.navigate({
         to: ".",
         search: (prev) => ({ ...prev, ...boardSearch(key) }),
       });
     },
-    [router],
+    [router, routePage],
   );
 
   const createBoardMutation = useCreateBoardMutation();
@@ -272,11 +287,19 @@ export function ShellContainer({
       toast(`Board ${failed} could not be loaded.`, {
         action: { label: "Try again", onClick: () => switchBoard(failed) },
       });
-      void router.navigate({
-        to: ".",
-        search: (prev) => ({ ...prev, ...boardSearch(DEFAULT_BOARD_KEY) }),
-        replace: true,
-      });
+      const href = switchBoardLocation({ page: routePage }, DEFAULT_BOARD_KEY);
+      void router.navigate(
+        href !== null
+          ? { href, replace: true }
+          : {
+              to: ".",
+              search: (prev) => ({
+                ...prev,
+                ...boardSearch(DEFAULT_BOARD_KEY),
+              }),
+              replace: true,
+            },
+      );
       return;
     }
     toast(`Board ${boardKey} could not be loaded.`, {
@@ -288,6 +311,7 @@ export function ShellContainer({
     refetchBoard,
     neverLoaded,
     router,
+    routePage,
     switchBoard,
   ]);
 
@@ -352,19 +376,22 @@ export function ShellContainer({
   );
 
   useShortcuts(
-    bindShortcuts(switcherShortcuts(showBoards), {
-      "meta+k": () => openOverlay(appStore, () => setPaletteOpen(true)),
+    bindShortcuts(GLOBAL_SHORTCUTS, {
+      "meta+k": () =>
+        openOverlay(appStore, () => {
+          setPaletteGroup(undefined);
+          setPaletteOpen(true);
+        }),
       n: () => openOverlay(appStore, appStore.openCreateTicket),
       "?": () => openOverlay(appStore, () => setShortcutsOpen(true)),
-      b: () => setSwitcherOpen(true),
+      b: () =>
+        openOverlay(appStore, () => {
+          setPaletteGroup(BOARDS_GROUP);
+          setPaletteOpen(true);
+        }),
     }),
     {
-      menuOpen:
-        activityOpen ||
-        sheetOpen ||
-        switcherOpen ||
-        board === null ||
-        setupWizardOpen,
+      menuOpen: activityOpen || sheetOpen || board === null || setupWizardOpen,
       scopeId: "root",
     },
   );
@@ -430,20 +457,6 @@ export function ShellContainer({
     selectedCardOf(board.cards, selectedCardId, pinned),
     boardItems,
   );
-  const switcher: BoardSwitcherData | undefined = showBoards
-    ? {
-        selected: boardKey,
-        items: boardItems ?? [],
-        failed: boardList === undefined,
-        staleLabel: staleCountsLabel(counts),
-        open: switcherOpen,
-        onOpenChange: setSwitcherOpen,
-        onSelect: switchBoard,
-        onManage: () => navigate("boards"),
-        onRetry: () => void list.refetch(),
-      }
-    : undefined;
-
   return (
     <SidebarProvider
       open={sidebarOpen(preference, carousel)}
@@ -484,7 +497,14 @@ export function ShellContainer({
         activityUnseen={isUnseen(events[0]?.ts, lastOpened["__feed__"])}
         activityOpen={activityOpen}
         carousel={carousel}
-        switcher={switcher}
+        boards={{
+          items: boardItems,
+          failed: boardList === undefined && listFailed,
+          staleLabel: staleCountsLabel(counts),
+          onOpenBoard: openBoard,
+          onCreate: openCreateBoard,
+          onRetry: () => void list.refetch(),
+        }}
         pageTitle={boardPageTitle(
           route.page,
           PAGE_TITLES[route.page],
@@ -517,7 +537,7 @@ export function ShellContainer({
         {shortcutsOpen && (
           <CheatSheet
             groups={[
-              { title: "Global", rows: switcherShortcuts(showBoards) },
+              { title: "Global", rows: GLOBAL_SHORTCUTS },
               ...SHORTCUT_GROUPS_AFTER_GLOBAL,
             ]}
             onClose={() =>
@@ -528,6 +548,7 @@ export function ShellContainer({
         {paletteOpen && (
           <CommandPaletteContainer
             commands={paletteCommands}
+            initialGroup={paletteGroup}
             onClose={(ran) =>
               closeOverlay(appStore, () => setPaletteOpen(false), ran)
             }

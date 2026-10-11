@@ -27,7 +27,7 @@ const CARD_COLUMNS: [string, string][] = [
   ["LOCAL-7", "done"],
   ["LOCAL-8", "parked"],
 ];
-const SWITCHER = 'button[aria-label^="Switch board"]';
+const BOARDS_SECTION = 'nav[aria-label="Primary"] [data-sidebar="content"]';
 const ALLOWED_EXTRA = new Set(["GET /api/boards", "GET /api/boards/counts"]);
 const ROUTE_ALLOWED_EXTRA: Record<
   string,
@@ -83,7 +83,7 @@ interface PageLoad {
   requests: string[];
   detailed: string[];
   png: Buffer;
-  switcher: Box | null;
+  boardsSection: Box | null;
 }
 
 interface RouteRow {
@@ -252,14 +252,15 @@ async function loadRoute(
   await page.waitForSelector("div.z-9999", { state: "detached" });
   await settle(pending, route);
   await page.evaluate(() => document.fonts.ready);
-  const shown = page.locator(SWITCHER);
-  const switcher = (await shown.count()) > 0 ? await shown.boundingBox() : null;
+  const shown = page.locator(BOARDS_SECTION);
+  const boardsSection =
+    (await shown.count()) > 0 ? await shown.boundingBox() : null;
   const png = await stableScreenshot(page);
   return {
     requests: [...requests].sort(),
     detailed: [...detailed].sort(),
     png,
-    switcher,
+    boardsSection,
   };
 }
 
@@ -379,7 +380,7 @@ function writeReport(rows: RouteRow[], box: Box | null, now: number): void {
     "",
     `Build old: v4.2.0 (${RELEASE_V420}/dist). Build new: this branch. Viewport 1440x900, light theme, fixed clock ${new Date(now).toISOString()}.`,
     "",
-    `Allowed pixel region (board switcher on the new build): ${box === null ? "empty, the switcher is hidden while the data has one board" : `x ${box.x}, y ${box.y}, width ${box.width}, height ${box.height}`}.`,
+    `Allowed pixel region (sidebar content with the Boards section on the new build): ${box === null ? "empty, the sidebar content is missing" : `x ${box.x}, y ${box.y}, width ${box.width}, height ${box.height}`}.`,
     `Allowed extra requests on the new build: ${[...ALLOWED_EXTRA].join(" and ")}.`,
     ...Object.entries(ROUTE_ALLOWED_EXTRA).map(
       ([route, { ticket, requests }]) =>
@@ -399,7 +400,7 @@ function writeReport(rows: RouteRow[], box: Box | null, now: number): void {
 }
 
 void test(
-  "scenario 2: a traditional board matches v4.2.0 except the attributed changes and the board switcher",
+  "scenario 2: a traditional board matches v4.2.0 except the attributed changes and the sidebar Boards section",
   { timeout: 30 * MINUTE, skip: V420_SKIP },
   async () => {
     fs.mkdirSync(OUT, { recursive: true });
@@ -461,7 +462,7 @@ void test(
           );
           const oldLoad = await loadRoute(oldPage, oldBuild.url, route, now);
           const newLoad = await loadRoute(newPage, newBuild.url, route, now);
-          box ??= newLoad.switcher;
+          box ??= newLoad.boardsSection;
           detail[route] = { old: oldLoad.detailed, new: newLoad.detailed };
           const { extra, missing } = diffRequests(
             route,

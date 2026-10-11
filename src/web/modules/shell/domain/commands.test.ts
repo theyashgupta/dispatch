@@ -2,9 +2,10 @@ import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { BoardKey, Card } from "../../../../shared/types.js";
-import type { SwitcherItem } from "./board-switcher.js";
+import { switcherItems, type SwitcherItem } from "./board-switcher.js";
 import {
   buildCommands,
+  commandsInGroup,
   filterCommands,
   groupCommands,
   type CommandContext,
@@ -197,6 +198,7 @@ const item = (key: string, name: string, selected: boolean): SwitcherItem => ({
   key: key as BoardKey,
   name,
   attention: 0,
+  loops: 0,
   selected,
 });
 
@@ -205,7 +207,7 @@ const twoBoards = [
   item("ACME", "Acme", false),
 ];
 
-test("with the switcher shown each board but the selected one gets a Switch to board entry", () => {
+test("each board but the selected one gets a Switch to board entry", () => {
   const { context, calls } = ctx();
   const commands = buildCommands(context, nav, null, twoBoards);
   const entries = commands.filter((c) => c.id.startsWith("board:"));
@@ -217,7 +219,27 @@ test("with the switcher shown each board but the selected one gets a Switch to b
   assert.deepEqual(calls, ["switch ACME"]);
 });
 
-test("with one board or no switcher there is no Switch to board entry", () => {
+test("the switch entries follow the list order and leave out the selected board and archived boards", () => {
+  const { context } = ctx();
+  const listed = switcherItems(
+    [
+      { key: "LOCAL" as BoardKey, name: "Dispatch", archived: false },
+      { key: "OLD" as BoardKey, name: "Old", archived: true },
+      { key: "ACME" as BoardKey, name: "Acme", archived: false },
+      { key: "GARNET" as BoardKey, name: "Garnet", archived: false },
+    ],
+    undefined,
+    "ACME" as BoardKey,
+  );
+  assert.deepEqual(
+    buildCommands(context, nav, null, listed)
+      .filter((c) => c.id.startsWith("board:"))
+      .map((c) => c.id),
+    ["board:LOCAL", "board:GARNET"],
+  );
+});
+
+test("with only the selected board or before the list loads there is no Switch to board entry", () => {
   const { context } = ctx();
   for (const switcher of [null, [item("LOCAL", "Dispatch", true)]]) {
     const commands = buildCommands(context, nav, null, switcher);
@@ -226,6 +248,17 @@ test("with one board or no switcher there is no Switch to board entry", () => {
       false,
     );
   }
+});
+
+test("commandsInGroup keeps only the group rows, or every row for a null group", () => {
+  const { context } = ctx();
+  const commands = buildCommands(context, nav, card(), twoBoards);
+  assert.deepEqual(
+    commandsInGroup(commands, "Boards").map((c) => c.id),
+    ["board:ACME", "manage-boards", "create-board"],
+  );
+  assert.equal(commandsInGroup(commands, null).length, commands.length);
+  assert.deepEqual(commandsInGroup(commands, "Nope"), []);
 });
 
 test("Manage boards and Create board show with and without the switcher", async () => {

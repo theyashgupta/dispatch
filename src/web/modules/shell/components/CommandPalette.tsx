@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Kbd } from "@/components/ui/kbd";
 import {
+  commandsInGroup,
   filterCommands,
   groupCommands,
   type Command as PaletteCommand,
@@ -31,6 +32,7 @@ import { useReturnFocus } from "@/modules/shell/hooks/use-return-focus";
 
 interface CommandPaletteProps {
   commands: readonly PaletteCommand[];
+  initialGroup?: string;
   results: readonly CardSearchResult[];
   searchFailed: boolean;
   onQueryChange: (query: string) => void;
@@ -40,13 +42,18 @@ interface CommandPaletteProps {
 
 export function CommandPalette({
   commands,
+  initialGroup,
   results,
   searchFailed,
   onQueryChange,
   onClose,
   onOpenCard,
 }: CommandPaletteProps) {
-  const [state, dispatch] = useReducer(paletteReducer, INITIAL_PALETTE);
+  const [state, dispatch] = useReducer(paletteReducer, initialGroup, (group) =>
+    group === undefined
+      ? INITIAL_PALETTE
+      : paletteReducer(INITIAL_PALETTE, { type: "open-group", group }),
+  );
   const ranRef = useRef<"command" | "card" | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -58,8 +65,11 @@ export function CommandPalette({
     if (prompt !== null && !submitting) inputRef.current?.focus();
   }, [prompt, submitting]);
 
-  const shown = prompt === null ? filterCommands(commands, state.query) : [];
-  const shownResults = prompt === null ? results : [];
+  const shown =
+    prompt === null
+      ? filterCommands(commandsInGroup(commands, state.group), state.query)
+      : [];
+  const shownResults = prompt === null && state.group === null ? results : [];
   const values =
     prompt === null
       ? [
@@ -143,7 +153,7 @@ export function CommandPalette({
             disabled={submitting}
             onValueChange={(query) => {
               dispatch({ type: "query", query });
-              if (prompt === null) onQueryChange(query);
+              if (prompt === null && state.group === null) onQueryChange(query);
             }}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.nativeEvent.isComposing) {

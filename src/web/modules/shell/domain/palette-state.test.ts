@@ -8,6 +8,7 @@ test("a query change resets the highlight to the first row", () => {
     query: "inb",
     highlight: 0,
     promptId: null,
+    group: null,
   });
 });
 
@@ -18,13 +19,18 @@ const prompting = paletteReducer(
 );
 
 test("entering a prompt clears the query and the highlight and keeps the prompt id", () => {
-  assert.deepEqual(prompting, { query: "", highlight: 0, promptId: PROMPT });
+  assert.deepEqual(prompting, {
+    query: "",
+    highlight: 0,
+    promptId: PROMPT,
+    group: null,
+  });
 });
 
 test("typing in prompt mode keeps the prompt id", () => {
   assert.deepEqual(
     paletteReducer(prompting, { type: "query", query: "Payments" }),
-    { query: "Payments", highlight: 0, promptId: PROMPT },
+    { query: "Payments", highlight: 0, promptId: PROMPT, group: null },
   );
 });
 
@@ -76,4 +82,49 @@ test("results follow the commands in one index space", () => {
     result: "LOCAL-1",
   });
   assert.equal(rowAt(commands, results, 4), null);
+});
+
+const inBoards = paletteReducer(INITIAL_PALETTE, {
+  type: "open-group",
+  group: "Boards",
+});
+
+test("opening in a group sets the group with an empty query and the first row highlighted", () => {
+  assert.deepEqual(inBoards, {
+    query: "",
+    highlight: 0,
+    promptId: null,
+    group: "Boards",
+  });
+});
+
+test("typing and moving inside a group keep the group", () => {
+  const typed = paletteReducer(inBoards, { type: "query", query: "gar" });
+  assert.deepEqual(typed, {
+    query: "gar",
+    highlight: 0,
+    promptId: null,
+    group: "Boards",
+  });
+  assert.equal(
+    paletteReducer(typed, { type: "move", delta: 1, count: 2 }).group,
+    "Boards",
+  );
+});
+
+test("entering a prompt from a group keeps the group and leaving the prompt resets it", () => {
+  const prompted = paletteReducer(inBoards, {
+    type: "enter-prompt",
+    commandId: PROMPT,
+  });
+  assert.deepEqual(prompted, {
+    query: "",
+    highlight: 0,
+    promptId: PROMPT,
+    group: "Boards",
+  });
+  assert.deepEqual(
+    paletteReducer(prompted, { type: "leave-prompt" }),
+    INITIAL_PALETTE,
+  );
 });

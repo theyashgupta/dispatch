@@ -2,18 +2,21 @@ export interface PaletteState {
   query: string;
   highlight: number;
   promptId: string | null;
+  group: string | null;
 }
 
 export type PaletteAction =
   | { type: "query"; query: string }
   | { type: "move"; delta: number; count: number }
   | { type: "enter-prompt"; commandId: string }
+  | { type: "open-group"; group: string }
   | { type: "leave-prompt" };
 
 export const INITIAL_PALETTE: PaletteState = {
   query: "",
   highlight: 0,
   promptId: null,
+  group: null,
 };
 
 const clamp = (index: number, count: number) =>
@@ -25,6 +28,7 @@ const clamp = (index: number, count: number) =>
  * @remarks A new query resets the highlight to the first row and a move clamps it to the row
  * count it is given; the component clamps again at render when the rows change underneath.
  * Entering or leaving a prompt clears the query, so the typed text never carries across modes.
+ * Opening in a group limits the commands to that group; leaving a prompt resets it with the rest.
  */
 export function paletteReducer(
   state: PaletteState,
@@ -39,11 +43,9 @@ export function paletteReducer(
         highlight: clamp(state.highlight + action.delta, action.count),
       };
     case "enter-prompt":
-      return {
-        query: "",
-        highlight: 0,
-        promptId: action.commandId,
-      };
+      return { ...state, query: "", highlight: 0, promptId: action.commandId };
+    case "open-group":
+      return { ...INITIAL_PALETTE, group: action.group };
     case "leave-prompt":
       return INITIAL_PALETTE;
   }
