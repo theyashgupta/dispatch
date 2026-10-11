@@ -1,6 +1,4 @@
 import { Router } from "express";
-import { ORCHESTRATOR_TOKEN_HEADER } from "../../shared/orchestrator-limits.js";
-import { ForbiddenError } from "../services/domain/errors.js";
 import { resolveBoard } from "../services/orchestration/boards.js";
 import { readOrchestratorConversation } from "../services/orchestration/orchestrator-conversation.js";
 import {
@@ -20,6 +18,7 @@ import {
   editBodySchema,
   orchestratorIdSchema,
 } from "./orchestrators-schemas.js";
+import { refuseOrchestratorToken } from "./orchestrator.route.js";
 import { parseOrThrow } from "./parse-input.js";
 
 export const orchestratorsRouter = Router({ caseSensitive: true });
@@ -32,9 +31,7 @@ orchestratorsRouter.get("/boards/:key/orchestrators", (req, res) => {
 orchestratorsRouter.get(
   "/boards/:key/orchestrators/:id/conversation",
   async (req, res) => {
-    if (req.headers[ORCHESTRATOR_TOKEN_HEADER] !== undefined) {
-      throw new ForbiddenError("orchestrator-token-on-user-route");
-    }
+    refuseOrchestratorToken(req);
     const board = resolveBoard(parseBoardKeyParam(req.params.key));
     const id = parseOrThrow(orchestratorIdSchema, req.params.id);
     const { limit } = parseOrThrow(conversationQuerySchema, req.query);
