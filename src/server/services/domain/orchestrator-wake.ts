@@ -1,3 +1,4 @@
+import { DISPATCH_WAKE_PREFIX } from "../../../shared/dispatch-lines.js";
 import type {
   OrchestrationEvent,
   SessionTurnState,
@@ -137,7 +138,7 @@ export function wakeLine(reasons: readonly string[]): string {
     .map((r) => r.slice(0, MAX_REASON_CHARS));
   const more = reasons.length - shown.length;
   if (more > 0) shown.push(`and ${more} more`);
-  return `Dispatch wake: ${shown.join(", ")}. Read the board state with the dispatch tools and continue.`;
+  return `${DISPATCH_WAKE_PREFIX} ${shown.join(", ")}. Read the board state with the dispatch tools and continue.`;
 }
 
 export function timerDue(facts: {
