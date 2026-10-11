@@ -166,6 +166,9 @@ Mount prefix: `/api/orchestrator`.
 | GET    | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `get_ship_state`: read the stored ship flow of a group card.                                   |
 | GET    | `/api/orchestrator/state`                          | Orchestrator token | Tool `read_state`: read the saved state of the calling orchestrator.                                |
 | PUT    | `/api/orchestrator/state`                          | Orchestrator token | Tool `write_state`: replace the saved state of the calling orchestrator.                            |
+| GET    | `/api/orchestrator/playbooks`                      | Orchestrator token | Tool `list_playbooks`: list the playbooks with the name, the when line and the source.              |
+| GET    | `/api/orchestrator/rulebook`                       | Orchestrator token | Tool `get_rulebook`: read the orchestration rule book.                                              |
+| POST   | `/api/orchestrator/cards/:cardId/start`            | Orchestrator token | Tool `start_card`: start the session of one ticket card with a playbook and a direction.            |
 
 ### `routes/board.route.ts`
 
@@ -1435,6 +1438,8 @@ legal source column(s), target, and owning code path:
 | Hook `UserPromptSubmit`                                      | `FLIP_BACK_SOURCES` (`needs_input`, `agent_done`, `in_review`)                   | `in_progress`                                    | `hook-events.ts#applyPromptSubmit` → `board.store.ts#flipBack`                            |
 | Hook `PreToolUse` (pause-class tool)                         | any except `APPLY_MARKER_EXCLUDED_SOURCES`                                       | `needs_input`                                    | `hook-events.ts#applyPreToolUseEvent` → `applyMarker`                                     |
 | Hook `PostToolUse` (pause-class tool)                        | `FLIP_BACK_SOURCES`                                                              | `in_progress`                                    | `applyHookEvent`'s `PostToolUse` branch → `flipBack`                                      |
+| Hook `PostToolUseFailure` (pause-class tool)                 | `FLIP_BACK_SOURCES`                                                              | `in_progress`                                    | same as above                                                                             |
+| Hook `PostToolUse` or `Stop` while a pause-tool marker holds | `needs_input` ONLY                                                               | `in_progress`                                    | `applyHookEvent` reading `heldByPauseTool` → `flipBack`                                   |
 | Watcher marker decision (pane-parsed)                        | any except `APPLY_MARKER_EXCLUDED_SOURCES`                                       | `needs_input` / `agent_done`                     | `watcher.ts#scanSession` reading pure `scan-decision.ts#decideScan` → `applyMarker`       |
 | Watcher flip-back decision                                   | `needs_input` ONLY                                                               | `in_progress`                                    | same path → `flipBack`                                                                    |
 | Manual drag / `POST /cards/:id/move`                         | any except `agent_done` as a target, and never `todo → in_progress` (`BOARD-07`) | any allowed pair                                 | `board.store.ts#moveCardManual`, gated by `routes/cards.route.ts`                         |
@@ -4223,8 +4228,8 @@ watcher's per-session maps.
 fires at the pause, so `applyStopEvent`'s marker-text parsing (the mechanism every other pause
 class relies on) never runs for it, and answering the question delivers the reply as a tool
 result, not a fresh prompt, so `UserPromptSubmit` never fires either. Both gaps were confirmed
-live (not inferred from docs) against the installed CLI before any fix landed. The fix is two
-layers, ordered lowest-risk first:
+live (not inferred from docs) against the installed CLI before any fix landed. The fix has three
+parts, ordered lowest-risk first:
 
 1. `kickoff.ts`'s `STATUS_PROTOCOL` carries a fourth instruction line asking the agent to print
    the `NEEDS_INPUT` marker as a standalone reply before calling a pausing tool. Live-measured
@@ -4263,6 +4268,14 @@ layers, ordered lowest-risk first:
    pause flips the card to Needs Input, answering flips it back, a plain `pane`-mode session stays
    structurally unable to detect the pause (unregressed, pre-existing, out of this fix's scope),
    and a manual drag still wins over any marker.
+3. A subagent cannot show a dialog. A hook payload with an `agent_id` comes from a subagent, so
+   `applyHookEvent` ignores its pause-tool `PreToolUse`, `PostToolUse` and `PostToolUseFailure`
+   events. A pause-tool call can also fail without a dialog. The hook settings register
+   `PostToolUseFailure`, and a pause-tool failure flips the card back. If a pause-tool marker still
+   holds the card in Needs Input when the main session runs a tool (`PostToolUse`) or ends a turn
+   (`Stop`), the main session is not blocked on a dialog, so the card flips back. A text
+   `DISPATCH_STATUS: NEEDS_INPUT` marker does not start with the pause-tool key, so this rule does
+   not release it.
 
 **Accepted residuals.** Under `auto`, the window between a card becoming watcher-visible and its
 first authenticated hook event has BOTH channels live and can double-stamp the same activity (two
@@ -5275,6 +5288,22 @@ such a session has. This degrade path pre-dates this phase: it is the same below
 branch the hooks feature has always had, not a new gap this phase introduced, and it means VLT-08's
 guarantee is conditional on hooks capability rather than universal. Cross-references `T-105-06`.
 
+### Check slot count (`DISPATCH_CHECK_SLOTS`)
+
+The slot gate (`scripts/with-check-slot.mjs`) lets a fixed number of heavy checks run at the same
+time on one machine. The default is 1 slot for each 8 GB of RAM, rounded down, with a minimum of 1.
+On an 8 GB Mac the default is 1 slot. A larger count on that machine causes heavy swap: with 4 agent
+loops, 3 concurrent full checks took the load average to 24 and made timing tests fail.
+
+To change the count, set `DISPATCH_CHECK_SLOTS` to a positive integer in the environment of every
+agent session on the machine. All sessions must use the same value, because each gate counts only
+the slots below its own value. A value that is not a positive integer gives the default.
+
+A slot file that is older than the last boot is dead. The gate calculates the boot time from the
+system uptime and the wall clock. If the wall clock moves forward by a large step after a slot is
+taken, the gate can find a live slot to be dead. This can occur on Linux early in a boot. It does
+not occur on macOS.
+
 ## Verification Gates
 
 Dev tooling plus one small `node:test` suite. Each gate answers one narrow, mechanically-checkable
@@ -5282,10 +5311,54 @@ question; none of them read prose for truth.
 
 - **`npm run check`** — the standing CI-shaped gate: `format:check`, `lint`, `typecheck`, `test`,
   `deadcode` (knip), `replay-gate`, `doc-drift`, and `invariants` (all below), run in sequence.
+- **`npm run lint`** and **`npm run lint:typed`**: two ESLint modes. `lint` runs every rule that does not
+  need type information, which includes all custom rules, and does not build a TypeScript program.
+  It is the local default and a step of `npm run check`. `lint:typed` sets `DISPATCH_LINT_TYPED=1`,
+  which adds `recommendedTypeChecked`, the project service and the two type-aware rule overrides.
+  The CI check job runs `lint:typed` after `npm run check`. Only `lint:typed` reports unused
+  `eslint-disable` directives, because a directive for a type-aware rule looks unused to `lint`, and
+  `lint:fix` would delete it. Each mode has its own cache directory.
+- **`npm run typecheck`**: `tsgo --noEmit` from `@typescript/native-preview`, once for the root
+  project and once for `src/web/tsconfig.json`. Each project writes its build info to
+  `node_modules/.cache/tsgo/`, apart from the `tsc` build info. The CI check job also runs
+  `npm run typecheck:tsc`, the same two checks with `tsc`, because tsgo is a preview build.
+  `npm run build:server` still uses `tsc`, because only `tsc` emits the server build.
+- **`scripts/with-check-slot.mjs`**: the slot gate for heavy checks. `lint`, `lint:fix`,
+  `lint:typed`, `typecheck`, `deadcode`, `check`, `check:static` and `check:changed` run their
+  command through it. The number of gated commands that run at the same time on the machine, across
+  all worktrees, is the slot count. The slot count is `DISPATCH_CHECK_SLOTS`, or by default 1 slot
+  for each 8 GB of RAM, minimum 1 (see [Check slot count](#check-slot-count-dispatch_check_slots)).
+  A slot is the file `~/.dispatch/locks/check-slot-<n>`, which holds the pid of the gate process.
+  The gate creates it with a hard link, so it cannot replace a slot that exists. A caller that finds
+  no free slot prints the holder pids, then waits. A slot is dead when its pid is not alive, when
+  its content is not a pid, or when it is older than the last boot. A dead slot is removed only
+  while the caller holds the `.reclaim` guard directory with its own token. This prevents the removal
+  of a live slot, except in one race: 3 or more gates that act on a guard older than 60 seconds. The gate sets `DISPATCH_CHECK_SLOT_HELD=1` for its command, so the steps of
+  `npm run check` run in the slot of the chain and do not take a second slot. The command runs in
+  its own process group, and the gate sends SIGINT, SIGTERM and SIGHUP to the full group. After 5400
+  seconds of waiting, the gate exits with code 75. If it cannot use the lock directory, it exits
+  with code 2. `DISPATCH_CHECK_LOCK_DIR` and `DISPATCH_CHECK_WAIT_SECONDS` change the lock directory
+  and the wait limit. Limit: if the gate gets SIGKILL, its command continues to run without a slot.
+  For this reason, the Stop hook in `.claude/settings.json` sends SIGTERM at its
+  timeout and SIGKILL only 5 seconds later. The Stop hook also sets the wait limit to 30 seconds
+  less than its own timeout. When no slot becomes free, it reports that the checks were skipped and
+  lets the stop continue. Each gated step has its own wait limit. If the steps before a waiting
+  step take more than 30 seconds, the timeout occurs first, and the hook lets the stop continue
+  with no report.
+- **`npm run check:changed`** (`scripts/check-changed.mjs`): the fast check for one agent session.
+  It holds one slot for the full run. It selects the files changed since `origin/main`, plus staged,
+  unstaged and untracked files, and removes deleted files. It runs `prettier --check` on these
+  files and the untyped ESLint on the lintable files, then runs `npm run typecheck`. If
+  `origin/main` does not exist, it exits with code 2 and names the ref. Run `git fetch origin main`
+  first to compare with the current base.
+- **Format hook** (the `PostToolUse` hook in `.claude/settings.json`): after each Edit or Write in a Claude
+  session, it runs `prettier --write` on the edited file. It does not format files under `.claude/`
+  or Prettier, ESLint and package config files.
 - **`npm test`**: two `node --import tsx --test` passes, `src/server` and `src/shared` under the root
   tsconfig, then `src/web` with `TSX_TSCONFIG_PATH=src/web/tsconfig.json`: unit tests on pure modules and
   wiring tests that boot a router on port 0 under a temporary `HOME`. No framework beyond Node's
-  built-in runner; test files are excluded from the server build.
+  built-in runner; test files are excluded from the server build. A last pass runs
+  `scripts/**/*.test.mjs` with `node --test`.
 - **`node scripts/check-invariants.mjs`** (`npm run invariants`, wired into `npm run check`) —
   invariant-home audit: every ID in the frozen baseline (`scripts/invariant-baseline.txt`) must
   have a durable home (a JSDoc block in `src/` or anywhere in this doc). It was previously
@@ -5618,6 +5691,8 @@ Scenario 4 (tests/e2e/scenario-4-no-loop-ship.e2e.ts) proves that a group with n
 
 Scenario 5 (tests/e2e/scenario-5-wake.e2e.ts) proves that the server wakes the orchestrator. The board has one group of two tickets, and the fake orchestrator replays its tool calls under busy status rows and waits under idle rows. The test answers the orchestrator decision item through `POST /api/decisions/:id/answer` and checks that the `Dispatch wake: decision` line reaches the fake in 30 s or less. It then makes the group commit, print the done marker and report Stop, and checks that an Agent done wake line follows at least 20 s after the first, after which the orchestrator calls `start_ship` and the PR merges into the bare origin. The test also checks that every wake line has one confirmed `orchestrator_wake` row and that no wake line or row falls inside a busy status window of the fake. The scenario types no key into any pane, and a static check of its own files enforces that.
 
+Scenario 6 (tests/e2e/scenario-6-intake-judgment.e2e.ts) proves that the orchestrator judges an intake and starts three loops inside a cap of 2. The board has four tickets (a quick fix, a single feature and two related tickets), the policy **Ask me for each roadmap** and a cap of 2. The fake orchestrator reads the rule book and the playbooks, raises one plan decision item and waits for it. The test answers the plan through `POST /api/decisions/:id/answer`. The orchestrator then calls `start_card` for the quick fix with "Write code directly" and for the single feature with "PRD + Ralph Loop", and creates a group of the two related tickets with "Roadmap Loop". The test checks that the accepted `start_card` and `start_group` rows are in that order, that each card and the group carry their playbook, and that the first `start_group` answers 403 `policy-refused` and starts no session. The test then makes the quick fix card reach Agent done with a Stop hook, which frees a slot, and checks that the second `start_group` starts the group. A watcher checks that no more than 2 cards or groups hold a slot at any time. The scenario types no key into any pane, and a static check of its own files enforces that.
+
 The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
 ## Orchestration Initiative
@@ -5921,7 +5996,7 @@ reads the identity or writes, `assertAheadAndClean` resolves the base once. The 
 `branch-not-ahead`) and the worktree must be clean (409 `worktree-dirty`). A failed git call of
 these two checks answers 409 `no-workspace`. A group with loop progress keeps the D-8 rules.
 
-**MCP server.** `dispatch mcp` serves the 26 tools over stdio. `bootstrap/cli.ts` reads and checks
+**MCP server.** `dispatch mcp` serves the 29 tools over stdio. `bootstrap/cli.ts` reads and checks
 `DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and
 `bootstrap/mcp-tools.ts` holds the zod input and the description of each tool. The dependency
 cruiser rule `mcp-server-isolated` refuses an import of `routes`, `services`, `store`, `adapters`
@@ -6005,6 +6080,8 @@ hidden card, links the card to the record, leaves the record `stopped` and answe
 seed (`board-orchestrator` in `playbooks.ts`) that holds the duties, the ten rules of D-9 and the two
 rules of F13 and F18. It tells the session to act on an `intake_submitted` or `decision_answered` event
 only when `data.orchestratorId` names its own id, so an extra ignores the intake of the main.
+
+**Playbook when line and seed upgrade.** A playbook can have a `when` line in its front matter, 300 characters or fewer, and `list_playbooks` and the start dialog picker show it. A seeded playbook without the line gets the `when` line of its seed. `seedPlaybooks` rewrites a seeded file only when the SHA-256 hash of its content is in the retired set of its slug, so a file that the user edited stays as it is. The rule book `docs/orchestration/rulebook.md` ships in the package, and `get_rulebook` reads it. The Board Orchestrator playbook tells the session to load it.
 
 **Remove and boot.** Remove revokes the token. It is refused with 409 `orchestrator-running` unless the
 record is `stopped`, and with 409 `orchestrator-session-live` while the tmux session of the hidden card is

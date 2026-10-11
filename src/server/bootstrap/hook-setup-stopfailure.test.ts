@@ -9,13 +9,14 @@ const { installHookArtifacts } = await import("./hook-setup.js");
 
 void test.after(() => env.cleanup());
 
-void test("the generated hook settings register StopFailure with the same entry as Stop", async () => {
+void test("the generated hook settings register StopFailure and PostToolUseFailure with the same entry as Stop", async () => {
   await installHookArtifacts("accept");
   const settings = JSON.parse(
     fs.readFileSync(path.join(env.dispatchDir, "hook-settings.json"), "utf8"),
   ) as { hooks: Record<string, unknown> };
   assert.ok(Array.isArray(settings.hooks.Stop));
   assert.deepEqual(settings.hooks.StopFailure, settings.hooks.Stop);
+  assert.deepEqual(settings.hooks.PostToolUseFailure, settings.hooks.Stop);
   const [entry] = settings.hooks.StopFailure as {
     hooks: { type: string; command: string; timeout: number }[];
   }[];

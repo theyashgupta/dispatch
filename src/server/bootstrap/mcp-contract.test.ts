@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { after, describe, it } from "node:test";
 import { z } from "zod";
+import {
+  DECISION_KINDS,
+  ORCHESTRATION_EVENT_KINDS,
+} from "../../shared/types.js";
 import { isolateEnv } from "../test-support/fixtures.js";
 import { MCP_TOOLS, splitInput, type McpTool } from "./mcp-tools.js";
 
@@ -8,8 +12,7 @@ const env = isolateEnv();
 const schemas = await import("../routes/orchestrator-schemas.js");
 const { COMMENT_BODY_MAX } = await import("../../shared/comment-body.js");
 const limits = await import("../../shared/orchestrator-limits.js");
-const { seedPlaybooks, loadPlaybooks } =
-  await import("../services/infra/playbooks.js");
+const { readRulebook } = await import("../services/infra/rulebook.js");
 after(() => env.cleanup());
 
 interface ServerSide {
@@ -30,6 +33,8 @@ const SERVER: Record<string, ServerSide> = {
   list_events: { query: schemas.listEventsQuerySchema },
   get_policy: {},
   get_board_workspace: {},
+  list_playbooks: {},
+  get_rulebook: {},
   create_ticket: { body: schemas.createTicketBodySchema },
   update_ticket: {
     params: schemas.cardParamsSchema,
@@ -43,6 +48,10 @@ const SERVER: Record<string, ServerSide> = {
   create_base_branch: { body: schemas.baseBranchBodySchema },
   create_group: { body: schemas.createGroupBodySchema },
   start_group: { params: schemas.cardParamsSchema },
+  start_card: {
+    params: schemas.sessionCardParamsSchema,
+    body: schemas.startCardBodySchema,
+  },
   send_input: {
     params: schemas.sessionCardParamsSchema,
     body: schemas.sendInputBodySchema,
@@ -84,6 +93,8 @@ const VALID: Record<string, Record<string, unknown>> = {
   list_events: { since: 0, limit: 200 },
   get_policy: {},
   get_board_workspace: {},
+  list_playbooks: {},
+  get_rulebook: {},
   create_ticket: { proposalItemId: "7f8e-41", index: 19 },
   update_ticket: { id: ID, title: "t", description: "d" },
   move_card: { id: ID, column: "inbox" },
@@ -98,6 +109,13 @@ const VALID: Record<string, Record<string, unknown>> = {
     dependsOn: ["LOCAL-3"],
   },
   start_group: { id: ID },
+  start_card: {
+    cardId: ID,
+    playbook: "Write code directly",
+    direction: "d",
+    folder: "/f",
+    repos: [{ path: "/r", base: "main" }],
+  },
   send_input: { cardId: ID, text: "go" },
   approve_roadmap: { cardId: ID, decisionIds: ["d-1"] },
   request_handoff: { cardId: ID, hard: true },
@@ -151,6 +169,19 @@ const REFUSED: [string, Record<string, unknown>][] = [
       title: "g",
       memberIds: [ID, "LOCAL-2"],
       repos: [{ path: "/r", base: "main" }],
+      direction: "d".repeat(limits.DIRECTION_MAX + 1),
+    },
+  ],
+  ["start_card", { cardId: "", playbook: "p" }],
+  ["start_card", { cardId: ID, playbook: "" }],
+  ["start_card", { cardId: ID, playbook: "p".repeat(201) }],
+  ["start_card", { cardId: ID, playbook: "p", folder: "" }],
+  ["start_card", { cardId: ID, playbook: "p", repos: [] }],
+  [
+    "start_card",
+    {
+      cardId: ID,
+      playbook: "p",
       direction: "d".repeat(limits.DIRECTION_MAX + 1),
     },
   ],
@@ -321,15 +352,11 @@ describe("mcp tool table against the server schemas", () => {
   });
 });
 
-describe("wait_for_event against the Board Orchestrator playbook", () => {
-  it("caps and defaults the wait at the playbook limit and says so", async () => {
-    await seedPlaybooks();
-    const playbook = (await loadPlaybooks()).find(
-      (p) => p.name === "Board Orchestrator",
-    );
-    assert.ok(playbook);
-    const rule = /timeoutSeconds to (\d+)\./.exec(playbook.body);
-    assert.ok(rule, "the playbook names a wait limit");
+describe("wait_for_event against the rule book", () => {
+  it("caps and defaults the wait at the rule book limit and says so", async () => {
+    const { markdown } = await readRulebook();
+    const rule = /timeoutSeconds to (\d+)\./.exec(markdown);
+    assert.ok(rule, "the rule book names a wait limit");
     const limit = Number(rule[1]);
     assert.equal(limit, 55);
 
@@ -353,5 +380,35 @@ describe("wait_for_event against the Board Orchestrator playbook", () => {
       since: 3,
       timeoutSeconds: 55,
     });
+  });
+});
+
+describe("the rule book against the tool table", () => {
+  const POLICY_VALUES = [
+    "ask",
+    "rules",
+    "all",
+    "wait",
+    "stop",
+    "on",
+    "off",
+    "none",
+    "open_prs",
+    "merge",
+  ];
+
+  it("names only tools, event kinds, decision kinds or policy values in snake case backticks", async () => {
+    const { markdown } = await readRulebook();
+    const known = new Set<string>([
+      ...MCP_TOOLS.map((t) => t.name),
+      ...ORCHESTRATION_EVENT_KINDS,
+      ...DECISION_KINDS,
+      ...POLICY_VALUES,
+    ]);
+    const words = [...markdown.matchAll(/`([^`\n]+)`/g)]
+      .map((m) => m[1])
+      .filter((w) => /^[a-z]+(_[a-z]+)+$/.test(w));
+    assert.ok(words.length > 0);
+    for (const word of words) assert.ok(known.has(word), word);
   });
 });

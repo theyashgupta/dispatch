@@ -1,6 +1,7 @@
 import path from "node:path";
 import fsp from "node:fs/promises";
 import type { Dirent } from "node:fs";
+import { createHash } from "node:crypto";
 import writeFileAtomic from "write-file-atomic";
 import type { InvalidPlaybook, Playbook } from "../../../shared/types.js";
 import { DISPATCH_DIR } from "./paths.js";
@@ -14,6 +15,8 @@ export type PlaybookWriteInput = {
   body: string;
 };
 
+const PLAYBOOK_WHEN_MAX = 300;
+
 /** Result union for create/update/delete — callers map each `error` to the appropriate HTTP status. */
 export type PlaybookWriteResult =
   | { ok: true; playbook: Playbook }
@@ -21,6 +24,7 @@ export type PlaybookWriteResult =
 
 const PRD_RALPH_LOOP_PLAYBOOK = `---
 name: PRD + Ralph Loop
+when: One ticket or one feature of one module, up to a few hundred lines, with phases, QA and a gap analysis.
 ---
 ## Extra direction
 {extra}
@@ -30,6 +34,7 @@ Use the grill-me skill first to stress-test the scope of this ticket until requi
 
 const SUPERPOWERS_PLAYBOOK = `---
 name: Superpowers
+when: A ticket whose design is still open and needs a brainstorm before a plan.
 ---
 ## Extra direction
 {extra}
@@ -39,6 +44,7 @@ Use the Superpowers brainstorming skill to reach an approved design for this tic
 
 const GSD_PLAYBOOK = `---
 name: GSD
+when: A repository that already runs a GSD project, or work that needs a new GSD milestone.
 ---
 ## Extra direction
 {extra}
@@ -48,31 +54,44 @@ If this repo already has a GSD project set up for related work, plan and execute
 
 const WRITE_CODE_DIRECTLY_PLAYBOOK = `---
 name: Write code directly
+when: One known fix of a few lines with no new surface.
 ---
 ## Extra direction
 {extra}`;
 
+const ROADMAP_LOOP_PLAYBOOK = `---
+name: Roadmap Loop
+when: Two or more related tickets with an order or shared files, or any ticket that spans server, web and docs across modules.
+---
+## Extra direction
+{extra}
+
+## Workflow
+Use this playbook for one feature that spans several related tickets and runs end to end as one stack. Read every ticket above, with its description and comments, first.
+
+Part 1, planning:
+1. Run the write-roadmap skill on the whole ticket group. It verifies claims against the code, grills the unknowns and the unit cut, then writes the roadmap. Stop for roadmap approval.
+2. After the approval, for each unit in order: run grill-me scoped to that unit, then write-prd for that unit. Decision ids go to .roadmap/<slug>/decisions.md, and every id must appear in the PRD of its unit.
+
+Part 2, execution:
+3. Run the roadmap-loop skill on the roadmap. It executes every unit through the ralph-loop per-phase flow, audits each unit with readiness-audit, records deviations in changed-decisions.md and deferrals in todo.md, and commits each unit to a stacked local branch.
+4. Never push, tag, open a PR or merge. On completion, hand back with the end-of-run report.`;
+
 const BOARD_ORCHESTRATOR_PLAYBOOK = `---
 name: Board Orchestrator
+when: Only the board orchestrator session. Dispatch starts it; never start a ticket with it.
 ---
 ## Extra direction
 {extra}
 
 ## Workflow
 You coordinate the work of one board with the dispatch tools. Your state lives in the tools, never in your memory.
-1. Call read_state first. Then call get_board_workspace, list_cards, list_events and get_policy, and read the open decision items from the decision_raised and decision_answered events of list_events. Act only on what the tools return. Never ask the user for a repository path or a base branch that get_board_workspace returns. Omit repos in create_group to use the board repositories.
-2. Turn a goal or an intake_submitted event into a ticket proposal: a create_decision_item of kind ticket_proposal. Wait for the approval of the user before you create tickets. After the user approves it, create each ticket with create_ticket and the proposal id and index.
-3. Write a direction for each group before you start it.
-4. Start groups only inside the concurrency cap. Read the cap and the count of running loops with get_policy.
-5. Approve or escalate each roadmap as the roadmapApproval setting of get_policy says.
-6. Answer the inputs of a loop with send_input.
-7. End every turn with wait_for_event. Set kinds to decision_answered, group_state and intake_submitted, and timeoutSeconds to 55. When it times out, call it again. Never end a turn with only a report.
-8. Ship in order with start_ship when your shipRights allow it. When your shipRights allow it, ship a group in agent_done without a decision item.
-9. Report to the user. Use create_decision_item when a person must decide.
-10. Call write_state after each decision, with the full current state: groups, pending decisions and next steps.
-A message that starts with "Dispatch wake:" comes from Dispatch. Read the board state with the dispatch tools and continue.
-After a usage limit, check get_group_progress and read_pane_tail for the group before you send any new input with send_input.
-Each direction or input that you write for a loop must tell the loop: never run a dangerous rm, and stop and report instead.
+1. Call read_state first. Then call get_rulebook and follow the rule book that it returns. Call get_rulebook again after each handoff.
+2. The rule book tells you how to triage an intake, judge the playbook of each ticket, group related tickets, write one plan as a decision item, start cards and groups inside the concurrency cap, write directions, monitor, ship and release.
+3. A user turn typed in your terminal is a direction from the user. Handle it as the rule book says for an intake.
+4. A message that starts with "Dispatch wake:" comes from Dispatch. Read the board state with the dispatch tools and continue.
+5. End every turn with wait_for_event. Never end a turn with only a report.
+6. Call write_state after each decision, with the full current state: cards, groups, pending decisions and next steps.
 Act on an intake_submitted or decision_answered event only when its data.orchestratorId is your orchestrator id.
 Hand off only when asked. At a handoff, call write_state with handoffReady set to true, print HANDOFF_READY and your orchestrator id, and end your turn.
 You do not change product code.
@@ -90,12 +109,11 @@ An orchestrator never:
 10. Deletes a branch, a worktree or a card that it did not create.`;
 
 /**
- * Hand-rolled front-matter parser (no YAML dependency): the file must open with a `---\n` fence and
- * close it with a `\n---\n` fence; only `name` is read from the fenced region and the remainder is
- * the verbatim body — any other key (including a legacy `stage:` line, still present on files
- * written before the stage split was retired) is silently ignored, never validated. Returns null
- * (caller SKIPS) when the fences are absent or `name` is empty — a permissive parser would let a
- * malformed playbook silently join the picker.
+ * Parse the front matter of a playbook file, or null when the fences are absent or `name` is empty.
+ *
+ * @remarks Only `name` and `when` are read, and a `when` that is empty or longer than
+ * {@link PLAYBOOK_WHEN_MAX} is dropped without failing the parse. Every other key, such as a legacy
+ * `stage:` line, is ignored, and the rest of the file is the verbatim body.
  */
 function parseFrontMatter(raw: string): Playbook | null {
   if (!raw.startsWith("---\n")) return null;
@@ -106,19 +124,26 @@ function parseFrontMatter(raw: string): Playbook | null {
   const body = rest.slice(end + 5);
 
   let name = "";
+  let when = "";
   for (const line of fmRegion.split("\n")) {
     const idx = line.indexOf(":");
     if (idx === -1) continue;
     const key = line.slice(0, idx).trim();
     const value = line.slice(idx + 1).trim();
     if (key === "name") name = value;
+    if (key === "when") when = value;
   }
 
   if (name === "") return null;
-  return { name, body };
+  if (when === "" || when.length > PLAYBOOK_WHEN_MAX) return { name, body };
+  return { name, body, when };
 }
 
 export { hasDispatchMarker };
+
+function carriesMarker(p: Playbook): boolean {
+  return hasDispatchMarker(p.body) || hasDispatchMarker(p.when ?? "");
+}
 
 /**
  * Derive an on-disk-safe slug from a display name: lowercase, collapse every run of
@@ -166,13 +191,13 @@ export async function loadPlaybooks(): Promise<Playbook[]> {
       console.warn("[playbooks] skipped a file (missing front-matter)");
       continue;
     }
-    if (hasDispatchMarker(parsed.body)) {
+    if (carriesMarker(parsed)) {
       console.warn(
-        "[playbooks] skipped a file (footgun: DISPATCH_STATUS in body)",
+        "[playbooks] skipped a file (footgun: DISPATCH_STATUS in body or when)",
       );
       continue;
     }
-    playbooks.push({ ...parsed, slug: entry.name.slice(0, -3) });
+    playbooks.push(withSeedWhen({ ...parsed, slug: entry.name.slice(0, -3) }));
   }
 
   playbooks.sort((a, b) => a.name.localeCompare(b.name));
@@ -228,7 +253,7 @@ export async function loadPlaybooksForPicker(): Promise<{
       invalid.push({ name: slug, reason: "missing front-matter" });
       continue;
     }
-    if (hasDispatchMarker(parsed.body)) {
+    if (carriesMarker(parsed)) {
       invalid.push({ name: parsed.name, reason: "contains a reserved marker" });
       continue;
     }
@@ -236,7 +261,7 @@ export async function loadPlaybooksForPicker(): Promise<{
       invalid.push({ name: parsed.name, reason: "empty body" });
       continue;
     }
-    valid.push({ ...parsed, slug });
+    valid.push(withSeedWhen({ ...parsed, slug }));
   }
 
   valid.sort((a, b) => a.name.localeCompare(b.name));
@@ -248,8 +273,69 @@ const SEED_PLAYBOOKS: { slug: string; content: string }[] = [
   { slug: "superpowers", content: SUPERPOWERS_PLAYBOOK },
   { slug: "gsd", content: GSD_PLAYBOOK },
   { slug: "write-code-directly", content: WRITE_CODE_DIRECTLY_PLAYBOOK },
+  { slug: "roadmap-loop", content: ROADMAP_LOOP_PLAYBOOK },
   { slug: "board-orchestrator", content: BOARD_ORCHESTRATOR_PLAYBOOK },
 ];
+
+const SEED_WHEN_BY_SLUG: ReadonlyMap<string, string> = new Map(
+  SEED_PLAYBOOKS.flatMap((s) => {
+    const when = parseFrontMatter(s.content)?.when;
+    return when === undefined ? [] : [[s.slug, when] as const];
+  }),
+);
+
+export function isSeedSlug(slug: string): boolean {
+  return SEED_PLAYBOOKS.some((s) => s.slug === slug);
+}
+
+function withSeedWhen(p: Playbook): Playbook {
+  const seedWhen =
+    p.slug === undefined ? undefined : SEED_WHEN_BY_SLUG.get(p.slug);
+  return p.when === undefined && seedWhen !== undefined
+    ? { ...p, when: seedWhen }
+    : p;
+}
+
+const RETIRED_SEED_HASHES: Readonly<Record<string, readonly string[]>> = {
+  "prd-ralph-loop": [
+    "61328e5d08d8c54c0f017bcd9fa5e5ab51eb74b06c7e54769ebd09b1c6cb3298",
+  ],
+  superpowers: [
+    "31ac4e5c6844d4a5d6f78f834a64d28452fda3faaa3f08561086488bb3e31bd0",
+  ],
+  gsd: ["687d4f24b7cec727f78ba8e7eac392ea9a146673a5291bb451983a3d75c46d94"],
+  "write-code-directly": [
+    "6cd92780a37c31f451a1113f9e4173802eaf693d0ab9fcb028fb67f98dfaf451",
+  ],
+  "board-orchestrator": [
+    "20ec6f18f070b4abd7a6677127bcd9955140bb7a465f6a08253e88772c75f057",
+    "bf061f731d3c651ccbf81a2deb55a1ba0920589b1ff1f40852982ff8c7b414de",
+    "9ceacc27bb0734cb81ebd898a341cd71bb95f9b63b5fa505caf17f2464727076",
+  ],
+};
+
+async function upgradeRetiredSeed(seed: {
+  slug: string;
+  content: string;
+}): Promise<void> {
+  const file = path.join(PLAYBOOKS_DIR, `${seed.slug}.md`);
+  let raw: string;
+  try {
+    raw = await fsp.readFile(file, "utf8");
+  } catch {
+    return;
+  }
+  const hash = createHash("sha256").update(raw, "utf8").digest("hex");
+  if (RETIRED_SEED_HASHES[seed.slug]?.includes(hash)) {
+    try {
+      await writeFileAtomic(file, seed.content, { mode: 0o600 });
+    } catch (err) {
+      console.warn(
+        `[playbooks] could not upgrade seed ${seed.slug}: ${(err as Error).message}`,
+      );
+    }
+  }
+}
 
 const SEED_STATE_PATH = path.join(PLAYBOOKS_DIR, ".seeded.json");
 
@@ -281,6 +367,9 @@ async function readSeededSlugs(): Promise<Set<string>> {
  * restarts while a NEW seed shipped to an old install still lands exactly once. Files already on
  * disk before the tombstone existed are recorded without being touched; a user's own files
  * (including the retired code.md/plan.md) are never seeded, overwritten, or deleted here.
+ *
+ * @remarks A seed file whose SHA-256 is in the retired set of its slug is rewritten with the
+ * current seed, because a match proves the user never edited it. Any other content stays untouched.
  */
 export async function seedPlaybooks(): Promise<void> {
   await fsp.mkdir(PLAYBOOKS_DIR, { recursive: true, mode: 0o700 });
@@ -288,6 +377,7 @@ export async function seedPlaybooks(): Promise<void> {
   const seeded = await readSeededSlugs();
   let changed = false;
   for (const seed of SEED_PLAYBOOKS) {
+    await upgradeRetiredSeed(seed);
     if (seeded.has(seed.slug)) continue;
     if (!(await slugExists(seed.slug))) {
       await fsp.writeFile(
@@ -309,8 +399,9 @@ export async function seedPlaybooks(): Promise<void> {
   }
 }
 
-function assembleContent(input: PlaybookWriteInput): string {
-  return `---\nname: ${input.name}\n---\n${input.body}`;
+function assembleContent(input: PlaybookWriteInput, when?: string): string {
+  const whenLine = when ? `when: ${when}\n` : "";
+  return `---\nname: ${input.name}\n${whenLine}---\n${input.body}`;
 }
 
 async function slugExists(slug: string): Promise<boolean> {
@@ -395,6 +486,10 @@ export async function updatePlaybook(
     return { ok: false, error: "footgun" };
   }
 
+  const storedWhen = await fsp.readFile(oldPath, "utf8").then(
+    (raw) => parseFrontMatter(raw)?.when,
+    () => undefined,
+  );
   const existing = await loadPlaybooks();
   const collision = existing.some(
     (p) => p.slug !== slug && p.name.toLowerCase() === input.name.toLowerCase(),
@@ -405,7 +500,9 @@ export async function updatePlaybook(
 
   const newSlug = await uniqueSlug(input.name, slug);
   const newPath = path.join(PLAYBOOKS_DIR, `${newSlug}.md`);
-  await writeFileAtomic(newPath, assembleContent(input), { mode: 0o600 });
+  await writeFileAtomic(newPath, assembleContent(input, storedWhen), {
+    mode: 0o600,
+  });
   if (newSlug !== slug) {
     await fsp.unlink(oldPath).catch((err) => {
       if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
@@ -417,6 +514,7 @@ export async function updatePlaybook(
       name: input.name,
       body: input.body,
       slug: newSlug,
+      ...(storedWhen ? { when: storedWhen } : {}),
     },
   };
 }

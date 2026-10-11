@@ -12,7 +12,7 @@ against the running app, so tell us how you know this works. Adding tests is wel
 say how to run them. Delete lines that don't apply.
 -->
 
-- [ ] `npm run check` passes locally (format, lint, typecheck, deadcode, replay-gate)
+- [ ] `npm run check` passes locally (format, lint, typecheck, deadcode, replay-gate). CI also runs `npm run lint:typed` and `npm run typecheck:tsc`.
 - [ ] I ran the change against the live app (`npm run dev`) and confirmed the behavior:
 
 <!-- e.g. "dragged a ticket to In Progress, watched the session provision, card moved on DONE marker" -->
