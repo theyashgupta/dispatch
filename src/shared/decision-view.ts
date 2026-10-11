@@ -54,11 +54,39 @@ export function askedAgo(iso: string, now: number): string {
 }
 
 /**
- * Build the view model of each open decision item.
+ * Build the view model of one decision item.
  *
  * @remarks
  * Options keep their written order and the recommended mark never moves one. The typed answer of "Other answer" rides on the recommended option, else the first option, because the answer route needs an option id of the item. A `roadmap_approval`, `ticket_proposal` or `plan` item is a binary gate, so it has no other answer.
  */
+export function decisionView(
+  item: DecisionItem,
+  orchestratorNames: ReadonlyMap<string, string>,
+  now: number,
+): DecisionView {
+  const name =
+    orchestratorNames.get(item.orchestratorId) ?? item.orchestratorId;
+  return {
+    id: item.id,
+    question: item.question,
+    meta: `${item.cardId ?? "Board"}, asked by ${name} ${askedAgo(item.createdAt, now)}`,
+    options: item.options.map((option) => ({
+      id: option.id,
+      label: option.label,
+      recommended: option.id === item.recommendedOptionId,
+    })),
+    proposalTitles:
+      item.kind === "ticket_proposal"
+        ? (item.proposal?.tickets.map((t) => t.title) ?? [])
+        : [],
+    planRows: [...(item.plan?.entries ?? [])].sort((a, b) => a.order - b.order),
+    otherOptionId: GATE_KINDS.includes(item.kind)
+      ? null
+      : (item.recommendedOptionId ?? item.options[0]?.id ?? null),
+  };
+}
+
+/** Build the view model of each open decision item. */
 export function decisionViews(
   items: readonly DecisionItem[],
   orchestratorNames: ReadonlyMap<string, string>,
@@ -66,30 +94,7 @@ export function decisionViews(
 ): DecisionView[] {
   return items
     .filter((item) => item.state === "open")
-    .map((item) => {
-      const name =
-        orchestratorNames.get(item.orchestratorId) ?? item.orchestratorId;
-      return {
-        id: item.id,
-        question: item.question,
-        meta: `${item.cardId ?? "Board"}, asked by ${name} ${askedAgo(item.createdAt, now)}`,
-        options: item.options.map((option) => ({
-          id: option.id,
-          label: option.label,
-          recommended: option.id === item.recommendedOptionId,
-        })),
-        proposalTitles:
-          item.kind === "ticket_proposal"
-            ? (item.proposal?.tickets.map((t) => t.title) ?? [])
-            : [],
-        planRows: [...(item.plan?.entries ?? [])].sort(
-          (a, b) => a.order - b.order,
-        ),
-        otherOptionId: GATE_KINDS.includes(item.kind)
-          ? null
-          : (item.recommendedOptionId ?? item.options[0]?.id ?? null),
-      };
-    });
+    .map((item) => decisionView(item, orchestratorNames, now));
 }
 
 /**
