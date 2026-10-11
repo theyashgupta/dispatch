@@ -315,9 +315,6 @@ export async function isRepositoryTop(dir: string): Promise<boolean> {
   }
 }
 
-/**
- * Make a repository in `dir` with `main` checked out.
- */
 export async function initMainRepository(dir: string): Promise<void> {
   await run("git", ["init", "-b", "main"], { cwd: dir });
 }

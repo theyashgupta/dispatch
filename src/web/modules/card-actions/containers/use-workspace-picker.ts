@@ -2,7 +2,10 @@ import { useEffect, useState } from "react";
 import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import type { BoardKey } from "../../../../shared/types.js";
 import { useBoardListQuery } from "@/queries/board-list-queries";
-import { useInitRepositoryMutation } from "@/queries/board-repository-queries";
+import {
+  initRepositoryErrorText,
+  useInitRepositoryMutation,
+} from "@/queries/board-repository-queries";
 import {
   useAddWorkspaceFolderMutation,
   useDiscoverFolderQuery,
@@ -123,7 +126,9 @@ export function useWorkspacePicker(
     if (initMutation.isPending) return;
     const result = await initMutation.mutateAsync(board);
     if (!result.ok) return;
-    const created = result.board.repositories.at(-1)?.path;
+    const created = result.board.repositories.find((repo) =>
+      repo.path.endsWith(`/${board.toLowerCase()}`),
+    )?.path;
     if (created !== undefined) startSelection(created);
   };
 
@@ -140,14 +145,16 @@ export function useWorkspacePicker(
         ? null
         : {
             creating: initMutation.isPending,
-            createError:
-              initMutation.data?.ok === false
-                ? initMutation.data.error
-                : (initMutation.error?.message ?? null),
+            createError: initRepositoryErrorText(
+              initMutation.data,
+              initMutation.error,
+            ),
             startDisabled: startNow.disabled || initMutation.isPending,
             createDisabled: startNow.pending,
             onCreate: () => void createRepository(),
-            onStartWithout: startNow.run,
+            onStartWithout: () => {
+              if (!initMutation.isPending) startNow.run();
+            },
           },
     repos,
     toggles: own.toggles,

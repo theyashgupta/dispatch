@@ -33,7 +33,7 @@ export function boardErrorText(raw: string): string {
 /**
  * Read a board refusal from a failed response.
  *
- * @remarks The body `code`, `suggestion`, `field` and `path` pass on, so a form can place the copy
+ * @remarks The body `code`, `suggestion`, `field`, `path` and `detail` pass on, so a form can place the copy
  * on its field.
  */
 export function parseBoardRefusal(failure: ApiFailure): BoardRefusal {
@@ -46,7 +46,7 @@ export function parseBoardRefusal(failure: ApiFailure): BoardRefusal {
         : boardErrorText(raw),
     code: text(body.code) ?? raw ?? "unknown",
   };
-  for (const key of ["suggestion", "field", "path"] as const) {
+  for (const key of ["suggestion", "field", "path", "detail"] as const) {
     const value = text(body[key]);
     if (value !== undefined) refusal[key] = value;
   }

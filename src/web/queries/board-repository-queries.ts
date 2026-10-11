@@ -36,3 +36,20 @@ export function initRepositoryMutationOptions(queryClient: QueryClient) {
 export function useInitRepositoryMutation() {
   return useMutation(initRepositoryMutationOptions(useQueryClient()));
 }
+
+/**
+ * The error text of an init repository mutation, or null when it has none.
+ *
+ * @remarks A refusal shows its copy and, when the server sent one, the git message after it.
+ */
+export function initRepositoryErrorText(
+  data: InitRepositoryResult | undefined,
+  error: Error | null,
+): string | null {
+  if (data?.ok === false) {
+    return data.detail === undefined
+      ? data.error
+      : `${data.error} ${data.detail}`;
+  }
+  return error?.message ?? null;
+}
