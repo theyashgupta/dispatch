@@ -51,7 +51,7 @@ test("an unknown page with a query maps to the board with the same query", () =>
   );
 });
 
-test("a boards path keeps its segments on first load", () => {
+test("a keyed board path keeps its segments on first load", () => {
   assert.equal(
     initialHash("#/boards/ACME/settings", null, null),
     "#/boards/ACME/settings",
@@ -59,6 +59,10 @@ test("a boards path keeps its segments on first load", () => {
   assert.equal(
     initialHash("#/boards/ACME/settings?x=1", "#/inbox", null),
     "#/boards/ACME/settings?x=1",
+  );
+  assert.equal(
+    initialHash("#/boards/ACME/inbox?x=1", null, null),
+    "#/boards/ACME/inbox?x=1",
   );
 });
 

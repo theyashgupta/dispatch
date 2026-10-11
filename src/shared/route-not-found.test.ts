@@ -20,3 +20,7 @@ test("the root and an empty path redirect to the board", () => {
   assert.equal(notFoundTarget("/"), "/board");
   assert.equal(notFoundTarget(""), "/board");
 });
+
+test("an unknown child under a board redirects to that board", () => {
+  assert.equal(notFoundTarget("/boards/NIMBUS/xyz"), "/boards/NIMBUS");
+});

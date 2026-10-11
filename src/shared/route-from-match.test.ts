@@ -19,12 +19,51 @@ test("a page leaf with an id yields the page and the id", () => {
   );
 });
 
-test("the board settings leaf yields the boards page with no id", () => {
+test("the board settings leaf yields the board settings page and the board", () => {
   assert.deepEqual(
     routeFromMatch(
       { routeId: "/boards/$key/settings", params: { key: "ACME" } },
       "/boards/ACME/settings",
     ),
+    { page: "board-settings", board: "ACME" },
+  );
+});
+
+test("the keyed kanban index leaf yields the board page and the board", () => {
+  assert.deepEqual(
+    routeFromMatch(
+      { routeId: "/boards/$key/", params: { key: "ACME" } },
+      "/boards/ACME",
+    ),
+    { page: "board", board: "ACME" },
+  );
+});
+
+test("a keyed dashboard, inbox and sessions leaf yield the page, board and id", () => {
+  for (const page of ["dashboard", "inbox", "sessions"] as const) {
+    assert.deepEqual(
+      routeFromMatch(
+        {
+          routeId: `/boards/$key/${page}/{-$id}`,
+          params: { key: "ACME", id: "x1" },
+        },
+        `/boards/ACME/${page}/x1`,
+      ),
+      { page, board: "ACME", id: "x1" },
+    );
+    assert.deepEqual(
+      routeFromMatch(
+        { routeId: `/boards/$key/${page}/{-$id}`, params: { key: "ACME" } },
+        `/boards/ACME/${page}`,
+      ),
+      { page, board: "ACME" },
+    );
+  }
+});
+
+test("the boards list index leaf yields the boards page with no board", () => {
+  assert.deepEqual(
+    routeFromMatch({ routeId: "/boards/", params: {} }, "/boards"),
     { page: "boards" },
   );
 });

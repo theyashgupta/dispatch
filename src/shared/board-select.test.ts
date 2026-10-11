@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  boardKeyFromPath,
   boardSearch,
   cardBoardSwitch,
   entryBoard,
-  hasManyBoards,
+  resolveBoardParam,
   selectBoard,
-  shouldPollCounts,
   staleCountsLabel,
   withBoard,
   type BoardEntry,
@@ -159,39 +159,6 @@ test("entryBoard is null while the list is loading", () => {
   assert.equal(entryBoard("ACME", undefined), null);
 });
 
-test("hasManyBoards is false for one board", () => {
-  assert.equal(hasManyBoards([{ key: LOCAL, archived: false }]), false);
-});
-
-test("hasManyBoards is true for two active boards", () => {
-  assert.equal(hasManyBoards(boards.slice(0, 2)), true);
-});
-
-test("hasManyBoards is false for one active board plus one archived board", () => {
-  assert.equal(
-    hasManyBoards([
-      { key: LOCAL, archived: false },
-      { key: "OLD" as BoardKey, archived: true },
-    ]),
-    false,
-  );
-});
-
-test("shouldPollCounts is false for one board off the boards page", () => {
-  assert.equal(
-    shouldPollCounts([{ key: LOCAL, archived: false }], false),
-    false,
-  );
-});
-
-test("shouldPollCounts is true for one board on the boards page", () => {
-  assert.equal(shouldPollCounts([{ key: LOCAL, archived: false }], true), true);
-});
-
-test("shouldPollCounts is true for two boards off the boards page", () => {
-  assert.equal(shouldPollCounts(boards.slice(0, 2), false), true);
-});
-
 test("cardBoardSwitch returns the card board only when it differs from the selected board", () => {
   assert.equal(cardBoardSwitch(ACME, LOCAL), ACME);
   assert.equal(cardBoardSwitch(ACME, ACME), null);
@@ -223,4 +190,44 @@ test("unavailableBoardMessage names a well-formed key and never echoes other tex
       "This board link is not valid.",
     );
   }
+});
+
+test("boardKeyFromPath reads the key of a board path", () => {
+  assert.equal(boardKeyFromPath("/boards/NIMBUS"), "NIMBUS");
+  assert.equal(boardKeyFromPath("/boards/NIMBUS/inbox/x"), "NIMBUS");
+});
+
+test("boardKeyFromPath returns null for paths with no key", () => {
+  for (const path of ["/boards", "/boards/", "/board", "/inbox"]) {
+    assert.equal(boardKeyFromPath(path), null);
+  }
+});
+
+test("boardKeyFromPath does not validate the key", () => {
+  assert.equal(boardKeyFromPath("/boards/nimbus"), "nimbus");
+});
+
+test("resolveBoardParam lets the path key beat a different search key", () => {
+  assert.deepEqual(resolveBoardParam("/boards/ACME/inbox", "OTHER"), {
+    param: "ACME",
+    stripSearchBoard: true,
+  });
+});
+
+test("resolveBoardParam uses the search key when the path has none", () => {
+  assert.deepEqual(resolveBoardParam("/inbox", "ACME"), {
+    param: "ACME",
+    stripSearchBoard: false,
+  });
+  assert.deepEqual(resolveBoardParam("/boards", undefined), {
+    param: undefined,
+    stripSearchBoard: false,
+  });
+});
+
+test("resolveBoardParam asks for no strip when a keyed path has no search key", () => {
+  assert.deepEqual(resolveBoardParam("/boards/ACME", undefined), {
+    param: "ACME",
+    stripSearchBoard: false,
+  });
 });
