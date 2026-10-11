@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouteContext, useRouter } from "@tanstack/react-router";
 import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
-import { routeHash } from "../../../../shared/route.js";
+import { pageLocation } from "../../../../shared/route.js";
 import type { Card } from "../../../../shared/types.js";
 import { GroupStartDialog } from "@/modules/card-actions/components/GroupStartDialog";
 import { useStartFlow } from "./use-start-flow";
@@ -121,6 +121,7 @@ export function GroupStartRequestContainer() {
   const { appStore } = useRouteContext({ from: "__root__" });
   const router = useRouter();
   const members = useAppStore(appStore, (s) => s.groupStart);
+  const boardKey = useAppStore(appStore, (s) => s.board);
   if (members == null) return null;
   return (
     <GroupStartContainer
@@ -129,7 +130,7 @@ export function GroupStartRequestContainer() {
       onStarted={appStore.groupStarted}
       onEditPlaybooks={() =>
         void router.navigate({
-          href: routeHash({ page: "playbooks" }).slice(1),
+          href: pageLocation({ page: "playbooks" }, boardKey),
         })
       }
     />

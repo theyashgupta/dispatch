@@ -46,6 +46,7 @@ import { DONE_PAGE_SIZE } from "../../shared/done-limit.js";
 import {
   boardKeyFromPath,
   entryBoard,
+  isArchivedSettingsPath,
   resolveBoardParam,
   selectBoard,
   unavailableBoardMessage,
@@ -219,8 +220,16 @@ export const Route = createRootRouteWithContext<{
       boards = fresh ?? boards;
       choice = selectBoard(param, boards);
     }
+    if (
+      choice.unavailable !== null &&
+      isArchivedSettingsPath(location.pathname, boards)
+    ) {
+      return { setup, board: appStore.getState().board };
+    }
     if (choice.unavailable !== null) {
-      toast(unavailableBoardMessage(choice.unavailable));
+      toast(unavailableBoardMessage(choice.unavailable), {
+        id: "board-unavailable",
+      });
       const keyedHref =
         boardKeyFromPath(location.pathname) === null
           ? null

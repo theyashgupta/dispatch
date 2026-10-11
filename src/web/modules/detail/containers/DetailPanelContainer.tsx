@@ -11,7 +11,7 @@ import type {
 } from "../../../../shared/types.js";
 import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import {
-  boardSearch,
+  boardSwitchTarget,
   cardBoardSwitch,
 } from "../../../../shared/board-select.js";
 import { askAboutQuestion } from "../../../../shared/ask.js";
@@ -21,11 +21,7 @@ import {
   actionablePinnedMembers,
   selectedCardOf,
 } from "../../../../shared/pinned-card.js";
-import {
-  routeFromMatch,
-  routeHash,
-  switchBoardLocation,
-} from "../../../../shared/route.js";
+import { pageLocation, routeFromMatch } from "../../../../shared/route.js";
 import {
   accountName,
   sessionAccountView,
@@ -145,7 +141,7 @@ export function DetailPanelContainer() {
       title: target.title,
     });
     void router.navigate({
-      href: routeHash({ page: "ask", id: question }).slice(1),
+      href: pageLocation({ page: "ask", id: question }, boardKey),
     });
   };
   const onUnwindRequest = (id: string, to: UnwindDestination) => {
@@ -192,16 +188,10 @@ export function DetailPanelContainer() {
     if (cardId === undefined) return;
     const target = cardBoardSwitch(cardBoard, selectedBoardRef.current);
     if (target === null) return;
-    const href = switchBoardLocation({ page: routePageRef.current }, target);
-    void router.navigate(
-      href !== null
-        ? { href, replace: true }
-        : {
-            to: ".",
-            search: (prev) => ({ ...prev, ...boardSearch(target) }),
-            replace: true,
-          },
-    );
+    void router.navigate({
+      ...boardSwitchTarget(routePageRef.current, target),
+      replace: true,
+    });
   }, [cardId, cardBoard, router]);
 
   const [detailsExpanded, setDetailsExpanded] = useState(false);

@@ -3,8 +3,10 @@ import { test } from "node:test";
 import {
   boardKeyFromPath,
   boardSearch,
+  boardSwitchTarget,
   cardBoardSwitch,
   entryBoard,
+  isArchivedSettingsPath,
   resolveBoardParam,
   selectBoard,
   staleCountsLabel,
@@ -230,4 +232,42 @@ test("resolveBoardParam asks for no strip when a keyed path has no search key", 
     param: "ACME",
     stripSearchBoard: false,
   });
+});
+
+test("boardSwitchTarget gives a keyed page the board in its path without its id", () => {
+  assert.deepEqual(boardSwitchTarget("inbox", ACME), {
+    href: "/boards/ACME/inbox",
+  });
+  assert.deepEqual(boardSwitchTarget("board", LOCAL), {
+    href: "/boards/LOCAL",
+  });
+});
+
+test("boardSwitchTarget sets the board search parameter of any other page and keeps the rest", () => {
+  const target = boardSwitchTarget("tickets", ACME);
+  assert.ok("search" in target);
+  assert.equal(target.to, ".");
+  assert.deepEqual(target.search({ dialog: "new", board: "OLD" }), {
+    dialog: "new",
+    board: ACME,
+  });
+  const toLocal = boardSwitchTarget("boards", LOCAL);
+  assert.ok("search" in toLocal);
+  assert.deepEqual(toLocal.search({ dialog: "new", board: ACME }), {
+    dialog: "new",
+    board: undefined,
+  });
+});
+
+test("isArchivedSettingsPath is true only for the settings page of an archived listed board", () => {
+  assert.equal(isArchivedSettingsPath("/boards/OLD/settings", boards), true);
+  assert.equal(isArchivedSettingsPath("/boards/ACME/settings", boards), false);
+  assert.equal(isArchivedSettingsPath("/boards/OLD", boards), false);
+  assert.equal(isArchivedSettingsPath("/boards/OLD/inbox", boards), false);
+  assert.equal(isArchivedSettingsPath("/boards/GONE/settings", boards), false);
+  assert.equal(
+    isArchivedSettingsPath("/boards/OLD/settings", undefined),
+    false,
+  );
+  assert.equal(isArchivedSettingsPath("/tickets", boards), false);
 });

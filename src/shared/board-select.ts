@@ -1,5 +1,5 @@
 import { DEFAULT_BOARD_KEY, parseBoardKey } from "./board-key.js";
-import { parseRoute } from "./route.js";
+import { parseRoute, switchBoardLocation, type Page } from "./route.js";
 import type { Board, BoardKey } from "./types.js";
 
 export type BoardEntry = Pick<Board, "key" | "archived">;
@@ -61,6 +61,26 @@ export function boardSearch(board: BoardKey): { board: BoardKey | undefined } {
   return { board: board === DEFAULT_BOARD_KEY ? undefined : board };
 }
 
+/**
+ * The `router.navigate` options that move a page to another board.
+ *
+ * @remarks A keyed page gets the board in its path. Any other page keeps its other search parameters and sets `board`.
+ */
+export function boardSwitchTarget(
+  page: Page,
+  board: BoardKey,
+):
+  | { href: string }
+  | {
+      to: ".";
+      search: (prev: Record<string, unknown>) => Record<string, unknown>;
+    } {
+  const href = switchBoardLocation({ page }, board);
+  return href !== null
+    ? { href }
+    : { to: ".", search: (prev) => ({ ...prev, ...boardSearch(board) }) };
+}
+
 /** Add the `board` query parameter to an API path, or return it unchanged for `LOCAL` (U3-03). */
 export function withBoard(path: string, board: BoardKey): string {
   if (board === DEFAULT_BOARD_KEY) return path;
@@ -118,4 +138,21 @@ export function resolveBoardParam(
   const pathKey = boardKeyFromPath(pathname);
   if (pathKey === null) return { param: searchBoard, stripSearchBoard: false };
   return { param: pathKey, stripSearchBoard: searchBoard !== undefined };
+}
+
+/**
+ * Whether a path is the settings page of an archived board in the loaded list.
+ *
+ * @remarks That page is the one place an archived board is shown, read only, so the root keeps the selected board instead of rejecting the key.
+ */
+export function isArchivedSettingsPath(
+  pathname: string,
+  boards: readonly BoardEntry[] | undefined,
+): boolean {
+  const route = parseRoute(`#${pathname}`);
+  return (
+    route.page === "board-settings" &&
+    boards?.some((board) => board.key === route.board && board.archived) ===
+      true
+  );
 }

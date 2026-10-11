@@ -18,6 +18,7 @@ import {
 import { toast } from "sonner";
 import {
   boardSearch,
+  boardSwitchTarget,
   staleCountsLabel,
 } from "../../../../shared/board-select.js";
 import { createdBoardText } from "../../../../shared/board-create.js";
@@ -35,7 +36,6 @@ import { buildPrRows } from "../../../../shared/pr-rows.js";
 import {
   pageLocation,
   routeFromMatch,
-  switchBoardLocation,
   type Page,
   type Route,
 } from "../../../../shared/route.js";
@@ -221,20 +221,15 @@ export function ShellContainer({
   );
 
   const openCreateBoard = useCallback(() => {
-    void router.navigate({ to: "/boards", search: { dialog: "new" } });
-  }, [router]);
+    void router.navigate({
+      to: "/boards",
+      search: { dialog: "new", ...boardSearch(boardKey) },
+    });
+  }, [router, boardKey]);
 
   const switchBoard = useCallback(
     (key: BoardKey) => {
-      const href = switchBoardLocation({ page: routePage }, key);
-      if (href !== null) {
-        void router.navigate({ href });
-        return;
-      }
-      void router.navigate({
-        to: ".",
-        search: (prev) => ({ ...prev, ...boardSearch(key) }),
-      });
+      void router.navigate(boardSwitchTarget(routePage, key));
     },
     [router, routePage],
   );
@@ -248,7 +243,7 @@ export function ShellContainer({
     }
     toast.success(createdBoardText(result.board));
     closeOverlay(appStore, () => setPaletteOpen(false), true);
-    switchBoard(result.board.key);
+    openBoard(result.board.key);
   };
 
   const [liveBoard, setLiveBoard] = useState<BoardSnapshot | null>(null);
@@ -287,19 +282,10 @@ export function ShellContainer({
       toast(`Board ${failed} could not be loaded.`, {
         action: { label: "Try again", onClick: () => switchBoard(failed) },
       });
-      const href = switchBoardLocation({ page: routePage }, DEFAULT_BOARD_KEY);
-      void router.navigate(
-        href !== null
-          ? { href, replace: true }
-          : {
-              to: ".",
-              search: (prev) => ({
-                ...prev,
-                ...boardSearch(DEFAULT_BOARD_KEY),
-              }),
-              replace: true,
-            },
-      );
+      void router.navigate({
+        ...boardSwitchTarget(routePage, DEFAULT_BOARD_KEY),
+        replace: true,
+      });
       return;
     }
     toast(`Board ${boardKey} could not be loaded.`, {

@@ -3,7 +3,7 @@ import { useRouteContext, useRouter } from "@tanstack/react-router";
 import { inboxFeed } from "../../../../shared/feed-items.js";
 import { startAgentFor } from "../../../../shared/item-actions.js";
 import type { BoardSnapshot } from "../../../../shared/types.js";
-import { routeHash } from "../../../../shared/route.js";
+import { pageLocation } from "../../../../shared/route.js";
 import { DetailPlaceholder, DetailScroll } from "@/components/DetailPaneBody";
 import { SplitPane } from "@/components/SplitPane";
 import { CAROUSEL_QUERY } from "../../../../shared/media-queries.js";
@@ -57,7 +57,7 @@ export function SlackContainer({ selectedId }: { selectedId: string | null }) {
       selectedId={selectedId}
       onSelect={(id) =>
         void router.navigate({
-          href: routeHash({ page: "slack", id: id ?? undefined }).slice(1),
+          href: pageLocation({ page: "slack", id: id ?? undefined }, boardKey),
           replace: true,
         })
       }
@@ -130,7 +130,7 @@ function SlackPage({
           empty={rows.length === 0}
           onSelect={handleSelect}
           onOpenSettings={() => {
-            window.location.hash = routeHash({ page: "settings" });
+            window.location.hash = `#${pageLocation({ page: "settings" }, board.boardKey)}`;
           }}
         />
       }
