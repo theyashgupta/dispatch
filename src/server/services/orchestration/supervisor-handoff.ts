@@ -3,6 +3,7 @@ import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import {
   HANDOFF_CANCEL_LINE,
   HANDOFF_REQUEST_TITLE,
+  ORCHESTRATOR_RESUME_PREFIX,
 } from "../../../shared/dispatch-lines.js";
 import { isHiddenCard } from "../../../shared/hidden-card.js";
 import type { BoardPolicy, Card, Session } from "../../../shared/types.js";
@@ -40,8 +41,9 @@ const HANDOFF_TIMING: HandoffTiming = {
   cancelWindowMs: 5 * 60_000,
   pollMs: 500,
 };
-const REQUEST_SIGN =
-  /Context handoff request|context-refresh request|-handoff(-hard)?\.md/;
+const REQUEST_SIGN = new RegExp(
+  `${HANDOFF_REQUEST_TITLE}|context-refresh request|-handoff(-hard)?\\.md`,
+);
 
 interface Resumed {
   at: number;
@@ -100,9 +102,8 @@ export function orchestratorResumePromptText(
   orchestratorId: string,
   boardKey: string,
 ): string {
-  return `Resume as the ${orchestratorId} orchestrator of board ${boardKey}. Before any action call read_state, then list_cards, list_events and the open decision items; act only on what the tools return.`;
+  return `${ORCHESTRATOR_RESUME_PREFIX}${orchestratorId} orchestrator of board ${boardKey}. Before any action call read_state, then list_cards, list_events and the open decision items; act only on what the tools return.`;
 }
-
 
 /**
  * The name the handoff request carries and whether the card is active and already pending.

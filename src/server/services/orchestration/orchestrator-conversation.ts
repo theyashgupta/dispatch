@@ -17,21 +17,16 @@ const empty = (
   status: OrchestratorConversation["status"],
 ): OrchestratorConversation => ({ status, messages: [], truncated: false });
 
-function roleOf(
-  entry: TranscriptEntry,
-  kickoff: boolean,
-): ConversationMessage["role"] {
+function roleOf(entry: TranscriptEntry): ConversationMessage["role"] {
   if (entry.type === "assistant") return "orchestrator";
-  return kickoff || isDispatchLine(entry.text) ? "system" : "user";
+  return isDispatchLine(entry.text) ? "system" : "user";
 }
 
 /**
  * Read the conversation of one orchestrator from the transcript of its active session.
  *
- * @remarks
- * Dispatch types the first prompt of every orchestrator transcript (the kickoff, or the resume
- * prompt after a handoff), so the first user entry is a system message when the read starts at
- * the beginning of the file. A wake or handoff line is a system message wherever it sits.
+ * @remarks A user entry is a system message when Dispatch typed it (kickoff, wake, handoff,
+ * resume or continue line), so the user sees only their own turns as "You".
  */
 export async function readOrchestratorConversation(
   board: Board,
@@ -51,15 +46,12 @@ export async function readOrchestratorConversation(
     CONVERSATION_TEXT_MAX,
   );
   if (read === null) return empty("unreadable");
-  const firstUser = read.fromStart
-    ? read.entries.findIndex((e) => e.type === "user")
-    : -1;
   return {
     status: "ok",
-    messages: read.entries.map((entry, index) => ({
+    messages: read.entries.map((entry) => ({
       id: entry.id,
       at: entry.at,
-      role: roleOf(entry, index === firstUser),
+      role: roleOf(entry),
       text: entry.text,
     })),
     truncated: read.truncated,

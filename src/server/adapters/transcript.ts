@@ -13,7 +13,6 @@ export interface TranscriptEntry {
 
 export interface TranscriptConversation {
   entries: TranscriptEntry[];
-  fromStart: boolean;
   truncated: boolean;
 }
 
@@ -84,20 +83,20 @@ export async function resolveTranscriptPath(input: {
   return newestJsonl(dir);
 }
 
-function entryText(
-  line: string,
-): { type: "user" | "assistant"; text: string } | null {
-  let entry: { type?: unknown; message?: { content?: unknown } } | null;
-  try {
-    entry = JSON.parse(line) as typeof entry;
-  } catch {
-    return null;
-  }
-  const type = entry?.type;
-  if (type !== "assistant" && type !== "user") return null;
-  const text = contentText(entry?.message?.content);
-  return text === null ? null : { type, text };
+interface ParsedEntry {
+  type: "user" | "assistant";
+  text: string;
+  uuid: string | null;
+  at: string | null;
+  hidden: boolean;
 }
+
+const SYNTHETIC_PREFIXES = [
+  "<command-name>",
+  "<command-message>",
+  "<local-command-",
+  "[Request interrupted by user",
+];
 
 function contentText(content: unknown): string | null {
   if (typeof content === "string") return content;
@@ -110,17 +109,21 @@ function contentText(content: unknown): string | null {
   return texts.length > 0 ? texts.join("\n") : null;
 }
 
-function conversationEntry(
-  line: string,
-  index: number,
-  textMax: number,
-): TranscriptEntry | null {
+/**
+ * Parse one transcript line into a user or assistant text entry.
+ *
+ * @remarks `hidden` marks the entries Claude Code writes for itself (meta, sidechain, compact
+ * summary, slash command echoes, interrupt notes); the conversation skips them, the supervisor
+ * samples still count them.
+ */
+function parseEntry(line: string): ParsedEntry | null {
   let entry: {
     type?: unknown;
     uuid?: unknown;
     timestamp?: unknown;
     isMeta?: unknown;
     isSidechain?: unknown;
+    isCompactSummary?: unknown;
     message?: { content?: unknown };
   } | null;
   try {
@@ -130,33 +133,30 @@ function conversationEntry(
   }
   const type = entry?.type;
   if (type !== "assistant" && type !== "user") return null;
-  if (entry?.isMeta === true || entry?.isSidechain === true) return null;
   const text = contentText(entry?.message?.content);
   if (text === null) return null;
   return {
-    id: typeof entry?.uuid === "string" ? entry.uuid : `line-${index}`,
-    at: typeof entry?.timestamp === "string" ? entry.timestamp : null,
     type,
-    text:
-      text.length > textMax
-        ? `${text.slice(0, textMax)}\n[cut at ${textMax} characters]`
-        : text,
+    text,
+    uuid: typeof entry?.uuid === "string" ? entry.uuid : null,
+    at: typeof entry?.timestamp === "string" ? entry.timestamp : null,
+    hidden:
+      entry?.isMeta === true ||
+      entry?.isSidechain === true ||
+      entry?.isCompactSummary === true ||
+      SYNTHETIC_PREFIXES.some((prefix) => text.startsWith(prefix)),
   };
 }
 
 /**
- * Read the user and assistant text entries of a transcript in order, newest `limit` kept.
+ * Read the last 256 KiB of a file as whole lines, with the byte offset of the first kept line.
  *
- * @remarks
- * Reads the same 256 KiB tail as {@link readTranscriptTail}. Tool calls, tool results, thinking,
- * meta and sidechain entries carry no conversation text and are skipped, as is a line that does
- * not parse. `fromStart` says the read began at the first byte of the file.
+ * @remarks A tail that starts inside the file drops its partial first line. Resolves null when
+ * the file cannot be read.
  */
-export async function readTranscriptConversation(
+async function readTailLines(
   file: string,
-  limit: number,
-  textMax: number,
-): Promise<TranscriptConversation | null> {
+): Promise<{ size: number; start: number; lines: string[] } | null> {
   let handle: fsp.FileHandle;
   try {
     handle = await fsp.open(file, "r");
@@ -165,27 +165,56 @@ export async function readTranscriptConversation(
   }
   try {
     const { size } = await handle.stat();
-    const start = Math.max(0, size - TAIL_BYTES);
-    const buffer = Buffer.alloc(size - start);
-    await handle.read(buffer, 0, buffer.length, start);
-    const lines = buffer.toString("utf8").split("\n");
-    if (start > 0) lines.shift();
-    const entries: TranscriptEntry[] = [];
-    lines.forEach((line, index) => {
-      const entry = conversationEntry(line, index, textMax);
-      if (entry) entries.push(entry);
-    });
-    const kept = entries.slice(-limit);
-    return {
-      entries: kept,
-      fromStart: start === 0 && kept.length === entries.length,
-      truncated: start > 0 || kept.length < entries.length,
-    };
+    const from = Math.max(0, size - TAIL_BYTES);
+    const buffer = Buffer.alloc(size - from);
+    await handle.read(buffer, 0, buffer.length, from);
+    const skip = from > 0 ? buffer.indexOf(10) + 1 : 0;
+    const lines = buffer.subarray(skip).toString("utf8").split("\n");
+    return { size, start: from + skip, lines };
   } catch {
     return null;
   } finally {
     await handle.close();
   }
+}
+
+/**
+ * Read the user and assistant text entries of a transcript in order, newest `limit` kept.
+ *
+ * @remarks
+ * Tool calls, tool results, thinking and the entries Claude Code writes for itself carry no
+ * conversation text and are skipped, as is a line that does not parse. An entry with no uuid
+ * takes its byte offset as its id, so the id stays the same while the tail window moves.
+ */
+export async function readTranscriptConversation(
+  file: string,
+  limit: number,
+  textMax: number,
+): Promise<TranscriptConversation | null> {
+  const tail = await readTailLines(file);
+  if (tail === null) return null;
+  const entries: TranscriptEntry[] = [];
+  let offset = tail.start;
+  for (const line of tail.lines) {
+    const parsed = parseEntry(line);
+    if (parsed !== null && !parsed.hidden) {
+      entries.push({
+        id: parsed.uuid ?? `offset-${offset}`,
+        at: parsed.at,
+        type: parsed.type,
+        text:
+          parsed.text.length > textMax
+            ? `${parsed.text.slice(0, textMax)}\n[cut at ${textMax} characters]`
+            : parsed.text,
+      });
+    }
+    offset += Buffer.byteLength(line) + 1;
+  }
+  const kept = entries.slice(-limit);
+  return {
+    entries: kept,
+    truncated: tail.start > 0 || kept.length < entries.length,
+  };
 }
 
 /**
@@ -197,30 +226,14 @@ export async function readTranscriptConversation(
 export async function readTranscriptTail(
   file: string,
 ): Promise<TranscriptTail | null> {
-  let handle: fsp.FileHandle;
-  try {
-    handle = await fsp.open(file, "r");
-  } catch {
-    return null;
+  const tail = await readTailLines(file);
+  if (tail === null) return null;
+  let lastAssistantText: string | null = null;
+  const userTexts: string[] = [];
+  for (const line of tail.lines) {
+    const entry = parseEntry(line);
+    if (entry?.type === "assistant") lastAssistantText = entry.text;
+    else if (entry?.type === "user") userTexts.push(entry.text);
   }
-  try {
-    const { size } = await handle.stat();
-    const start = Math.max(0, size - TAIL_BYTES);
-    const buffer = Buffer.alloc(size - start);
-    await handle.read(buffer, 0, buffer.length, start);
-    const lines = buffer.toString("utf8").split("\n");
-    if (start > 0) lines.shift();
-    let lastAssistantText: string | null = null;
-    const userTexts: string[] = [];
-    for (const line of lines) {
-      const entry = entryText(line);
-      if (entry?.type === "assistant") lastAssistantText = entry.text;
-      else if (entry?.type === "user") userTexts.push(entry.text);
-    }
-    return { size, lastAssistantText, userTexts };
-  } catch {
-    return null;
-  } finally {
-    await handle.close();
-  }
+  return { size: tail.size, lastAssistantText, userTexts };
 }

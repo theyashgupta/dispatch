@@ -2,6 +2,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
+import { ORCHESTRATOR_KICKOFF_LEAD } from "../../../shared/dispatch-lines.js";
 import type {
   Board,
   BoardKey,
@@ -481,7 +482,7 @@ async function writeMcpConfig(
 }
 
 function kickoffDirection(board: Board, record: OrchestratorRecord): string {
-  return `You are the orchestrator "${record.name}" (id ${record.id}) of board ${board.key}. Use the dispatch tools to coordinate the work of this board.`;
+  return `${ORCHESTRATOR_KICKOFF_LEAD}${record.name}" (id ${record.id}) of board ${board.key}. Use the dispatch tools to coordinate the work of this board.`;
 }
 
 function settledState(cardId: string): "running" | "stopped" {
