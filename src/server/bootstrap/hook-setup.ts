@@ -425,6 +425,7 @@ function hookSettingsJson(): string {
       StopFailure: entry,
       UserPromptSubmit: entry,
       PostToolUse: entry,
+      PostToolUseFailure: entry,
       PreToolUse: [
         { matcher: [...PAUSE_TOOL_NAMES].join("|"), hooks: entry[0].hooks },
         {
