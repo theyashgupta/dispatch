@@ -298,26 +298,27 @@ function writeFileStep(step, append) {
   return { path: rel, bytes: Buffer.byteLength(content) };
 }
 
-async function reportStep(step) {
+async function postToHookPort(route, body, expected, label) {
   const port = process.env.DISPATCH_HOOK_PORT;
   const token = process.env.DISPATCH_HOOK_TOKEN;
   if (!port || !token) {
     throw new Error("DISPATCH_HOOK_PORT and DISPATCH_HOOK_TOKEN are required");
   }
-  const res = await fetch("http://127.0.0.1:" + port + "/api/loops/report", {
+  const res = await fetch("http://127.0.0.1:" + port + route, {
     method: "POST",
     headers: { "content-type": "application/json", "x-dispatch-token": token },
-    body: JSON.stringify(step.report),
+    body: JSON.stringify(body),
     signal: AbortSignal.timeout(5000),
   });
-  if (res.status !== 202) throw new Error("report answered " + res.status);
+  if (res.status !== expected) throw new Error(label + " answered " + res.status);
   return { status: res.status };
 }
 
 const ACTIONS = {
   writeFile: (step) => writeFileStep(step, false),
   appendFile: (step) => writeFileStep(step, true),
-  report: reportStep,
+  report: (step) => postToHookPort("/api/loops/report", step.report, 202, "report"),
+  hook: (step) => postToHookPort("/api/hook/claude", step.hook, 204, "hook"),
   waitKeys: waitForKeys,
 };
 
@@ -604,7 +605,7 @@ function shellQuote(value: string): string {
 /**
  * Write a fake interactive `claude` that reads its scenario from `FAKE_CLAUDE_SCENARIO_DIR` or `FAKE_CLAUDE_SCENARIO`.
  *
- * @remarks Lookup order is `<dir>/<DISPATCH_CARD_ID>.json`, `<dir>/default.json`, then the variable. A `loop` scenario writes only inside its cwd and reports to the hook port, and the fake is test-only. The fake sets its stdout non-blocking because a blocking write stalls on a full pty during a large paste.
+ * @remarks Lookup order is `<dir>/<DISPATCH_CARD_ID>.json`, `<dir>/default.json`, then the variable. A `loop` scenario writes only inside its cwd and sends reports and hook events to the hook port, and the fake is test-only. The fake sets its stdout non-blocking because a blocking write stalls on a full pty during a large paste.
  */
 export function writeFakeClaudeTui(binDir: string): string {
   const script = path.join(binDir, "fake-claude-tui.mjs");

@@ -1443,6 +1443,8 @@ legal source column(s), target, and owning code path:
 | Hook `UserPromptSubmit`                                      | `FLIP_BACK_SOURCES` (`needs_input`, `agent_done`, `in_review`)                   | `in_progress`                                    | `hook-events.ts#applyPromptSubmit` → `board.store.ts#flipBack`                            |
 | Hook `PreToolUse` (pause-class tool)                         | any except `APPLY_MARKER_EXCLUDED_SOURCES`                                       | `needs_input`                                    | `hook-events.ts#applyPreToolUseEvent` → `applyMarker`                                     |
 | Hook `PostToolUse` (pause-class tool)                        | `FLIP_BACK_SOURCES`                                                              | `in_progress`                                    | `applyHookEvent`'s `PostToolUse` branch → `flipBack`                                      |
+| Hook `PostToolUseFailure` (pause-class tool)                 | `FLIP_BACK_SOURCES`                                                              | `in_progress`                                    | same as above                                                                             |
+| Hook `PostToolUse` or `Stop` while a pause-tool marker holds | `needs_input` ONLY                                                               | `in_progress`                                    | `applyHookEvent` reading `heldByPauseTool` → `flipBack`                                   |
 | Watcher marker decision (pane-parsed)                        | any except `APPLY_MARKER_EXCLUDED_SOURCES`                                       | `needs_input` / `agent_done`                     | `watcher.ts#scanSession` reading pure `scan-decision.ts#decideScan` → `applyMarker`       |
 | Watcher flip-back decision                                   | `needs_input` ONLY                                                               | `in_progress`                                    | same path → `flipBack`                                                                    |
 | Manual drag / `POST /cards/:id/move`                         | any except `agent_done` as a target, and never `todo → in_progress` (`BOARD-07`) | any allowed pair                                 | `board.store.ts#moveCardManual`, gated by `routes/cards.route.ts`                         |
@@ -4202,8 +4204,8 @@ watcher's per-session maps.
 fires at the pause, so `applyStopEvent`'s marker-text parsing (the mechanism every other pause
 class relies on) never runs for it, and answering the question delivers the reply as a tool
 result, not a fresh prompt, so `UserPromptSubmit` never fires either. Both gaps were confirmed
-live (not inferred from docs) against the installed CLI before any fix landed. The fix is two
-layers, ordered lowest-risk first:
+live (not inferred from docs) against the installed CLI before any fix landed. The fix has three
+parts, ordered lowest-risk first:
 
 1. `kickoff.ts`'s `STATUS_PROTOCOL` carries a fourth instruction line asking the agent to print
    the `NEEDS_INPUT` marker as a standalone reply before calling a pausing tool. Live-measured
@@ -4241,6 +4243,14 @@ layers, ordered lowest-risk first:
    pause flips the card to Needs Input, answering flips it back, a plain `pane`-mode session stays
    structurally unable to detect the pause (unregressed, pre-existing, out of this fix's scope),
    and a manual drag still wins over any marker.
+3. A subagent cannot show a dialog. A hook payload with an `agent_id` comes from a subagent, so
+   `applyHookEvent` ignores its pause-tool `PreToolUse`, `PostToolUse` and `PostToolUseFailure`
+   events. A pause-tool call can also fail without a dialog. The hook settings register
+   `PostToolUseFailure`, and a pause-tool failure flips the card back. If a pause-tool marker still
+   holds the card in Needs Input when the main session runs a tool (`PostToolUse`) or ends a turn
+   (`Stop`), the main session is not blocked on a dialog, so the card flips back. A text
+   `DISPATCH_STATUS: NEEDS_INPUT` marker does not start with the pause-tool key, so this rule does
+   not release it.
 
 **Accepted residuals.** Under `auto`, the window between a card becoming watcher-visible and its
 first authenticated hook event has BOTH channels live and can double-stamp the same activity (two

@@ -185,6 +185,24 @@ async function applyPreToolUseEvent(
 }
 
 /**
+ * Tell whether a card sits in Needs Input only because this session's last marker is a
+ * synthesized pause-tool marker.
+ *
+ * @remarks A text marker from the agent never matches, so new output after a real
+ * `DISPATCH_STATUS: NEEDS_INPUT` line does not move the card.
+ */
+function heldByPauseTool(cardId: string, sessionId: string): boolean {
+  const card = store.getCard(cardId);
+  if (card?.column !== "needs_input") return false;
+  const key = card.sessions?.find((s) => s.id === sessionId)?.lastMarker;
+  return [...PAUSE_TOOL_NAMES].some((name) =>
+    key?.startsWith(
+      markerKey({ kind: "NEEDS_INPUT", reason: `waiting on ${name} (` }),
+    ),
+  );
+}
+
+/**
  * Resolve the per-invocation discriminator a synthesized `PreToolUse` marker's `reason` folds in
  * (HOOK-03 follow-up): the payload's own `tool_use_id` when present and well-formed — validated
  * with the same string-plus-bounded-charset shape as `session_id` below, never trusted blindly —
@@ -236,6 +254,9 @@ function resolvePreToolUseDiscriminator(
  * conversation node per id on the resolved session (LOCAL-13): a `/clear` in the pane starts a new
  * conversation whose first hook event appends a node, so Resume follows the user to it. The
  * store's own throttle keeps the per-event call cheap.
+ * @remarks A payload with an `agent_id` comes from a subagent, which cannot show a dialog, so its
+ * pause-tool events never move the card. A pause also ends on a pause-tool `PostToolUseFailure`,
+ * or when the main session runs a tool or stops while a pause-tool marker holds the card.
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
 export async function applyHookEvent(
@@ -250,6 +271,7 @@ export async function applyHookEvent(
         tool_use_id?: unknown;
         error?: unknown;
         transcript_path?: unknown;
+        agent_id?: unknown;
       }
     | undefined,
 ): Promise<void> {
@@ -273,8 +295,12 @@ export async function applyHookEvent(
   }
 
   const event = body?.hook_event_name;
+  const fromSubagent =
+    typeof body?.agent_id === "string" && body.agent_id !== "";
   const toolName =
-    typeof body?.tool_name === "string" && PAUSE_TOOL_NAMES.has(body.tool_name)
+    !fromSubagent &&
+    typeof body?.tool_name === "string" &&
+    PAUSE_TOOL_NAMES.has(body.tool_name)
       ? body.tool_name
       : undefined;
 
@@ -291,6 +317,17 @@ export async function applyHookEvent(
     }
   }
 
+  const pauseEnded =
+    toolName !== undefined &&
+    (event === "PostToolUse" || event === "PostToolUseFailure");
+  const mainRanOn =
+    !fromSubagent &&
+    (event === "PostToolUse" || event === "Stop") &&
+    heldByPauseTool(cardId, sessionId);
+  if (pauseEnded || mainRanOn) {
+    await store.flipBack(cardId, sessionId);
+  }
+
   if (event === "Stop" && typeof body?.last_assistant_message === "string") {
     await applyStopEvent(cardId, sessionId, body.last_assistant_message);
   } else if (event === "UserPromptSubmit") {
@@ -301,10 +338,6 @@ export async function applyHookEvent(
       body?.tool_use_id,
     );
     await applyPreToolUseEvent(cardId, sessionId, toolName, discriminator);
-  }
-
-  if (event === "PostToolUse" && toolName !== undefined) {
-    await store.flipBack(cardId, sessionId);
   }
 
   if (event === "Stop") {
