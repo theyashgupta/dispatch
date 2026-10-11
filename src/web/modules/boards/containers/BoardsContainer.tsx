@@ -25,7 +25,7 @@ import { BoardFormContainer } from "./BoardFormContainer";
 
 export function BoardsContainer() {
   const nav = useBoardsNavigation();
-  const search = useSearch({ from: "/boards/{-$id}" });
+  const search = useSearch({ from: "/boards/" });
   const list = useBoardListQuery();
   const counts = useBoardCountsQuery();
   const archive = useArchiveBoardMutation();

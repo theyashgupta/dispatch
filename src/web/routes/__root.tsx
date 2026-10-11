@@ -1,4 +1,11 @@
-import { lazy, Suspense, useEffect, useState, type ComponentType } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useLayoutEffect,
+  useState,
+  type ComponentType,
+} from "react";
 import type { QueryClient } from "@tanstack/react-query";
 import {
   createRootRouteWithContext,
@@ -37,11 +44,18 @@ import {
 import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 import { DONE_PAGE_SIZE } from "../../shared/done-limit.js";
 import {
+  boardKeyFromPath,
   entryBoard,
+  resolveBoardParam,
   selectBoard,
   unavailableBoardMessage,
 } from "../../shared/board-select.js";
-import { notFoundTarget, type Page } from "../../shared/route.js";
+import {
+  notFoundTarget,
+  parseRoute,
+  switchBoardLocation,
+  type Page,
+} from "../../shared/route.js";
 
 const MeetingNotesView = lazy(() =>
   import("@/modules/meetings").then((m) => ({ default: m.MeetingNotesView })),
@@ -134,9 +148,21 @@ export const Route = createRootRouteWithContext<{
   search: { middlewares: [retainSearchParams(["board"])] },
   beforeLoad: async ({ context, search, cause, location }) => {
     const { queryClient, appStore } = context;
+    const { param, stripSearchBoard } = resolveBoardParam(
+      location.pathname,
+      search.board,
+    );
+    if (stripSearchBoard) {
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
+      throw redirect({
+        to: location.pathname,
+        search: { ...search, board: undefined },
+        replace: true,
+      });
+    }
     const remembered = context.rememberedBoard;
     if (
-      search.board === undefined &&
+      param === undefined &&
       (remembered === null || remembered === DEFAULT_BOARD_KEY)
     ) {
       const state = appStore.getState();
@@ -150,8 +176,8 @@ export const Route = createRootRouteWithContext<{
     const listFromCache = cached !== undefined;
     const switching =
       cause !== "enter" &&
-      typeof search.board === "string" &&
-      search.board !== appStore.getState().board;
+      typeof param === "string" &&
+      param !== appStore.getState().board;
     const [setup, loaded] = await Promise.all([
       loadSetup(queryClient),
       withTimeout(
@@ -165,7 +191,7 @@ export const Route = createRootRouteWithContext<{
       ),
     ]);
     let boards = loaded ?? (switching ? cached?.boards : undefined);
-    if (cause === "enter" && search.board === undefined) {
+    if (cause === "enter" && param === undefined) {
       const entry = entryBoard(context.rememberedBoard, boards);
       if (entry !== null) {
         // eslint-disable-next-line @typescript-eslint/only-throw-error
@@ -176,7 +202,7 @@ export const Route = createRootRouteWithContext<{
         });
       }
     }
-    let choice = selectBoard(search.board, boards);
+    let choice = selectBoard(param, boards);
     if (
       choice.unavailable !== null &&
       boards !== undefined &&
@@ -191,10 +217,21 @@ export const Route = createRootRouteWithContext<{
         BOARD_LIST_WAIT_MS,
       );
       boards = fresh ?? boards;
-      choice = selectBoard(search.board, boards);
+      choice = selectBoard(param, boards);
     }
     if (choice.unavailable !== null) {
       toast(unavailableBoardMessage(choice.unavailable));
+      const keyedHref =
+        boardKeyFromPath(location.pathname) === null
+          ? null
+          : switchBoardLocation(
+              parseRoute(`#${location.pathname}`),
+              DEFAULT_BOARD_KEY,
+            );
+      if (keyedHref !== null) {
+        // eslint-disable-next-line @typescript-eslint/only-throw-error
+        throw redirect({ href: keyedHref, replace: true });
+      }
       // eslint-disable-next-line @typescript-eslint/only-throw-error
       throw redirect({
         to: location.pathname,
@@ -202,9 +239,14 @@ export const Route = createRootRouteWithContext<{
         replace: true,
       });
     }
-    appStore.setBoard(choice.key);
-    prefetchBoard(queryClient, choice.key, appStore.getState().doneLimit);
-    return { setup };
+    if (cause === "enter") appStore.setBoard(choice.key);
+    const current = appStore.getState();
+    prefetchBoard(
+      queryClient,
+      choice.key,
+      current.board === choice.key ? current.doneLimit : DONE_PAGE_SIZE,
+    );
+    return { setup, board: choice.key };
   },
   pendingComponent: () => <BootScreen connection="connecting" />,
   component: RootComponent,
@@ -212,7 +254,10 @@ export const Route = createRootRouteWithContext<{
 });
 
 function RootComponent() {
-  const { appStore } = Route.useRouteContext();
+  const { appStore, board } = Route.useRouteContext();
+  useLayoutEffect(() => {
+    appStore.setBoard(board);
+  }, [appStore, board]);
   const meetingNotesOpen = useAppStore(appStore, (s) => s.meetingNotesOpen);
   return (
     <ShellView

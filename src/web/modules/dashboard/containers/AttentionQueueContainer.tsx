@@ -169,8 +169,8 @@ export function AttentionQueueContainer() {
       onReply={onReply}
       onAnswer={onAnswer}
       onAction={(kind, cardId) => void onAction(kind, cardId)}
-      onOpenTerminal={(cardId) =>
-        void navigate({ to: "/board/{-$id}", params: { id: cardId } })
+      onOpenTerminal={() =>
+        void navigate({ to: "/boards/$key", params: { key: boardKey } })
       }
     />
   );

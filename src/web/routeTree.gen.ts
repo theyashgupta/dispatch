@@ -12,9 +12,17 @@ import { createFileRoute } from '@tanstack/react-router'
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as BoardChar123IdChar125RouteImport } from './routes/board.{-$id}'
-import { Route as BoardsChar123IdChar125RouteImport } from './routes/boards.{-$id}'
+import { Route as BoardsIndexRouteImport } from './routes/boards.index'
+import { Route as DashboardChar123IdChar125RouteImport } from './routes/dashboard.{-$id}'
 import { Route as ErrorsChar123IdChar125RouteImport } from './routes/errors.{-$id}'
+import { Route as InboxChar123IdChar125RouteImport } from './routes/inbox.{-$id}'
 import { Route as PullRequestsChar123IdChar125RouteImport } from './routes/pull-requests.{-$id}'
+import { Route as SessionsChar123IdChar125RouteImport } from './routes/sessions.{-$id}'
+import { Route as BoardsKeyIndexRouteImport } from './routes/boards.$key.index'
+import { Route as BoardsKeySettingsRouteImport } from './routes/boards.$key.settings'
+import { Route as BoardsKeyDashboardChar123IdChar125RouteImport } from './routes/boards.$key.dashboard.{-$id}'
+import { Route as BoardsKeyInboxChar123IdChar125RouteImport } from './routes/boards.$key.inbox.{-$id}'
+import { Route as BoardsKeySessionsChar123IdChar125RouteImport } from './routes/boards.$key.sessions.{-$id}'
 
 const AccountsChar123IdChar125LazyRouteImport =
   createFileRoute('/accounts/{-$id}')()
@@ -25,16 +33,11 @@ const ArchiveChar123IdChar125LazyRouteImport =
 const AskChar123IdChar125LazyRouteImport = createFileRoute('/ask/{-$id}')()
 const CalendarChar123IdChar125LazyRouteImport =
   createFileRoute('/calendar/{-$id}')()
-const DashboardChar123IdChar125LazyRouteImport =
-  createFileRoute('/dashboard/{-$id}')()
 const FlowChar123IdChar125LazyRouteImport = createFileRoute('/flow/{-$id}')()
-const InboxChar123IdChar125LazyRouteImport = createFileRoute('/inbox/{-$id}')()
 const MeetingsChar123IdChar125LazyRouteImport =
   createFileRoute('/meetings/{-$id}')()
 const PlaybooksChar123IdChar125LazyRouteImport =
   createFileRoute('/playbooks/{-$id}')()
-const SessionsChar123IdChar125LazyRouteImport =
-  createFileRoute('/sessions/{-$id}')()
 const SettingsChar123IdChar125LazyRouteImport =
   createFileRoute('/settings/{-$id}')()
 const SlackChar123IdChar125LazyRouteImport = createFileRoute('/slack/{-$id}')()
@@ -46,9 +49,6 @@ const WorkspaceChar123IdChar125LazyRouteImport =
   createFileRoute('/workspace/{-$id}')()
 const WorkspacesChar123IdChar125LazyRouteImport =
   createFileRoute('/workspaces/{-$id}')()
-const BoardsKeySettingsLazyRouteImport = createFileRoute(
-  '/boards/$key/settings',
-)()
 
 const AccountsChar123IdChar125LazyRoute =
   AccountsChar123IdChar125LazyRouteImport.update({
@@ -83,12 +83,12 @@ const BoardChar123IdChar125Route = BoardChar123IdChar125RouteImport.update({
   id: '/board/{-$id}',
   path: '/board/{-$id}',
   getParentRoute: () => rootRouteImport,
-} as any).lazy(() => import('./routes/board.{-$id}.lazy').then((d) => d.Route))
-const BoardsChar123IdChar125Route = BoardsChar123IdChar125RouteImport.update({
-  id: '/boards/{-$id}',
-  path: '/boards/{-$id}',
+} as any)
+const BoardsIndexRoute = BoardsIndexRouteImport.update({
+  id: '/boards/',
+  path: '/boards/',
   getParentRoute: () => rootRouteImport,
-} as any).lazy(() => import('./routes/boards.{-$id}.lazy').then((d) => d.Route))
+} as any).lazy(() => import('./routes/boards.index.lazy').then((d) => d.Route))
 const CalendarChar123IdChar125LazyRoute =
   CalendarChar123IdChar125LazyRouteImport.update({
     id: '/calendar/{-$id}',
@@ -97,14 +97,12 @@ const CalendarChar123IdChar125LazyRoute =
   } as any).lazy(() =>
     import('./routes/calendar.{-$id}.lazy').then((d) => d.Route),
   )
-const DashboardChar123IdChar125LazyRoute =
-  DashboardChar123IdChar125LazyRouteImport.update({
+const DashboardChar123IdChar125Route =
+  DashboardChar123IdChar125RouteImport.update({
     id: '/dashboard/{-$id}',
     path: '/dashboard/{-$id}',
     getParentRoute: () => rootRouteImport,
-  } as any).lazy(() =>
-    import('./routes/dashboard.{-$id}.lazy').then((d) => d.Route),
-  )
+  } as any)
 const ErrorsChar123IdChar125Route = ErrorsChar123IdChar125RouteImport.update({
   id: '/errors/{-$id}',
   path: '/errors/{-$id}',
@@ -116,14 +114,11 @@ const FlowChar123IdChar125LazyRoute =
     path: '/flow/{-$id}',
     getParentRoute: () => rootRouteImport,
   } as any).lazy(() => import('./routes/flow.{-$id}.lazy').then((d) => d.Route))
-const InboxChar123IdChar125LazyRoute =
-  InboxChar123IdChar125LazyRouteImport.update({
-    id: '/inbox/{-$id}',
-    path: '/inbox/{-$id}',
-    getParentRoute: () => rootRouteImport,
-  } as any).lazy(() =>
-    import('./routes/inbox.{-$id}.lazy').then((d) => d.Route),
-  )
+const InboxChar123IdChar125Route = InboxChar123IdChar125RouteImport.update({
+  id: '/inbox/{-$id}',
+  path: '/inbox/{-$id}',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const MeetingsChar123IdChar125LazyRoute =
   MeetingsChar123IdChar125LazyRouteImport.update({
     id: '/meetings/{-$id}',
@@ -148,14 +143,12 @@ const PullRequestsChar123IdChar125Route =
   } as any).lazy(() =>
     import('./routes/pull-requests.{-$id}.lazy').then((d) => d.Route),
   )
-const SessionsChar123IdChar125LazyRoute =
-  SessionsChar123IdChar125LazyRouteImport.update({
+const SessionsChar123IdChar125Route =
+  SessionsChar123IdChar125RouteImport.update({
     id: '/sessions/{-$id}',
     path: '/sessions/{-$id}',
     getParentRoute: () => rootRouteImport,
-  } as any).lazy(() =>
-    import('./routes/sessions.{-$id}.lazy').then((d) => d.Route),
-  )
+  } as any)
 const SettingsChar123IdChar125LazyRoute =
   SettingsChar123IdChar125LazyRouteImport.update({
     id: '/settings/{-$id}',
@@ -212,30 +205,60 @@ const WorkspacesChar123IdChar125LazyRoute =
   } as any).lazy(() =>
     import('./routes/workspaces.{-$id}.lazy').then((d) => d.Route),
   )
-const BoardsKeySettingsLazyRoute = BoardsKeySettingsLazyRouteImport.update({
+const BoardsKeyIndexRoute = BoardsKeyIndexRouteImport.update({
+  id: '/boards/$key/',
+  path: '/boards/$key/',
+  getParentRoute: () => rootRouteImport,
+} as any).lazy(() =>
+  import('./routes/boards.$key.index.lazy').then((d) => d.Route),
+)
+const BoardsKeySettingsRoute = BoardsKeySettingsRouteImport.update({
   id: '/boards/$key/settings',
   path: '/boards/$key/settings',
   getParentRoute: () => rootRouteImport,
 } as any).lazy(() =>
   import('./routes/boards.$key.settings.lazy').then((d) => d.Route),
 )
+const BoardsKeyDashboardChar123IdChar125Route =
+  BoardsKeyDashboardChar123IdChar125RouteImport.update({
+    id: '/boards/$key/dashboard/{-$id}',
+    path: '/boards/$key/dashboard/{-$id}',
+    getParentRoute: () => rootRouteImport,
+  } as any).lazy(() =>
+    import('./routes/boards.$key.dashboard.{-$id}.lazy').then((d) => d.Route),
+  )
+const BoardsKeyInboxChar123IdChar125Route =
+  BoardsKeyInboxChar123IdChar125RouteImport.update({
+    id: '/boards/$key/inbox/{-$id}',
+    path: '/boards/$key/inbox/{-$id}',
+    getParentRoute: () => rootRouteImport,
+  } as any).lazy(() =>
+    import('./routes/boards.$key.inbox.{-$id}.lazy').then((d) => d.Route),
+  )
+const BoardsKeySessionsChar123IdChar125Route =
+  BoardsKeySessionsChar123IdChar125RouteImport.update({
+    id: '/boards/$key/sessions/{-$id}',
+    path: '/boards/$key/sessions/{-$id}',
+    getParentRoute: () => rootRouteImport,
+  } as any).lazy(() =>
+    import('./routes/boards.$key.sessions.{-$id}.lazy').then((d) => d.Route),
+  )
 
 export interface FileRoutesByFullPath {
   '/board/{-$id}': typeof BoardChar123IdChar125Route
-  '/boards/{-$id}': typeof BoardsChar123IdChar125Route
+  '/dashboard/{-$id}': typeof DashboardChar123IdChar125Route
   '/errors/{-$id}': typeof ErrorsChar123IdChar125Route
+  '/inbox/{-$id}': typeof InboxChar123IdChar125Route
   '/pull-requests/{-$id}': typeof PullRequestsChar123IdChar125Route
+  '/sessions/{-$id}': typeof SessionsChar123IdChar125Route
   '/accounts/{-$id}': typeof AccountsChar123IdChar125LazyRoute
   '/activity/{-$id}': typeof ActivityChar123IdChar125LazyRoute
   '/archive/{-$id}': typeof ArchiveChar123IdChar125LazyRoute
   '/ask/{-$id}': typeof AskChar123IdChar125LazyRoute
   '/calendar/{-$id}': typeof CalendarChar123IdChar125LazyRoute
-  '/dashboard/{-$id}': typeof DashboardChar123IdChar125LazyRoute
   '/flow/{-$id}': typeof FlowChar123IdChar125LazyRoute
-  '/inbox/{-$id}': typeof InboxChar123IdChar125LazyRoute
   '/meetings/{-$id}': typeof MeetingsChar123IdChar125LazyRoute
   '/playbooks/{-$id}': typeof PlaybooksChar123IdChar125LazyRoute
-  '/sessions/{-$id}': typeof SessionsChar123IdChar125LazyRoute
   '/settings/{-$id}': typeof SettingsChar123IdChar125LazyRoute
   '/slack/{-$id}': typeof SlackChar123IdChar125LazyRoute
   '/tickets/{-$id}': typeof TicketsChar123IdChar125LazyRoute
@@ -243,24 +266,28 @@ export interface FileRoutesByFullPath {
   '/vault/{-$id}': typeof VaultChar123IdChar125LazyRoute
   '/workspace/{-$id}': typeof WorkspaceChar123IdChar125LazyRoute
   '/workspaces/{-$id}': typeof WorkspacesChar123IdChar125LazyRoute
-  '/boards/$key/settings': typeof BoardsKeySettingsLazyRoute
+  '/boards/': typeof BoardsIndexRoute
+  '/boards/$key/settings': typeof BoardsKeySettingsRoute
+  '/boards/$key/': typeof BoardsKeyIndexRoute
+  '/boards/$key/dashboard/{-$id}': typeof BoardsKeyDashboardChar123IdChar125Route
+  '/boards/$key/inbox/{-$id}': typeof BoardsKeyInboxChar123IdChar125Route
+  '/boards/$key/sessions/{-$id}': typeof BoardsKeySessionsChar123IdChar125Route
 }
 export interface FileRoutesByTo {
   '/board/{-$id}': typeof BoardChar123IdChar125Route
-  '/boards/{-$id}': typeof BoardsChar123IdChar125Route
+  '/dashboard/{-$id}': typeof DashboardChar123IdChar125Route
   '/errors/{-$id}': typeof ErrorsChar123IdChar125Route
+  '/inbox/{-$id}': typeof InboxChar123IdChar125Route
   '/pull-requests/{-$id}': typeof PullRequestsChar123IdChar125Route
+  '/sessions/{-$id}': typeof SessionsChar123IdChar125Route
   '/accounts/{-$id}': typeof AccountsChar123IdChar125LazyRoute
   '/activity/{-$id}': typeof ActivityChar123IdChar125LazyRoute
   '/archive/{-$id}': typeof ArchiveChar123IdChar125LazyRoute
   '/ask/{-$id}': typeof AskChar123IdChar125LazyRoute
   '/calendar/{-$id}': typeof CalendarChar123IdChar125LazyRoute
-  '/dashboard/{-$id}': typeof DashboardChar123IdChar125LazyRoute
   '/flow/{-$id}': typeof FlowChar123IdChar125LazyRoute
-  '/inbox/{-$id}': typeof InboxChar123IdChar125LazyRoute
   '/meetings/{-$id}': typeof MeetingsChar123IdChar125LazyRoute
   '/playbooks/{-$id}': typeof PlaybooksChar123IdChar125LazyRoute
-  '/sessions/{-$id}': typeof SessionsChar123IdChar125LazyRoute
   '/settings/{-$id}': typeof SettingsChar123IdChar125LazyRoute
   '/slack/{-$id}': typeof SlackChar123IdChar125LazyRoute
   '/tickets/{-$id}': typeof TicketsChar123IdChar125LazyRoute
@@ -268,25 +295,29 @@ export interface FileRoutesByTo {
   '/vault/{-$id}': typeof VaultChar123IdChar125LazyRoute
   '/workspace/{-$id}': typeof WorkspaceChar123IdChar125LazyRoute
   '/workspaces/{-$id}': typeof WorkspacesChar123IdChar125LazyRoute
-  '/boards/$key/settings': typeof BoardsKeySettingsLazyRoute
+  '/boards': typeof BoardsIndexRoute
+  '/boards/$key/settings': typeof BoardsKeySettingsRoute
+  '/boards/$key': typeof BoardsKeyIndexRoute
+  '/boards/$key/dashboard/{-$id}': typeof BoardsKeyDashboardChar123IdChar125Route
+  '/boards/$key/inbox/{-$id}': typeof BoardsKeyInboxChar123IdChar125Route
+  '/boards/$key/sessions/{-$id}': typeof BoardsKeySessionsChar123IdChar125Route
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/board/{-$id}': typeof BoardChar123IdChar125Route
-  '/boards/{-$id}': typeof BoardsChar123IdChar125Route
+  '/dashboard/{-$id}': typeof DashboardChar123IdChar125Route
   '/errors/{-$id}': typeof ErrorsChar123IdChar125Route
+  '/inbox/{-$id}': typeof InboxChar123IdChar125Route
   '/pull-requests/{-$id}': typeof PullRequestsChar123IdChar125Route
+  '/sessions/{-$id}': typeof SessionsChar123IdChar125Route
   '/accounts/{-$id}': typeof AccountsChar123IdChar125LazyRoute
   '/activity/{-$id}': typeof ActivityChar123IdChar125LazyRoute
   '/archive/{-$id}': typeof ArchiveChar123IdChar125LazyRoute
   '/ask/{-$id}': typeof AskChar123IdChar125LazyRoute
   '/calendar/{-$id}': typeof CalendarChar123IdChar125LazyRoute
-  '/dashboard/{-$id}': typeof DashboardChar123IdChar125LazyRoute
   '/flow/{-$id}': typeof FlowChar123IdChar125LazyRoute
-  '/inbox/{-$id}': typeof InboxChar123IdChar125LazyRoute
   '/meetings/{-$id}': typeof MeetingsChar123IdChar125LazyRoute
   '/playbooks/{-$id}': typeof PlaybooksChar123IdChar125LazyRoute
-  '/sessions/{-$id}': typeof SessionsChar123IdChar125LazyRoute
   '/settings/{-$id}': typeof SettingsChar123IdChar125LazyRoute
   '/slack/{-$id}': typeof SlackChar123IdChar125LazyRoute
   '/tickets/{-$id}': typeof TicketsChar123IdChar125LazyRoute
@@ -294,26 +325,30 @@ export interface FileRoutesById {
   '/vault/{-$id}': typeof VaultChar123IdChar125LazyRoute
   '/workspace/{-$id}': typeof WorkspaceChar123IdChar125LazyRoute
   '/workspaces/{-$id}': typeof WorkspacesChar123IdChar125LazyRoute
-  '/boards/$key/settings': typeof BoardsKeySettingsLazyRoute
+  '/boards/': typeof BoardsIndexRoute
+  '/boards/$key/settings': typeof BoardsKeySettingsRoute
+  '/boards/$key/': typeof BoardsKeyIndexRoute
+  '/boards/$key/dashboard/{-$id}': typeof BoardsKeyDashboardChar123IdChar125Route
+  '/boards/$key/inbox/{-$id}': typeof BoardsKeyInboxChar123IdChar125Route
+  '/boards/$key/sessions/{-$id}': typeof BoardsKeySessionsChar123IdChar125Route
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/board/{-$id}'
-    | '/boards/{-$id}'
+    | '/dashboard/{-$id}'
     | '/errors/{-$id}'
+    | '/inbox/{-$id}'
     | '/pull-requests/{-$id}'
+    | '/sessions/{-$id}'
     | '/accounts/{-$id}'
     | '/activity/{-$id}'
     | '/archive/{-$id}'
     | '/ask/{-$id}'
     | '/calendar/{-$id}'
-    | '/dashboard/{-$id}'
     | '/flow/{-$id}'
-    | '/inbox/{-$id}'
     | '/meetings/{-$id}'
     | '/playbooks/{-$id}'
-    | '/sessions/{-$id}'
     | '/settings/{-$id}'
     | '/slack/{-$id}'
     | '/tickets/{-$id}'
@@ -321,24 +356,28 @@ export interface FileRouteTypes {
     | '/vault/{-$id}'
     | '/workspace/{-$id}'
     | '/workspaces/{-$id}'
+    | '/boards/'
     | '/boards/$key/settings'
+    | '/boards/$key/'
+    | '/boards/$key/dashboard/{-$id}'
+    | '/boards/$key/inbox/{-$id}'
+    | '/boards/$key/sessions/{-$id}'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/board/{-$id}'
-    | '/boards/{-$id}'
+    | '/dashboard/{-$id}'
     | '/errors/{-$id}'
+    | '/inbox/{-$id}'
     | '/pull-requests/{-$id}'
+    | '/sessions/{-$id}'
     | '/accounts/{-$id}'
     | '/activity/{-$id}'
     | '/archive/{-$id}'
     | '/ask/{-$id}'
     | '/calendar/{-$id}'
-    | '/dashboard/{-$id}'
     | '/flow/{-$id}'
-    | '/inbox/{-$id}'
     | '/meetings/{-$id}'
     | '/playbooks/{-$id}'
-    | '/sessions/{-$id}'
     | '/settings/{-$id}'
     | '/slack/{-$id}'
     | '/tickets/{-$id}'
@@ -346,24 +385,28 @@ export interface FileRouteTypes {
     | '/vault/{-$id}'
     | '/workspace/{-$id}'
     | '/workspaces/{-$id}'
+    | '/boards'
     | '/boards/$key/settings'
+    | '/boards/$key'
+    | '/boards/$key/dashboard/{-$id}'
+    | '/boards/$key/inbox/{-$id}'
+    | '/boards/$key/sessions/{-$id}'
   id:
     | '__root__'
     | '/board/{-$id}'
-    | '/boards/{-$id}'
+    | '/dashboard/{-$id}'
     | '/errors/{-$id}'
+    | '/inbox/{-$id}'
     | '/pull-requests/{-$id}'
+    | '/sessions/{-$id}'
     | '/accounts/{-$id}'
     | '/activity/{-$id}'
     | '/archive/{-$id}'
     | '/ask/{-$id}'
     | '/calendar/{-$id}'
-    | '/dashboard/{-$id}'
     | '/flow/{-$id}'
-    | '/inbox/{-$id}'
     | '/meetings/{-$id}'
     | '/playbooks/{-$id}'
-    | '/sessions/{-$id}'
     | '/settings/{-$id}'
     | '/slack/{-$id}'
     | '/tickets/{-$id}'
@@ -371,25 +414,29 @@ export interface FileRouteTypes {
     | '/vault/{-$id}'
     | '/workspace/{-$id}'
     | '/workspaces/{-$id}'
+    | '/boards/'
     | '/boards/$key/settings'
+    | '/boards/$key/'
+    | '/boards/$key/dashboard/{-$id}'
+    | '/boards/$key/inbox/{-$id}'
+    | '/boards/$key/sessions/{-$id}'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   BoardChar123IdChar125Route: typeof BoardChar123IdChar125Route
-  BoardsChar123IdChar125Route: typeof BoardsChar123IdChar125Route
+  DashboardChar123IdChar125Route: typeof DashboardChar123IdChar125Route
   ErrorsChar123IdChar125Route: typeof ErrorsChar123IdChar125Route
+  InboxChar123IdChar125Route: typeof InboxChar123IdChar125Route
   PullRequestsChar123IdChar125Route: typeof PullRequestsChar123IdChar125Route
+  SessionsChar123IdChar125Route: typeof SessionsChar123IdChar125Route
   AccountsChar123IdChar125LazyRoute: typeof AccountsChar123IdChar125LazyRoute
   ActivityChar123IdChar125LazyRoute: typeof ActivityChar123IdChar125LazyRoute
   ArchiveChar123IdChar125LazyRoute: typeof ArchiveChar123IdChar125LazyRoute
   AskChar123IdChar125LazyRoute: typeof AskChar123IdChar125LazyRoute
   CalendarChar123IdChar125LazyRoute: typeof CalendarChar123IdChar125LazyRoute
-  DashboardChar123IdChar125LazyRoute: typeof DashboardChar123IdChar125LazyRoute
   FlowChar123IdChar125LazyRoute: typeof FlowChar123IdChar125LazyRoute
-  InboxChar123IdChar125LazyRoute: typeof InboxChar123IdChar125LazyRoute
   MeetingsChar123IdChar125LazyRoute: typeof MeetingsChar123IdChar125LazyRoute
   PlaybooksChar123IdChar125LazyRoute: typeof PlaybooksChar123IdChar125LazyRoute
-  SessionsChar123IdChar125LazyRoute: typeof SessionsChar123IdChar125LazyRoute
   SettingsChar123IdChar125LazyRoute: typeof SettingsChar123IdChar125LazyRoute
   SlackChar123IdChar125LazyRoute: typeof SlackChar123IdChar125LazyRoute
   TicketsChar123IdChar125LazyRoute: typeof TicketsChar123IdChar125LazyRoute
@@ -397,7 +444,12 @@ export interface RootRouteChildren {
   VaultChar123IdChar125LazyRoute: typeof VaultChar123IdChar125LazyRoute
   WorkspaceChar123IdChar125LazyRoute: typeof WorkspaceChar123IdChar125LazyRoute
   WorkspacesChar123IdChar125LazyRoute: typeof WorkspacesChar123IdChar125LazyRoute
-  BoardsKeySettingsLazyRoute: typeof BoardsKeySettingsLazyRoute
+  BoardsIndexRoute: typeof BoardsIndexRoute
+  BoardsKeySettingsRoute: typeof BoardsKeySettingsRoute
+  BoardsKeyIndexRoute: typeof BoardsKeyIndexRoute
+  BoardsKeyDashboardChar123IdChar125Route: typeof BoardsKeyDashboardChar123IdChar125Route
+  BoardsKeyInboxChar123IdChar125Route: typeof BoardsKeyInboxChar123IdChar125Route
+  BoardsKeySessionsChar123IdChar125Route: typeof BoardsKeySessionsChar123IdChar125Route
 }
 
 declare module '@tanstack/react-router' {
@@ -437,11 +489,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BoardChar123IdChar125RouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/boards/{-$id}': {
-      id: '/boards/{-$id}'
-      path: '/boards/{-$id}'
-      fullPath: '/boards/{-$id}'
-      preLoaderRoute: typeof BoardsChar123IdChar125RouteImport
+    '/boards/': {
+      id: '/boards/'
+      path: '/boards'
+      fullPath: '/boards/'
+      preLoaderRoute: typeof BoardsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/calendar/{-$id}': {
@@ -455,7 +507,7 @@ declare module '@tanstack/react-router' {
       id: '/dashboard/{-$id}'
       path: '/dashboard/{-$id}'
       fullPath: '/dashboard/{-$id}'
-      preLoaderRoute: typeof DashboardChar123IdChar125LazyRouteImport
+      preLoaderRoute: typeof DashboardChar123IdChar125RouteImport
       parentRoute: typeof rootRouteImport
     }
     '/errors/{-$id}': {
@@ -476,7 +528,7 @@ declare module '@tanstack/react-router' {
       id: '/inbox/{-$id}'
       path: '/inbox/{-$id}'
       fullPath: '/inbox/{-$id}'
-      preLoaderRoute: typeof InboxChar123IdChar125LazyRouteImport
+      preLoaderRoute: typeof InboxChar123IdChar125RouteImport
       parentRoute: typeof rootRouteImport
     }
     '/meetings/{-$id}': {
@@ -504,7 +556,7 @@ declare module '@tanstack/react-router' {
       id: '/sessions/{-$id}'
       path: '/sessions/{-$id}'
       fullPath: '/sessions/{-$id}'
-      preLoaderRoute: typeof SessionsChar123IdChar125LazyRouteImport
+      preLoaderRoute: typeof SessionsChar123IdChar125RouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings/{-$id}': {
@@ -556,11 +608,39 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspacesChar123IdChar125LazyRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/boards/$key/': {
+      id: '/boards/$key/'
+      path: '/boards/$key'
+      fullPath: '/boards/$key/'
+      preLoaderRoute: typeof BoardsKeyIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/boards/$key/settings': {
       id: '/boards/$key/settings'
       path: '/boards/$key/settings'
       fullPath: '/boards/$key/settings'
-      preLoaderRoute: typeof BoardsKeySettingsLazyRouteImport
+      preLoaderRoute: typeof BoardsKeySettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/boards/$key/dashboard/{-$id}': {
+      id: '/boards/$key/dashboard/{-$id}'
+      path: '/boards/$key/dashboard/{-$id}'
+      fullPath: '/boards/$key/dashboard/{-$id}'
+      preLoaderRoute: typeof BoardsKeyDashboardChar123IdChar125RouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/boards/$key/inbox/{-$id}': {
+      id: '/boards/$key/inbox/{-$id}'
+      path: '/boards/$key/inbox/{-$id}'
+      fullPath: '/boards/$key/inbox/{-$id}'
+      preLoaderRoute: typeof BoardsKeyInboxChar123IdChar125RouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/boards/$key/sessions/{-$id}': {
+      id: '/boards/$key/sessions/{-$id}'
+      path: '/boards/$key/sessions/{-$id}'
+      fullPath: '/boards/$key/sessions/{-$id}'
+      preLoaderRoute: typeof BoardsKeySessionsChar123IdChar125RouteImport
       parentRoute: typeof rootRouteImport
     }
   }
@@ -568,20 +648,19 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   BoardChar123IdChar125Route: BoardChar123IdChar125Route,
-  BoardsChar123IdChar125Route: BoardsChar123IdChar125Route,
+  DashboardChar123IdChar125Route: DashboardChar123IdChar125Route,
   ErrorsChar123IdChar125Route: ErrorsChar123IdChar125Route,
+  InboxChar123IdChar125Route: InboxChar123IdChar125Route,
   PullRequestsChar123IdChar125Route: PullRequestsChar123IdChar125Route,
+  SessionsChar123IdChar125Route: SessionsChar123IdChar125Route,
   AccountsChar123IdChar125LazyRoute: AccountsChar123IdChar125LazyRoute,
   ActivityChar123IdChar125LazyRoute: ActivityChar123IdChar125LazyRoute,
   ArchiveChar123IdChar125LazyRoute: ArchiveChar123IdChar125LazyRoute,
   AskChar123IdChar125LazyRoute: AskChar123IdChar125LazyRoute,
   CalendarChar123IdChar125LazyRoute: CalendarChar123IdChar125LazyRoute,
-  DashboardChar123IdChar125LazyRoute: DashboardChar123IdChar125LazyRoute,
   FlowChar123IdChar125LazyRoute: FlowChar123IdChar125LazyRoute,
-  InboxChar123IdChar125LazyRoute: InboxChar123IdChar125LazyRoute,
   MeetingsChar123IdChar125LazyRoute: MeetingsChar123IdChar125LazyRoute,
   PlaybooksChar123IdChar125LazyRoute: PlaybooksChar123IdChar125LazyRoute,
-  SessionsChar123IdChar125LazyRoute: SessionsChar123IdChar125LazyRoute,
   SettingsChar123IdChar125LazyRoute: SettingsChar123IdChar125LazyRoute,
   SlackChar123IdChar125LazyRoute: SlackChar123IdChar125LazyRoute,
   TicketsChar123IdChar125LazyRoute: TicketsChar123IdChar125LazyRoute,
@@ -589,7 +668,14 @@ const rootRouteChildren: RootRouteChildren = {
   VaultChar123IdChar125LazyRoute: VaultChar123IdChar125LazyRoute,
   WorkspaceChar123IdChar125LazyRoute: WorkspaceChar123IdChar125LazyRoute,
   WorkspacesChar123IdChar125LazyRoute: WorkspacesChar123IdChar125LazyRoute,
-  BoardsKeySettingsLazyRoute: BoardsKeySettingsLazyRoute,
+  BoardsIndexRoute: BoardsIndexRoute,
+  BoardsKeySettingsRoute: BoardsKeySettingsRoute,
+  BoardsKeyIndexRoute: BoardsKeyIndexRoute,
+  BoardsKeyDashboardChar123IdChar125Route:
+    BoardsKeyDashboardChar123IdChar125Route,
+  BoardsKeyInboxChar123IdChar125Route: BoardsKeyInboxChar123IdChar125Route,
+  BoardsKeySessionsChar123IdChar125Route:
+    BoardsKeySessionsChar123IdChar125Route,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

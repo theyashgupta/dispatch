@@ -21,7 +21,11 @@ import {
   actionablePinnedMembers,
   selectedCardOf,
 } from "../../../../shared/pinned-card.js";
-import { routeFromMatch, routeHash } from "../../../../shared/route.js";
+import {
+  routeFromMatch,
+  routeHash,
+  switchBoardLocation,
+} from "../../../../shared/route.js";
 import {
   accountName,
   sessionAccountView,
@@ -87,7 +91,8 @@ export function DetailPanelContainer() {
   const router = useRouter();
   const leaf = useRouterState({ select: (s) => s.matches.at(-1) });
   const pathname = useLocation({ select: (l) => l.pathname });
-  const docked = routeFromMatch(leaf, pathname).page === "workspace";
+  const routePage = routeFromMatch(leaf, pathname).page;
+  const docked = routePage === "workspace";
   const boardKey = useAppStore(appStore, (s) => s.board);
   const board = useBoardSnapshot(
     boardKey,
@@ -176,8 +181,10 @@ export function DetailPanelContainer() {
   const open = card != null;
 
   const selectedBoardRef = useRef(boardKey);
+  const routePageRef = useRef(routePage);
   useEffect(() => {
     selectedBoardRef.current = boardKey;
+    routePageRef.current = routePage;
   });
   const cardId = card?.id;
   const cardBoard = card?.boardKey;
@@ -185,11 +192,16 @@ export function DetailPanelContainer() {
     if (cardId === undefined) return;
     const target = cardBoardSwitch(cardBoard, selectedBoardRef.current);
     if (target === null) return;
-    void router.navigate({
-      to: ".",
-      search: (prev) => ({ ...prev, ...boardSearch(target) }),
-      replace: true,
-    });
+    const href = switchBoardLocation({ page: routePageRef.current }, target);
+    void router.navigate(
+      href !== null
+        ? { href, replace: true }
+        : {
+            to: ".",
+            search: (prev) => ({ ...prev, ...boardSearch(target) }),
+            replace: true,
+          },
+    );
   }, [cardId, cardBoard, router]);
 
   const [detailsExpanded, setDetailsExpanded] = useState(false);
