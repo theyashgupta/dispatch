@@ -16,6 +16,7 @@ interface DecisionInput {
   options: DecisionItem["options"];
   recommendedOptionId?: string | undefined;
   tickets?: NonNullable<DecisionItem["proposal"]>["tickets"] | undefined;
+  plan?: DecisionItem["plan"] | undefined;
 }
 
 const ROADMAP_OPTIONS: DecisionItem["options"] = [
@@ -26,6 +27,11 @@ const ROADMAP_OPTIONS: DecisionItem["options"] = [
 const PROPOSAL_OPTIONS: DecisionItem["options"] = [
   { id: "approve", label: "Create these tickets" },
   { id: "reject", label: "Do not create" },
+];
+
+const PLAN_OPTIONS: DecisionItem["options"] = [
+  { id: "approve", label: "Approve the plan" },
+  { id: "reject", label: "Do not approve" },
 ];
 
 /**
@@ -44,9 +50,9 @@ function ownerOf(caller: OrchestratorIdentity, cardId: string | null): string {
  *
  * @remarks
  * The caller checks that `cardId` belongs to the board. The recommended option must be
- * one of the options, else the typed 400 `invalid-recommended-option`. A `roadmap_approval` or
- * `ticket_proposal` item gets the server options, so the label the user picks always matches the id
- * the later tool checks.
+ * one of the options, else the typed 400 `invalid-recommended-option`. A `roadmap_approval`,
+ * `ticket_proposal` or `plan` item gets the server options, so the label the user picks always matches
+ * the id the later tool checks.
  */
 export function createDecisionItem(
   caller: OrchestratorIdentity,
@@ -56,12 +62,18 @@ export function createDecisionItem(
   if (proposal !== (input.tickets !== undefined)) {
     throw new ValidationError("invalid-tickets");
   }
-  const serverOptions = proposal || input.kind === "roadmap_approval";
+  const plan = input.kind === "plan";
+  if (plan !== (input.plan !== undefined)) {
+    throw new ValidationError("invalid-plan");
+  }
+  const serverOptions = proposal || plan || input.kind === "roadmap_approval";
   const options = proposal
     ? PROPOSAL_OPTIONS
-    : serverOptions
-      ? ROADMAP_OPTIONS
-      : input.options;
+    : plan
+      ? PLAN_OPTIONS
+      : serverOptions
+        ? ROADMAP_OPTIONS
+        : input.options;
   const recommended = serverOptions
     ? "approve"
     : (input.recommendedOptionId ?? null);
@@ -87,6 +99,7 @@ export function createDecisionItem(
     ...(input.tickets === undefined
       ? {}
       : { proposal: { tickets: input.tickets, usedIndexes: [] } }),
+    ...(input.plan === undefined ? {} : { plan: input.plan }),
   };
   store.insertDecisionItem(item);
   store.appendOrchestrationEvent({

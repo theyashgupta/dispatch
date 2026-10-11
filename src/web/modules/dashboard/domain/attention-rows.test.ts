@@ -126,6 +126,7 @@ test("a decision item becomes a decision row with its view, and falls back when 
     meta: "Board, asked by Main 1 min ago",
     options: [],
     proposalTitles: [],
+    planRows: [],
     otherOptionId: null,
   };
   const decision = item("decision", {

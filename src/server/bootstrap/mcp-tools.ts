@@ -12,6 +12,9 @@ import {
   ITEM_TITLE_MAX,
   MOVABLE_COLUMNS,
   ORCHESTRATOR_STATE_MAX_BYTES,
+  PLAN_ENTRIES_MAX,
+  PLAN_PLAYBOOK_MAX,
+  PLAN_REF_MAX,
   SESSION_INPUT_MAX,
   SHIP_BODY_MAX,
   SHIP_TITLE_MAX,
@@ -19,6 +22,7 @@ import {
 import {
   DECISION_KINDS,
   ORCHESTRATION_EVENT_KINDS,
+  PLAN_SIZES,
 } from "../../shared/types.js";
 
 export interface McpTool {
@@ -284,7 +288,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "create_decision_item",
     description:
-      "Create a decision item for a person to answer. Give 2 to 8 options with distinct ids. For the kind ticket_proposal, give 1 to 20 tickets, each with a title and a description.",
+      "Create a decision item for a person to answer. Give 2 to 8 options with distinct ids. For the kind ticket_proposal, give 1 to 20 tickets, each with a title and a description. For the kind plan, give plan.entries: 1 to 20 entries, each with ref (a card id or a group title), playbook, order (1 to 20, unique) and size (small, medium or large). A plan gets the options approve and reject.",
     input: {
       cardId: looseId.nullable().optional(),
       kind: z.enum(DECISION_KINDS),
@@ -303,6 +307,21 @@ export const MCP_TOOLS: readonly McpTool[] = [
         .array(z.object({ title: titleField, description: descriptionField }))
         .min(1)
         .max(20)
+        .optional(),
+      plan: z
+        .object({
+          entries: z
+            .array(
+              z.object({
+                ref: z.string().min(1).max(PLAN_REF_MAX),
+                playbook: z.string().min(1).max(PLAN_PLAYBOOK_MAX),
+                order: z.number().int().min(1).max(PLAN_ENTRIES_MAX),
+                size: z.enum(PLAN_SIZES),
+              }),
+            )
+            .min(1)
+            .max(PLAN_ENTRIES_MAX),
+        })
         .optional(),
     },
     method: "POST",

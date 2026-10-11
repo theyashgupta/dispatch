@@ -1,4 +1,4 @@
-import type { DecisionItem } from "./types.js";
+import type { DecisionItem, PlanEntry } from "./types.js";
 
 export interface DecisionOptionView {
   id: string;
@@ -12,6 +12,7 @@ export interface DecisionView {
   meta: string;
   options: DecisionOptionView[];
   proposalTitles: string[];
+  planRows: PlanEntry[];
   otherOptionId: string | null;
 }
 
@@ -34,7 +35,11 @@ export interface ReplyRow {
   stateSince: string | null;
 }
 
-const GATE_KINDS: readonly string[] = ["roadmap_approval", "ticket_proposal"];
+const GATE_KINDS: readonly string[] = [
+  "roadmap_approval",
+  "ticket_proposal",
+  "plan",
+];
 
 /** Format how long ago a decision item was asked, for example "6 min ago". */
 export function askedAgo(iso: string, now: number): string {
@@ -52,7 +57,7 @@ export function askedAgo(iso: string, now: number): string {
  * Build the view model of each open decision item.
  *
  * @remarks
- * Options keep their written order and the recommended mark never moves one. The typed answer of "Other answer" rides on the recommended option, else the first option, because the answer route needs an option id of the item. A `roadmap_approval` or `ticket_proposal` item is a binary gate, so it has no other answer.
+ * Options keep their written order and the recommended mark never moves one. The typed answer of "Other answer" rides on the recommended option, else the first option, because the answer route needs an option id of the item. A `roadmap_approval`, `ticket_proposal` or `plan` item is a binary gate, so it has no other answer.
  */
 export function decisionViews(
   items: readonly DecisionItem[],
@@ -77,6 +82,9 @@ export function decisionViews(
           item.kind === "ticket_proposal"
             ? (item.proposal?.tickets.map((t) => t.title) ?? [])
             : [],
+        planRows: [...(item.plan?.entries ?? [])].sort(
+          (a, b) => a.order - b.order,
+        ),
         otherOptionId: GATE_KINDS.includes(item.kind)
           ? null
           : (item.recommendedOptionId ?? item.options[0]?.id ?? null),

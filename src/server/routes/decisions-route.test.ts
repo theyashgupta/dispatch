@@ -456,3 +456,72 @@ void test("tickets are refused on another kind, required on a proposal and bound
   }
   assert.equal(store.listDecisionItems(SBX).length, before);
 });
+
+void test("a plan item holds its entries, gets the server options and is answered by the user", async () => {
+  const plan = {
+    entries: [
+      { ref: "SBX-1", playbook: "Write code directly", order: 1, size: "small" },
+      { ref: "Calendar sync", playbook: "Roadmap Loop", order: 2, size: "large" },
+    ],
+  };
+  const item = await created({
+    kind: "plan",
+    plan,
+    options: [
+      { id: "x", label: "X" },
+      { id: "y", label: "Y" },
+    ],
+  });
+  assert.deepEqual(
+    item.options.map((o) => o.id),
+    ["approve", "reject"],
+  );
+  assert.equal(item.recommendedOptionId, "approve");
+  assert.deepEqual(item.plan, plan);
+  const wrong = await call("POST", `/decisions/${item.id}/answer`, {
+    body: { optionId: "x" },
+  });
+  assert.equal(wrong.status, 400);
+  const answered = await call("POST", `/decisions/${item.id}/answer`, {
+    body: { optionId: "approve" },
+  });
+  assert.equal(answered.status, 200);
+  const event = rows(SBX, "decision_answered").find(
+    (e) => e.data.decisionId === item.id,
+  );
+  assert.equal(event?.data.kind, "plan");
+  assert.equal(event?.data.optionId, "approve");
+});
+
+void test("a plan is refused on another kind, required on a plan item and bounded", async () => {
+  const entry = { ref: "SBX-1", playbook: "p", order: 1, size: "small" };
+  const plan = (entries: unknown[]) => ({ entries });
+  const cases: Record<string, unknown>[] = [
+    { kind: "ruling", plan: plan([entry]) },
+    { kind: "plan" },
+    { kind: "plan", plan: plan([]) },
+    {
+      kind: "plan",
+      plan: plan(
+        Array.from({ length: 21 }, (_, i) => ({ ...entry, order: i + 1 })),
+      ),
+    },
+    { kind: "plan", plan: plan([entry, { ...entry, ref: "SBX-2" }]) },
+    { kind: "plan", plan: plan([{ ...entry, order: 0 }]) },
+    { kind: "plan", plan: plan([{ ...entry, order: 21 }]) },
+    { kind: "plan", plan: plan([{ ...entry, order: 1.5 }]) },
+    { kind: "plan", plan: plan([{ ...entry, size: "huge" }]) },
+    { kind: "plan", plan: plan([{ ...entry, ref: "" }]) },
+    { kind: "plan", plan: plan([{ ...entry, ref: "r".repeat(301) }]) },
+    { kind: "plan", plan: plan([{ ...entry, playbook: " " }]) },
+    { kind: "plan", plan: plan([{ ...entry, playbook: "p".repeat(201) }]) },
+    { kind: "plan", plan: plan([{ ...entry, extra: 1 }]) },
+  ];
+  const before = store.listDecisionItems(SBX).length;
+  for (const body of cases) {
+    const reply = await create(body);
+    assert.equal(reply.status, 400, JSON.stringify(body).slice(0, 80));
+    assert.equal(reply.body.error, "invalid-plan");
+  }
+  assert.equal(store.listDecisionItems(SBX).length, before);
+});
