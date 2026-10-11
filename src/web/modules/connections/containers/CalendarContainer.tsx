@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { useRouteContext } from "@tanstack/react-router";
+import { pageLocation } from "../../../../shared/route.js";
 import { calendarCardStatus } from "../../../../shared/connection-status.js";
 import type {
   CalendarChoice,
@@ -6,6 +8,7 @@ import type {
   CalendarMode,
   CalendarSettingsPatch,
 } from "../../../../shared/types.js";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { CalendarCard } from "@/modules/connections/components/CalendarCard";
 import { calendarAccessView } from "@/modules/connections/domain/calendar-permission";
 import {
@@ -21,6 +24,8 @@ import {
 } from "@/modules/connections/queries/connections-queries";
 
 export function CalendarContainer() {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const boardKey = useAppStore(appStore, (s) => s.board);
   const statusQuery = useCalendarConnectionStatusQuery();
   const list = useListCalendarsMutation();
   const saveSettings = useSaveCalendarSettingsMutation();
@@ -94,6 +99,7 @@ export function CalendarContainer() {
       enabled={status?.enabled === true}
       statusKnown={status !== null}
       access={status === null ? null : calendarAccessView(status, new Date())}
+      vaultHref={`#${pageLocation({ page: "vault" }, boardKey)}`}
       checkingAccess={checkAccess.isPending}
       onModeChange={(next) => {
         setActionError(null);

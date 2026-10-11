@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { withBoard } from "../../../../shared/board-select.js";
+import { routeHash } from "../../../../shared/route.js";
 import type { Column } from "../../../../shared/types.js";
 import { TicketsSection } from "@/modules/dashboard/components/TicketsSection";
 import { sectionState } from "@/modules/dashboard/domain/section-state";
@@ -32,7 +32,7 @@ export function TicketsContainer() {
       state={sectionState([snapshot])}
       rows={rows}
       total={rows.reduce((sum, row) => sum + row.cards.length, 0)}
-      openBoardHref={withBoard("#/board", boardKey)}
+      openBoardHref={routeHash({ page: "board", board: boardKey })}
       groups={groups}
       groupValue={groupValue}
       columnValue={columnValue}

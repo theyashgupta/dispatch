@@ -6,11 +6,11 @@ import {
   type QueryClient,
 } from "@tanstack/react-query";
 import type { BoardKey } from "../../../../shared/types.js";
+import type { UpdateBoardInput } from "../../../../shared/board-create.js";
 import { boardListKeys } from "@/queries/board-list-queries";
-import type { UpdateBoardInput } from "@/modules/boards/domain/board-form";
+import { workspaceFoldersKeys } from "@/queries/workspace-folders-queries";
 import {
   archiveBoard,
-  createBoard,
   getBoardDetail,
   restoreBoard,
   updateBoard,
@@ -22,7 +22,7 @@ export const boardsKeys = {
 };
 
 /**
- * Read one board fresh each time the edit form opens.
+ * Read one board fresh each time the settings page opens.
  *
  * @remarks The default board's folders come from Settings, so a cached copy could show a list
  * that Settings already changed.
@@ -54,15 +54,30 @@ function refreshBoards(queryClient: QueryClient) {
   };
 }
 
-export function createBoardMutationOptions(queryClient: QueryClient) {
-  return { mutationFn: createBoard, onSuccess: refreshBoards(queryClient) };
-}
-
+/**
+ * Build the mutation options that change a board.
+ *
+ * @remarks A saved repository list changes the folders the Start dialog reads for that board. The
+ * folder list is reset, not invalidated, so a closed dialog never opens on the old list.
+ */
 export function updateBoardMutationOptions(queryClient: QueryClient) {
+  const refresh = refreshBoards(queryClient);
   return {
     mutationFn: (vars: { key: BoardKey; input: UpdateBoardInput }) =>
       updateBoard(vars.key, vars.input),
-    onSuccess: refreshBoards(queryClient),
+    onSuccess: async (
+      result: BoardWriteResult,
+      vars: { key: BoardKey; input: UpdateBoardInput },
+    ) => {
+      await Promise.all([
+        refresh(result),
+        result.ok
+          ? queryClient.resetQueries({
+              queryKey: workspaceFoldersKeys.folders(vars.key),
+            })
+          : undefined,
+      ]);
+    },
   };
 }
 
@@ -72,10 +87,6 @@ export function archiveBoardMutationOptions(queryClient: QueryClient) {
 
 export function restoreBoardMutationOptions(queryClient: QueryClient) {
   return { mutationFn: restoreBoard, onSuccess: refreshBoards(queryClient) };
-}
-
-export function useCreateBoardMutation() {
-  return useMutation(createBoardMutationOptions(useQueryClient()));
 }
 
 export function useUpdateBoardMutation() {

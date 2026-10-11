@@ -3,7 +3,7 @@ import { SidePanelLayout } from "@/components/SidePanelLayout";
 import { BoardView } from "@/modules/board";
 import { OrchestratorPanelView } from "@/modules/orchestrator";
 
-export const Route = createLazyFileRoute("/board/{-$id}")({
+export const Route = createLazyFileRoute("/boards/$key/")({
   component: BoardRoute,
 });
 

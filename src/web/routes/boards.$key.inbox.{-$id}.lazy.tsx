@@ -2,7 +2,7 @@ import { createLazyFileRoute } from "@tanstack/react-router";
 import { InboxView } from "@/modules/inbox";
 import { SlackThreadView } from "@/modules/slack";
 
-export const Route = createLazyFileRoute("/inbox/{-$id}")({
+export const Route = createLazyFileRoute("/boards/$key/inbox/{-$id}")({
   component: InboxRoute,
 });
 

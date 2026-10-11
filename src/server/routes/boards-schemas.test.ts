@@ -106,16 +106,28 @@ test("the create body normalises paths, fills the defaults and drops a repeated 
   );
 });
 
+test("the create body takes a name alone and leaves the key and folder out", () => {
+  const parsed = createBoardBodySchema.parse({ name: "Payments" });
+  assert.deepEqual(parsed, {
+    name: "Payments",
+    repositories: [],
+    linearTeamKeys: [],
+  });
+  assert.equal(issue(createBoardBodySchema, {}), "missing-name");
+  assert.equal(issue(createBoardBodySchema, { name: "  " }), undefined);
+});
+
 test("the create body names the variant of the first failing field", () => {
   const cases: [Record<string, unknown>, string][] = [
-    [{ key: undefined }, "invalid-key"],
+    [{ key: 7 }, "invalid-key"],
     [{ name: undefined }, "missing-name"],
+    [{ name: 7 }, "missing-name"],
     [{ workspaceRoot: "rel" }, "folder-missing"],
     [{ workspaceRoot: "/a/../b" }, "folder-missing"],
     [{ workspaceRoot: "/a/./b" }, "folder-missing"],
     [{ workspaceRoot: "/a//b" }, "folder-missing"],
     [{ workspaceRoot: "/a\u0000b" }, "folder-missing"],
-    [{ repositories: undefined }, "no-repositories"],
+    [{ repositories: "x" }, "invalid-repository"],
     [{ repositories: [{ path: "rel" }] }, "folder-missing"],
     [
       { repositories: [{ path: "/a", baseBranch: "a b" }] },
@@ -135,7 +147,7 @@ test("the create body names the variant of the first failing field", () => {
       message,
     );
   }
-  assert.equal(issue(createBoardBodySchema, null), "invalid-key");
+  assert.equal(issue(createBoardBodySchema, null), "missing-name");
 });
 
 test("the create body refuses the root folder, a newline or carriage return, and a reserved team key", () => {

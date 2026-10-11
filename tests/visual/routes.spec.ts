@@ -12,8 +12,8 @@ const routes = [
   ),
 ];
 
-test("the route tree lists 22 page routes", () => {
-  expect(routes).toHaveLength(22);
+test("the route tree lists 21 page routes", () => {
+  expect(routes).toHaveLength(21);
 });
 
 for (const theme of ["dark", "light"] as const) {
@@ -70,7 +70,7 @@ test("the theme control flips the live theme and stores it", async ({
   });
   page.on("pageerror", (err) => errors.push(`pageerror: ${err.message}`));
 
-  await page.goto(`${seeded}/#/board`);
+  await page.goto(`${seeded}/#/boards/LOCAL`);
   const html = page.locator("html");
   await expect(page.getByText("Todo ticket").first()).toBeVisible();
   await expect(html).toHaveAttribute("data-theme", "dark");

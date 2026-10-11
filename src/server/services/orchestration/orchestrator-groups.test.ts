@@ -6,6 +6,7 @@ import type { BoardKey, BoardPolicy } from "../../../shared/types.js";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { startedGroup } from "../../test-support/group-fixtures.js";
 import {
+  BoardValidationError,
   ConflictError,
   ForbiddenError,
   NotFoundError,
@@ -581,4 +582,46 @@ void test("start_group by an extra with a cap override of 1 is refused while one
         ),
     );
   }
+});
+
+void test("a board with no repository refuses a group with no requested repos and a base branch, creating no card", async () => {
+  const EMPTY = parseBoardKey("EMPT") as BoardKey;
+  await store.createBoard({
+    key: EMPTY,
+    name: "Empty",
+    workspaceRoot: "/empty/sessions",
+    repositories: [],
+    linearTeamKeys: [],
+  });
+  const caller = { boardKey: EMPTY, orchestratorId: "orc-empty" };
+  const noRepositories = (err: unknown): boolean =>
+    err instanceof BoardValidationError &&
+    err.code ===
+      "This board has no repository. Add one in the board settings." &&
+    err.details?.code === "no-repositories";
+  const ids = [(await store.createLocalCard(EMPTY, "member", "")).id];
+  const groups = () =>
+    store.listCards(EMPTY).filter((c) => c.source === "group").length;
+  const before = groups();
+  await assert.rejects(
+    createOrchestratorGroup(caller, { title: "g", memberIds: ids }),
+    noRepositories,
+  );
+  await assert.rejects(
+    createOrchestratorGroup(caller, {
+      title: "g",
+      memberIds: ids,
+      repos: [{ path: repo, base: "main" }],
+    }),
+    noRepositories,
+  );
+  assert.equal(groups(), before);
+  await assert.rejects(
+    createBaseBranch(caller, {
+      repository: repo,
+      name: "base/none",
+      startPoint: "main",
+    }),
+    noRepositories,
+  );
 });

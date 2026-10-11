@@ -18,6 +18,7 @@ import {
 } from "../infra/config-holder.js";
 import { ConflictError, ValidationError } from "../domain/errors.js";
 import { launchableCard } from "./card-move.js";
+import { getBoard } from "./boards.js";
 import { restatRepos } from "./workspaces.js";
 import {
   columnChangesSince,
@@ -402,11 +403,30 @@ export async function commitCardStart(
   });
 }
 
+/**
+ * The workspace a start body names, or undefined when the card keeps its saved one.
+ *
+ * @remarks A workspace with no repository counts only on a board with no repository. On a board
+ * with repositories it is a stale client body, so the saved workspace decides.
+ */
+function bodyWorkspace(
+  card: Card,
+  workspace: CardStartInput["workspace"],
+): CardStartInput["workspace"] {
+  if (workspace === undefined || workspace.repos.length > 0) return workspace;
+  const board = getBoard(card.boardKey ?? DEFAULT_BOARD_KEY);
+  return board.repositories.length === 0 ? workspace : undefined;
+}
+
 /** Run every start check, then store the workspace and begin the session, for the start dialog route. */
 export async function startCardFromDialog(
   id: string,
   input: CardStartInput,
 ): Promise<void> {
-  const config = await prepareCardStart(id, input);
-  await commitCardStart(id, config, input);
+  const start = {
+    ...input,
+    workspace: bodyWorkspace(launchableCard(id), input.workspace),
+  };
+  const config = await prepareCardStart(id, start);
+  await commitCardStart(id, config, start);
 }

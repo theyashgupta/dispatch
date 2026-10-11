@@ -18,31 +18,48 @@ A group is one session that works on several tickets. A loop is a roadmap that a
 ### Create a board
 
 1. Press `Cmd+K` (or `Ctrl+K`) to open the command palette.
-2. Choose **New board**. The dialog **New board** opens.
-3. Fill the fields.
+2. Choose **Manage boards**. On the boards page, choose **New board**. The dialog **New board** opens.
+3. Fill the fields. Only **Name** is required. The repository rows and **Advanced** are optional. **Advanced** is closed at first. It holds **Key**, **Folder** and **Linear team keys**.
 
 | Field                | What to enter                                                                                                                      |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | **Key**              | 2 to 6 capital letters or digits. The key starts with a letter. You cannot change the key later. `LOCAL` and `GROUP` are reserved. |
 | **Name**             | The name of the board.                                                                                                             |
-| **Sessions folder**  | The folder in which Dispatch makes one folder for each session.                                                                    |
+| **Folder**           | The folder in which Dispatch makes one folder for each session.                                                                    |
 | **Repository path**  | The path of a git repository. Choose **Add repository** to add more rows.                                                          |
 | **Base branch**      | The base branch of that repository.                                                                                                |
 | **Check command**    | The command that the ship flow runs as the check of that repository. The row shows the placeholder `npm run check`.                |
 | **Linear team keys** | Linear team keys, separated by commas. New Linear issues of these teams go to this board.                                          |
 
-4. Choose **Create board**. The dialog closes and the message "Board <name> created." shows. You stay on the boards page. The board switcher still shows the old board.
-5. Open the new board. In its row, choose **Board actions**, then **Open board**. Or choose the new board in the board switcher.
+4. Choose **Create**. The dialog closes, the message "Created board <name> (<KEY>)" shows and Dispatch opens the new board.
 
-These fields are required: **Key**, **Name**, **Sessions folder** and the path of one repository. The form shows an error under a field that is empty or wrong. **Base branch**, **Check command** and **Linear team keys** are optional. An empty **Check command** becomes `npm run check`. Enter the sessions folder and the repository path as absolute paths.
+Dispatch derives the key from the name when you give no key. When you give no folder, Dispatch makes the folder `<workspaces root>/<key>`. The form shows an error under a field that is empty or wrong. **Key**, **Folder**, **Repository path**, **Base branch**, **Check command** and **Linear team keys** are optional. An empty **Check command** becomes `npm run check`. Enter the folder and the repository path as absolute paths.
 
-The key must be new. Dispatch refuses a key that another board or a Linear team already uses. A board needs at least one repository.
+In the dialog, **Browse** next to **Repository path** opens the folder browser. Choose a git folder to fill the path. In **Advanced**, **Key** and **Folder** have placeholders that show the values Dispatch uses when you leave them empty.
+
+The key must be new. Dispatch refuses a key that another board or a Linear team already uses. A board can have no repository. Add a repository later in the board settings. The server can also make a local repository in `<board folder>/<lowercase key>`.
 
 ### Switch boards
 
-The sidebar shows the board switcher when more than one board is active. Choose the switcher, or press `B`, and select a board. The switcher shows the number of items that need attention for each board.
+The sidebar has a **Boards** section at its end, after the System group. It lists every active board, in list order. The board you are on is marked. Each row shows the number of items that need attention and the number of running loops. Select a row to open the kanban board of that board. The last row, **Create board**, opens the create dialog.
 
-The palette also has **Switch to board** commands, **Manage boards** and **New board**.
+Select the label **Boards** to fold or unfold the section. Press `Enter` or `Space` on the label to do the same. When the sidebar is narrow, the section is one icon that opens the boards page. On a phone, the section shows in the sidebar sheet, and the sheet closes when you select a board.
+
+Press `B` to open the command palette with the boards only. Type to filter the boards. The palette lists **Switch to board** for each active board except the current one, then **Manage boards** and **Create board**. `B` does nothing while you type in a text field or while a dialog is open. Select a board in the palette to show the same page on that board.
+
+The address of a board page holds the board key. The pages with a keyed address are the board (`/boards/<key>`), the dashboard (`/boards/<key>/dashboard`), the inbox (`/boards/<key>/inbox`), the sessions (`/boards/<key>/sessions`) and the board settings (`/boards/<key>/settings`). The other pages keep the `board` search parameter, for example `/tickets?board=<key>`. The old addresses, such as `/board`, `/inbox` and `/dashboard?board=<key>`, still open the same pages.
+
+### Create a board from the palette
+
+1. Press `Cmd+K` (or `Ctrl+K`). Choose **Create board**.
+2. Type the board name in the field **Board name**. Press `Enter`.
+3. Dispatch shows the message "Created board <name> (<KEY>)" and opens the board.
+
+An empty name does nothing. Press `Escape` to go back to the command list. If Dispatch refuses the name, it shows the reason and keeps the palette open.
+
+### Create a board from the Ask page
+
+Write "create a board called <name>" on the **Ask** page. Dispatch creates the board with the default values. The answer gives the key and the link **Open <name>**. If you write "create a board" with no name, Dispatch asks "What should the board be called?". Write the name, or write "cancel".
 
 ### Manage boards
 
@@ -51,15 +68,27 @@ The palette also has **Switch to board** commands, **Manage boards** and **New b
 The row menu **Board actions** has three items.
 
 - **Open board** opens the board.
-- **Edit** opens the dialog **Edit board**. You can change everything except the key.
-- **Archive** hides the board from the switcher. The cards and sessions stay. The item is off while sessions run on the board. Restore the board from **Archived boards** with **Restore**.
+- **Edit** opens the board settings page (see "Board settings"). You can change the name, the team keys and the repositories. The key and the folder do not change.
+- **Archive** hides the board from the **Boards** section. The cards and sessions stay. The item is off while sessions run on the board. Restore the board from **Archived boards** with **Restore**.
+
+### Board settings
+
+Choose **Edit** in the row menu **Board actions**, or open `/boards/<key>/settings`. The page changes the name, the repositories and the Linear team keys of the board. The key does not change. An active board shows **Create a repository here**. It makes the repository `<folder>/<lowercase key>`.
+
+### Start a card on a board with no repository
+
+If the board has no repository, **Start** shows "This board has no repository." and three actions.
+
+- **Start without a repository** runs the session in the board folder.
+- **Create a repository here** makes the repository and selects it. Then choose **Start**.
+- **Add a repository** opens **Browse**. Choose a git folder. Dispatch adds it to the board and selects it.
 
 ### The default board
 
 `LOCAL` is the default board. It is the board that Dispatch shows when no other board is selected.
 
 - You cannot archive it.
-- Its repositories come from **Settings**, **Workspaces**. A change in its **Edit board** dialog also changes that list. The dialog shows the repository path only.
+- Its repositories come from **Settings**, **Workspaces**. A change on its board settings page also changes that list. The page shows the repository path only.
 - Its supervisor starts **Off**. A new board starts with the supervisor **On**.
 
 ## Orchestrated board setup
@@ -75,7 +104,7 @@ Add the repositories when you create the board, or choose **Edit** later. Each r
 To open the policy form of a board:
 
 1. If the board does not exist, create it (see "Create a board").
-2. Select the board in the board switcher (see "Switch boards").
+2. Select the board in the **Boards** section (see "Switch boards").
 3. Open the board page.
 4. Choose **Orchestrator**, or **Add orchestrator** when the board has none. The panel has four tabs: **Terminal**, **Decisions**, **Policy** and **Orchestrators**.
 5. Open **Policy**. The form is called **Policy for** and the board name.
@@ -112,12 +141,14 @@ The server accepts wider number ranges than the form does. The form ranges in th
 
 ## Add and start an orchestrator
 
-1. Select the board in the board switcher. Open the board page. Every board has its own button. `LOCAL` has one too, and its supervisor starts **Off**.
+1. Select the board in the **Boards** section. Open the board page. Every board has its own button. `LOCAL` has one too, and its supervisor starts **Off**.
 2. Choose **Add orchestrator** in the page header. When the board already has an orchestrator, the button reads **Orchestrator**. The orchestrator panel opens as a side panel over the board. Its header shows the board name.
 3. Make sure the supervisor is **On** in the **Policy** tab. With the supervisor **Off**, the panel shows: "Turn on the supervisor in Policy to start an orchestrator."
 4. Choose **Start orchestrator**.
 
 When the board has no orchestrator record, **Start orchestrator** first adds the main orchestrator. The record has the id `main` and the name "Main orchestrator". Then it starts the orchestrator.
+
+The orchestrator can create a board with the tool `create_board`. It gives a name, and the tool answers the key and the link. The tool `get_board_workspace` lists all boards.
 
 The orchestrator reads the folder and the repositories of the board by itself. It does not ask you for a repository path or a base branch. Set the base branch of each repository in the board settings.
 
@@ -222,7 +253,7 @@ The loop also reports each phase gate and unit gate to Dispatch. The report uses
 
 ## The dashboard
 
-Open the dashboard from the sidebar row **Dashboard** (group **Work**), or from the palette command **Go to Dashboard**. The sidebar row and the palette command show only when the board has a main orchestrator. The dashboard shows the board that is selected in the switcher.
+Open the dashboard from the sidebar row **Dashboard** (group **Work**), or from the palette command **Go to Dashboard**. The sidebar row and the palette command show only when the board has a main orchestrator. The dashboard shows the board that is selected in the **Boards** section.
 
 The page has six sections in a fixed order. Each section shows its own loading state and its own error. A section error has the button **Try again**. The other sections stay.
 

@@ -135,6 +135,18 @@ void test("no repos and a stored workspace: the stored workspace stays", async (
   assert.equal(starts.at(-1)?.id, card.id);
 });
 
+void test("no repos and a stored workspace with no repository: the board repositories are used", async () => {
+  const card = await ticket();
+  await store.setCardWorkspace(card.id, { folder: fixture.root, repos: [] });
+  await startOrchestratorCard(CALLER, store.getCard(card.id)!, {
+    playbook: PLAYBOOK,
+  });
+  assert.deepEqual(store.getCard(card.id)?.workspace, {
+    folder: path.dirname(repo),
+    repos: [{ path: repo, base: "main" }],
+  });
+});
+
 void test("no repos and no stored workspace: every board repository with its base", async () => {
   const card = await ticket();
   await startOrchestratorCard(CALLER, card, { playbook: PLAYBOOK });
@@ -144,7 +156,7 @@ void test("no repos and no stored workspace: every board repository with its bas
   });
 });
 
-void test("a board repository with no base refuses missing-base, and a board with none refuses invalid-repos", async () => {
+void test("a board repository with no base refuses missing-base, and a board with none refuses no-repositories", async () => {
   const caller = { boardKey: NOB, orchestratorId: "orc-nob" };
   const noBase = await ticket(NOB);
   const startsBefore = starts.length;
@@ -157,7 +169,8 @@ void test("a board repository with no base refuses missing-base, and a board wit
     startOrchestratorCard({ boardKey: EMP, orchestratorId: "orc-emp" }, empty, {
       playbook: PLAYBOOK,
     }),
-    (err) => err instanceof ValidationError && err.code === "invalid-repos",
+    (err) =>
+      err instanceof ValidationError && err.details?.code === "no-repositories",
   );
   assert.equal(starts.length, startsBefore);
   for (const card of [noBase, empty]) {

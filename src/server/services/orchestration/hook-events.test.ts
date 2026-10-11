@@ -204,3 +204,75 @@ void test("UserPromptSubmit, Stop and StopFailure set the turn state; the pane c
     setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
   }
 });
+
+const columnOf = (cardId: string) => store.getCard(cardId)?.column;
+
+void test("a subagent AskUserQuestion leaves the card in progress", async () => {
+  const { cardId, sessionId } = await cardWithSession("hook-subagent-pause");
+  assert.equal(columnOf(cardId), "in_progress");
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "PreToolUse",
+    tool_name: "AskUserQuestion",
+    tool_use_id: "toolu_subagent",
+    agent_id: "a0473ff8813982962",
+    agent_type: "review-edge-cases",
+  } as Parameters<typeof applyHookEvent>[2]);
+  assert.equal(columnOf(cardId), "in_progress");
+  assert.equal(store.getCard(cardId)?.lastMarker, undefined);
+});
+
+void test("a main-session AskUserQuestion that fails flips the card back", async () => {
+  const { cardId, sessionId } = await cardWithSession("hook-pause-failure");
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "PreToolUse",
+    tool_name: "AskUserQuestion",
+    tool_use_id: "toolu_failed",
+  });
+  assert.equal(columnOf(cardId), "needs_input");
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "PostToolUseFailure",
+    tool_name: "AskUserQuestion",
+    tool_use_id: "toolu_failed",
+    error: "no dialog",
+  });
+  assert.equal(columnOf(cardId), "in_progress");
+});
+
+void test("main-session output after a pause-tool marker flips the card back", async () => {
+  for (const next of [
+    { hook_event_name: "PostToolUse", tool_name: "Bash" },
+    { hook_event_name: "Stop", last_assistant_message: "still working" },
+  ]) {
+    const { cardId, sessionId } = await cardWithSession(
+      `hook-ran-on-${next.hook_event_name}`,
+    );
+    await applyHookEvent(cardId, sessionId, {
+      hook_event_name: "PreToolUse",
+      tool_name: "AskUserQuestion",
+      tool_use_id: `toolu_${next.hook_event_name}`,
+    });
+    assert.equal(columnOf(cardId), "needs_input");
+    await applyHookEvent(cardId, sessionId, {
+      hook_event_name: "PostToolUse",
+      tool_name: "Bash",
+      agent_id: "a-subagent",
+    });
+    assert.equal(columnOf(cardId), "needs_input", "subagent output is ignored");
+    await applyHookEvent(cardId, sessionId, next);
+    assert.equal(columnOf(cardId), "in_progress", next.hook_event_name);
+  }
+});
+
+void test("main-session output after a text NEEDS_INPUT marker keeps the card waiting", async () => {
+  const { cardId, sessionId } = await cardWithSession("hook-text-pause");
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "Stop",
+    last_assistant_message: "DISPATCH_STATUS: NEEDS_INPUT - pick a name",
+  });
+  assert.equal(columnOf(cardId), "needs_input");
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+  });
+  assert.equal(columnOf(cardId), "needs_input");
+});

@@ -46,6 +46,7 @@ const SERVER: Record<string, ServerSide> = {
     body: schemas.commentBodySchema,
   },
   create_base_branch: { body: schemas.baseBranchBodySchema },
+  create_board: { body: schemas.createBoardToolBodySchema },
   create_group: { body: schemas.createGroupBodySchema },
   start_group: { params: schemas.cardParamsSchema },
   start_card: {
@@ -100,6 +101,7 @@ const VALID: Record<string, Record<string, unknown>> = {
   move_card: { id: ID, column: "inbox" },
   add_comment: { id: ID, body: "hello" },
   create_base_branch: { repository: "/r", name: "base/a", startPoint: "main" },
+  create_board: { name: "Payments", folder: "/w/pay", repositories: ["/w/r"] },
   create_group: {
     title: "g",
     memberIds: [ID, "LOCAL-2"],
@@ -180,6 +182,8 @@ const REFUSED: [string, Record<string, unknown>][] = [
   ["move_card", { id: ID, column: "nowhere" }],
   ["add_comment", { id: ID, body: "" }],
   ["add_comment", { id: ID, body: "x".repeat(COMMENT_BODY_MAX + 1) }],
+  ["create_board", { name: "Pay", folder: "" }],
+  ["create_board", { name: "Pay", repositories: [""] }],
   ["create_base_branch", { repository: "", name: "n", startPoint: "main" }],
   ["create_base_branch", { repository: "/r", name: "n", startPoint: "" }],
   [

@@ -5,7 +5,7 @@ import { boardRepository as store } from "../../store/board-repository.js";
 import { ConflictError, ValidationError } from "../domain/errors.js";
 import { getOrchestrationConfig } from "../infra/config-holder.js";
 import { playbookExists } from "../infra/playbooks.js";
-import { mapBoardUnavailable } from "./boards.js";
+import { boardRefusal, mapBoardUnavailable } from "./boards.js";
 import { recordGroupState } from "./group-state-events.js";
 import { startSession } from "./start-session.js";
 import { restatRepos } from "./workspaces.js";
@@ -55,9 +55,9 @@ export function requireOrchestrationConfig(): Config {
 /**
  * Mint a group card from the member cards and give it its workspace, without starting a session.
  *
- * @remarks The checks run in this order: members, config, playbook, workspace, base branch,
- * repositories. The store repeats the member check inside its write queue, so a member that was
- * raced ineligible still answers the same 409.
+ * @remarks The checks run in this order: members, config, playbook, workspace, repositories
+ * present, base branch, repositories. The store repeats the member check inside its write queue,
+ * so a member that was raced ineligible still answers the same 409.
  */
 export async function createGroup(
   board: BoardKey,
@@ -79,7 +79,10 @@ export async function createGroup(
     }
   }
 
-  if (!workspace) {
+  if (!workspace || workspace.repos.length === 0) {
+    if (workspace && store.getWorkspaceFolders(board).folders.length === 0) {
+      throw boardRefusal("no-repositories");
+    }
     throw new ValidationError("No workspace selected for this group", {
       variant: "config",
     });

@@ -24,11 +24,13 @@ import {
   PLAN_SIZES,
 } from "../../shared/types.js";
 import { hasDispatchMarker } from "../services/infra/playbooks.js";
+import { folderPathSchema } from "./boards-schemas.js";
 import { distinctIds } from "./cards-schemas.js";
 import {
   MARKER_ERROR,
   booleanFilter,
   boundedText,
+  fieldsOf,
   intText,
   unknownFieldError,
 } from "./schema-primitives.js";
@@ -129,6 +131,27 @@ export const baseBranchBodySchema = z.object(
       .max(200, "unknown-start-point"),
   },
   "unknown-repository",
+);
+
+/**
+ * The orchestrator `create_board` body.
+ *
+ * @remarks A schema message is a board variant (`missing-name`, `folder-missing`) or a plain error
+ * code, as for `POST /boards`. The key is never an input: the service derives it from the name.
+ */
+export const createBoardToolBodySchema = z.preprocess(
+  fieldsOf,
+  z.object(
+    {
+      name: z.string("missing-name"),
+      folder: folderPathSchema.optional(),
+      repositories: z
+        .array(folderPathSchema, "invalid-repository")
+        .optional()
+        .transform((paths) => [...new Set(paths ?? [])]),
+    },
+    "missing-name",
+  ),
 );
 
 const reposField = z

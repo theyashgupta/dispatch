@@ -1,12 +1,16 @@
+import fsp from "node:fs/promises";
 import path from "node:path";
 import {
   ALL_BOARDS,
   DEFAULT_BOARD_KEY,
+  DEFAULT_CHECK_COMMAND,
   defaultBoardPolicy,
+  deriveBoardKey,
   identifierPrefix,
   isReservedBoardKey,
   parseBoardKey,
 } from "../../../shared/board-key.js";
+import { BOARD_NAME_MAX } from "../../../shared/orchestrator-limits.js";
 import { buildAttentionQueue } from "../../../shared/attention-queue.js";
 import { loopView } from "../../../shared/loop-view.js";
 import { cardOwner } from "../../../shared/orchestrator-owner.js";
@@ -33,6 +37,7 @@ import {
   boardRepository as store,
 } from "../../store/board-repository.js";
 import { boardWorkspace } from "../domain/board-workspace.js";
+import { hasControlByte } from "../domain/claude-launch.js";
 import { effectivePolicy } from "../domain/orchestrator-rules.js";
 import type {
   OrchestratorIdentity,
@@ -42,6 +47,7 @@ import {
   BoardConflictError,
   BoardNotFoundError,
   BoardValidationError,
+  ForbiddenError,
 } from "../domain/errors.js";
 import {
   getOrchestrationConfig,
@@ -52,15 +58,20 @@ import {
   noteWorkflowFailure,
   workflowFailedRecently,
 } from "./linear-outbound.js";
-import { restatRepos, validateFolder } from "./workspaces.js";
+import { isWithinHome, restatRepos, validateFolder } from "./workspaces.js";
 
 const COPY = {
   "invalid-key":
     "Use 2 to 6 capital letters or digits, starting with a letter.",
   "reserved-key": "LOCAL and GROUP are reserved.",
   "missing-name": "Enter a name.",
+  "invalid-name": "Use a name of at most 100 characters on one line.",
   "folder-missing": "This folder does not exist.",
-  "no-repositories": "Add at least one repository.",
+  "no-repositories":
+    "This board has no repository. Add one in the board settings.",
+  "no-workspaces-root": "Set the Dispatch workspaces root in Settings.",
+  "no-free-key": "No free key for this name. Enter a key in Advanced.",
+  "git-init-failed": "Dispatch could not make the repository.",
 } as const;
 
 type StaticBoardVariant = keyof typeof COPY;
@@ -68,9 +79,9 @@ type StaticBoardVariant = keyof typeof COPY;
 type LinearTeamKeyReader = () => Promise<string[] | null>;
 
 interface NewBoardInput {
-  key: string;
+  key?: string;
   name: string;
-  workspaceRoot: string;
+  workspaceRoot?: string;
   repositories: BoardWorkspaceRepo[];
   linearTeamKeys: string[];
 }
@@ -476,15 +487,6 @@ export async function isBoardRepository(
     : restatRepos([{ path: folder, base: "" }]);
 }
 
-/** Refuse removing the only repository of a board that is not the default board. */
-export function assertNotLastRepository(board: BoardKey, folder: string): void {
-  if (board === DEFAULT_BOARD_KEY) return;
-  const { folders } = store.getWorkspaceFolders(board);
-  if (folders.length === 1 && folders[0] === folder) {
-    throw boardRefusal("no-repositories");
-  }
-}
-
 async function assertRepositories(
   board: BoardKey,
   repositories: readonly BoardWorkspaceRepo[],
@@ -506,53 +508,236 @@ async function assertSessionsFolder(workspaceRoot: string): Promise<void> {
 }
 
 /**
- * Create a board after the key, name, folder, repository and Linear team checks.
+ * Create a board after the name, key, folder, repository and Linear team checks.
  *
- * @remarks The checks run in the order of the form: key, name, sessions folder, repositories, a
- * key a board already uses, a key a Linear team uses, then a team key another board lists. The
- * store repeats the key checks inside its write queue, and each store refusal maps to the same
- * typed error. The team key check runs in the service only.
+ * @remarks The checks run in the order of the form: name, explicit key, workspaces root, sessions
+ * folder, repositories, a key a board already uses, a key a Linear team uses, then a team key
+ * another board lists. A missing key is derived from the name and tried up to 3 times when the
+ * store refuses it or its default folder exists; a missing folder is the key below the workspaces
+ * root, made right before the store write and removed again when the store refuses a folder this
+ * create made. An explicit key adopts an existing default folder.
  */
 export async function createBoard(
   input: NewBoardInput,
   readTeamKeys: LinearTeamKeyReader = readLinearTeamKeys,
 ): Promise<Board> {
-  const key = parseBoardKey(input.key);
-  if (key === null) throw boardRefusal("invalid-key");
-  if (isReservedBoardKey(key)) throw boardRefusal("reserved-key");
-  const name = input.name.trim();
-  if (name === "") throw boardRefusal("missing-name");
-  await assertSessionsFolder(input.workspaceRoot);
-  if (input.repositories.length === 0) throw boardRefusal("no-repositories");
-  await assertRepositories(key, input.repositories);
-  const existing = store.getBoard(key);
-  if (existing) throw duplicateKey(existing.name);
-  if ((await readTeamKeys())?.includes(key)) throw linearTeamKey(key);
-  assertTeamKeysFree(input.linearTeamKeys);
+  const name = checkedName(input.name);
+  let explicitKey: BoardKey | null = null;
+  if (input.key !== undefined) {
+    explicitKey = parseBoardKey(input.key);
+    if (explicitKey === null) throw boardRefusal("invalid-key");
+    if (isReservedBoardKey(explicitKey)) throw boardRefusal("reserved-key");
+  }
+  const folder = await sessionsFolderFor(input.workspaceRoot);
+  const write = (key: BoardKey, adopt: boolean) =>
+    writeBoard(key, name, input, folder, adopt);
+  if (explicitKey !== null) {
+    await assertRepositories(explicitKey, input.repositories);
+    return createWithKey(explicitKey, input, readTeamKeys, (k) =>
+      write(k, true),
+    );
+  }
+  return createWithDerivedKey(name, input, await readTeamKeys(), (k) =>
+    write(k, false),
+  );
+}
 
-  const result = await store.createBoard({
-    key,
-    name,
-    workspaceRoot: input.workspaceRoot,
-    repositories: input.repositories,
-    linearTeamKeys: input.linearTeamKeys,
-  });
+function hasLineBreak(text: string): boolean {
+  for (const ch of text) {
+    const code = ch.charCodeAt(0);
+    if (code === 0x0a || (code >= 0x80 && code <= 0x9f)) return true;
+    if (code === 0x2028 || code === 0x2029) return true;
+  }
+  return false;
+}
+
+function checkedName(raw: string): string {
+  const name = raw.trim();
+  if (name === "") throw boardRefusal("missing-name");
+  if (
+    name.length > BOARD_NAME_MAX ||
+    hasControlByte(name) ||
+    hasLineBreak(name)
+  ) {
+    throw boardRefusal("invalid-name");
+  }
+  return name;
+}
+
+type SessionsFolder =
+  { kind: "given"; path: string } | { kind: "default"; root: string };
+
+type BoardWrite = Promise<
+  | Awaited<ReturnType<typeof store.createBoard>>
+  | { ok: false; reason: "folder-exists" }
+>;
+
+type StoreRefusal = Exclude<Awaited<BoardWrite>, { ok: true }>;
+
+async function sessionsFolderFor(
+  workspaceRoot: string | undefined,
+): Promise<SessionsFolder> {
+  if (workspaceRoot !== undefined) {
+    await assertSessionsFolder(workspaceRoot);
+    return { kind: "given", path: workspaceRoot };
+  }
+  const defaultRoot = getOrchestrationConfig()?.workspaceRoot;
+  if (!defaultRoot) throw boardRefusal("no-workspaces-root");
+  return { kind: "default", root: path.resolve(defaultRoot) };
+}
+
+async function createWithKey(
+  key: BoardKey,
+  input: NewBoardInput,
+  readTeamKeys: LinearTeamKeyReader,
+  write: (key: BoardKey) => BoardWrite,
+): Promise<Board> {
+  const teamKeys = await readTeamKeys();
+  const existing = store.getBoard(key);
+  if (existing) throw duplicateKey(existing.name, deriveFor(key, teamKeys));
+  if (teamKeys?.includes(key)) throw linearTeamKey(key);
+  assertTeamKeysFree(input.linearTeamKeys);
+  const result = await write(key);
   if (result.ok) return viewOf(result.board);
-  switch (result.reason) {
-    case "invalid-key":
-    case "reserved-key":
-      throw boardRefusal(result.reason);
-    case "duplicate-key":
-      throw duplicateKey(result.boardName);
-    case "key-in-use":
-      throw linearTeamKey(key);
+  throw refusalFor(result, key, teamKeys);
+}
+
+const DERIVED_KEY_TRIES = 3;
+
+async function createWithDerivedKey(
+  name: string,
+  input: NewBoardInput,
+  teamKeys: readonly string[] | null,
+  write: (key: BoardKey) => BoardWrite,
+): Promise<Board> {
+  const taken = takenKeys(teamKeys);
+  let key = nextFreeKey(name, taken);
+  await assertRepositories(key, input.repositories);
+  assertTeamKeysFree(input.linearTeamKeys);
+  for (let attempt = 1; ; attempt++) {
+    const result = await write(key);
+    if (result.ok) return viewOf(result.board);
+    const retry =
+      (result.reason === "duplicate-key" ||
+        result.reason === "key-in-use" ||
+        result.reason === "folder-exists") &&
+      attempt < DERIVED_KEY_TRIES;
+    if (!retry) throw refusalFor(result, key, teamKeys);
+    taken.add(key);
+    key = nextFreeKey(name, taken);
   }
 }
 
-function duplicateKey(boardName: string): BoardValidationError {
+function nextFreeKey(name: string, taken: ReadonlySet<string>): BoardKey {
+  const key = deriveBoardKey(name, taken);
+  if (key === null) throw boardRefusal("no-free-key");
+  return key;
+}
+
+async function writeBoard(
+  key: BoardKey,
+  name: string,
+  input: NewBoardInput,
+  folder: SessionsFolder,
+  adopt: boolean,
+): BoardWrite {
+  const workspaceRoot =
+    folder.kind === "given" ? folder.path : path.join(folder.root, key);
+  let made = false;
+  if (folder.kind === "default") {
+    await fsp.mkdir(folder.root, { recursive: true });
+    try {
+      await fsp.mkdir(workspaceRoot);
+      made = true;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      if (!adopt) return { ok: false, reason: "folder-exists" };
+      if (!(await fsp.stat(workspaceRoot)).isDirectory()) {
+        throw boardRefusal("folder-missing", { field: "workspaceRoot" });
+      }
+    }
+  }
+  const result = await store.createBoard({
+    key,
+    name,
+    workspaceRoot,
+    repositories: input.repositories,
+    linearTeamKeys: input.linearTeamKeys,
+  });
+  if (!result.ok && made) {
+    await fsp.rmdir(workspaceRoot).catch(() => undefined);
+  }
+  return result;
+}
+
+function refusalFor(
+  result: StoreRefusal,
+  key: BoardKey,
+  teamKeys: readonly string[] | null,
+): BoardValidationError {
+  switch (result.reason) {
+    case "invalid-key":
+    case "reserved-key":
+      return boardRefusal(result.reason);
+    case "duplicate-key":
+      return duplicateKey(result.boardName, deriveFor(key, teamKeys));
+    case "key-in-use":
+      return linearTeamKey(key);
+    case "folder-exists":
+      return boardRefusal("no-free-key");
+  }
+}
+
+/**
+ * Create a board for an orchestrator, which may only name folders inside the home folder.
+ *
+ * @remarks A session folder or a repository outside the home folder answers the typed 403
+ * `outside-home` before any other check, so an orchestrator cannot point a board at the system.
+ */
+export async function createBoardForOrchestrator(
+  input: NewBoardInput,
+  readTeamKeys?: LinearTeamKeyReader,
+): Promise<Board> {
+  const folders = [
+    ...(input.workspaceRoot === undefined ? [] : [input.workspaceRoot]),
+    ...input.repositories.map((repo) => repo.path),
+  ];
+  for (const folder of folders) {
+    if (!(await isWithinHome(folder))) throw new ForbiddenError("outside-home");
+  }
+  return createBoard(input, readTeamKeys);
+}
+
+export function repositoryEntry(
+  path: string,
+  baseBranch: string | null,
+): BoardWorkspaceRepo {
+  return { path, baseBranch, checkCommand: DEFAULT_CHECK_COMMAND };
+}
+
+function takenKeys(teamKeys: readonly string[] | null): Set<string> {
+  return new Set([
+    ...store.listBoards().map((b) => b.key),
+    ...linearCardPrefixes(),
+    ...(teamKeys ?? []),
+  ]);
+}
+
+function deriveFor(
+  key: string,
+  teamKeys: readonly string[] | null,
+): BoardKey | null {
+  return deriveBoardKey(key, takenKeys(teamKeys));
+}
+
+function duplicateKey(
+  boardName: string,
+  suggestion: BoardKey | null,
+): BoardValidationError {
   return new BoardValidationError(
     "duplicate-key",
     `Board ${boardName} uses this key.`,
+    suggestion === null ? undefined : { suggestion },
   );
 }
 
@@ -585,25 +770,31 @@ function linearTeamKey(key: string): BoardValidationError {
  * default board keeps its sessions folder in `Config` and its repositories in the global workspace
  * folders, so those two go there; its base branch and check command are dropped (D-1). An unchanged
  * default sessions folder is not checked, because it can be a fallback that is not created yet.
+ * `onlyCheckRepository` limits the repository check to that path, so a stale entry elsewhere in
+ * the list cannot block adding a new one.
  */
 export async function updateBoard(
   key: BoardKey,
   patch: BoardUpdateInput,
+  onlyCheckRepository?: string,
 ): Promise<Board> {
   const board = resolveBoard(key);
   const isDefault = key === DEFAULT_BOARD_KEY;
-  const name = patch.name?.trim();
-  if (name === "") throw boardRefusal("missing-name");
+  const name = patch.name === undefined ? undefined : checkedName(patch.name);
   const unchangedRoot =
     isDefault && patch.workspaceRoot === viewOf(board).workspaceRoot;
   if (patch.workspaceRoot !== undefined && !unchangedRoot) {
     await assertSessionsFolder(patch.workspaceRoot);
   }
   if (patch.repositories !== undefined) {
-    if (!isDefault && patch.repositories.length === 0) {
-      throw boardRefusal("no-repositories");
-    }
-    await assertRepositories(key, patch.repositories);
+    await assertRepositories(
+      key,
+      onlyCheckRepository === undefined
+        ? patch.repositories
+        : patch.repositories.filter(
+            (repo) => repo.path === onlyCheckRepository,
+          ),
+    );
   }
   if (patch.linearTeamKeys !== undefined) {
     assertTeamKeysFree(patch.linearTeamKeys, board);
