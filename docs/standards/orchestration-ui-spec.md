@@ -413,6 +413,66 @@ Updated 2026-10-07 (LOCAL-77): the source paths above moved to the board and she
 | Error   | The page error state of today, with the reload button.                                                                                                | As today: "This page failed to load." Button "Reload".                                                                                                                                           |
 | Stale   | The last cards stay. The shell shows the disconnected line of today. The "Add orchestrator" button stays enabled; the panel opens in its Stale state. | As today: "Disconnected, reconnecting…"                                                                                                                                                          |
 
+## Screen 6: Command centre
+
+### Purpose
+
+The user sees the orchestrator of a board as one centre: the orchestrator node, a branch to each ticket and group that it runs, and a conversation where the user comments and the orchestrator answers. The layout is the orchestrator tree (Layout B of `docs/research/orchestration-centre-research.md`, section "Chosen layout"). LOCAL-104 Part 1b builds this screen. Part 2 moves the Policy and Orchestrators tabs into a settings sheet of this screen.
+
+### Data
+
+- The route `/orchestrator` with the `board` search parameter and an optional `orchestrator` search parameter (the orchestrator id; the default is the main orchestrator).
+- The orchestrator records of the board (D-7): name, role, state, card id, the session meters `contextPercent` and `cost` of its active session.
+- The board snapshot (cards with `state`, `stateReason`, `stateSince`, `activeSessionId`, `contextPercent`, `cost`, `launch.playbook`, `startIntent.playbook`, `loopProgress`, `shipFlow`, `memberIds`, `groupId`). The branches come from the cards whose owner resolves to the selected orchestrator (D-7). Hidden cards and group members are not branches.
+- The decision items of the board, open and answered (D-3). The newest `plan` item of the selected orchestrator that is open or approved gives the planned branches and their order.
+- The conversation of the selected orchestrator: `GET /api/boards/<KEY>/orchestrators/<id>/conversation`. The user turns, the orchestrator text replies and the lines that Dispatch typed, in transcript order, with no tool calls.
+- Polling: conversation and decision items every 3 s while the screen is open. The branches follow the board stream.
+
+### Layout
+
+- **1440 px:** two regions under the page header. Left: the canvas with the faint dot grid. The orchestrator node is at the top left of the canvas. The branches are one vertical stack to the right of it, joined to it by elbow edges. The stack is in bands, in this order: Needs you, Running, Planned, Done, Shipped. Each band has an uppercase eyebrow heading with a count. Right: the conversation pane, 420 px wide, with the tabs Conversation and Terminal. Conversation is the default tab.
+- **1024 px:** the same two regions. The conversation pane is 360 px wide. The node tiles take the full width of the stack.
+- **390 px:** a compact orchestrator header (name, state badge, context, cost, "<n> branches, <m> need you"), then the tabs Branches and Conversation. Branches is the default tab. The Branches tab shows the bands as a grouped list with the same tiles and actions and no edges. The Conversation tab holds the pane with its Conversation and Terminal tabs.
+- The canvas draws the edges in one SVG layer behind the tiles. The tiles are focusable buttons in the band order. A new branch goes into its band after the branches of the same plan rank; the other tiles keep their place.
+
+### Parts
+
+| Part                  | Primitive                              | Copy                                                                                                                                                                                                                                                   |
+| --------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Page title            | page header                            | "Orchestrator", or "Orchestrator · <board name>" when more than one board exists                                                                                                                                                                       |
+| Orchestrator controls | `button`, `badge`                      | The state badge of "Cross-screen rules". "Start", "Stop", "Resume" with the rules of Screen 3 (`outline` variant). "Settings" (`outline` variant).                                                                                                     |
+| Orchestrator switcher | `select`                               | Label "Orchestrator" (sr-only). One option per orchestrator: "<name>" with "Main" or "Extra". Shows only when the board has more than one orchestrator.                                                                                                |
+| Orchestrator node     | module component                       | Eyebrow "Orchestrator", the name, the state badge, "Context <n>%", "$<cost> today", "<n> branches, <m> need you"                                                                                                                                       |
+| Band heading          | `badge`                                | "Needs you", "Running", "Planned", "Done", "Shipped", each with its count                                                                                                                                                                              |
+| Branch tile           | module component                       | The card id (mono), the title, the state badge, the detail line, "Playbook <name>", "Context <n>%", "$<cost>". A planned branch with no session shows "Not started" in place of the meters.                                                            |
+| Branch state badge    | `badge`                                | "Planned", "Running", "Needs input", "Usage limit", "Agent done", "Shipped", or the label of "Cross-screen rules" for the other session states. Each with its glyph.                                                                                   |
+| Detail line           | text                                   | Running: "Unit <n> of <m>, phase <p> of <q>" or "Phase <p> of <q>". Group: "Group of <n> tickets". Planned: "Plan order <n>, size <size>". Done: "Done <time>, awaiting ship". Shipped: "Shipped <time>, PR <number>".                                 |
+| Inline reply          | `field`, `label`, `textarea`, `button` | The copy of the Screen 4 inline reply, with the card id                                                                                                                                                                                                |
+| Branch actions        | `button`                               | "Resume loop", "Try resume again", "Open terminal" with the rules of Screen 4 Section 1                                                                                                                                                                |
+| Older shipped         | `button`                               | "Show <n> older shipped", "Hide older shipped" (link variant)                                                                                                                                                                                          |
+| Pane tabs             | `tabs`                                 | "Conversation", "Terminal"                                                                                                                                                                                                                             |
+| Message               | `item`                                 | Eyebrow "You", "<orchestrator name>" or "Dispatch", and the time (mono). The text.                                                                                                                                                                     |
+| Decision message      | `item`, `button`, `badge`, `table`     | Badge "Decision" or "Question". The question. A plan shows a table with the heads "Order", "Ticket", "Playbook", "Size". The option buttons, the recommended mark and the other answer of Screen 3. An answered item shows "Answered: <option label>". |
+| Comment box           | `field`, `label`, `textarea`, `button` | Label "Message the orchestrator" (sr-only). Placeholder "Message the orchestrator". Button "Send". The count "<n> of 500 characters. A longer reply goes as a file." Results "Delivered", "Not confirmed. Check the terminal."                         |
+| Terminal              | terminal frame                         | The live ttyd terminal of the orchestrator session, fully interactive. The frame stays mounted when the user changes tabs.                                                                                                                             |
+
+### Keyboard
+
+- Tab order: page header, the orchestrator node, the tiles in band order, then the pane.
+- In the canvas, the up and down arrow keys move focus from tile to tile in band order, Home goes to the orchestrator node and End to the last tile.
+- Enter on a tile opens the card (the detail panel of the card). Enter on the orchestrator node moves focus to the comment box.
+- The inline controls of a tile are reachable with Tab inside the tile.
+
+### States
+
+| State        | What shows                                                                                                                                                                                   | Copy                                                                                                                       |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Empty        | The board has no orchestrator: the empty block of Screen 3 with "Start". The orchestrator has no branch: the orchestrator node and one line in the canvas. No message: one line in the pane. | "This board has no orchestrator." "No tickets or groups yet. Ask the orchestrator in the conversation." "No messages yet." |
+| Loading      | `skeleton` tiles in the canvas and `skeleton` rows in the pane.                                                                                                                              | Screen reader text "Loading command centre"                                                                                |
+| Error        | An `alert` in the region that did not load. The other region stays. A conversation status `no-transcript` or `unreadable` shows one line and the link to the Terminal tab.                   | "<region> did not load: <error message>." Button "Try again". "The conversation is not available. Open the terminal."      |
+| Stale        | The last data stays. A `badge` beside the page title shows the time of the last update. The reply, resume, decision and send buttons are disabled until the stream is back.                  | Badge "Data from <time>". Disabled reason "Reconnecting. Actions are off until the board stream is back."                  |
+| Action error | A failed reply, decision answer, resume or comment. The control stays and shows an `alert` under it.                                                                                         | "<Action> failed: <error message>." Button "Try again". "Not sent. <id> is now at <state label>. Open the terminal."       |
+
 ## Cross-screen rules
 
 ### Keyboard
@@ -467,6 +527,7 @@ Static sketches of the populated state of each screen. Each sketch is one HTML f
 | Screen 3: Orchestrator panel         | [orchestrator-panel.html](../research/sketches/orchestrator-panel.html)       | [orchestrator-panel-1440-light.png](../research/sketches/screenshots/orchestrator-panel-1440-light.png)       | [orchestrator-panel-1440-dark.png](../research/sketches/screenshots/orchestrator-panel-1440-dark.png)       | [orchestrator-panel-390-light.png](../research/sketches/screenshots/orchestrator-panel-390-light.png)       | [orchestrator-panel-390-dark.png](../research/sketches/screenshots/orchestrator-panel-390-dark.png)       |
 | Screen 4: Dashboard                  | [dashboard.html](../research/sketches/dashboard.html)                         | [dashboard-1440-light.png](../research/sketches/screenshots/dashboard-1440-light.png)                         | [dashboard-1440-dark.png](../research/sketches/screenshots/dashboard-1440-dark.png)                         | [dashboard-390-light.png](../research/sketches/screenshots/dashboard-390-light.png)                         | [dashboard-390-dark.png](../research/sketches/screenshots/dashboard-390-dark.png)                         |
 | Screen 5: Board with no orchestrator | [board-no-orchestrator.html](../research/sketches/board-no-orchestrator.html) | [board-no-orchestrator-1440-light.png](../research/sketches/screenshots/board-no-orchestrator-1440-light.png) | [board-no-orchestrator-1440-dark.png](../research/sketches/screenshots/board-no-orchestrator-1440-dark.png) | [board-no-orchestrator-390-light.png](../research/sketches/screenshots/board-no-orchestrator-390-light.png) | [board-no-orchestrator-390-dark.png](../research/sketches/screenshots/board-no-orchestrator-390-dark.png) |
+| Screen 6: Command centre             | [centre-b.html](../research/sketches/centre-b.html)                           | [centre-b-1440-light.png](../research/sketches/screenshots/centre-b-1440-light.png)                           | [centre-b-1440-dark.png](../research/sketches/screenshots/centre-b-1440-dark.png)                           | [centre-b-390-light.png](../research/sketches/screenshots/centre-b-390-light.png)                           | [centre-b-390-dark.png](../research/sketches/screenshots/centre-b-390-dark.png)                           |
 
 ## Changes
 
@@ -488,3 +549,13 @@ This entry adds to the screens above. It does not change the text of an earlier 
 - **Policy form, Wake timer (U2-09).** The form gains a text input "Wake timer (minutes)" after "Hard handoff at context percent". It accepts a whole number from 0 to 1440. Any other text shows the error "Enter a whole number from 0 to 1440." and "Save policy" saves nothing. The helper text reads "Wakes an idle orchestrator after this many quiet minutes. 0 turns it off." The override form of an extra orchestrator has no such field.
 - **Orchestrators tab, Last wake column (U2-10).** The table gains a "Last wake" column after "Policy". The value is "<reasons> at <HH:MM>", with the reasons joined by ", " and the time in local 24-hour format, or "None" when the orchestrator has not woken. The cell wraps its text like the other text columns, so the table keeps its columns at 390 px.
 - **Activity, wake row (U2-12).** A `supervisor_action` with `action` `orchestrator_wake` reads "Woke <orchestrator name>: <reasons joined with ', '>". When the event has no orchestrator name, it shows the identifier of the orchestrator card in place of the name. An unconfirmed send reads "Could not wake <orchestrator name>: <reasons>". A `group_state` event reads "<group id> <label>" with the actor "Supervisor"; the labels are "reached Agent done", "needs input", "failed to start", "shipped", "ship stopped", "loop error" and "hit a usage limit".
+
+### 2026-10-11 (LOCAL-104)
+
+This entry adds to the screens above. It does not change the text of an earlier section.
+
+- **Screen 6, Command centre.** A new screen at `/orchestrator?board=<KEY>`. The layout is the orchestrator tree, chosen in `docs/research/orchestration-centre-research.md`, section "Chosen layout". The candidate sketches are `centre-a.html`, `centre-b.html` and `centre-c.html`.
+- **Entry point.** In Part 1b, the board header button "Orchestrator" opens Screen 6 in place of the panel. Until Part 2, the "Settings" button of Screen 6 opens the Policy tab of the panel (Screen 3).
+- **Screen 3.** In Part 2, a settings sheet of Screen 6 takes the Policy and Orchestrators tabs, and the panel goes away. The Terminal and Decisions tabs of Screen 3 are covered by the Terminal tab and the decision messages of Screen 6.
+- **Screen 4.** The attention queue and the progress rows stay. In Part 1b, the dashboard gets a link "Open command centre" to Screen 6.
+- **Decision kind `plan`.** A plan decision shows its entries as a table (Order, Ticket, Playbook, Size) and the options "Approve the plan" and "Do not approve". It has no other answer.
