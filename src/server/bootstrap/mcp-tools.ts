@@ -288,7 +288,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "create_decision_item",
     description:
-      "Create a decision item for a person to answer. Give 2 to 8 options with distinct ids. For the kind ticket_proposal, give 1 to 20 tickets, each with a title and a description. For the kind plan, give plan.entries: 1 to 20 entries, each with ref (a card id or a group title), playbook, order (1 to 20, unique) and size (small, medium or large). A plan gets the options approve and reject.",
+      "Create a decision item for a person to answer. Give 2 to 8 options with distinct ids. For the kind ticket_proposal, give 1 to 20 tickets, each with a title and a description. For the kind plan, give plan.entries: 1 to 20 entries, each with ref (a card id or a group title, unique), playbook, order (1 to 20, unique) and size (small, medium or large). A plan gets the options approve and reject.",
     input: {
       cardId: looseId.nullable().optional(),
       kind: z.enum(DECISION_KINDS),
