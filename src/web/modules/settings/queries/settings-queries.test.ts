@@ -5,6 +5,7 @@ import {
   disablePush,
   saveClaudeArgs,
   saveCleanupDelay,
+  saveCrossSessionInbound,
   saveProfile,
   saveTerminalAppearance,
 } from "./settings-api.js";
@@ -12,6 +13,7 @@ import { isPushSupported, refreshPushSubscription } from "@/queries/push-api";
 import {
   claudeArgsQueryOptions,
   cleanupDelayQueryOptions,
+  crossSessionInboundQueryOptions,
   disablePushMutationOptions,
   disableRemoteMutationOptions,
   enablePushMutationOptions,
@@ -21,6 +23,7 @@ import {
   readPushEnvironment,
   saveClaudeArgsMutationOptions,
   saveCleanupDelayMutationOptions,
+  saveCrossSessionInboundMutationOptions,
   saveProfileMutationOptions,
   saveTerminalAppearanceMutationOptions,
   settingsKeys,
@@ -66,6 +69,10 @@ test("settingsKeys has the documented shape", () => {
   assert.deepEqual(settingsKeys.cleanupDelay, ["settings", "cleanup-delay"]);
   assert.deepEqual(settingsKeys.terminal, ["settings", "terminal"]);
   assert.deepEqual(settingsKeys.claudeArgs, ["settings", "claude-args"]);
+  assert.deepEqual(settingsKeys.crossSessionInbound, [
+    "settings",
+    "cross-session-inbound",
+  ]);
   assert.deepEqual(settingsKeys.linearStateMap, [
     "settings",
     "linear-state-map",
@@ -110,6 +117,15 @@ const reads = [
     data: { claudeArgs: "claude-arg" },
   },
   {
+    name: "crossSessionInboundQueryOptions",
+    key: crossSessionInboundQueryOptions().queryKey,
+    run: () => newClient().fetchQuery(crossSessionInboundQueryOptions()),
+    expectedKey: ["settings", "cross-session-inbound"],
+    url: "/api/config/cross-session-inbound",
+    body: { crossSessionInbound: "hold" },
+    data: { crossSessionInbound: "hold" },
+  },
+  {
     name: "profileQueryOptions",
     key: profileQueryOptions().queryKey,
     run: () => newClient().fetchQuery(profileQueryOptions()),
@@ -150,6 +166,13 @@ const savers = [
     url: "/api/config/claude-args",
     body: { claudeArgs: "claude-arg" },
     fallback: "Couldn't save Claude arguments.",
+  },
+  {
+    name: "saveCrossSessionInbound",
+    call: () => saveCrossSessionInbound("hold"),
+    url: "/api/config/cross-session-inbound",
+    body: { crossSessionInbound: "hold" },
+    fallback: "Couldn't save the messages setting.",
   },
   {
     name: "saveProfile",
@@ -316,6 +339,17 @@ const writes = [
         client,
         saveClaudeArgsMutationOptions(client),
       ).mutate("new-arg"),
+  },
+  {
+    name: "cross-session messages",
+    key: settingsKeys.crossSessionInbound,
+    before: { crossSessionInbound: "accept" },
+    after: { crossSessionInbound: "refuse" },
+    run: (client: QueryClient) =>
+      new MutationObserver(
+        client,
+        saveCrossSessionInboundMutationOptions(client),
+      ).mutate("refuse"),
   },
   {
     name: "terminal appearance",

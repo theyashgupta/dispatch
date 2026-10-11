@@ -1,4 +1,5 @@
 import type {
+  CrossSessionInbound,
   TerminalAppearance,
   UserProfile,
 } from "../../../../shared/types.js";
@@ -126,6 +127,50 @@ export async function saveClaudeArgs(
     };
   }
   throw httpError("saveClaudeArgs", result);
+}
+
+/**
+ * Read the persisted cross-session messages value: GET /api/config/cross-session-inbound.
+ *
+ * @remarks
+ * Throws on any non-2xx.
+ */
+export async function getCrossSessionInbound(): Promise<{
+  crossSessionInbound: CrossSessionInbound;
+}> {
+  const result = await http<{ crossSessionInbound: CrossSessionInbound }>(
+    "/api/config/cross-session-inbound",
+  );
+  if (!result.ok) {
+    throw httpError("getCrossSessionInbound", result);
+  }
+  return result.data;
+}
+
+/**
+ * Persist the cross-session messages value: PUT /api/config/cross-session-inbound.
+ *
+ * @remarks
+ * Follows `saveClaudeArgs`'s 200, 400, throw split.
+ */
+export async function saveCrossSessionInbound(
+  crossSessionInbound: CrossSessionInbound,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const result = await http("/api/config/cross-session-inbound", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ crossSessionInbound }),
+  });
+  if (result.ok) {
+    return { ok: true };
+  }
+  if (result.status === 400) {
+    return {
+      ok: false,
+      error: result.error ?? "Couldn't save the messages setting.",
+    };
+  }
+  throw httpError("saveCrossSessionInbound", result);
 }
 
 /**

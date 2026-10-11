@@ -5,6 +5,9 @@ import { Switch } from "@/components/ui/switch";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import type { SelectOption } from "@/modules/orchestrator/domain/orchestrator-models";
 import {
+  crossSessionInboundFromSelect,
+  crossSessionInboundOptions,
+  crossSessionInboundSelectValue,
   groupPlaybookFromSelect,
   groupPlaybookSelectValue,
   ROADMAP_APPROVAL_OPTIONS,
@@ -93,6 +96,17 @@ export function PolicyForm({
         description="The playbook of a group that the orchestrator creates without one."
         onChange={(value) =>
           onChange({ groupPlaybook: groupPlaybookFromSelect(value) })
+        }
+      />
+      <SelectField
+        id="policy-cross-session-inbound"
+        label="Messages from other sessions (loops and orchestrator)"
+        value={crossSessionInboundSelectValue(values.crossSessionInbound)}
+        options={crossSessionInboundOptions}
+        onChange={(value) =>
+          onChange({
+            crossSessionInbound: crossSessionInboundFromSelect(value),
+          })
         }
       />
       <SelectField
