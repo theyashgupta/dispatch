@@ -86,6 +86,55 @@ const screens: {
       ).toBeVisible(),
   },
   {
+    name: "board-keyed",
+    url: `${orchestrated}/#/boards/ORC`,
+    ready: (page) =>
+      expect(page.getByText("Plain todo ticket").first()).toBeVisible(),
+  },
+  {
+    name: "sidebar-boards",
+    url: `${orchestrated}/#/boards/ORC`,
+    ready: async (page) => {
+      if ((page.viewportSize()?.width ?? 0) < 768)
+        await page.getByRole("button", { name: "Open navigation" }).click();
+      const nav = page.getByRole("navigation", { name: "Primary" });
+      const create = nav.getByRole("button", { name: "Create board" });
+      await create.scrollIntoViewIfNeeded();
+      await expect(create).toBeVisible();
+      const row = nav.getByRole("button", { name: /^Orchestrated/ });
+      await expect(row).toBeVisible();
+      await expect(row).toHaveAttribute("aria-current", "true");
+    },
+  },
+  {
+    name: "board-create",
+    url: `${orchestrated}/#/boards?dialog=new`,
+    ready: (page) =>
+      expect(
+        page.getByRole("dialog", { name: "New board" }).getByLabel("Name"),
+      ).toBeVisible(),
+  },
+  {
+    name: "board-settings",
+    url: `${orchestrated}/#/boards/ORC/settings`,
+    ready: (page) =>
+      expect(
+        page.getByRole("heading", { name: "Board settings", level: 1 }),
+      ).toBeVisible(),
+  },
+  {
+    name: "start-no-repository",
+    url: `${orchestrated}/#/boards/ORC`,
+    ready: async (page) => {
+      await page.getByText("Plain todo ticket").first().click();
+      await page.keyboard.press("Meta+k");
+      await page.getByRole("option", { name: "Start", exact: true }).click();
+      await expect(
+        page.getByText("This board has no repository."),
+      ).toBeVisible();
+    },
+  },
+  {
     name: "setup-wizard",
     url: `http://127.0.0.1:${seededPort + 1}/#/boards/LOCAL`,
     ready: (page) => expect(page.getByRole("dialog")).toBeVisible(),
