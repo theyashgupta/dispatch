@@ -13,6 +13,7 @@ import {
 import { BOARD_NAME_MAX } from "../../../shared/orchestrator-limits.js";
 import { buildAttentionQueue } from "../../../shared/attention-queue.js";
 import { loopView } from "../../../shared/loop-view.js";
+import { cardOwner } from "../../../shared/orchestrator-owner.js";
 import {
   hasLiveSession,
   hasLoopProgress,
@@ -37,7 +38,7 @@ import {
 } from "../../store/board-repository.js";
 import { boardWorkspace } from "../domain/board-workspace.js";
 import { hasControlByte } from "../domain/claude-launch.js";
-import { cardOwner, effectivePolicy } from "../domain/orchestrator-rules.js";
+import { effectivePolicy } from "../domain/orchestrator-rules.js";
 import type {
   OrchestratorIdentity,
   ScopeTarget,

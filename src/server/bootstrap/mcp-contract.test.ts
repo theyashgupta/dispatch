@@ -143,7 +143,31 @@ const VALID: Record<string, Record<string, unknown>> = {
   write_state: { markdown: "# State", handoffReady: true },
 };
 
+const PLAN_ENTRY = {
+  ref: "CEN-1",
+  playbook: "Write code directly",
+  order: 1,
+  size: "small",
+};
+
+const planInput = (entries: unknown[]) => ({
+  kind: "plan",
+  question: "q",
+  options: OPTIONS,
+  plan: { entries },
+});
+
 const REFUSED: [string, Record<string, unknown>][] = [
+  ["create_decision_item", planInput([])],
+  [
+    "create_decision_item",
+    planInput(
+      Array.from({ length: 21 }, (_, i) => ({ ...PLAN_ENTRY, order: i + 1 })),
+    ),
+  ],
+  ["create_decision_item", planInput([{ ...PLAN_ENTRY, order: 0 }])],
+  ["create_decision_item", planInput([{ ...PLAN_ENTRY, size: "huge" }])],
+  ["create_decision_item", planInput([{ ...PLAN_ENTRY, ref: "" }])],
   ["get_card", { id: "" }],
   ["get_card", { id: "A".repeat(limits.CARD_ID_MAX + 1) }],
   ["list_cards", { column: "nowhere" }],
@@ -322,6 +346,16 @@ describe("mcp tool table against the server schemas", () => {
       assert.equal(serverAccepts(tool, input), false, "server");
       assert.equal(mcpAccepts(tool, input), false, "mcp");
     });
+  });
+
+  it("create_decision_item: a plan with two entries passes the MCP and the server schema", () => {
+    const tool = byName("create_decision_item");
+    const input = planInput([
+      PLAN_ENTRY,
+      { ...PLAN_ENTRY, ref: "Calendar sync", order: 2, size: "large" },
+    ]);
+    assert.equal(mcpAccepts(tool, input), true, "mcp");
+    assert.equal(serverAccepts(tool, input), true, "server");
   });
 
   it("accepts a one letter team key, a long team key id and a Linear UUID card id", () => {

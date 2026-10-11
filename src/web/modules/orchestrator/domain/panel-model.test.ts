@@ -38,6 +38,7 @@ function main(
             state: null,
             stateReason: null,
             contextPercent: null,
+            cost: null,
             model: null,
             hasTmuxSession: true,
             activeSessionId: "s1",
