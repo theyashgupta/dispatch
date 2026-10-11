@@ -687,7 +687,7 @@ test("createBoard stops a derived key after 3 store refusals and removes every e
 
 test("createBoard treats a derived key whose default folder exists as taken", () =>
   inRoot("exists-root", async (root) => {
-    fs.mkdirSync(path.join(root, "keeper"));
+    fs.mkdirSync(path.join(root, "KEEPER"));
     const board = await createBoard(nameOnly("Keeper"), countingReader([]));
     assert.equal(board.key, "KEEPE2");
     assert.ok(fs.statSync(path.join(root, "KEEPE2")).isDirectory());
