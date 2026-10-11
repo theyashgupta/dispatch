@@ -40,7 +40,6 @@ function setup() {
       turns: [],
       pending: null,
       error: null,
-      pendingBoardName: false,
       generation: 0,
     };
   const send = (question: string) =>
@@ -55,7 +54,6 @@ test("the conversation options start empty and never go stale", () => {
     turns: [],
     pending: null,
     error: null,
-    pendingBoardName: false,
     generation: 0,
   });
   assert.equal(options.staleTime, Infinity);
@@ -106,7 +104,6 @@ test("a cancel aborts the request and a late reply is ignored", async () => {
     turns: [{ role: "user", text: "slow" }],
     pending: null,
     error: null,
-    pendingBoardName: false,
     generation: 0,
   });
 });
@@ -122,7 +119,6 @@ test("a clear during a run empties the conversation and drops the reply", async 
     turns: [],
     pending: null,
     error: null,
-    pendingBoardName: false,
     generation: 1,
   });
 });
@@ -152,7 +148,7 @@ test("a network error becomes a failed turn", async () => {
   assert.equal(state().error, "failed");
 });
 
-test("local turns and the board name flag write the cache and make no request", async () => {
+test("local turns write the cache and make no request", async () => {
   const { client, state } = setup();
   const net = deferredFetch();
   await runAskAction(client, {
@@ -163,11 +159,7 @@ test("local turns and the board name flag write the cache and make no request", 
     type: "local",
     turn: { role: "assistant", text: "What should the board be called?" },
   });
-  await runAskAction(client, { type: "await-board-name" });
-  assert.equal(state().pendingBoardName, true);
   assert.equal(state().turns.length, 2);
-  await runAskAction(client, { type: "board-name-done" });
-  assert.equal(state().pendingBoardName, false);
   assert.equal(net.calls.length, 0);
 });
 

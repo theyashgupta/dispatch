@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
-import { useRouter } from "@tanstack/react-router";
-import { routeHash } from "../../../../shared/route.js";
+import { useRouteContext, useRouter } from "@tanstack/react-router";
+import { pageLocation } from "../../../../shared/route.js";
 import { AskComposer } from "@/modules/ask/components/AskComposer";
 import {
   CANCELLED,
   type BoardIntent,
   NAME_QUESTION,
+  awaitingBoardName,
   createdAnswer,
   refusedAnswer,
   resolveBoardIntent,
@@ -14,6 +15,7 @@ import {
   useAskConversationQuery,
   useAskQuestionMutation,
 } from "@/modules/ask/queries/ask-queries";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { useCreateBoardMutation } from "@/queries/board-create-queries";
 
 export interface AskComposerContainerProps {
@@ -22,13 +24,15 @@ export interface AskComposerContainerProps {
 
 export function AskComposerContainer({ prefill }: AskComposerContainerProps) {
   const router = useRouter();
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const boardKey = useAppStore(appStore, (s) => s.board);
   const onPrefillConsumed = useCallback(
     () =>
       void router.navigate({
-        href: routeHash({ page: "ask" }).slice(1),
+        href: pageLocation({ page: "ask" }, boardKey),
         replace: true,
       }),
-    [router],
+    [router, boardKey],
   );
   const { data } = useAskConversationQuery();
   const { mutateAsync } = useAskQuestionMutation();
@@ -51,10 +55,8 @@ export function AskComposerContainer({ prefill }: AskComposerContainerProps) {
     await say("user", text);
     if (intent.kind === "needs-name") {
       await say("assistant", NAME_QUESTION);
-      await mutateAsync({ type: "await-board-name" });
       return;
     }
-    await mutateAsync({ type: "board-name-done" });
     if (intent.kind === "cancel") {
       await say("assistant", CANCELLED);
       return;
@@ -74,7 +76,7 @@ export function AskComposerContainer({ prefill }: AskComposerContainerProps) {
       onChange={setDraft}
       onSend={() => {
         const text = draft.trim();
-        const intent = resolveBoardIntent(text, data.pendingBoardName);
+        const intent = resolveBoardIntent(text, awaitingBoardName(data.turns));
         if (intent === null) {
           void mutateAsync({ type: "send", question: text });
         } else {

@@ -1,4 +1,5 @@
 import { boardLink } from "../../../../shared/board-key.js";
+import type { AskTurn } from "../../../../shared/types.js";
 
 export type BoardIntent =
   | { kind: "create"; name: string }
@@ -7,6 +8,12 @@ export type BoardIntent =
 
 export const NAME_QUESTION = "What should the board be called?";
 export const CANCELLED = "Cancelled.";
+
+/** Whether the last turn is the assistant asking for a board name. */
+export function awaitingBoardName(turns: readonly AskTurn[]): boolean {
+  const last = turns.at(-1);
+  return last?.role === "assistant" && last.text === NAME_QUESTION;
+}
 
 const NEEDS_NAME =
   /^(?:(?:create|make|add)\s+(?:me\s+)?(?:an?\s+)?(?:new\s+)?board(?:\s+for\s+me)?|new\s+board)$/i;

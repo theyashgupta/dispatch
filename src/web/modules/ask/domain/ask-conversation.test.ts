@@ -7,7 +7,6 @@ const EMPTY: AskState = {
   turns: [],
   pending: null,
   error: null,
-  pendingBoardName: false,
   generation: 0,
 };
 
@@ -20,7 +19,6 @@ test("send appends the user turn and sets pending", () => {
     turns: [{ role: "user", text: "what needs me?" }],
     pending: "what needs me?",
     error: null,
-    pendingBoardName: false,
     generation: 0,
   });
 });
@@ -106,28 +104,6 @@ test("an assistant turn can carry a markdown link", () => {
     turn: { role: "assistant", text },
   });
   assert.equal(next.turns[0]?.text, text);
-});
-
-test("the board name flag is set once and cleared once", () => {
-  const waiting = askReducer(EMPTY, { type: "await-board-name" });
-  assert.equal(waiting.pendingBoardName, true);
-  assert.equal(askReducer(waiting, { type: "await-board-name" }), waiting);
-  assert.deepEqual(askReducer(waiting, { type: "board-name-done" }), EMPTY);
-  assert.equal(askReducer(EMPTY, { type: "board-name-done" }), EMPTY);
-});
-
-test("clear and a server send drop the board name flag, an answer keeps it", () => {
-  const waiting = askReducer(EMPTY, { type: "await-board-name" });
-  assert.equal(askReducer(waiting, { type: "clear" }).pendingBoardName, false);
-  assert.equal(
-    askReducer(waiting, { type: "send", question: "hi" }).pendingBoardName,
-    false,
-  );
-  const answered = askReducer(
-    { ...waiting, pending: "x" },
-    { type: "answer", answer: "a" },
-  );
-  assert.equal(answered.pendingBoardName, true);
 });
 
 test("the history for the 22nd turn carries the last 20", () => {

@@ -6,7 +6,6 @@ export interface AskState {
   turns: AskTurn[];
   pending: string | null;
   error: AskErrorKind | null;
-  pendingBoardName: boolean;
   generation: number;
 }
 
@@ -17,15 +16,12 @@ export type AskEvent =
   | { type: "cancel" }
   | { type: "retry" }
   | { type: "clear" }
-  | { type: "local"; turn: AskTurn; generation?: number }
-  | { type: "await-board-name" }
-  | { type: "board-name-done" };
+  | { type: "local"; turn: AskTurn; generation?: number };
 
 export const EMPTY_ASK_STATE: AskState = {
   turns: [],
   pending: null,
   error: null,
-  pendingBoardName: false,
   generation: 0,
 };
 
@@ -45,7 +41,6 @@ export function askReducer(state: AskState, event: AskEvent): AskState {
         turns: [...state.turns, { role: "user", text: event.question }],
         pending: event.question,
         error: null,
-        pendingBoardName: false,
       };
     case "answer":
       return {
@@ -72,14 +67,6 @@ export function askReducer(state: AskState, event: AskEvent): AskState {
         return state;
       }
       return { ...state, turns: [...state.turns, event.turn], error: null };
-    case "await-board-name":
-      return state.pendingBoardName
-        ? state
-        : { ...state, pendingBoardName: true };
-    case "board-name-done":
-      return state.pendingBoardName
-        ? { ...state, pendingBoardName: false }
-        : state;
   }
 }
 
