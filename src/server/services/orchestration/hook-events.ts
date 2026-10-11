@@ -7,22 +7,9 @@ import { boardRepository as store } from "../../store/board-repository.js";
 import { isTranscriptPath } from "../../adapters/transcript.js";
 import { CLAUDE_SESSION_ID } from "../../../shared/claude-session-id.js";
 import { getHooksRuntime } from "../infra/config-holder.js";
+import { PAUSE_TOOL_NAMES } from "../infra/hook-settings.js";
 import { runPendingMove } from "./session-account-apply.js";
 import { forgetTurnState, recordTurnEvent } from "./session-turn.js";
-
-/**
- * Tool names whose `PreToolUse` fires the structural Needs-Input safety net (HOOK-03) and whose
- * matching `PostToolUse` fires the symmetric flip-back — the single source of truth for the pause
- * class: both event branches here read it AND `bootstrap/hook-setup.ts` derives the registered
- * `PreToolUse` matcher from it, so the "enters on tool X", "leaves on tool X", and "matcher
- * delivers tool X" contracts can never drift apart (a set edited without the matcher would
- * half-wire: catch-all PostToolUse flips back on a tool the enter side never covered).
- * Live-verified (48-DIAGNOSIS.md) for `AskUserQuestion`; `ExitPlanMode` (48-IN-03, allow-list #8)
- * is live-verified in Phase 57 — see 57-01-SUMMARY.md for the sandbox probe evidence (PreToolUse
- * synthesizes the needs_input marker with a clean display reason, PostToolUse flips it back).
- * @see docs/ARCHITECTURE.md#hooks-status-channel
- */
-export const PAUSE_TOOL_NAMES = new Set(["AskUserQuestion", "ExitPlanMode"]);
 
 /**
  * Composite key for every per-session throttle/dedup map below (Phase 91, HOOK-01): a card owns

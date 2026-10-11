@@ -10,7 +10,7 @@ const { installHookArtifacts } = await import("./hook-setup.js");
 void test.after(() => env.cleanup());
 
 void test("the generated hook settings register StopFailure with the same entry as Stop", async () => {
-  await installHookArtifacts();
+  await installHookArtifacts("accept");
   const settings = JSON.parse(
     fs.readFileSync(path.join(env.dispatchDir, "hook-settings.json"), "utf8"),
   ) as { hooks: Record<string, unknown> };
