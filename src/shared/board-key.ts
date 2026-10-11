@@ -45,5 +45,6 @@ export function defaultBoardPolicy(key: BoardKey): BoardPolicy {
     supervisor: key === DEFAULT_BOARD_KEY ? "off" : "on",
     groupPlaybook: null,
     wakeMinutes: 15,
+    crossSessionInbound: null,
   };
 }

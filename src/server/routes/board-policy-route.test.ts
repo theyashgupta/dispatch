@@ -60,6 +60,7 @@ const VALID: BoardPolicy = {
   supervisor: "off",
   groupPlaybook: null,
   wakeMinutes: 15,
+  crossSessionInbound: null,
 };
 
 function stored(): BoardPolicy | undefined {
@@ -263,4 +264,42 @@ test("an omitted wakeMinutes keeps the stored value", async () => {
   assert.equal(kept.status, 200, kept.text);
   assert.equal(kept.body.board.policy.wakeMinutes, 42);
   assert.equal(stored()?.wakeMinutes, 42);
+});
+
+test("crossSessionInbound accepts each value and null and reads each back", async () => {
+  for (const crossSessionInbound of ["accept", "hold", "refuse", null]) {
+    const got = await put("/boards/PLC/policy", {
+      ...VALID,
+      crossSessionInbound,
+    });
+    assert.equal(got.status, 200, got.text);
+    assert.equal(
+      got.body.board.policy.crossSessionInbound,
+      crossSessionInbound,
+    );
+    assert.equal(stored()?.crossSessionInbound, crossSessionInbound);
+  }
+});
+
+test("an omitted crossSessionInbound keeps the stored value", async () => {
+  await put("/boards/PLC/policy", { ...VALID, crossSessionInbound: "accept" });
+  const kept = await put("/boards/PLC/policy", {
+    ...VALID,
+    crossSessionInbound: undefined,
+  });
+  assert.equal(kept.status, 200, kept.text);
+  assert.equal(kept.body.board.policy.crossSessionInbound, "accept");
+  assert.equal(stored()?.crossSessionInbound, "accept");
+});
+
+test("an unknown crossSessionInbound answers 400 and the stored value does not change", async () => {
+  await put("/boards/PLC/policy", { ...VALID, crossSessionInbound: "hold" });
+  for (const crossSessionInbound of ["bogus", "", 5]) {
+    await expectRefusal(
+      { ...VALID, crossSessionInbound },
+      400,
+      "invalid-crossSessionInbound",
+    );
+  }
+  assert.equal(stored()?.crossSessionInbound, "hold");
 });

@@ -144,3 +144,24 @@ void test("policySummary lists the groups of the board with the policy budget an
     null,
   );
 });
+
+void test("policySummary carries crossSessionInbound as null by default and as the stored value once set", async () => {
+  const CSI = parseBoardKey("CSI") as BoardKey;
+  await store.createBoard({
+    key: CSI,
+    name: "Inbound",
+    workspaceRoot: "/csi/sessions",
+    repositories: [],
+    linearTeamKeys: [],
+  });
+  const caller = { boardKey: CSI, orchestratorId: "orc" };
+  assert.equal((await policySummary(caller)).policy?.crossSessionInbound, null);
+  await store.setBoardPolicy(CSI, {
+    ...store.getBoard(CSI)!.policy,
+    crossSessionInbound: "accept",
+  });
+  assert.equal(
+    (await policySummary(caller)).policy?.crossSessionInbound,
+    "accept",
+  );
+});

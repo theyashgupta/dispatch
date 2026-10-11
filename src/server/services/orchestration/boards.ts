@@ -24,6 +24,7 @@ import type {
   BoardWorkspaceRepo,
   Card,
   Column,
+  CrossSessionInbound,
   SessionSummary,
 } from "../../../shared/types.js";
 import {
@@ -408,13 +409,18 @@ export function getBoard(key: BoardKey): Board {
 /**
  * Store a board policy and answer the board as the API shows it, or the typed 404 `unknown-board`.
  *
- * @remarks An omitted `groupPlaybook` or `wakeMinutes` keeps the stored value, and an explicit null clears the playbook.
+ * @remarks An omitted `groupPlaybook`, `wakeMinutes` or `crossSessionInbound` keeps the stored
+ * value, and an explicit null clears the playbook or the inbound value.
  */
 export async function setBoardPolicy(
   key: BoardKey,
-  policy: Omit<BoardPolicy, "groupPlaybook" | "wakeMinutes"> & {
+  policy: Omit<
+    BoardPolicy,
+    "groupPlaybook" | "wakeMinutes" | "crossSessionInbound"
+  > & {
     groupPlaybook?: string | null | undefined;
     wakeMinutes?: number | undefined;
+    crossSessionInbound?: CrossSessionInbound | null | undefined;
   },
 ): Promise<Board> {
   const stored = store.getBoard(key)?.policy;
@@ -426,10 +432,15 @@ export async function setBoardPolicy(
     policy.wakeMinutes ??
     stored?.wakeMinutes ??
     defaultBoardPolicy(key).wakeMinutes;
+  const crossSessionInbound =
+    policy.crossSessionInbound === undefined
+      ? (stored?.crossSessionInbound ?? null)
+      : policy.crossSessionInbound;
   const board = await store.setBoardPolicy(key, {
     ...policy,
     groupPlaybook,
     wakeMinutes,
+    crossSessionInbound,
   });
   if (!board) throw new BoardNotFoundError("unknown-board");
   return viewOf(board);

@@ -4,6 +4,7 @@ import {
   isLoopModel,
   isOrchestratorModel,
 } from "../../shared/orchestrator-models.js";
+import { CROSS_SESSION_INBOUND_VALUES } from "../../shared/types.js";
 import { setBoardPolicy } from "../services/orchestration/boards.js";
 import { parseBoardKeyParam } from "./boards-schemas.js";
 import { httpErrorHandler } from "./error-handler.js";
@@ -58,6 +59,10 @@ const policyBodySchema = z
         .nullable()
         .optional(),
       wakeMinutes: whole("wakeMinutes", 0, 1440).optional(),
+      crossSessionInbound: z
+        .enum(CROSS_SESSION_INBOUND_VALUES, "invalid-crossSessionInbound")
+        .nullable()
+        .optional(),
     },
     { error: unknownFieldError("invalid-policy") },
   )
