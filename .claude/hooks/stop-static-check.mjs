@@ -5,6 +5,8 @@ import { readFileSync } from "node:fs";
 const STEPS = ["format:check", "lint", "typecheck", "depcruise"];
 const TAIL_LINES = 40;
 const TIMEOUT_MS = Number(process.env.DISPATCH_STOP_CHECK_TIMEOUT_MS) || 240000;
+const KILL_GRACE_MS = 5000;
+const NO_SLOT_CODE = 75;
 
 /**
  * Tell if the stop must run the static checks.
@@ -26,11 +28,14 @@ function shouldCheck(payload, env, projectDir) {
  * Run the static check steps and resolve with the exit code and the output lines.
  *
  * @remarks
- * The steps run in their own process group, so the timeout kills npm and every tool it started. A timeout, a spawn error or a kill of a group that already exited resolves with a null code.
+ * The steps run in their own process group, so the timeout sends SIGTERM to the group, which the slot gate forwards to its command, and SIGKILL 5 seconds later if the group is still open. The slot wait limit is set 30 seconds below the timeout, so a busy slot gives up with exit 75 before the hook is killed only when the steps before it end within those 30 seconds. A timeout or a spawn error resolves with a null code.
  */
 function runSteps(projectDir) {
   const env = { ...process.env };
   delete env.NODE_ENV;
+  env.DISPATCH_CHECK_WAIT_SECONDS = String(
+    Math.max(0, Math.floor(TIMEOUT_MS / 1000) - 30),
+  );
   const child = spawn(STEPS.map((step) => `npm run ${step}`).join(" && "), {
     cwd: projectDir,
     env,
@@ -42,21 +47,30 @@ function runSteps(projectDir) {
   child.stdout.on("data", (chunk) => (output += chunk));
   child.stderr.on("data", (chunk) => (output += chunk));
   let timedOut = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
+  let killTimer;
+  const signalGroup = (signal) => {
     try {
-      process.kill(-child.pid, "SIGKILL");
+      process.kill(-child.pid, signal);
     } catch {
       return;
     }
+  };
+  const timer = setTimeout(() => {
+    timedOut = true;
+    signalGroup("SIGTERM");
+    killTimer = setTimeout(() => signalGroup("SIGKILL"), KILL_GRACE_MS);
   }, TIMEOUT_MS);
+  const clearTimers = () => {
+    clearTimeout(timer);
+    clearTimeout(killTimer);
+  };
   return new Promise((done) => {
     child.on("error", () => {
-      clearTimeout(timer);
+      clearTimers();
       done({ code: null, lines: [] });
     });
     child.on("close", (code) => {
-      clearTimeout(timer);
+      clearTimers();
       done({
         code: timedOut ? null : code,
         lines: output.trimEnd().split("\n"),
@@ -115,6 +129,7 @@ try {
   }
   const { code, lines } = await runSteps(projectDir);
   if (code === 0 || code === null) process.exit(0);
+  const skipped = code === NO_SLOT_CODE;
   const report = [
     `The static checks failed in the step ${failingStep(lines)}. Fix these errors before you stop. Ask the user before you skip this check.`,
     "Error lines:",
@@ -122,7 +137,12 @@ try {
     `Last ${TAIL_LINES} lines:`,
     ...lines.slice(-TAIL_LINES),
   ];
-  process.stderr.write(`${report.join("\n")}\n`, () => process.exit(2));
+  process.stderr.write(
+    skipped
+      ? "Static checks skipped: no free check slot.\n"
+      : `${report.join("\n")}\n`,
+    () => process.exit(skipped ? 0 : 2),
+  );
 } catch {
   process.exit(0);
 }

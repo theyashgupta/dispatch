@@ -33,6 +33,10 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y tmux zsh
       - name: npm run check
         run: npm run check
+      - name: npm run lint:typed
+        run: npm run lint:typed
+      - name: npm run typecheck:tsc
+        run: npm run typecheck:tsc
 
   visual:
     name: visual

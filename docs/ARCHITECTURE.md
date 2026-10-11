@@ -5245,6 +5245,22 @@ such a session has. This degrade path pre-dates this phase: it is the same below
 branch the hooks feature has always had, not a new gap this phase introduced, and it means VLT-08's
 guarantee is conditional on hooks capability rather than universal. Cross-references `T-105-06`.
 
+### Check slot count (`DISPATCH_CHECK_SLOTS`)
+
+The slot gate (`scripts/with-check-slot.mjs`) lets a fixed number of heavy checks run at the same
+time on one machine. The default is 1 slot for each 8 GB of RAM, rounded down, with a minimum of 1.
+On an 8 GB Mac the default is 1 slot. A larger count on that machine causes heavy swap: with 4 agent
+loops, 3 concurrent full checks took the load average to 24 and made timing tests fail.
+
+To change the count, set `DISPATCH_CHECK_SLOTS` to a positive integer in the environment of every
+agent session on the machine. All sessions must use the same value, because each gate counts only
+the slots below its own value. A value that is not a positive integer gives the default.
+
+A slot file that is older than the last boot is dead. The gate calculates the boot time from the
+system uptime and the wall clock. If the wall clock moves forward by a large step after a slot is
+taken, the gate can find a live slot to be dead. This can occur on Linux early in a boot. It does
+not occur on macOS.
+
 ## Verification Gates
 
 Dev tooling plus one small `node:test` suite. Each gate answers one narrow, mechanically-checkable
@@ -5252,10 +5268,54 @@ question; none of them read prose for truth.
 
 - **`npm run check`** — the standing CI-shaped gate: `format:check`, `lint`, `typecheck`, `test`,
   `deadcode` (knip), `replay-gate`, `doc-drift`, and `invariants` (all below), run in sequence.
+- **`npm run lint`** and **`npm run lint:typed`**: two ESLint modes. `lint` runs every rule that does not
+  need type information, which includes all custom rules, and does not build a TypeScript program.
+  It is the local default and a step of `npm run check`. `lint:typed` sets `DISPATCH_LINT_TYPED=1`,
+  which adds `recommendedTypeChecked`, the project service and the two type-aware rule overrides.
+  The CI check job runs `lint:typed` after `npm run check`. Only `lint:typed` reports unused
+  `eslint-disable` directives, because a directive for a type-aware rule looks unused to `lint`, and
+  `lint:fix` would delete it. Each mode has its own cache directory.
+- **`npm run typecheck`**: `tsgo --noEmit` from `@typescript/native-preview`, once for the root
+  project and once for `src/web/tsconfig.json`. Each project writes its build info to
+  `node_modules/.cache/tsgo/`, apart from the `tsc` build info. The CI check job also runs
+  `npm run typecheck:tsc`, the same two checks with `tsc`, because tsgo is a preview build.
+  `npm run build:server` still uses `tsc`, because only `tsc` emits the server build.
+- **`scripts/with-check-slot.mjs`**: the slot gate for heavy checks. `lint`, `lint:fix`,
+  `lint:typed`, `typecheck`, `deadcode`, `check`, `check:static` and `check:changed` run their
+  command through it. The number of gated commands that run at the same time on the machine, across
+  all worktrees, is the slot count. The slot count is `DISPATCH_CHECK_SLOTS`, or by default 1 slot
+  for each 8 GB of RAM, minimum 1 (see [Check slot count](#check-slot-count-dispatch_check_slots)).
+  A slot is the file `~/.dispatch/locks/check-slot-<n>`, which holds the pid of the gate process.
+  The gate creates it with a hard link, so it cannot replace a slot that exists. A caller that finds
+  no free slot prints the holder pids, then waits. A slot is dead when its pid is not alive, when
+  its content is not a pid, or when it is older than the last boot. A dead slot is removed only
+  while the caller holds the `.reclaim` guard directory with its own token. This prevents the removal
+  of a live slot, except in one race: 3 or more gates that act on a guard older than 60 seconds. The gate sets `DISPATCH_CHECK_SLOT_HELD=1` for its command, so the steps of
+  `npm run check` run in the slot of the chain and do not take a second slot. The command runs in
+  its own process group, and the gate sends SIGINT, SIGTERM and SIGHUP to the full group. After 5400
+  seconds of waiting, the gate exits with code 75. If it cannot use the lock directory, it exits
+  with code 2. `DISPATCH_CHECK_LOCK_DIR` and `DISPATCH_CHECK_WAIT_SECONDS` change the lock directory
+  and the wait limit. Limit: if the gate gets SIGKILL, its command continues to run without a slot.
+  For this reason, the Stop hook in `.claude/settings.json` sends SIGTERM at its
+  timeout and SIGKILL only 5 seconds later. The Stop hook also sets the wait limit to 30 seconds
+  less than its own timeout. When no slot becomes free, it reports that the checks were skipped and
+  lets the stop continue. Each gated step has its own wait limit. If the steps before a waiting
+  step take more than 30 seconds, the timeout occurs first, and the hook lets the stop continue
+  with no report.
+- **`npm run check:changed`** (`scripts/check-changed.mjs`): the fast check for one agent session.
+  It holds one slot for the full run. It selects the files changed since `origin/main`, plus staged,
+  unstaged and untracked files, and removes deleted files. It runs `prettier --check` on these
+  files and the untyped ESLint on the lintable files, then runs `npm run typecheck`. If
+  `origin/main` does not exist, it exits with code 2 and names the ref. Run `git fetch origin main`
+  first to compare with the current base.
+- **Format hook** (the `PostToolUse` hook in `.claude/settings.json`): after each Edit or Write in a Claude
+  session, it runs `prettier --write` on the edited file. It does not format files under `.claude/`
+  or Prettier, ESLint and package config files.
 - **`npm test`**: two `node --import tsx --test` passes, `src/server` and `src/shared` under the root
   tsconfig, then `src/web` with `TSX_TSCONFIG_PATH=src/web/tsconfig.json`: unit tests on pure modules and
   wiring tests that boot a router on port 0 under a temporary `HOME`. No framework beyond Node's
-  built-in runner; test files are excluded from the server build.
+  built-in runner; test files are excluded from the server build. A last pass runs
+  `scripts/**/*.test.mjs` with `node --test`.
 - **`node scripts/check-invariants.mjs`** (`npm run invariants`, wired into `npm run check`) —
   invariant-home audit: every ID in the frozen baseline (`scripts/invariant-baseline.txt`) must
   have a durable home (a JSDoc block in `src/` or anywhere in this doc). It was previously
