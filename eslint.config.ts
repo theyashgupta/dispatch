@@ -750,6 +750,8 @@ const newTreeZones = [
 const KEBAB = "+([a-z])*([a-z0-9])*(-+([a-z0-9]))";
 const ROUTE_FILE = `@(__root|${KEBAB}.\\{-$id\\}?(.lazy))`;
 
+const typed = process.env.DISPATCH_LINT_TYPED === "1";
+
 export default tseslint.config(
   {
     ignores: [
@@ -767,16 +769,26 @@ export default tseslint.config(
     ],
   },
 
-  js.configs.recommended,
-  ...tseslint.configs.recommendedTypeChecked,
   {
-    languageOptions: {
-      parserOptions: {
-        projectService: true,
-        tsconfigRootDir: import.meta.dirname,
-      },
-    },
+    linterOptions: { reportUnusedDisableDirectives: typed ? "warn" : "off" },
   },
+
+  js.configs.recommended,
+  ...(typed
+    ? tseslint.configs.recommendedTypeChecked
+    : tseslint.configs.recommended),
+  ...(typed
+    ? [
+        {
+          languageOptions: {
+            parserOptions: {
+              projectService: true,
+              tsconfigRootDir: import.meta.dirname,
+            },
+          },
+        },
+      ]
+    : []),
 
   {
     files: [".claude/**/*.mjs", "tests/**/*.mjs"],
@@ -921,10 +933,20 @@ export default tseslint.config(
       ],
       "preserve-caught-error": "warn",
       "no-useless-assignment": "warn",
-      "@typescript-eslint/no-misused-promises": "warn",
-      "@typescript-eslint/no-unsafe-argument": "warn",
     },
   },
+
+  ...(typed
+    ? [
+        {
+          files: ["src/**/*.{ts,tsx}"],
+          rules: {
+            "@typescript-eslint/no-misused-promises": "warn",
+            "@typescript-eslint/no-unsafe-argument": "warn",
+          },
+        },
+      ]
+    : []),
 
   /**
    * File/folder naming enforcement (docs/standards/folder-structure.md):

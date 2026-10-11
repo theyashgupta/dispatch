@@ -200,6 +200,15 @@ const stopCases = [
     scripts: { "format:check": "sleep 5; exit 1" },
   },
   {
+    name: "stop skip: a step that exits 75 reports no free slot and allows the stop",
+    env: {},
+    payload: { stop_hook_active: false },
+    dirty: true,
+    block: false,
+    notice: "no free check slot",
+    scripts: { "format:check": "exit 75" },
+  },
+  {
     name: "stop block: changes and no skip run the failing check",
     env: {},
     payload: { stop_hook_active: false },
@@ -212,9 +221,9 @@ const stopCases = [
  * Run the Stop hook in a scratch git repository and return the error list for one case.
  *
  * @remarks
- * The scratch repository has no npm scripts, so a guard that does not skip makes the hook exit 2.
+ * The scratch repository has only the npm scripts that the case names, so a guard that does not skip makes the hook exit 2 on the first missing step.
  */
-function checkStop({ env, payload, dirty, block, scripts }) {
+function checkStop({ env, payload, dirty, block, scripts, notice }) {
   const dir = mkdtempSync(join(tmpdir(), "dispatch-stop-"));
   try {
     spawnSync("git", ["init", "-q"], { cwd: dir });
@@ -233,6 +242,11 @@ function checkStop({ env, payload, dirty, block, scripts }) {
       return run.status === 2 && run.stderr.includes("static checks failed")
         ? []
         : [`expected exit 2 with the check tail, got exit ${run.status}`];
+    }
+    if (notice) {
+      return run.status === 0 && run.stderr.includes(notice)
+        ? []
+        : [`expected exit 0 with "${notice}", got exit ${run.status}`];
     }
     return run.status === 0 && !run.stdout && !run.stderr
       ? []
