@@ -88,7 +88,7 @@ If the board has no repository, **Start** shows "This board has no repository." 
 `LOCAL` is the default board. It is the board that Dispatch shows when no other board is selected.
 
 - You cannot archive it.
-- Its repositories come from **Settings**, **Workspaces**. A change in its **Edit board** dialog also changes that list. The dialog shows the repository path only.
+- Its repositories come from **Settings**, **Workspaces**. A change on its board settings page also changes that list. The page shows the repository path only.
 - Its supervisor starts **Off**. A new board starts with the supervisor **On**.
 
 ## Orchestrated board setup

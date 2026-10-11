@@ -753,8 +753,9 @@ activity frame goes only to the clients of the board of the event.
 - `400` `team-key-taken`: "Board <name> lists Linear team <KEY>." Create and patch return it when
   another board lists the same team key. `LOCAL` and `GROUP` as a team key return `reserved-key`.
 - `400` `missing-name`: "Enter a name."
+- `400` `invalid-name`: "Use a name of at most 100 characters on one line."
 - `400` `folder-missing`: "This folder does not exist."
-- `400` `no-repositories`: "Add at least one repository."
+- `400` `no-repositories`: "This board has no repository. Add one in the board settings."
 - `409` `sessions-running`: "Stop the <n> running sessions first."
 - `409` `default-board`, `409` `board-archived`, `404` `unknown-board`, `400` `invalid-board`: the
   `error` string is the code.
