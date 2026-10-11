@@ -290,6 +290,7 @@ function sessionViewOf(
     state: session?.state ?? null,
     stateReason: session?.stateReason ?? null,
     contextPercent: session?.contextPercent ?? null,
+    cost: session?.cost ?? null,
     model: session?.model ?? null,
     hasTmuxSession: (session?.tmuxSession ?? card.tmuxSession) != null,
     activeSessionId: card.activeSessionId ?? null,

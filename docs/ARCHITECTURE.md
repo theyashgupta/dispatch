@@ -227,15 +227,16 @@ Mount prefix: `/api`.
 
 Mount prefix: `/api`.
 
-| Method | Path                                        | Auth | Purpose                                                           |
-| ------ | ------------------------------------------- | ---- | ----------------------------------------------------------------- |
-| GET    | `/api/boards/:key/orchestrators`            | User | List the orchestrators of a board with their session views.       |
-| POST   | `/api/boards/:key/orchestrators`            | User | Add an orchestrator record, main or extra.                        |
-| PATCH  | `/api/boards/:key/orchestrators/:id`        | User | Edit the name, scope or policy override of an orchestrator.       |
-| DELETE | `/api/boards/:key/orchestrators/:id`        | User | Remove a stopped orchestrator and revoke its token.               |
-| POST   | `/api/boards/:key/orchestrators/:id/start`  | User | Start the session of a stopped orchestrator.                      |
-| POST   | `/api/boards/:key/orchestrators/:id/stop`   | User | Stop a running orchestrator.                                      |
-| POST   | `/api/boards/:key/orchestrators/:id/resume` | User | Bring an orchestrator back after a lost session or a Claude exit. |
+| Method | Path                                              | Auth | Purpose                                                                                                                                                                                                  |
+| ------ | ------------------------------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/boards/:key/orchestrators`                  | User | List the orchestrators of a board with their session views.                                                                                                                                              |
+| POST   | `/api/boards/:key/orchestrators`                  | User | Add an orchestrator record, main or extra.                                                                                                                                                               |
+| PATCH  | `/api/boards/:key/orchestrators/:id`              | User | Edit the name, scope or policy override of an orchestrator.                                                                                                                                              |
+| DELETE | `/api/boards/:key/orchestrators/:id`              | User | Remove a stopped orchestrator and revoke its token.                                                                                                                                                      |
+| POST   | `/api/boards/:key/orchestrators/:id/start`        | User | Start the session of a stopped orchestrator.                                                                                                                                                             |
+| POST   | `/api/boards/:key/orchestrators/:id/stop`         | User | Stop a running orchestrator.                                                                                                                                                                             |
+| POST   | `/api/boards/:key/orchestrators/:id/resume`       | User | Bring an orchestrator back after a lost session or a Claude exit.                                                                                                                                        |
+| GET    | `/api/boards/:key/orchestrators/:id/conversation` | User | Read the conversation of an orchestrator from its transcript: user turns, text replies and the lines that Dispatch typed, in order, with no tool calls. `limit` 1 to 200. Refuses an orchestrator token. |
 
 ### `routes/intake.route.ts`
 

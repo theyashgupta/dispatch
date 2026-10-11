@@ -4,6 +4,19 @@ import path from "node:path";
 const TAIL_BYTES = 256 * 1024;
 const SESSION_ID = /^[\w-]{1,256}$/;
 
+export interface TranscriptEntry {
+  id: string;
+  at: string | null;
+  type: "user" | "assistant";
+  text: string;
+}
+
+export interface TranscriptConversation {
+  entries: TranscriptEntry[];
+  fromStart: boolean;
+  truncated: boolean;
+}
+
 export interface TranscriptTail {
   size: number;
   lastAssistantText: string | null;
@@ -95,6 +108,84 @@ function contentText(content: unknown): string | null {
       texts.push(part.text);
   }
   return texts.length > 0 ? texts.join("\n") : null;
+}
+
+function conversationEntry(
+  line: string,
+  index: number,
+  textMax: number,
+): TranscriptEntry | null {
+  let entry: {
+    type?: unknown;
+    uuid?: unknown;
+    timestamp?: unknown;
+    isMeta?: unknown;
+    isSidechain?: unknown;
+    message?: { content?: unknown };
+  } | null;
+  try {
+    entry = JSON.parse(line) as typeof entry;
+  } catch {
+    return null;
+  }
+  const type = entry?.type;
+  if (type !== "assistant" && type !== "user") return null;
+  if (entry?.isMeta === true || entry?.isSidechain === true) return null;
+  const text = contentText(entry?.message?.content);
+  if (text === null) return null;
+  return {
+    id: typeof entry?.uuid === "string" ? entry.uuid : `line-${index}`,
+    at: typeof entry?.timestamp === "string" ? entry.timestamp : null,
+    type,
+    text:
+      text.length > textMax
+        ? `${text.slice(0, textMax)}\n[cut at ${textMax} characters]`
+        : text,
+  };
+}
+
+/**
+ * Read the user and assistant text entries of a transcript in order, newest `limit` kept.
+ *
+ * @remarks
+ * Reads the same 256 KiB tail as {@link readTranscriptTail}. Tool calls, tool results, thinking,
+ * meta and sidechain entries carry no conversation text and are skipped, as is a line that does
+ * not parse. `fromStart` says the read began at the first byte of the file.
+ */
+export async function readTranscriptConversation(
+  file: string,
+  limit: number,
+  textMax: number,
+): Promise<TranscriptConversation | null> {
+  let handle: fsp.FileHandle;
+  try {
+    handle = await fsp.open(file, "r");
+  } catch {
+    return null;
+  }
+  try {
+    const { size } = await handle.stat();
+    const start = Math.max(0, size - TAIL_BYTES);
+    const buffer = Buffer.alloc(size - start);
+    await handle.read(buffer, 0, buffer.length, start);
+    const lines = buffer.toString("utf8").split("\n");
+    if (start > 0) lines.shift();
+    const entries: TranscriptEntry[] = [];
+    lines.forEach((line, index) => {
+      const entry = conversationEntry(line, index, textMax);
+      if (entry) entries.push(entry);
+    });
+    const kept = entries.slice(-limit);
+    return {
+      entries: kept,
+      fromStart: start === 0 && kept.length === entries.length,
+      truncated: start > 0 || kept.length < entries.length,
+    };
+  } catch {
+    return null;
+  } finally {
+    await handle.close();
+  }
 }
 
 /**

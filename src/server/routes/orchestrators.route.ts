@@ -1,5 +1,8 @@
 import { Router } from "express";
+import { ORCHESTRATOR_TOKEN_HEADER } from "../../shared/orchestrator-limits.js";
+import { ForbiddenError } from "../services/domain/errors.js";
 import { resolveBoard } from "../services/orchestration/boards.js";
+import { readOrchestratorConversation } from "../services/orchestration/orchestrator-conversation.js";
 import {
   addOrchestrator,
   editOrchestrator,
@@ -13,6 +16,7 @@ import { parseBoardKeyParam } from "./boards-schemas.js";
 import { httpErrorHandler, orFail } from "./error-handler.js";
 import {
   addBodySchema,
+  conversationQuerySchema,
   editBodySchema,
   orchestratorIdSchema,
 } from "./orchestrators-schemas.js";
@@ -24,6 +28,19 @@ orchestratorsRouter.get("/boards/:key/orchestrators", (req, res) => {
   const board = resolveBoard(parseBoardKeyParam(req.params.key));
   res.status(200).json({ orchestrators: listOrchestrators(board) });
 });
+
+orchestratorsRouter.get(
+  "/boards/:key/orchestrators/:id/conversation",
+  async (req, res) => {
+    if (req.headers[ORCHESTRATOR_TOKEN_HEADER] !== undefined) {
+      throw new ForbiddenError("orchestrator-token-on-user-route");
+    }
+    const board = resolveBoard(parseBoardKeyParam(req.params.key));
+    const id = parseOrThrow(orchestratorIdSchema, req.params.id);
+    const { limit } = parseOrThrow(conversationQuerySchema, req.query);
+    res.status(200).json(await readOrchestratorConversation(board, id, limit));
+  },
+);
 
 orchestratorsRouter.post("/boards/:key/orchestrators", async (req, res) => {
   const board = resolveBoard(parseBoardKeyParam(req.params.key));

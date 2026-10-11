@@ -1793,6 +1793,7 @@ export interface OrchestratorSessionView {
   state: SupervisorState | null;
   stateReason: string | null;
   contextPercent: number | null;
+  cost: number | null;
   model: string | null;
   hasTmuxSession: boolean;
   activeSessionId: string | null;
@@ -2069,6 +2070,19 @@ export interface DecisionItem {
     usedIndexes: number[];
   };
   plan?: { entries: PlanEntry[] };
+}
+
+export interface ConversationMessage {
+  id: string;
+  at: string | null;
+  role: "user" | "orchestrator" | "system";
+  text: string;
+}
+
+export interface OrchestratorConversation {
+  status: "ok" | "no-session" | "no-transcript" | "unreadable";
+  messages: ConversationMessage[];
+  truncated: boolean;
 }
 
 export interface SessionMeters {
