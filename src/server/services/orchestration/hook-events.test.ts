@@ -256,7 +256,7 @@ void test("main-session output after a pause-tool marker flips the card back", a
       hook_event_name: "PostToolUse",
       tool_name: "Bash",
       agent_id: "a-subagent",
-    } as Parameters<typeof applyHookEvent>[2]);
+    });
     assert.equal(columnOf(cardId), "needs_input", "subagent output is ignored");
     await applyHookEvent(cardId, sessionId, next);
     assert.equal(columnOf(cardId), "in_progress", next.hook_event_name);
