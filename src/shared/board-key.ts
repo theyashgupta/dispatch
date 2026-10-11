@@ -54,7 +54,6 @@ export function deriveBoardKey(
   return null;
 }
 
-/** The app link of a board page. */
 export function boardLink(key: BoardKey | string): string {
   return `/boards/${key}`;
 }

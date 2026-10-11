@@ -116,8 +116,8 @@ export const createBoardBodySchema = z.preprocess(
   fieldsOf,
   z.object(
     {
-      key: z.string("invalid-key").optional(),
       name: z.string("missing-name"),
+      key: z.string("invalid-key").optional(),
       workspaceRoot: folderPathSchema.optional(),
       repositories: repositoriesSchema.optional().transform((r) => r ?? []),
       linearTeamKeys: linearTeamKeysSchema.optional().transform((k) => k ?? []),

@@ -585,6 +585,12 @@ test("POST /boards refuses a missing name, folder and a malformed repositories l
       "missing-name",
     );
   }
+  await expectRefusal(
+    call("POST", "/boards", { key: 5 }),
+    400,
+    "Enter a name.",
+    "missing-name",
+  );
   const folder = "This folder does not exist.";
   await expectRefusal(
     call(
@@ -623,6 +629,32 @@ test("POST /boards refuses a missing name, folder and a malformed repositories l
   );
   assert.equal(notList.status, 400);
   assert.deepEqual(notList.body, { error: "invalid-repository" });
+});
+
+test("POST and PATCH refuse a name over 100 characters or with a control character, and accept 100", async () => {
+  const copy = "Use a name of at most 100 characters on one line.";
+  for (const name of ["a".repeat(101), "two\nlines", "tab\there"]) {
+    await expectRefusal(
+      call("POST", "/boards", acmeBody({ key: "NAME", name })),
+      400,
+      copy,
+      "invalid-name",
+    );
+    await expectRefusal(
+      call("PATCH", "/boards/ACME", { name }),
+      400,
+      copy,
+      "invalid-name",
+    );
+  }
+  const max = "b".repeat(100);
+  const created = await call(
+    "POST",
+    "/boards",
+    acmeBody({ key: "LONGNM", name: max, linearTeamKeys: [] }),
+  );
+  assert.equal(created.status, 201, created.text);
+  assert.equal(created.body.board.name, max);
 });
 
 test("POST /boards refuses a bad base branch, check command and team keys", async () => {

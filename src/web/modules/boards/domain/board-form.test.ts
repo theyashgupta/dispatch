@@ -251,10 +251,14 @@ test("refusalFieldError maps folder-missing to the folder or to a repository row
   );
 });
 
-test("refusalFieldError maps missing-name to the name and anything else to the form", () => {
+test("refusalFieldError maps missing-name and invalid-name to the name and anything else to the form", () => {
   assert.deepEqual(
     refusalFieldError({ error: "Enter a name.", code: "missing-name" }),
     { field: "name", message: "Enter a name." },
+  );
+  assert.deepEqual(
+    refusalFieldError({ error: "One line.", code: "invalid-name" }),
+    { field: "name", message: "One line." },
   );
   for (const code of ["invalid-key", "no-workspaces-root", "unknown"]) {
     assert.deepEqual(refusalFieldError({ error: "Nope.", code }), {

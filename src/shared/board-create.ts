@@ -26,6 +26,7 @@ export interface BoardRefusal {
   suggestion?: string;
   field?: string;
   path?: string;
+  detail?: string;
 }
 
 /** The success line for a created board, shown in a toast. */

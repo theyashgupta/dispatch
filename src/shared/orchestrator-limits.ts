@@ -1,6 +1,7 @@
 import { COLUMNS, type Column } from "./types.js";
 
 export const ITEM_TITLE_MAX = 300;
+export const BOARD_NAME_MAX = 100;
 export const ITEM_DESCRIPTION_MAX = 20000;
 export const TEAM_KEY_RE = /^[A-Z][A-Z0-9]{0,9}$/;
 export const CARD_ID_MAX = 200;

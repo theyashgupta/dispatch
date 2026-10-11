@@ -586,6 +586,43 @@ test("createBoard with a name only derives the key and makes the folder below th
     assert.ok(fs.statSync(path.join(root, "PAYME2")).isDirectory());
   }));
 
+test("createBoard and updateBoard refuse a name over 100 characters or with a control character", async () => {
+  const bad = [
+    "a".repeat(101),
+    "two\nlines",
+    "nul\u0000",
+    "next\u0085line",
+    "sep\u2028line",
+    "sep\u2029line",
+  ];
+  for (const name of bad) {
+    await assert.rejects(
+      createBoard(input({ key: "NAMEX", name }), countingReader([])),
+      refusal(
+        400,
+        "invalid-name",
+        "Use a name of at most 100 characters on one line.",
+      ),
+    );
+  }
+  const max = "c".repeat(100);
+  const board = await createBoard(
+    input({ key: "NAMEY", name: max }),
+    countingReader([]),
+  );
+  assert.equal(board.name, max);
+  for (const name of bad) {
+    await assert.rejects(
+      updateBoard(key("NAMEY"), { name }),
+      refusal(
+        400,
+        "invalid-name",
+        "Use a name of at most 100 characters on one line.",
+      ),
+    );
+  }
+});
+
 test("createBoard skips a derived key that a Linear team uses, reading the team keys once", async () => {
   const reader = countingReader(["QUEUES"]);
   const board = await inRoot("queues-root", () =>
@@ -648,17 +685,49 @@ test("createBoard stops a derived key after 3 store refusals and removes every e
     assert.deepEqual(fs.readdirSync(root), []);
   }));
 
-test("createBoard keeps a default folder that existed before a store refusal", () =>
+test("createBoard treats a derived key whose default folder exists as taken", () =>
+  inRoot("exists-root", async (root) => {
+    fs.mkdirSync(path.join(root, "keeper"));
+    const board = await createBoard(nameOnly("Keeper"), countingReader([]));
+    assert.equal(board.key, "KEEPE2");
+    assert.ok(fs.statSync(path.join(root, "KEEPE2")).isDirectory());
+  }));
+
+test("createBoard adopts an existing default folder for an explicit key and keeps it when the store refuses", () =>
   inRoot("keep-root", async (root) => {
     fs.mkdirSync(path.join(root, "KEEPER"));
-    const refused = refuseOnce(1);
+    const refused = refuseOnce(1, "duplicate-key");
     try {
-      const board = await createBoard(nameOnly("Keeper"), countingReader([]));
-      assert.equal(board.key, "KEEPE2");
+      await assert.rejects(
+        createBoard(
+          { ...nameOnly("Keeper"), key: "KEEPER" },
+          countingReader([]),
+        ),
+      );
     } finally {
       refused.mock.restore();
     }
     assert.ok(fs.statSync(path.join(root, "KEEPER")).isDirectory());
+    const board = await createBoard(
+      { ...nameOnly("Keeper"), key: "KEEPER" },
+      countingReader([]),
+    );
+    assert.equal(board.workspaceRoot, path.join(root, "KEEPER"));
+  }));
+
+test("createBoard refuses an explicit key whose default folder is a plain file and stores no board", () =>
+  inRoot("file-root", async (root) => {
+    fs.writeFileSync(path.join(root, "FILEK"), "");
+    await assert.rejects(
+      createBoard(
+        { ...nameOnly("File key"), key: "FILEK" },
+        countingReader([]),
+      ),
+      refusal(400, "folder-missing", "This folder does not exist.", {
+        field: "workspaceRoot",
+      }),
+    );
+    assert.equal(store.getBoard(key("FILEK")), undefined);
   }));
 
 test("createBoard removes the empty folder it made when an explicit key is refused by the store", () =>

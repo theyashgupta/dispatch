@@ -143,7 +143,6 @@ export function repositoryInputs(
     });
 }
 
-/** The index of the repository row that holds a path, or -1 when no row does. */
 export function rowOfPath(
   repositories: readonly RepositoryValues[],
   path: string | undefined,
@@ -220,6 +219,7 @@ export function refusalFieldError(refusal: BoardRefusal): RefusalFieldError {
         ? { field: "repositories", message, path: refusal.path }
         : { field: "workspaceRoot", message };
     case "missing-name":
+    case "invalid-name":
       return { field: "name", message };
     default:
       return { field: "form", message };
