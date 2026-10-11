@@ -34,6 +34,14 @@ const PLAN_OPTIONS: DecisionItem["options"] = [
   { id: "reject", label: "Do not approve" },
 ];
 
+const SERVER_OPTIONS: Partial<
+  Record<DecisionItem["kind"], DecisionItem["options"]>
+> = {
+  roadmap_approval: ROADMAP_OPTIONS,
+  ticket_proposal: PROPOSAL_OPTIONS,
+  plan: PLAN_OPTIONS,
+};
+
 /**
  * Resolve the orchestrator that owns a decision.
  *
@@ -51,32 +59,22 @@ function ownerOf(caller: OrchestratorIdentity, cardId: string | null): string {
  * @remarks
  * The caller checks that `cardId` belongs to the board. The recommended option must be
  * one of the options, else the typed 400 `invalid-recommended-option`. A `roadmap_approval`,
- * `ticket_proposal` or `plan` item gets the server options, so the label the user picks always matches
- * the id the later tool checks.
+ * `ticket_proposal` or `plan` item gets the server options, so the label the user picks always
+ * matches the id the later tool checks.
  */
 export function createDecisionItem(
   caller: OrchestratorIdentity,
   input: DecisionInput,
 ): DecisionItem {
-  const proposal = input.kind === "ticket_proposal";
-  if (proposal !== (input.tickets !== undefined)) {
+  if ((input.kind === "ticket_proposal") !== (input.tickets !== undefined)) {
     throw new ValidationError("invalid-tickets");
   }
-  const plan = input.kind === "plan";
-  if (plan !== (input.plan !== undefined)) {
+  if ((input.kind === "plan") !== (input.plan !== undefined)) {
     throw new ValidationError("invalid-plan");
   }
-  const serverOptions = proposal || plan || input.kind === "roadmap_approval";
-  const options = proposal
-    ? PROPOSAL_OPTIONS
-    : plan
-      ? PLAN_OPTIONS
-      : serverOptions
-        ? ROADMAP_OPTIONS
-        : input.options;
-  const recommended = serverOptions
-    ? "approve"
-    : (input.recommendedOptionId ?? null);
+  const forced = SERVER_OPTIONS[input.kind];
+  const options = forced ?? input.options;
+  const recommended = forced ? "approve" : (input.recommendedOptionId ?? null);
   if (
     recommended !== null &&
     !options.some((option) => option.id === recommended)

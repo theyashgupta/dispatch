@@ -96,13 +96,13 @@ Ship order follows the plan order. It does not follow card numbers. Card numbers
 Write one plan for the whole intake. Call `create_decision_item` one time with these values:
 
 - kind: `plan`
-- options: `approve` and `reject` (the server sets them)
-- question: a short summary of the plan, at most 2000 characters
+- options: `approve` and `reject` (the server sets their labels)
+- question: the plan as text, at most 2000 characters, with one line for each entry (the ref, the playbook, the order and the size)
 - plan.entries: one entry for each ticket or group
 
 Each entry holds these items:
 
-- ref: the ticket id, or the group title for a group.
+- ref: the ticket id, or the group title for a group. Each ref is used one time.
 - playbook: the playbook name.
 - order: the position in the plan, from 1 to 20. Each order is used one time.
 - size: `small`, `medium` or `large` (section 3).

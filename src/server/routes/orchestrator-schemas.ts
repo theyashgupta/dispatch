@@ -290,7 +290,8 @@ const decisionBodyShape = z.object(
             .max(PLAN_ENTRIES_MAX, "invalid-plan")
             .refine(
               (entries) =>
-                new Set(entries.map((e) => e.order)).size === entries.length,
+                new Set(entries.map((e) => e.order)).size === entries.length &&
+                new Set(entries.map((e) => e.ref)).size === entries.length,
               "invalid-plan",
             ),
         },

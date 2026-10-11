@@ -460,8 +460,18 @@ void test("tickets are refused on another kind, required on a proposal and bound
 void test("a plan item holds its entries, gets the server options and is answered by the user", async () => {
   const plan = {
     entries: [
-      { ref: "SBX-1", playbook: "Write code directly", order: 1, size: "small" },
-      { ref: "Calendar sync", playbook: "Roadmap Loop", order: 2, size: "large" },
+      {
+        ref: "SBX-1",
+        playbook: "Write code directly",
+        order: 1,
+        size: "small",
+      },
+      {
+        ref: "Calendar sync",
+        playbook: "Roadmap Loop",
+        order: 2,
+        size: "large",
+      },
     ],
   };
   const item = await created({
@@ -507,6 +517,7 @@ void test("a plan is refused on another kind, required on a plan item and bounde
       ),
     },
     { kind: "plan", plan: plan([entry, { ...entry, ref: "SBX-2" }]) },
+    { kind: "plan", plan: plan([entry, { ...entry, order: 2 }]) },
     { kind: "plan", plan: plan([{ ...entry, order: 0 }]) },
     { kind: "plan", plan: plan([{ ...entry, order: 21 }]) },
     { kind: "plan", plan: plan([{ ...entry, order: 1.5 }]) },
