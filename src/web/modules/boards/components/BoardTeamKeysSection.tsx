@@ -9,7 +9,7 @@ interface BoardTeamKeysSectionProps {
   canSave: boolean;
   saving: boolean;
   onChange: (value: string) => void;
-  onSave: () => void;
+  onSave?: () => void;
 }
 
 export function BoardTeamKeysSection({

@@ -28,7 +28,7 @@ const clamp = (index: number, count: number) =>
  * @remarks A new query resets the highlight to the first row and a move clamps it to the row
  * count it is given; the component clamps again at render when the rows change underneath.
  * Entering or leaving a prompt clears the query, so the typed text never carries across modes.
- * Opening in a group limits the commands to that group; leaving a prompt resets it with the rest.
+ * Opening in a group limits the commands to that group; leaving a prompt returns to the group it was opened in.
  */
 export function paletteReducer(
   state: PaletteState,
@@ -47,7 +47,7 @@ export function paletteReducer(
     case "open-group":
       return { ...INITIAL_PALETTE, group: action.group };
     case "leave-prompt":
-      return INITIAL_PALETTE;
+      return { ...INITIAL_PALETTE, group: state.group };
   }
 }
 

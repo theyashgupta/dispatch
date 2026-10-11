@@ -28,7 +28,10 @@ import {
   type SettingsSection,
 } from "@/modules/boards/domain/board-settings";
 import { useUpdateBoardMutation } from "@/modules/boards/queries/boards-queries";
-import { useInitRepositoryMutation } from "@/queries/board-repository-queries";
+import {
+  initRepositoryErrorText,
+  useInitRepositoryMutation,
+} from "@/queries/board-repository-queries";
 import { useRepositoryBrowser } from "./use-repository-browser";
 
 interface BoardSettingsFormContainerProps {
@@ -46,8 +49,7 @@ export function BoardSettingsFormContainer({
   const [errors, setErrors] = useState<BoardSettingsErrors>({});
   const [saving, setSaving] = useState<SettingsSection | null>(null);
   const isDefault = board.key === DEFAULT_BOARD_KEY;
-  const createError =
-    init.data?.ok === false ? init.data.error : (init.error?.message ?? null);
+  const createError = initRepositoryErrorText(init.data, init.error);
 
   const edit = (apply: (prev: BoardSettingsValues) => BoardSettingsValues) => {
     setErrors({});
@@ -106,7 +108,7 @@ export function BoardSettingsFormContainer({
           canSave={canSave("name")}
           saving={saving === "name"}
           onChange={(name) => edit((prev) => ({ ...prev, name }))}
-          onSave={() => void save("name")}
+          onSave={board.archived ? undefined : () => void save("name")}
         />
         <BoardRepositoriesSection
           repositories={values.repositories}
@@ -120,7 +122,7 @@ export function BoardSettingsFormContainer({
           onAdd={() => edit(addRepository)}
           onRemove={(index) => edit((prev) => removeRepository(prev, index))}
           onBrowse={repositoryBrowser.open}
-          onSave={() => void save("repositories")}
+          onSave={board.archived ? undefined : () => void save("repositories")}
         />
         {!board.archived && (
           <BoardCreateRepositorySection
@@ -140,7 +142,9 @@ export function BoardSettingsFormContainer({
             onChange={(linearTeamKeys) =>
               edit((prev) => ({ ...prev, linearTeamKeys }))
             }
-            onSave={() => void save("linearTeamKeys")}
+            onSave={
+              board.archived ? undefined : () => void save("linearTeamKeys")
+            }
           />
         )}
       </FieldSet>

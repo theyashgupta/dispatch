@@ -9,7 +9,7 @@ interface BoardNameSectionProps {
   canSave: boolean;
   saving: boolean;
   onChange: (name: string) => void;
-  onSave: () => void;
+  onSave?: () => void;
 }
 
 export function BoardNameSection({
@@ -24,7 +24,7 @@ export function BoardNameSection({
     <BoardSettingsSection
       id="board-settings-name"
       title="Name"
-      description="The name the board list and the board switcher show."
+      description="The name the board list and the sidebar Boards section show."
       canSave={canSave}
       saving={saving}
       onSave={onSave}

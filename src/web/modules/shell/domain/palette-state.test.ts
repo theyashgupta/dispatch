@@ -112,7 +112,7 @@ test("typing and moving inside a group keep the group", () => {
   );
 });
 
-test("entering a prompt from a group keeps the group and leaving the prompt resets it", () => {
+test("entering a prompt from a group keeps the group and leaving the prompt returns to it", () => {
   const prompted = paletteReducer(inBoards, {
     type: "enter-prompt",
     commandId: PROMPT,
@@ -123,8 +123,8 @@ test("entering a prompt from a group keeps the group and leaving the prompt rese
     promptId: PROMPT,
     group: "Boards",
   });
-  assert.deepEqual(
-    paletteReducer(prompted, { type: "leave-prompt" }),
-    INITIAL_PALETTE,
-  );
+  assert.deepEqual(paletteReducer(prompted, { type: "leave-prompt" }), {
+    ...INITIAL_PALETTE,
+    group: "Boards",
+  });
 });

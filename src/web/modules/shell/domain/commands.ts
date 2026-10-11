@@ -153,7 +153,6 @@ export function filterCommands(
   return commands.filter((c) => c.label.toLowerCase().includes(q));
 }
 
-/** The commands of one group, or all of them when the group is null. */
 export function commandsInGroup(
   commands: readonly Command[],
   group: string | null,

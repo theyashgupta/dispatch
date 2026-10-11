@@ -19,7 +19,7 @@ interface BoardRepositoriesSectionProps {
   onAdd: () => void;
   onRemove: (index: number) => void;
   onBrowse: (index: number) => void;
-  onSave: () => void;
+  onSave?: () => void;
 }
 
 export function BoardRepositoriesSection({

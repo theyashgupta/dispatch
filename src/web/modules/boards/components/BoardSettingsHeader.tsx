@@ -14,10 +14,8 @@ export function BoardSettingsHeader({
   return (
     <>
       <div className="flex flex-col gap-1">
-        <h1 className="text-xl font-semibold">Board settings</h1>
-        <p className="text-sm wrap-anywhere text-muted-foreground">
-          {name} <span className="font-mono">({boardKey})</span>
-        </p>
+        <h1 className="text-xl font-semibold wrap-anywhere">{name}</h1>
+        <p className="font-mono text-sm text-muted-foreground">{boardKey}</p>
       </div>
       {archived && (
         <Alert>
