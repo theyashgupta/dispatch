@@ -424,7 +424,7 @@ The user sees the orchestrator of a board as one centre: the orchestrator node, 
 - The route `/orchestrator` with the `board` search parameter and an optional `orchestrator` search parameter (the orchestrator id; the default is the main orchestrator).
 - The orchestrator records of the board (D-7): name, role, state, card id, the session meters `contextPercent` and `cost` of its active session.
 - The board snapshot (cards with `state`, `stateReason`, `stateSince`, `activeSessionId`, `contextPercent`, `cost`, `launch.playbook`, `startIntent.playbook`, `loopProgress`, `shipFlow`, `memberIds`, `groupId`). The branches come from the cards whose owner resolves to the selected orchestrator (D-7). Hidden cards and group members are not branches.
-- The decision items of the board, open and answered (D-3). The newest `plan` item of the selected orchestrator that is open or approved gives the planned branches and their order.
+- The decision items of the board, open and answered (D-3). The newest approved `plan` item of the selected orchestrator gives the planned branches and their order. A newer open plan adds only the refs that the approved plan does not have, after them, as a preview. A rejected plan adds nothing.
 - The conversation of the selected orchestrator: `GET /api/boards/<KEY>/orchestrators/<id>/conversation`. The user turns, the orchestrator text replies and the lines that Dispatch typed, in transcript order, with no tool calls.
 - Polling: conversation and decision items every 3 s while the screen is open. The branches follow the board stream.
 
