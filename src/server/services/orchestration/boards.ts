@@ -9,6 +9,7 @@ import {
 } from "../../../shared/board-key.js";
 import { buildAttentionQueue } from "../../../shared/attention-queue.js";
 import { loopView } from "../../../shared/loop-view.js";
+import { cardOwner } from "../../../shared/orchestrator-owner.js";
 import {
   hasLiveSession,
   hasLoopProgress,
@@ -32,7 +33,7 @@ import {
   boardRepository as store,
 } from "../../store/board-repository.js";
 import { boardWorkspace } from "../domain/board-workspace.js";
-import { cardOwner, effectivePolicy } from "../domain/orchestrator-rules.js";
+import { effectivePolicy } from "../domain/orchestrator-rules.js";
 import type {
   OrchestratorIdentity,
   ScopeTarget,
