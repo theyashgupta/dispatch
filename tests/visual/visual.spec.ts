@@ -25,13 +25,13 @@ const screens: {
 }[] = [
   {
     name: "board",
-    url: `${seeded}/#/board`,
+    url: `${seeded}/#/boards/LOCAL`,
     ready: (page) =>
       expect(page.getByText("Todo ticket").first()).toBeVisible(),
   },
   {
     name: "inbox",
-    url: `${seeded}/#/inbox`,
+    url: `${seeded}/#/boards/LOCAL/inbox`,
     ready: (page) =>
       expect(page.getByText("Review the token rename").first()).toBeVisible(),
   },
@@ -51,14 +51,14 @@ const screens: {
   },
   {
     name: "card-panel",
-    url: `${seeded}/?card=v-prog#/board`,
+    url: `${seeded}/?card=v-prog#/boards/LOCAL`,
     ready: async (page) => {
       await expect(
         page.getByText("In progress ticket with a session").last(),
       ).toBeVisible();
       const url = new URL(page.url());
       expect(url.searchParams.has("card")).toBe(false);
-      expect(url.hash).toBe("#/board");
+      expect(url.hash).toBe("#/boards/LOCAL");
     },
   },
   {
@@ -71,7 +71,7 @@ const screens: {
   },
   {
     name: "orchestrator-panel",
-    url: `${orchestrated}/#/board?board=ORC&panel=orchestrator&tab=decisions`,
+    url: `${orchestrated}/#/boards/ORC?panel=orchestrator&tab=decisions`,
     ready: (page) =>
       expect(
         page.getByText(/Retry the Phase 5 gate now/).first(),
@@ -79,7 +79,7 @@ const screens: {
   },
   {
     name: "dashboard",
-    url: `${orchestrated}/#/dashboard?board=ORC`,
+    url: `${orchestrated}/#/boards/ORC/dashboard`,
     ready: (page) =>
       expect(
         page.getByText("Allow WebFetch: docs.github.com?").first(),
@@ -87,7 +87,7 @@ const screens: {
   },
   {
     name: "setup-wizard",
-    url: `http://127.0.0.1:${seededPort + 1}/#/board`,
+    url: `http://127.0.0.1:${seededPort + 1}/#/boards/LOCAL`,
     ready: (page) => expect(page.getByRole("dialog")).toBeVisible(),
   },
   {
