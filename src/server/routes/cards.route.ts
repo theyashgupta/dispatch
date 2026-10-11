@@ -179,8 +179,14 @@ function inheritFromError(
 
 cardsRouter.post("/cards/:id/start", async (req, res) => {
   const { id } = req.params;
-  const { extraDirection, playbook, newSession, inheritFrom, workspace } =
-    parseOrThrow(startBodySchema, req.body);
+  const {
+    extraDirection,
+    playbook,
+    crossSessionInbound,
+    newSession,
+    inheritFrom,
+    workspace,
+  } = parseOrThrow(startBodySchema, req.body);
 
   const card = launchableCard(id);
 
@@ -239,6 +245,7 @@ cardsRouter.post("/cards/:id/start", async (req, res) => {
 
   void startSession(id, extraDirection, config, {
     playbook,
+    crossSessionInbound,
     newSession,
     inheritFrom,
   });

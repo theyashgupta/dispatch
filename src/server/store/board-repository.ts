@@ -153,7 +153,10 @@ export interface BoardRepository {
   endSync(id: string): void;
   setProvisioning(id: string, step: string): Promise<void>;
   setExtraDirection(id: string, text: string): Promise<void>;
-  setStartIntent(id: string, intent: { playbook?: string }): Promise<void>;
+  setStartIntent(
+    id: string,
+    intent: NonNullable<Card["startIntent"]>,
+  ): Promise<void>;
   addWorkspaceFolder(board: BoardKey, path: string): Promise<void>;
   removeWorkspaceFolder(board: BoardKey, path: string): Promise<void>;
   setLastUsedFolder(board: BoardKey, path: string): Promise<void>;
