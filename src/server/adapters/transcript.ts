@@ -113,8 +113,8 @@ function contentText(content: unknown): string | null {
  * Parse one transcript line into a user or assistant text entry.
  *
  * @remarks `hidden` marks the entries Claude Code writes for itself (meta, sidechain, compact
- * summary, slash command echoes, interrupt notes); the conversation skips them, the supervisor
- * samples still count them.
+ * summary, a non-human origin such as a task notification, slash command echoes, interrupt
+ * notes); the conversation skips them, the supervisor samples still count them.
  */
 function parseEntry(line: string): ParsedEntry | null {
   let entry: {
@@ -124,6 +124,7 @@ function parseEntry(line: string): ParsedEntry | null {
     isMeta?: unknown;
     isSidechain?: unknown;
     isCompactSummary?: unknown;
+    origin?: { kind?: unknown };
     message?: { content?: unknown };
   } | null;
   try {
@@ -144,6 +145,8 @@ function parseEntry(line: string): ParsedEntry | null {
       entry?.isMeta === true ||
       entry?.isSidechain === true ||
       entry?.isCompactSummary === true ||
+      (typeof entry?.origin?.kind === "string" &&
+        entry.origin.kind !== "human") ||
       SYNTHETIC_PREFIXES.some((prefix) => text.startsWith(prefix)),
   };
 }
@@ -204,7 +207,7 @@ export async function readTranscriptConversation(
         type: parsed.type,
         text:
           parsed.text.length > textMax
-            ? `${parsed.text.slice(0, textMax)}\n[cut at ${textMax} characters]`
+            ? `${parsed.text.slice(0, textMax).replace(/[\uD800-\uDBFF]$/, "")}\n[cut at ${textMax} characters]`
             : parsed.text,
       });
     }
