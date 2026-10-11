@@ -3,11 +3,55 @@ import { test } from "node:test";
 import { INITIAL_PALETTE, paletteReducer, rowAt } from "./palette-state.js";
 
 test("a query change resets the highlight to the first row", () => {
-  const moved = { query: "in", highlight: 3 };
+  const moved = { ...INITIAL_PALETTE, query: "in", highlight: 3 };
   assert.deepEqual(paletteReducer(moved, { type: "query", query: "inb" }), {
     query: "inb",
     highlight: 0,
+    promptId: null,
+    group: null,
   });
+});
+
+const PROMPT = "create-board";
+const prompting = paletteReducer(
+  { ...INITIAL_PALETTE, query: "cre", highlight: 2 },
+  { type: "enter-prompt", commandId: PROMPT },
+);
+
+test("entering a prompt clears the query and the highlight and keeps the prompt id", () => {
+  assert.deepEqual(prompting, {
+    query: "",
+    highlight: 0,
+    promptId: PROMPT,
+    group: null,
+  });
+});
+
+test("typing in prompt mode keeps the prompt id", () => {
+  assert.deepEqual(
+    paletteReducer(prompting, { type: "query", query: "Payments" }),
+    { query: "Payments", highlight: 0, promptId: PROMPT, group: null },
+  );
+});
+
+test("leaving a prompt returns to an empty command list", () => {
+  const typed = paletteReducer(prompting, { type: "query", query: "Pay" });
+  assert.deepEqual(
+    paletteReducer(typed, { type: "leave-prompt" }),
+    INITIAL_PALETTE,
+  );
+  assert.deepEqual(
+    paletteReducer(INITIAL_PALETTE, { type: "leave-prompt" }),
+    INITIAL_PALETTE,
+  );
+});
+
+test("a move in prompt mode keeps the prompt and the query", () => {
+  const typed = paletteReducer(prompting, { type: "query", query: "Pay" });
+  assert.deepEqual(
+    paletteReducer(typed, { type: "move", delta: 1, count: 1 }),
+    typed,
+  );
 });
 
 test("moves clamp to the rendered rows at both ends", () => {
@@ -38,4 +82,49 @@ test("results follow the commands in one index space", () => {
     result: "LOCAL-1",
   });
   assert.equal(rowAt(commands, results, 4), null);
+});
+
+const inBoards = paletteReducer(INITIAL_PALETTE, {
+  type: "open-group",
+  group: "Boards",
+});
+
+test("opening in a group sets the group with an empty query and the first row highlighted", () => {
+  assert.deepEqual(inBoards, {
+    query: "",
+    highlight: 0,
+    promptId: null,
+    group: "Boards",
+  });
+});
+
+test("typing and moving inside a group keep the group", () => {
+  const typed = paletteReducer(inBoards, { type: "query", query: "gar" });
+  assert.deepEqual(typed, {
+    query: "gar",
+    highlight: 0,
+    promptId: null,
+    group: "Boards",
+  });
+  assert.equal(
+    paletteReducer(typed, { type: "move", delta: 1, count: 2 }).group,
+    "Boards",
+  );
+});
+
+test("entering a prompt from a group keeps the group and leaving the prompt returns to it", () => {
+  const prompted = paletteReducer(inBoards, {
+    type: "enter-prompt",
+    commandId: PROMPT,
+  });
+  assert.deepEqual(prompted, {
+    query: "",
+    highlight: 0,
+    promptId: PROMPT,
+    group: "Boards",
+  });
+  assert.deepEqual(paletteReducer(prompted, { type: "leave-prompt" }), {
+    ...INITIAL_PALETTE,
+    group: "Boards",
+  });
 });

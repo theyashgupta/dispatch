@@ -13,12 +13,14 @@ const SEARCH_DEBOUNCE_MS = 150;
 
 export interface CommandPaletteContainerProps {
   commands: readonly Command[];
+  initialGroup?: string;
   onClose: (ran: boolean) => void;
   onOpenCard: (result: CardSearchResult) => void;
 }
 
 export function CommandPaletteContainer({
   commands,
+  initialGroup,
   onClose,
   onOpenCard,
 }: CommandPaletteContainerProps) {
@@ -43,6 +45,7 @@ export function CommandPaletteContainer({
   return (
     <CommandPalette
       commands={commands}
+      initialGroup={initialGroup}
       results={current ? (search.data?.results ?? []) : []}
       searchFailed={current && search.isError}
       onQueryChange={setTyped}

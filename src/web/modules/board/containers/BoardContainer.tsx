@@ -32,7 +32,7 @@ import {
   pinFromBoard,
   selectedCardOf,
 } from "../../../../shared/pinned-card.js";
-import { routeHash } from "../../../../shared/route.js";
+import { pageLocation } from "../../../../shared/route.js";
 import {
   startTarget,
   type StartRequest,
@@ -135,7 +135,7 @@ export function BoardContainer({ search }: BoardContainerProps) {
   const onStartRequest = (req: string | StartRequest) =>
     appStore.requestStart(req, startTarget(req, cards));
   const onOpenInbox = () =>
-    void router.navigate({ href: routeHash({ page: "inbox" }).slice(1) });
+    void router.navigate({ href: pageLocation({ page: "inbox" }, boardKey) });
   const onGroupStartRequest = appStore.openGroupStart;
 
   const moveCard = useMoveCardMutation();

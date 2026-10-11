@@ -5,6 +5,6 @@ const searchSchema = z.looseObject({
   dialog: z.literal("new").optional().catch(undefined),
 });
 
-export const Route = createFileRoute("/boards/{-$id}")({
+export const Route = createFileRoute("/boards/")({
   validateSearch: (search) => searchSchema.parse(search),
 });

@@ -48,7 +48,7 @@ export function OrchestratorPanelContainer() {
   const lifecycle = useLifecycleMutation(boardKey);
   const { mutateAsync: ensureTerminal } =
     useEnsureOrchestratorTerminalMutation();
-  const linkedTab = useSearch({ from: "/board/{-$id}" }).tab;
+  const linkedTab = useSearch({ from: "/boards/$key/" }).tab;
   const [tab, setTab] = useState<PanelTab>(linkedTab ?? "terminal");
   const [failure, setFailure] = useState<{
     kind: ControlKind;
@@ -97,7 +97,8 @@ export function OrchestratorPanelContainer() {
 
   function close() {
     void navigate({
-      to: "/board/{-$id}",
+      to: "/boards/$key",
+      params: { key: boardKey },
       search: (prev) => ({ ...prev, panel: undefined, tab: undefined }),
     });
     focusEntryButton();

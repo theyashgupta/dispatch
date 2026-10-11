@@ -9,13 +9,18 @@ import {
 } from "../../../../shared/types.js";
 import type { SwitcherItem } from "./board-switcher.js";
 
-const BOARDS_GROUP = "Boards";
+export const BOARDS_GROUP = "Boards";
 
 export interface Command {
   id: string;
   label: string;
   key?: string;
   group?: string;
+  prompt?: {
+    placeholder: string;
+    hint: string;
+    submit: (text: string) => void | Promise<void>;
+  };
   run: () => void | Promise<void>;
 }
 
@@ -29,7 +34,7 @@ export interface CommandContext {
   meetingNotes: () => void;
   syncNow: () => void;
   switchBoard: (key: BoardKey) => void;
-  newBoard: () => void;
+  createBoard: (name: string) => Promise<void>;
 }
 
 const hasLiveSession = (card: Card) =>
@@ -41,8 +46,8 @@ const hasLiveSession = (card: Card) =>
  * @remarks "Go to Dashboard" follows the nav list, so it shows only when the sidebar row does. Card commands come first, only with a selected card and only where it can take them:
  * Start from To Do, Open terminal with a live session, Move to every column the manual-move
  * rule allows except the card's own, and Clean up from Done. The "Boards" group comes last:
- * "Switch to board" for each board but the selected one only when `switcher` is given, then
- * "Manage boards" and "New board" always (U3-10).
+ * "Switch to board" for each board but the selected one once the board list has loaded (`switcher` is given), then
+ * "Manage boards" and "Create board" always (U3-10).
  */
 export function buildCommands(
   ctx: CommandContext,
@@ -66,10 +71,15 @@ export function buildCommands(
       run: () => ctx.navigate("boards"),
     },
     {
-      id: "new-board",
-      label: "New board",
+      id: "create-board",
+      label: "Create board",
       group: BOARDS_GROUP,
-      run: ctx.newBoard,
+      prompt: {
+        placeholder: "Board name",
+        hint: "Press Enter to create",
+        submit: ctx.createBoard,
+      },
+      run: () => undefined,
     },
   ];
   const general: Command[] = [
@@ -141,6 +151,15 @@ export function filterCommands(
 ): Command[] {
   const q = query.trim().toLowerCase();
   return commands.filter((c) => c.label.toLowerCase().includes(q));
+}
+
+export function commandsInGroup(
+  commands: readonly Command[],
+  group: string | null,
+): Command[] {
+  return group === null
+    ? [...commands]
+    : commands.filter((command) => command.group === group);
 }
 
 /** Split commands into runs of one group, keeping each command's index in the input. */

@@ -492,12 +492,6 @@ test("POST /boards refuses each bad key with the exact UI copy", async () => {
       "invalid-key",
     );
   }
-  await expectRefusal(
-    call("POST", "/boards", { ...acmeBody(), key: undefined }),
-    400,
-    invalid,
-    "invalid-key",
-  );
   for (const reserved of ["LOCAL", "GROUP"]) {
     await expectRefusal(
       call("POST", "/boards", acmeBody({ key: reserved })),
@@ -514,6 +508,7 @@ test("POST /boards refuses a duplicate key and a key a Linear team or Linear car
     400,
     "Board Acme Corp uses this key.",
     "duplicate-key",
+    { suggestion: "ACME2" },
   );
   await expectRefusal(
     call("POST", "/boards", acmeBody({ key: "ENG", name: "Eng" })),
@@ -581,7 +576,7 @@ test("POST /boards checks the Linear team keys only when Linear answers", async 
   assert.equal(created.status, 201, created.text);
 });
 
-test("POST /boards refuses a missing name, folder and repositories with the exact UI copy", async () => {
+test("POST /boards refuses a missing name, folder and a malformed repositories list with the exact UI copy", async () => {
   for (const name of ["", "   ", undefined, 7]) {
     await expectRefusal(
       call("POST", "/boards", acmeBody({ key: "NAME", name })),
@@ -590,6 +585,12 @@ test("POST /boards refuses a missing name, folder and repositories with the exac
       "missing-name",
     );
   }
+  await expectRefusal(
+    call("POST", "/boards", { key: 5 }),
+    400,
+    "Enter a name.",
+    "missing-name",
+  );
   const folder = "This folder does not exist.";
   await expectRefusal(
     call(
@@ -602,7 +603,7 @@ test("POST /boards refuses a missing name, folder and repositories with the exac
     "folder-missing",
     { field: "workspaceRoot" },
   );
-  for (const bad of [undefined, "relative/dir", "~/x", "/a/../b", 7]) {
+  for (const bad of ["relative/dir", "~/x", "/a/../b", 7]) {
     await expectRefusal(
       call("POST", "/boards", acmeBody({ key: "FOLD", workspaceRoot: bad })),
       400,
@@ -621,14 +622,39 @@ test("POST /boards refuses a missing name, folder and repositories with the exac
     "folder-missing",
     { field: "repositories", path: plainFolder },
   );
-  for (const repositories of [[], undefined, "x"]) {
+  const notList = await call(
+    "POST",
+    "/boards",
+    acmeBody({ key: "REPO", repositories: "x" }),
+  );
+  assert.equal(notList.status, 400);
+  assert.deepEqual(notList.body, { error: "invalid-repository" });
+});
+
+test("POST and PATCH refuse a name over 100 characters or with a control character, and accept 100", async () => {
+  const copy = "Use a name of at most 100 characters on one line.";
+  for (const name of ["a".repeat(101), "two\nlines", "tab\there"]) {
     await expectRefusal(
-      call("POST", "/boards", acmeBody({ key: "REPO", repositories })),
+      call("POST", "/boards", acmeBody({ key: "NAME", name })),
       400,
-      "Add at least one repository.",
-      "no-repositories",
+      copy,
+      "invalid-name",
+    );
+    await expectRefusal(
+      call("PATCH", "/boards/ACME", { name }),
+      400,
+      copy,
+      "invalid-name",
     );
   }
+  const max = "b".repeat(100);
+  const created = await call(
+    "POST",
+    "/boards",
+    acmeBody({ key: "LONGNM", name: max, linearTeamKeys: [] }),
+  );
+  assert.equal(created.status, 201, created.text);
+  assert.equal(created.body.board.name, max);
 });
 
 test("POST /boards refuses a bad base branch, check command and team keys", async () => {
@@ -685,12 +711,6 @@ test("PATCH /boards/:key refuses a bad field and changes nothing", async () => {
     { field: "workspaceRoot" },
   );
   await expectRefusal(
-    call("PATCH", "/boards/ACME", { repositories: [] }),
-    400,
-    "Add at least one repository.",
-    "no-repositories",
-  );
-  await expectRefusal(
     call("PATCH", "/boards/ACME", { repositories: [{ path: plainFolder }] }),
     400,
     folder,
@@ -729,6 +749,7 @@ test("an unknown board answers 404 and a malformed key answers 400 on each key r
     ["PATCH", "/boards/NOPE"],
     ["POST", "/boards/NOPE/archive"],
     ["POST", "/boards/NOPE/restore"],
+    ["POST", "/boards/NOPE/repositories/init"],
   ] as const) {
     await expectRefusal(
       call(method, route, method === "PATCH" ? {} : undefined),
@@ -802,4 +823,68 @@ test("GET /boards/counts still answers for a running loop whose last gate time i
   ).find((c) => c.key === "BADT");
   assert.equal(entry?.loops.length, 1);
   assert.equal(entry?.attention, 1);
+});
+
+test("POST /boards with a name only answers 201 with a link and makes the folder below the workspaces root", async () => {
+  const root = path.join(env.root, "derived-root");
+  const previous = getOrchestrationConfig()?.workspaceRoot ?? "";
+  fs.mkdirSync(root, { recursive: true });
+  setOrchestrationConfig({ linearApiKey: "", workspaceRoot: root });
+  try {
+    const created = await call("POST", "/boards", { name: "Payments" });
+    assert.equal(created.status, 201, created.text);
+    assert.equal(
+      (created.body as unknown as { link: string }).link,
+      "/boards/PAYMEN",
+    );
+    assert.equal(created.body.board.key, "PAYMEN");
+    assert.equal(created.body.board.workspaceRoot, path.join(root, "PAYMEN"));
+    assert.deepEqual(created.body.board.repositories, []);
+    assert.ok(fs.statSync(path.join(root, "PAYMEN")).isDirectory());
+
+    setOrchestrationConfig({ linearApiKey: "", workspaceRoot: "" });
+    await expectRefusal(
+      call("POST", "/boards", { name: "Nowhere" }),
+      400,
+      "Set the Dispatch workspaces root in Settings.",
+      "no-workspaces-root",
+    );
+  } finally {
+    setOrchestrationConfig({ linearApiKey: "", workspaceRoot: previous });
+  }
+});
+
+test("POST /boards/:key/repositories/init answers 200 with the board listing the new repository", async () => {
+  const identity = {
+    GIT_AUTHOR_NAME: "t",
+    GIT_AUTHOR_EMAIL: "t@example.com",
+    GIT_COMMITTER_NAME: "t",
+    GIT_COMMITTER_EMAIL: "t@example.com",
+  };
+  const savedIdentity = Object.fromEntries(
+    Object.keys(identity).map((name) => [name, process.env[name]]),
+  );
+  Object.assign(process.env, identity);
+  const root = path.join(env.root, "init-root");
+  const previous = getOrchestrationConfig()?.workspaceRoot ?? "";
+  fs.mkdirSync(root, { recursive: true });
+  setOrchestrationConfig({ linearApiKey: "", workspaceRoot: root });
+  try {
+    const created = await call("POST", "/boards", { name: "Ledger" });
+    assert.equal(created.status, 201, created.text);
+    const ledger = created.body.board.key;
+    const init = await call("POST", `/boards/${ledger}/repositories/init`);
+    assert.equal(init.status, 200, init.text);
+    const target = path.join(root, ledger, ledger.toLowerCase());
+    assert.deepEqual(init.body.board.repositories, [
+      { path: target, baseBranch: "main", checkCommand: "npm run check" },
+    ]);
+    assert.ok(fs.existsSync(path.join(target, ".git")));
+  } finally {
+    for (const [name, value] of Object.entries(savedIdentity)) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+    setOrchestrationConfig({ linearApiKey: "", workspaceRoot: previous });
+  }
 });

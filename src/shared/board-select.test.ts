@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
+  boardKeyFromPath,
   boardSearch,
+  boardSwitchTarget,
   cardBoardSwitch,
   entryBoard,
-  hasManyBoards,
+  isArchivedSettingsPath,
+  resolveBoardParam,
   selectBoard,
-  shouldPollCounts,
   staleCountsLabel,
   withBoard,
   type BoardEntry,
@@ -159,39 +161,6 @@ test("entryBoard is null while the list is loading", () => {
   assert.equal(entryBoard("ACME", undefined), null);
 });
 
-test("hasManyBoards is false for one board", () => {
-  assert.equal(hasManyBoards([{ key: LOCAL, archived: false }]), false);
-});
-
-test("hasManyBoards is true for two active boards", () => {
-  assert.equal(hasManyBoards(boards.slice(0, 2)), true);
-});
-
-test("hasManyBoards is false for one active board plus one archived board", () => {
-  assert.equal(
-    hasManyBoards([
-      { key: LOCAL, archived: false },
-      { key: "OLD" as BoardKey, archived: true },
-    ]),
-    false,
-  );
-});
-
-test("shouldPollCounts is false for one board off the boards page", () => {
-  assert.equal(
-    shouldPollCounts([{ key: LOCAL, archived: false }], false),
-    false,
-  );
-});
-
-test("shouldPollCounts is true for one board on the boards page", () => {
-  assert.equal(shouldPollCounts([{ key: LOCAL, archived: false }], true), true);
-});
-
-test("shouldPollCounts is true for two boards off the boards page", () => {
-  assert.equal(shouldPollCounts(boards.slice(0, 2), false), true);
-});
-
 test("cardBoardSwitch returns the card board only when it differs from the selected board", () => {
   assert.equal(cardBoardSwitch(ACME, LOCAL), ACME);
   assert.equal(cardBoardSwitch(ACME, ACME), null);
@@ -223,4 +192,82 @@ test("unavailableBoardMessage names a well-formed key and never echoes other tex
       "This board link is not valid.",
     );
   }
+});
+
+test("boardKeyFromPath reads the key of a board path", () => {
+  assert.equal(boardKeyFromPath("/boards/NIMBUS"), "NIMBUS");
+  assert.equal(boardKeyFromPath("/boards/NIMBUS/inbox/x"), "NIMBUS");
+});
+
+test("boardKeyFromPath returns null for paths with no key", () => {
+  for (const path of ["/boards", "/boards/", "/board", "/inbox"]) {
+    assert.equal(boardKeyFromPath(path), null);
+  }
+});
+
+test("boardKeyFromPath does not validate the key", () => {
+  assert.equal(boardKeyFromPath("/boards/nimbus"), "nimbus");
+});
+
+test("resolveBoardParam lets the path key beat a different search key", () => {
+  assert.deepEqual(resolveBoardParam("/boards/ACME/inbox", "OTHER"), {
+    param: "ACME",
+    stripSearchBoard: true,
+  });
+});
+
+test("resolveBoardParam uses the search key when the path has none", () => {
+  assert.deepEqual(resolveBoardParam("/inbox", "ACME"), {
+    param: "ACME",
+    stripSearchBoard: false,
+  });
+  assert.deepEqual(resolveBoardParam("/boards", undefined), {
+    param: undefined,
+    stripSearchBoard: false,
+  });
+});
+
+test("resolveBoardParam asks for no strip when a keyed path has no search key", () => {
+  assert.deepEqual(resolveBoardParam("/boards/ACME", undefined), {
+    param: "ACME",
+    stripSearchBoard: false,
+  });
+});
+
+test("boardSwitchTarget gives a keyed page the board in its path without its id", () => {
+  assert.deepEqual(boardSwitchTarget("inbox", ACME), {
+    href: "/boards/ACME/inbox",
+  });
+  assert.deepEqual(boardSwitchTarget("board", LOCAL), {
+    href: "/boards/LOCAL",
+  });
+});
+
+test("boardSwitchTarget sets the board search parameter of any other page and keeps the rest", () => {
+  const target = boardSwitchTarget("tickets", ACME);
+  assert.ok("search" in target);
+  assert.equal(target.to, ".");
+  assert.deepEqual(target.search({ dialog: "new", board: "OLD" }), {
+    dialog: "new",
+    board: ACME,
+  });
+  const toLocal = boardSwitchTarget("boards", LOCAL);
+  assert.ok("search" in toLocal);
+  assert.deepEqual(toLocal.search({ dialog: "new", board: ACME }), {
+    dialog: "new",
+    board: undefined,
+  });
+});
+
+test("isArchivedSettingsPath is true only for the settings page of an archived listed board", () => {
+  assert.equal(isArchivedSettingsPath("/boards/OLD/settings", boards), true);
+  assert.equal(isArchivedSettingsPath("/boards/ACME/settings", boards), false);
+  assert.equal(isArchivedSettingsPath("/boards/OLD", boards), false);
+  assert.equal(isArchivedSettingsPath("/boards/OLD/inbox", boards), false);
+  assert.equal(isArchivedSettingsPath("/boards/GONE/settings", boards), false);
+  assert.equal(
+    isArchivedSettingsPath("/boards/OLD/settings", undefined),
+    false,
+  );
+  assert.equal(isArchivedSettingsPath("/tickets", boards), false);
 });

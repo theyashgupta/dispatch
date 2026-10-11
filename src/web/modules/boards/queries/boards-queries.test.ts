@@ -6,7 +6,6 @@ import {
   archiveBoardMutationOptions,
   boardDetailQueryOptions,
   boardsKeys,
-  createBoardMutationOptions,
   restoreBoardMutationOptions,
   updateBoardMutationOptions,
 } from "./boards-queries.js";
@@ -38,7 +37,11 @@ afterEach(() => {
 
 const ACME = "ACME" as BoardKey;
 const board = { key: "ACME", name: "Acme" };
-const refusal = (error: string) => ({ ok: false as const, error });
+const refusal = (error: string, code = error) => ({
+  ok: false as const,
+  error,
+  code,
+});
 
 test("boardsKeys nest the detail key under the board list keys", () => {
   assert.deepEqual(boardsKeys.detail(ACME), ["boards", "detail", "ACME"]);
@@ -53,39 +56,40 @@ test("boardDetailQueryOptions requests GET /api/boards/:key and reads the board"
   assert.equal(calls[0]?.init?.method, undefined);
 });
 
-test("boardDetailQueryOptions rejects a non-2xx response", async () => {
+test("boardDetailQueryOptions resolves null for a key that no board has", async () => {
   reply(404, { error: "unknown-board" }, "Not Found");
+  assert.equal(
+    await newClient().fetchQuery({
+      ...boardDetailQueryOptions(ACME),
+      retry: false,
+    }),
+    null,
+  );
+});
+
+test("boardDetailQueryOptions resolves null for a key that breaks the key rule", async () => {
+  reply(400, { error: "invalid-board-key" }, "Bad Request");
+  assert.equal(
+    await newClient().fetchQuery(boardDetailQueryOptions(ACME)),
+    null,
+  );
+});
+
+test("boardDetailQueryOptions rejects any other non-2xx response", async () => {
+  reply(500, { error: "boom" }, "Server Error");
   await assert.rejects(
     newClient().fetchQuery({
       ...boardDetailQueryOptions(ACME),
       retry: false,
     }),
-    new Error("getBoardDetail failed: 404 Not Found"),
+    new Error("getBoardDetail failed: 500 Server Error"),
   );
-});
-
-test("create posts the input as JSON", async () => {
-  reply(201, { board });
-  const input = {
-    key: "ACME",
-    name: "Acme",
-    workspaceRoot: "/w",
-    repositories: [{ path: "/r" }],
-    linearTeamKeys: [],
-  };
-  const result =
-    await createBoardMutationOptions(newClient()).mutationFn(input);
-  assert.deepEqual(result, { ok: true, board });
-  assert.equal(calls[0]?.url, "/api/boards");
-  assert.equal(calls[0]?.init?.method, "POST");
-  assert.equal(calls[0]?.init?.body, JSON.stringify(input));
 });
 
 test("update patches /api/boards/:key with the input", async () => {
   reply(200, { board });
   const input = {
     name: "Acme",
-    workspaceRoot: "/w",
     repositories: [{ path: "/r" }],
   };
   await updateBoardMutationOptions(newClient()).mutationFn({
@@ -110,14 +114,35 @@ test("archive and restore post to their paths with no body", async () => {
 
 test("a refusal resolves its error text as data", async () => {
   reply(400, { error: "Enter a name.", code: "missing-name" }, "Bad Request");
-  const result = await createBoardMutationOptions(newClient()).mutationFn({
-    key: "ACME",
-    name: "",
-    workspaceRoot: "/w",
-    repositories: [],
-    linearTeamKeys: [],
+  const result = await updateBoardMutationOptions(newClient()).mutationFn({
+    key: ACME,
+    input: { name: "", repositories: [] },
   });
-  assert.deepEqual(result, refusal("Enter a name."));
+  assert.deepEqual(result, refusal("Enter a name.", "missing-name"));
+});
+
+test("a refusal passes on the field and the path it names", async () => {
+  reply(
+    400,
+    {
+      error: "This folder does not exist.",
+      code: "folder-missing",
+      field: "repositories",
+      path: "/nope",
+    },
+    "Bad Request",
+  );
+  const result = await updateBoardMutationOptions(newClient()).mutationFn({
+    key: ACME,
+    input: { repositories: [{ path: "/nope" }] },
+  });
+  assert.deepEqual(result, {
+    ok: false,
+    error: "This folder does not exist.",
+    code: "folder-missing",
+    field: "repositories",
+    path: "/nope",
+  });
 });
 
 test("a schema code resolves as its UI copy and any other text passes through", async () => {
@@ -133,7 +158,7 @@ test("a schema code resolves as its UI copy and any other text passes through", 
     reply(400, { error: code }, "Bad Request");
     assert.deepEqual(
       await archiveBoardMutationOptions(newClient()).mutationFn(ACME),
-      refusal(text),
+      refusal(text, code),
       code,
     );
   }
@@ -156,7 +181,7 @@ test("a refusal with no readable error falls back to the status line", async () 
     );
   assert.deepEqual(
     await archiveBoardMutationOptions(newClient()).mutationFn(ACME),
-    refusal("500 Server Error"),
+    refusal("500 Server Error", "unknown"),
   );
 });
 
@@ -172,23 +197,61 @@ test("a successful write invalidates the board list keys before it resolves", as
       }, 5),
     );
   };
-  await createBoardMutationOptions(client).onSuccess({
+  await archiveBoardMutationOptions(client).onSuccess({
     ok: true,
     board: board as never,
   });
   assert.equal(settled, true);
 });
 
+test("a saved board update resets the folders of that board", async () => {
+  const client = newClient();
+  const invalidated: (readonly unknown[] | undefined)[] = [];
+  const reset: (readonly unknown[] | undefined)[] = [];
+  client.invalidateQueries = (filters) => {
+    invalidated.push(filters?.queryKey);
+    return Promise.resolve();
+  };
+  client.resetQueries = (filters) => {
+    reset.push(filters?.queryKey);
+    return Promise.resolve();
+  };
+  await updateBoardMutationOptions(client).onSuccess(
+    { ok: true, board: board as never },
+    { key: ACME, input: { name: "Acme" } },
+  );
+  assert.deepEqual(invalidated, [["boards"]]);
+  assert.deepEqual(reset, [["workspaces", "folders", "ACME"]]);
+});
+
+test("a reset drops a cached empty folder list so a closed dialog cannot show it", async () => {
+  const client = newClient();
+  client.setQueryData(["workspaces", "folders", "ACME"], []);
+  await updateBoardMutationOptions(client).onSuccess(
+    { ok: true, board: board as never },
+    { key: ACME, input: { name: "Acme" } },
+  );
+  assert.equal(
+    client.getQueryData(["workspaces", "folders", "ACME"]),
+    undefined,
+  );
+});
+
 test("a refused write leaves the cache alone", async () => {
   const client = newClient();
   client.invalidateQueries = () => assert.fail("must not invalidate");
+  client.resetQueries = () => assert.fail("must not reset");
   await archiveBoardMutationOptions(client).onSuccess(refusal("no"));
+  await updateBoardMutationOptions(client).onSuccess(refusal("no"), {
+    key: ACME,
+    input: {},
+  });
 });
 
 test("a network failure resolves as a refusal", async () => {
   globalThis.fetch = () => Promise.reject(new Error("offline"));
   assert.deepEqual(
     await restoreBoardMutationOptions(newClient()).mutationFn(ACME),
-    refusal("offline"),
+    refusal("offline", "network"),
   );
 });
