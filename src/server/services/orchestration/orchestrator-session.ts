@@ -80,7 +80,7 @@ export interface LifecycleResult {
 }
 
 const busy = new Set<string>();
-const ORCHESTRATOR_PLAYBOOK = { playbook: "Board Orchestrator" };
+export const ORCHESTRATOR_PLAYBOOK = { playbook: "Board Orchestrator" };
 
 /**
  * The command that starts `dispatch mcp` from the running server's own entry files.

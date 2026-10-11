@@ -5,7 +5,6 @@ import {
   progressRows,
 } from "@/modules/dashboard/domain/progress-rows";
 import { sectionState } from "@/modules/dashboard/domain/section-state";
-import { isRunningGroup } from "../../../../shared/running-group.js";
 import { retryFailed, useDashboardData } from "./use-dashboard-data";
 
 export function ProgressContainer() {
@@ -16,10 +15,10 @@ export function ProgressContainer() {
     [cards, now],
   );
   const countText =
-    summary.data === undefined || cards === undefined
+    summary.data === undefined
       ? null
       : loopsRunningText(
-          cards.filter(isRunningGroup).length,
+          summary.data.runningLoops,
           summary.data.concurrencyCap,
         );
   return (

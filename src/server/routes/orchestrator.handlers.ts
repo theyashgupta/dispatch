@@ -2,7 +2,11 @@ import type { Request, Response } from "express";
 import { boardLink } from "../../shared/board-key.js";
 import { isHiddenCard } from "../../shared/hidden-card.js";
 import type { Card } from "../../shared/types.js";
-import { ForbiddenError, NotFoundError } from "../services/domain/errors.js";
+import {
+  ForbiddenError,
+  InternalError,
+  NotFoundError,
+} from "../services/domain/errors.js";
 import {
   checkScope,
   type OrchestratorIdentity,
@@ -20,9 +24,11 @@ import {
   eventsAfter,
   groupProgress,
   paneTail,
+  playbookSummaries,
   policySummary,
   workspaceSummary,
 } from "../services/orchestration/orchestrator-read.js";
+import { readRulebook } from "../services/infra/rulebook.js";
 import { createDecisionItem } from "../services/orchestration/decision-items.js";
 import { waitForEvent } from "../services/orchestration/orchestrator-wait.js";
 import { recordDelivered } from "../services/orchestration/orchestrator-wake.js";
@@ -37,6 +43,7 @@ import {
   createOrchestratorGroup,
   startOrchestratorGroup,
 } from "../services/orchestration/orchestrator-groups.js";
+import { startOrchestratorCard } from "../services/orchestration/orchestrator-cards.js";
 import {
   readState,
   writeState,
@@ -68,6 +75,7 @@ import {
   sendInputBodySchema,
   sessionCardParamsSchema,
   shipBodySchema,
+  startCardBodySchema,
   updateTicketBodySchema,
   waitBodySchema,
   writeStateBodySchema,
@@ -487,4 +495,40 @@ export const writeStateHandler: ToolHandler = async (
   res
     .status(200)
     .json({ updatedAt: state.updatedAt, handoffReady: state.handoffReady });
+};
+
+export const listPlaybooksHandler: ToolHandler = async (
+  _req,
+  res,
+  _caller,
+  call,
+) => {
+  const playbooks = await playbookSummaries();
+  call.result = `${playbooks.length} playbooks`;
+  res.status(200).json({ playbooks });
+};
+
+export const getRulebookHandler: ToolHandler = async (
+  _req,
+  res,
+  _caller,
+  call,
+) => {
+  const { markdown, bytes } = await readRulebook().catch(() => {
+    throw new InternalError("rulebook-unreadable");
+  });
+  call.result = `${bytes} bytes`;
+  res.status(200).json({ markdown, bytes });
+};
+
+export const startCardHandler: ToolHandler = async (req, res, caller, call) => {
+  const { cardId } = parseOrThrow(sessionCardParamsSchema, req.params);
+  const input = parseOrThrow(startCardBodySchema, req.body);
+  const outcome = await startOrchestratorCard(
+    caller,
+    scopedCard(caller, call, cardId),
+    input,
+  );
+  call.result = `started ${outcome.playbook}`;
+  res.status(202).json(outcome);
 };

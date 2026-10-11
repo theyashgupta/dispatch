@@ -54,7 +54,11 @@ export async function worktreeStatus(
  * the caller catches and falls back to the local base with a recorded warning.
  */
 export async function fetchBase(repoPath: string, base: string): Promise<void> {
-  await run("git", ["fetch", "origin", base], { cwd: repoPath });
+  await run("git", ["fetch", "origin", base], {
+    cwd: repoPath,
+    timeout: 60_000,
+    killEscalationMs: 5_000,
+  });
 }
 
 /**

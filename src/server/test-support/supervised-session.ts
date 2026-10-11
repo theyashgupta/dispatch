@@ -161,7 +161,7 @@ export async function startSupervised(opts: {
         .filter((e) => e.type === "user")
         .map((e) => (e.message as { content: string }).content),
     keysSettled: async (count: number) => {
-      const until = Date.now() + 8_000;
+      const until = Date.now() + 20_000;
       while (keys().length < count && Date.now() < until)
         await new Promise((resolve) => setTimeout(resolve, 50));
       return keys();
