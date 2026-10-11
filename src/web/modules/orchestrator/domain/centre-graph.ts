@@ -9,7 +9,10 @@ import {
   mainOrchestrator,
 } from "../../../../shared/orchestrator-owner.js";
 import { hasLoopProgress } from "../../../../shared/running-group.js";
-import { SESSION_STATES } from "../../../../shared/session-states.js";
+import {
+  SESSION_STATES,
+  type SessionTone,
+} from "../../../../shared/session-states.js";
 import type {
   Card,
   DecisionItem,
@@ -26,8 +29,7 @@ export type BranchState =
   | "shipped"
   | "attention";
 
-export type BranchTone =
-  "neutral" | "muted" | "attention" | "success" | "error";
+export type BranchTone = SessionTone;
 
 export type BranchAction =
   "open" | "reply" | "open_terminal" | "resume" | "retry_resume";
@@ -111,23 +113,69 @@ const BANDS: readonly { key: BandKey; label: string }[] = [
 
 type Status = Pick<CentreBranch, "state" | "label" | "tone" | "band">;
 
+const ATTENTION_STATES = [
+  "stale",
+  "permission_prompt",
+  "api_error",
+  "lost",
+  "shell_prompt",
+] as const;
+
+const isAttentionState = (
+  state: string | undefined,
+): state is (typeof ATTENTION_STATES)[number] =>
+  (ATTENTION_STATES as readonly (string | undefined)[]).includes(state);
+
+const status = (
+  state: BranchState,
+  label: string,
+  tone: BranchTone,
+  band: BandKey,
+): Status => ({ state, label, tone, band });
+
+const planDetail = (entry: PlanEntry): string =>
+  `Plan order ${entry.order}, size ${entry.size}`;
+
+const newestOf = (items: readonly DecisionItem[]): DecisionItem | undefined =>
+  items.reduce<DecisionItem | undefined>(
+    (best, d) =>
+      best === undefined || Date.parse(d.createdAt) > Date.parse(best.createdAt)
+        ? d
+        : best,
+    undefined,
+  );
+
+/**
+ * The plan entries of one orchestrator: the newest approved plan, then a newer open plan as a preview.
+ *
+ * @remarks The approved plan keeps its orders, so a new proposal never reorders the work that runs;
+ * an entry only the open plan names follows them. A rejected plan adds nothing.
+ */
 function currentPlan(
   decisions: readonly DecisionItem[],
   orchestratorId: string,
 ): PlanEntry[] {
-  const newest = decisions
-    .filter((d) => d.kind === "plan" && d.orchestratorId === orchestratorId)
-    .reduce<DecisionItem | null>(
-      (best, d) =>
-        best === null || Date.parse(d.createdAt) > Date.parse(best.createdAt)
-          ? d
-          : best,
-      null,
-    );
-  const counts =
-    newest !== null &&
-    (newest.state === "open" || newest.answer?.optionId === "approve");
-  return counts ? (newest.plan?.entries ?? []) : [];
+  const plans = decisions.filter(
+    (d) => d.kind === "plan" && d.orchestratorId === orchestratorId,
+  );
+  const approved = newestOf(
+    plans.filter((d) => d.answer?.optionId === "approve"),
+  );
+  const open = newestOf(
+    plans.filter(
+      (d) =>
+        d.state === "open" &&
+        (approved === undefined ||
+          Date.parse(d.createdAt) > Date.parse(approved.createdAt)),
+    ),
+  );
+  const base = approved?.plan?.entries ?? [];
+  const last = Math.max(0, ...base.map((e) => e.order));
+  const known = new Set(base.map((e) => e.ref));
+  const preview = (open?.plan?.entries ?? [])
+    .filter((e) => !known.has(e.ref))
+    .map((e) => ({ ...e, order: last + e.order }));
+  return [...base, ...preview];
 }
 
 function entryOf(
@@ -160,74 +208,33 @@ function statusOf(card: Card, session: ActiveSessionView | null): Status {
   const state = session?.state;
   const reason = session?.stateReason;
   if (card.column === "done" || card.shipFlow?.state === "done") {
-    return {
-      state: "shipped",
-      label: "Shipped",
-      tone: "muted",
-      band: "shipped",
-    };
+    return status("shipped", "Shipped", "muted", "shipped");
   }
   if (card.column === "agent_done" || state === "roadmap_complete") {
-    return {
-      state: "done",
-      label: "Agent done",
-      tone: "success",
-      band: "done",
-    };
+    return status("done", "Agent done", "success", "done");
   }
-  if (session === null) {
-    return {
-      state: "planned",
-      label: "Planned",
-      tone: "muted",
-      band: "planned",
-    };
-  }
-  const attention = (label: string, tone: BranchTone): Status => ({
-    state: "attention",
-    label,
-    tone,
-    band: "needs_you",
-  });
+  if (session === null) return status("planned", "Planned", "muted", "planned");
   if (
     (state === "needs_input" && reason === "usage_stop") ||
     state === "usage_limit_dialog" ||
     state === "usage_limit_wait"
   ) {
-    return {
-      state: "usage_limit",
-      label: "Usage limit",
-      tone: "attention",
-      band: "needs_you",
-    };
+    return status("usage_limit", "Usage limit", "attention", "needs_you");
   }
   if (state === "needs_input" && reason === "budget") {
-    return attention("Budget reached", "attention");
+    return status("attention", "Budget reached", "attention", "needs_you");
   }
-  if (reason === "resume_failed") return attention("Resume failed", "error");
+  if (reason === "resume_failed") {
+    return status("attention", "Resume failed", "error", "needs_you");
+  }
   if (state === "needs_input") {
-    return {
-      state: "needs_input",
-      label: "Needs input",
-      tone: "attention",
-      band: "needs_you",
-    };
+    return status("needs_input", "Needs input", "attention", "needs_you");
   }
-  if (
-    state === "stale" ||
-    state === "permission_prompt" ||
-    state === "api_error" ||
-    state === "lost" ||
-    state === "shell_prompt"
-  ) {
-    return attention(SESSION_STATES[state].label, SESSION_STATES[state].tone);
+  if (isAttentionState(state)) {
+    const { label, tone } = SESSION_STATES[state];
+    return status("attention", label, tone, "needs_you");
   }
-  return {
-    state: "running",
-    label: "Running",
-    tone: "neutral",
-    band: "running",
-  };
+  return status("running", "Running", "neutral", "running");
 }
 
 function actionsOf(
@@ -241,14 +248,7 @@ function actionsOf(
   if (status.state === "needs_input" || state === "stale") {
     actions.push("reply");
   }
-  if (
-    state === "stale" ||
-    state === "permission_prompt" ||
-    state === "api_error" ||
-    state === "lost" ||
-    state === "shell_prompt" ||
-    reason === "resume_failed"
-  ) {
+  if (isAttentionState(state) || reason === "resume_failed") {
     actions.push("open_terminal");
   }
   if (
@@ -265,6 +265,7 @@ function detailOf(
   card: Card,
   status: Status,
   entry: PlanEntry | undefined,
+  reason: ActiveSessionView["stateReason"],
 ): string | null {
   if (status.state === "running") {
     if (hasLoopProgress(card)) return loopView(card.loopProgress, {}).label;
@@ -275,13 +276,13 @@ function detailOf(
       : null;
   }
   if (status.state === "planned") {
-    return entry === undefined
-      ? null
-      : `Plan order ${entry.order}, size ${entry.size}`;
+    return entry === undefined ? null : planDetail(entry);
   }
   if (status.state === "done") return "Awaiting ship";
   if (status.state === "usage_limit") return "Stopped at the usage limit";
-  if (status.label === "Budget reached") return "Budget reached";
+  if (status.state === "attention" && reason === "budget") {
+    return "Budget reached";
+  }
   if (status.state === "needs_input") return "Needs your answer";
   return null;
 }
@@ -296,7 +297,7 @@ function branchOf(card: Card, entry: PlanEntry | undefined): CentreBranch {
     title: card.title,
     ...status,
     actions: actionsOf(status, session),
-    detail: detailOf(card, status, entry),
+    detail: detailOf(card, status, entry, session?.stateReason),
     contextPercent: session?.contextPercent ?? null,
     cost: session?.cost ?? null,
     playbook:
@@ -327,7 +328,7 @@ function plannedBranch(entry: PlanEntry): CentreBranch {
     tone: "muted",
     band: "planned",
     actions: [],
-    detail: `Plan order ${entry.order}, size ${entry.size}`,
+    detail: planDetail(entry),
     contextPercent: null,
     cost: null,
     playbook: entry.playbook,
@@ -349,6 +350,15 @@ function compare(x: number, y: number): number {
   return x === y ? 0 : x < y ? -1 : 1;
 }
 
+const RECORD_STATES: Partial<
+  Record<OrchestratorView["state"], { label: string; tone: BranchTone }>
+> = {
+  stopped: { label: "Stopped", tone: "muted" },
+  stopping: { label: "Stopping", tone: "muted" },
+};
+
+const STARTING = { label: "Starting", tone: "neutral" } as const;
+
 function centreNode(
   record: OrchestratorView,
   branches: readonly CentreBranch[],
@@ -356,11 +366,8 @@ function centreNode(
 ): CentreNode {
   const state = record.session?.state ?? null;
   const known =
-    state === null
-      ? record.state === "stopped"
-        ? { label: "Stopped", tone: "muted" as const }
-        : { label: "Starting", tone: "neutral" as const }
-      : SESSION_STATES[state];
+    RECORD_STATES[record.state] ??
+    (state === null ? STARTING : SESSION_STATES[state]);
   return {
     id: record.id,
     name: record.name,
@@ -375,7 +382,7 @@ function centreNode(
 }
 
 /**
- * Builds the centre graph of the selected orchestrator: its branches, bands, edges and centre node.
+ * Build the centre graph of the selected orchestrator: its branches, bands, edges and centre node.
  *
  * @remarks
  * The slot of a branch comes from the plan order and the ticket number only, never from
@@ -412,7 +419,8 @@ export function centreGraph(input: CentreGraphInput): CentreGraph {
     all.push(branchOf(card, entry));
   }
   for (const entry of entries) {
-    if (!matched.has(entry)) all.push(plannedBranch(entry));
+    const onBoard = input.cards.some((card) => entryOf([entry], card));
+    if (!matched.has(entry) && !onBoard) all.push(plannedBranch(entry));
   }
   all
     .sort(

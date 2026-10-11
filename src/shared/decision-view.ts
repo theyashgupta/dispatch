@@ -35,7 +35,7 @@ export interface ReplyRow {
   stateSince: string | null;
 }
 
-const GATE_KINDS: readonly string[] = [
+export const GATE_KINDS: readonly DecisionItem["kind"][] = [
   "roadmap_approval",
   "ticket_proposal",
   "plan",
@@ -57,7 +57,10 @@ export function askedAgo(iso: string, now: number): string {
  * Build the view model of one decision item.
  *
  * @remarks
- * Options keep their written order and the recommended mark never moves one. The typed answer of "Other answer" rides on the recommended option, else the first option, because the answer route needs an option id of the item. A `roadmap_approval`, `ticket_proposal` or `plan` item is a binary gate, so it has no other answer.
+ * Options keep their written order and the recommended mark never moves one. The typed answer
+ * of "Other answer" rides on the recommended option, else the first option, because the answer
+ * route needs an option id of the item. A `roadmap_approval`, `ticket_proposal` or `plan` item
+ * is a binary gate, so it has no other answer.
  */
 export function decisionView(
   item: DecisionItem,

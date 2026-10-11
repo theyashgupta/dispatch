@@ -1,5 +1,6 @@
 import {
   decisionView,
+  GATE_KINDS,
   type DecisionView,
 } from "../../../../shared/decision-view.js";
 import type {
@@ -20,10 +21,12 @@ export type ConversationEntry =
       kind: "decision";
       id: string;
       at: string;
+      decisionKind: DecisionItem["kind"];
       badge: "Decision" | "Question";
       view: DecisionView;
       state: "open" | "answered";
       answerLabel: string | null;
+      answerNote: string | null;
     };
 
 export interface ConversationViewInput {
@@ -35,14 +38,8 @@ export interface ConversationViewInput {
   now: number;
 }
 
-const GATE_BADGE_KINDS: readonly DecisionItem["kind"][] = [
-  "plan",
-  "roadmap_approval",
-  "ticket_proposal",
-];
-
 /**
- * Merges the transcript messages and the decision items of one orchestrator into one timeline.
+ * Merge the transcript messages and the decision items of one orchestrator into one timeline.
  *
  * @remarks
  * Messages keep their order. A decision goes before the first message that is later than
@@ -64,7 +61,8 @@ export function conversationView(
         kind: "decision",
         id: item.id,
         at: item.createdAt,
-        badge: GATE_BADGE_KINDS.includes(item.kind) ? "Decision" : "Question",
+        decisionKind: item.kind,
+        badge: GATE_KINDS.includes(item.kind) ? "Decision" : "Question",
         view: decisionView(item, input.orchestratorNames, input.now),
         state: item.state,
         answerLabel:
@@ -72,6 +70,7 @@ export function conversationView(
             ? (item.options.find((o) => o.id === item.answer?.optionId)
                 ?.label ?? null)
             : null,
+        answerNote: item.answer?.note ?? null,
       } satisfies ConversationEntry,
     }))
     .sort((a, b) => a.time - b.time);
