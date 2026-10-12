@@ -54,6 +54,10 @@ function ctx() {
         calls.push(`move ${id} ${column}`);
         await Promise.resolve();
       },
+      setCardInboxDismissed: async (id, dismissed) => {
+        calls.push(`card-dismissed ${id} ${dismissed}`);
+        await Promise.resolve();
+      },
       cleanupCard: async (id) => {
         calls.push(`cleanup ${id}`);
         await Promise.resolve();
@@ -104,6 +108,7 @@ function ctx() {
     openSnooze: (r) => calls.push(`snooze-picker ${r.id}`),
     openUrl: (url) => calls.push(`open ${url}`),
     askAbout: (question) => calls.push(`ask ${question}`),
+    openStart: (request) => calls.push(`open-start ${JSON.stringify(request)}`),
     copyText: async (text) => {
       calls.push(`copy ${text}`);
       await Promise.resolve();
@@ -129,15 +134,25 @@ test("appliesTo: promote applies to both kinds; snooze, done and toggleRead refu
   const bare = row({ url: undefined });
   assert.deepEqual(
     actionsFor(item).map((a) => a.id),
-    ["promote", "snooze", "done", "toggleRead", "open", "copyLink", "ask"],
+    [
+      "allow",
+      "dismiss",
+      "promote",
+      "snooze",
+      "done",
+      "toggleRead",
+      "open",
+      "copyLink",
+      "ask",
+    ],
   );
   assert.deepEqual(
     actionsFor(card).map((a) => a.id),
-    ["promote", "open", "copyLink", "ask"],
+    ["allow", "dismiss", "promote", "open", "copyLink", "ask"],
   );
   assert.deepEqual(
     actionsFor(bare).map((a) => a.id),
-    ["promote", "snooze", "done", "toggleRead", "ask"],
+    ["allow", "dismiss", "promote", "snooze", "done", "toggleRead", "ask"],
   );
 });
 
@@ -264,7 +279,7 @@ test("only http and https urls qualify for Open link and Copy link", async () =>
   const hostile = row({ url: "javascript:alert(1)" });
   assert.deepEqual(
     actionsFor(hostile).map((a) => a.id),
-    ["promote", "snooze", "done", "toggleRead", "ask"],
+    ["allow", "dismiss", "promote", "snooze", "done", "toggleRead", "ask"],
   );
   await runAction(action("open"), c.context, hostile);
   await runAction(action("copyLink"), c.context, hostile);
@@ -508,4 +523,103 @@ test("running ask on a card row calls askAbout with the card question", async ()
   assert.deepEqual(c.calls, [
     `ask ${askAboutQuestion({ kind: "card", identifier: "LOCAL-926", title: "Triage the flaky build report" })}`,
   ]);
+});
+
+function dismissedItemRow(): InboxRowModel {
+  const base = slackRow("slack:C1:9", {});
+  return row({
+    ...base,
+    unread: false,
+    item: base.item && { ...base.item, state: "dismissed" },
+  });
+}
+
+function cardRow(dismissedAt?: string): InboxRowModel {
+  return row({
+    kind: "card",
+    id: "LOCAL-7",
+    title: "Triage the build",
+    card: {
+      id: "LOCAL-7",
+      identifier: "LOCAL-7",
+      inboxDismissedAt: dismissedAt,
+    } as NonNullable<InboxRowModel["card"]>,
+  });
+}
+
+test("Allow, Dismiss and Restore carry the keys y, d and r", () => {
+  assert.equal(action("allow").key, "y");
+  assert.equal(action("dismiss").key, "d");
+  assert.equal(action("restore").key, "r");
+});
+
+test("Allow on an item starts the agent on that item with no extra direction", async () => {
+  const c = ctx();
+  await runAction(action("allow"), c.context, row());
+  assert.deepEqual(c.calls, ["start fake:a"]);
+  assert.deepEqual(c.prompts, [""]);
+});
+
+test("Allow on a card moves it to todo, then opens Start for it", async () => {
+  const c = ctx();
+  await runAction(action("allow"), c.context, cardRow());
+  assert.deepEqual(c.calls, [
+    "move LOCAL-7 todo",
+    `open-start ${JSON.stringify({ cardId: "LOCAL-7" })}`,
+  ]);
+});
+
+test("Dismiss on an item sets dismissed and its undo restores the prior state", async () => {
+  for (const unread of [true, false]) {
+    const c = ctx();
+    await runAction(action("dismiss"), c.context, row({ unread }));
+    assert.deepEqual(c.calls, [
+      "state fake:a dismissed",
+      "undo-toast Review PR 42 dismissed",
+    ]);
+    await c.undo()?.();
+    assert.equal(c.calls.at(-1), `state fake:a ${unread ? "unread" : "read"}`);
+  }
+});
+
+test("Dismiss on a card sets the dismissal and its undo clears it", async () => {
+  const c = ctx();
+  await runAction(action("dismiss"), c.context, cardRow());
+  assert.deepEqual(c.calls, [
+    "card-dismissed LOCAL-7 true",
+    "undo-toast Triage the build dismissed",
+  ]);
+  await c.undo()?.();
+  assert.equal(c.calls.at(-1), "card-dismissed LOCAL-7 false");
+});
+
+test("Restore applies only to dismissed rows: an item returns to read, a card clears its dismissal", async () => {
+  const live = [row(), cardRow()];
+  for (const r of live) assert.equal(action("restore").appliesTo(r), false);
+  const c = ctx();
+  await runAction(action("restore"), c.context, dismissedItemRow());
+  await runAction(
+    action("restore"),
+    c.context,
+    cardRow("2026-10-01T00:00:00.000Z"),
+  );
+  assert.deepEqual(c.calls, [
+    "state slack:C1:9 read",
+    "card-dismissed LOCAL-7 false",
+  ]);
+});
+
+test("a dismissed row offers exactly Restore, and Allow and Dismiss refuse it", async () => {
+  for (const r of [dismissedItemRow(), cardRow("2026-10-01T00:00:00.000Z")]) {
+    assert.deepEqual(
+      actionsFor(r).map((a) => a.id),
+      ["restore"],
+    );
+  }
+  const c = ctx();
+  assert.equal(
+    await runAction(action("allow"), c.context, dismissedItemRow()),
+    false,
+  );
+  assert.deepEqual(c.calls, []);
 });

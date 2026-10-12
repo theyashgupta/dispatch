@@ -36,6 +36,7 @@ export interface InboxOpenMenu {
 
 interface InboxListProps {
   totalCount: number;
+  showDismissed: boolean;
   visibleRows: InboxRowModel[];
   groups: InboxGroup[];
   groupBy: InboxGroupBy;
@@ -45,6 +46,7 @@ interface InboxListProps {
   expandedId: string | null;
   openMenu: InboxOpenMenu | null;
   onSelect: (row: InboxRowModel) => void;
+  onFocusRow: (row: InboxRowModel) => void;
   onMenuOpenChange: (rowId: string, kind: InboxMenuKind, open: boolean) => void;
   onAction: (row: InboxRowModel, actionId: InboxActionId) => void;
   onPickAction: (row: InboxRowModel, action: InboxAction) => void;
@@ -56,6 +58,7 @@ interface InboxListProps {
 
 export function InboxList({
   totalCount,
+  showDismissed,
   visibleRows,
   groups,
   groupBy,
@@ -65,6 +68,7 @@ export function InboxList({
   expandedId,
   openMenu,
   onSelect,
+  onFocusRow,
   onMenuOpenChange,
   onAction,
   onPickAction,
@@ -88,6 +92,7 @@ export function InboxList({
       expanded={row.id === expandedId}
       menuKind={openMenu?.rowId === row.id ? openMenu.kind : null}
       onSelect={onSelect}
+      onFocusRow={onFocusRow}
       onMenuOpenChange={onMenuOpenChange}
       onAction={onAction}
       onPickAction={onPickAction}
@@ -101,7 +106,15 @@ export function InboxList({
       role={visibleRows.length > 0 && groupBy === "none" ? "list" : undefined}
       className="scroll-stable-y min-h-0 flex-auto overflow-y-auto"
     >
-      {totalCount === 0 && noSource ? (
+      {totalCount === 0 && showDismissed ? (
+        <Empty className="gap-2 p-12">
+          <EmptyHeader className="max-w-none gap-2">
+            <EmptyTitle className="text-base font-semibold">
+              No dismissed items.
+            </EmptyTitle>
+          </EmptyHeader>
+        </Empty>
+      ) : totalCount === 0 && noSource ? (
         <div
           data-testid="inbox-connect"
           className="flex flex-col items-center gap-2 px-4 py-12 text-center"
