@@ -1,55 +1,76 @@
-import {
-  CATEGORY_LABEL,
-  type PrGroup,
-  type PrGroupBy,
-  type PrRow,
-} from "../../../../shared/pr-rows.js";
+import type { KeyboardEvent, MouseEvent } from "react";
+import type { PrFilters, PrRow } from "../../../../shared/pr-rows.js";
 import { formatAge, nowMs } from "../../../../shared/format-age.js";
-import { SourceBadge } from "@/components/badges";
+import { CHECK_TONE } from "@/modules/pull-requests/domain/pr-detail-state";
+import { STATE_TONE } from "@/modules/pull-requests/domain/pr-list-copy";
 import { ConnectSourceEmpty } from "@/components/ConnectSourceEmpty";
 import { DetailPlaceholder } from "@/components/DetailPaneBody";
-import { GroupByToolbar } from "@/components/GroupByToolbar";
-import { ListGroup, RowTime } from "@/components/ListGroup";
-import { ListItemRow } from "@/components/ListItemRow";
+import { ExternalTextLink } from "@/components/ExternalTextLink";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { PrFilterBar } from "./PrFilterBar";
 
 interface PrListProps {
-  groups: PrGroup[];
+  rows: PrRow[];
   selectedKey: string | null;
   narrow: boolean;
-  groupBy: PrGroupBy;
   connected: boolean;
   partial: boolean;
-  empty: boolean;
-  onGroupByChange: (value: PrGroupBy) => void;
+  emptyText: string;
+  filters: PrFilters;
+  authors: string[];
+  repos: string[];
+  reviewingKey: string | null;
+  onFiltersChange: (filters: PrFilters) => void;
   onSelect: (row: PrRow) => void;
+  onReview: (row: PrRow) => void;
   onOpenSettings: () => void;
 }
 
-const GROUP_LABEL: Record<PrGroupBy, string> = {
-  repo: "Repo",
-  author: "Author",
-  type: "Type",
-};
-
 export function PrList({
-  groups,
+  rows,
   selectedKey,
   narrow,
-  groupBy,
   connected,
   partial,
-  empty,
-  onGroupByChange,
+  emptyText,
+  filters,
+  authors,
+  repos,
+  reviewingKey,
+  onFiltersChange,
   onSelect,
+  onReview,
   onOpenSettings,
 }: PrListProps) {
+  function handleClick(event: MouseEvent<HTMLElement>, row: PrRow) {
+    if ((event.target as HTMLElement).closest("a, button")) return;
+    onSelect(row);
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLElement>, row: PrRow) {
+    if (event.target !== event.currentTarget) return;
+    if (event.repeat) return;
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    onSelect(row);
+  }
+
   return (
     <>
-      <GroupByToolbar
-        value={groupBy}
-        labels={GROUP_LABEL}
-        onChange={onGroupByChange}
+      <PrFilterBar
+        filters={filters}
+        authors={authors}
+        repos={repos}
+        onChange={onFiltersChange}
       />
       {partial && (
         <div className="px-4 py-2 text-sm font-semibold text-muted-foreground">
@@ -64,44 +85,88 @@ export function PrList({
             description="GitHub is not connected. Connect it in Settings and the pull requests that wait on you land here."
             onOpenSettings={onOpenSettings}
           />
-        ) : empty ? (
-          <DetailPlaceholder>No pull requests wait on you.</DetailPlaceholder>
+        ) : rows.length === 0 ? (
+          <DetailPlaceholder>{emptyText}</DetailPlaceholder>
         ) : (
-          groups.map((group) => (
-            <ListGroup
-              key={group.key}
-              title={group.label}
-              count={group.rows.length}
-              testId="pr-group"
-            >
-              {group.rows.map((row) => (
-                <ListItemRow
+          <Table data-testid="pr-table">
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead scope="col">#</TableHead>
+                <TableHead scope="col">Title</TableHead>
+                {!narrow && <TableHead scope="col">Author</TableHead>}
+                {!narrow && <TableHead scope="col">Repository</TableHead>}
+                <TableHead scope="col">State</TableHead>
+                {!narrow && <TableHead scope="col">Checks</TableHead>}
+                {!narrow && <TableHead scope="col">Age</TableHead>}
+                {!narrow && <TableHead scope="col">Linked card</TableHead>}
+                {!narrow && (
+                  <TableHead scope="col">
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
+                )}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((row) => (
+                <TableRow
                   key={row.key}
                   id={`pr-row-${row.key}`}
-                  selected={row.key === selectedKey}
-                  unread={row.unread}
-                  onSelect={() => onSelect(row)}
-                  snippet={
-                    row.author ? `${row.repo} by ${row.author}` : row.repo
-                  }
-                  leading={<SourceBadge source="github" />}
-                  title={`#${row.number} ${row.title}`}
-                  meta={
-                    <>
-                      {!narrow && row.category !== "yours" && (
-                        <Badge tone="neutral">
-                          {CATEGORY_LABEL[row.category]}
+                  tabIndex={0}
+                  aria-current={row.key === selectedKey ? "true" : undefined}
+                  className="cursor-pointer focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring aria-[current=true]:bg-card"
+                  onClick={(event) => handleClick(event, row)}
+                  onKeyDown={(event) => handleKeyDown(event, row)}
+                >
+                  <TableCell>
+                    <ExternalTextLink href={row.url}>
+                      {`#${row.number}`}
+                    </ExternalTextLink>
+                  </TableCell>
+                  <TableCell
+                    className={
+                      row.unread
+                        ? "max-w-0 min-w-24 truncate font-semibold"
+                        : "max-w-0 min-w-24 truncate"
+                    }
+                  >
+                    {row.title}
+                  </TableCell>
+                  {!narrow && <TableCell>{row.author}</TableCell>}
+                  {!narrow && <TableCell>{row.repo}</TableCell>}
+                  <TableCell>
+                    <Badge tone={STATE_TONE[row.state]}>{row.state}</Badge>
+                  </TableCell>
+                  {!narrow && (
+                    <TableCell>
+                      {row.checks !== "" && (
+                        <Badge tone={CHECK_TONE[row.checks]}>
+                          {row.checks}
                         </Badge>
                       )}
-                      {row.yours && <Badge tone="accent">Yours</Badge>}
-                      {row.draft && <Badge tone="neutral">Draft</Badge>}
-                      <RowTime>{formatAge(row.time, nowMs())}</RowTime>
-                    </>
-                  }
-                />
+                    </TableCell>
+                  )}
+                  {!narrow && (
+                    <TableCell>{formatAge(row.createdAt, nowMs())}</TableCell>
+                  )}
+                  {!narrow && <TableCell>{row.cardId ?? ""}</TableCell>}
+                  {!narrow && (
+                    <TableCell>
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        disabled={reviewingKey !== null}
+                        aria-label={`Review #${row.number}`}
+                        onClick={() => onReview(row)}
+                      >
+                        Review
+                      </Button>
+                    </TableCell>
+                  )}
+                </TableRow>
               ))}
-            </ListGroup>
-          ))
+            </TableBody>
+          </Table>
         )}
       </div>
     </>

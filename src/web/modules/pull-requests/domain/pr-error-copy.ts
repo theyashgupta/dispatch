@@ -4,6 +4,7 @@ const PR_ERROR_COPY: Record<string, string> = {
   rejected: "GitHub rejected the token. Reconnect GitHub in Settings.",
   "no-credential": "GitHub is not connected. Connect it in Settings.",
   "not-found": "GitHub could not find this pull request.",
+  "no-workspace": "No board repository matches this pull request.",
   "sso-required":
     "GitHub needs you to authorize the token for this organization's SAML single sign-on.",
   "rate-limited": "GitHub's rate limit was reached. Try again in a minute.",
