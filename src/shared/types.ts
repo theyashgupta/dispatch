@@ -162,7 +162,13 @@ export interface ProbeUnknown {
   checkedAt?: string;
 }
 
-export const ITEM_STATES = ["unread", "read", "snoozed", "done"] as const;
+export const ITEM_STATES = [
+  "unread",
+  "read",
+  "snoozed",
+  "done",
+  "dismissed",
+] as const;
 export type ItemState = (typeof ITEM_STATES)[number];
 export type SettableItemState = Exclude<ItemState, "snoozed">;
 
@@ -510,6 +516,7 @@ export interface Card {
     playbook?: string;
     crossSessionInbound?: CrossSessionInbound;
   };
+  inboxDismissedAt?: string;
 
   /**
    * Group-card-only: ids of member cards, in selection order. Presence (non-empty) is what

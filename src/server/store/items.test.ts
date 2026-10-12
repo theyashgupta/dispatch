@@ -265,6 +265,22 @@ test("buildPromotedCard builds a local Inbox card with the snippet, source link 
   );
 });
 
+test("buildPromotedCard leaves the Slack relevance meta out of the description", () => {
+  const card = buildPromotedCard(
+    item("a", {
+      meta: {
+        channel: "#ops",
+        needsSession: "true",
+        relevanceReason: "Direct question",
+      },
+    }),
+    DEFAULT_BOARD_KEY,
+    "LOCAL-8",
+    NOW,
+  );
+  assert.equal(card.description, "Snippet a\n\n- channel: #ops");
+});
+
 test("buildPromotedCard caps the title and description and drops an empty description", () => {
   const long = buildPromotedCard(
     item("a", { title: "t".repeat(400), snippet: "s".repeat(30000), meta: {} }),
@@ -281,4 +297,37 @@ test("buildPromotedCard caps the title and description and drops an empty descri
     NOW,
   );
   assert.equal(bare.description, null);
+});
+
+test("a dismissed row keeps dismissed after an append upsert of the same id", () => {
+  const r = applyItemUpserts(
+    existing(item("d", { state: "dismissed" })),
+    [item("d", { title: "again" })],
+    append,
+  );
+  assert.equal(r.upserts[0]?.state, "dismissed");
+  assert.equal(r.upserts[0]?.title, "again");
+});
+
+test("a complete snapshot pull that omits a dismissed row leaves it dismissed, not done or auto-resolved", () => {
+  const r = applyItemUpserts(
+    existing(item("d", { state: "dismissed" }), item("a")),
+    [item("a")],
+    snapshot,
+  );
+  assert.equal(
+    r.upserts.some((u) => u.id === "fake:d"),
+    false,
+  );
+  assert.deepEqual(r.counts, { inserted: 0, updated: 0, resolved: 0 });
+});
+
+test("a dismissed row present in a later snapshot stays dismissed, never unread", () => {
+  const r = applyItemUpserts(
+    existing(item("d", { state: "dismissed" })),
+    [item("d", { title: "back" })],
+    snapshot,
+  );
+  assert.equal(r.upserts[0]?.state, "dismissed");
+  assert.equal(r.upserts[0]?.autoResolved, undefined);
 });
