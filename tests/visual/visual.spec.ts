@@ -33,7 +33,7 @@ const screens: {
     name: "inbox",
     url: `${seeded}/#/boards/LOCAL/inbox`,
     ready: (page) =>
-      expect(page.getByText("Review the token rename").first()).toBeVisible(),
+      expect(page.getByText("Inbox ticket").first()).toBeVisible(),
   },
   {
     name: "today",
