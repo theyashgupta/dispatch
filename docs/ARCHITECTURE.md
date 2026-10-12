@@ -273,6 +273,7 @@ Mount prefix: `/api`.
 | POST   | `/api/cards/:id/run-claude`          | User | Start Claude in a live session whose terminal is at a shell prompt.                       |
 | POST   | `/api/cards/:id/session/account`     | User | Move a session to another Claude account, or queue the move.                              |
 | PUT    | `/api/cards/:id/session/account-pin` | User | Pin or unpin the Claude account of a session.                                             |
+| POST   | `/api/cards/:id/inbox-dismiss`       | User | Dismiss or restore an Inbox card.                                                         |
 | POST   | `/api/cards/:id/session`             | User | Switch the active session of a card.                                                      |
 | POST   | `/api/cards/:id/open-editor`         | User | Open the workspace of a card in an editor.                                                |
 | POST   | `/api/cards/:id/cleanup`             | User | Clean up all sessions of a Done card.                                                     |
@@ -768,7 +769,7 @@ viewer allows the folder of each board and the path of each live session.
 An `Item` (`shared/types.ts`) is the light row for things that are not tickets yet: a pull request
 asking for review, a mention, an error, a meeting action item. Its id is `<source>:<sourceKey>`; it
 carries `source`, `type`, `title`, `snippet`, `url`, `createdAt`, `priority` (0 to 100), `state`
-(`unread`, `read`, `snoozed`, `done`), `snoozedUntil`, a string `meta` map and `cardId` once
+(`unread`, `read`, `snoozed`, `dismissed`, `done`), `snoozedUntil`, a string `meta` map and `cardId` once
 promoted. Items live in the `items` table of `board.db` (`store/board-db.ts`), one JSON row per
 item with `source` and `state` columns for filtering, and they are written ONLY inside the store's
 mutation queue: an item mutator stages its changed rows and `persist` writes them in the same
@@ -795,9 +796,65 @@ snooze presented as `unread` by the pure `wakeItem` on the read path; the next w
 persists the wake. `GET /api/board` and the SSE `data` frame share the array through
 `store.snapshot()`; `GET /api/items` lists every item, done rows included, with `state` and `source`
 filters. The routes live in `routes/items.route.ts`: `POST /api/items/:id/state` (unread, read,
-done; a promoted item stays done and answers 409), `POST /api/items/:id/snooze` (the route
+dismissed, done; a promoted item stays done and answers 409), `POST /api/items/:id/snooze` (the route
 validates a future ISO time before any queue work; a promoted item answers 409 here too), `POST /api/items/:id/promote` (201 on the
 first call, 200 after).
+
+#### Dismissed items
+
+The item state `dismissed` hides an item from the Inbox without a final close.
+
+- `POST /api/items/:id/state` sets `dismissed`. The same route clears it. A restore sets the state `read`.
+- The upsert merge keeps `dismissed` on every poll.
+- A complete snapshot pull never marks a dismissed item `done`. A dismissed item therefore never returns to `unread`.
+- A promoted item answers `409`.
+
+#### Linear Inbox card dismiss
+
+A Linear Inbox card has its own dismiss field, `Card.inboxDismissedAt`.
+
+- `POST /api/cards/:id/inbox-dismiss` takes `{ dismissed: boolean }`. `true` sets the field to the current time. `false` clears it.
+- An unknown card answers `404`. A card outside the Inbox column answers `409` with the code `not-in-inbox`.
+- `isInboxWaiting` leaves a dismissed card out.
+- A Linear refresh keeps the field.
+- Known limit: when Linear drops an issue and returns it later, Dispatch creates a new card. The new card loses the dismiss.
+
+#### Inbox scope
+
+`src/shared/feed-items.ts` decides what the Inbox lists. `isInboxItem` accepts an item only when all these conditions are true:
+
+- The source is Slack.
+- `meta.needsSession` is `"true"`.
+- The state is not `done` and not `dismissed`.
+
+`inboxFeed` applies `isInboxItem`. The Inbox also lists the Linear Inbox cards. GitHub, Sentry, Calendar and Meeting items stay on their own pages. The Slack page lists every open Slack item through `slackRows`. An open Slack item is not `done` and not `dismissed`.
+
+#### Slack relevance
+
+`slackRelevance` in `src/server/sources/slack/slack-relevance.ts` decides if a Slack message needs a session. `slackItem` calls it once. Both write paths use `slackItem`. The result goes into two `meta` keys:
+
+- `needsSession`: `"true"` or `"false"`.
+- `relevanceReason`: the reason text.
+
+The rules run in order. The first match wins.
+
+| Order | Reason                                          | Match                                                                                                                                                       |
+| ----- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | "Bot or app message"                            | The message has a bot id, or its subtype starts with `bot`. No session.                                                                                     |
+| 2     | "Reaction or emoji only"                        | The text has only mentions, emoji, punctuation or symbols. No session.                                                                                      |
+| 3     | "Acknowledgement"                               | The text has 6 words or fewer, no `?` and no request. It starts with an acknowledgement word. No session.                                                   |
+| 4     | "Greeting"                                      | The text has 6 words or fewer, no `?` and no request. It starts with a greeting word. No session.                                                           |
+| 5     | "FYI or broadcast"                              | The text has no `?` and no request. It starts with `fyi`, `heads up`, `psa` or `announcement`, or it has a channel, here or everyone mention. No session.   |
+| 6     | "Digest"                                        | The text has no `?` and no request. It has 5 lines or more and 3 bullet lines or more, or it has `digest`, `daily summary` or `weekly summary`. No session. |
+| 7     | "Direct question"                               | The text has a `?`. Needs a session.                                                                                                                        |
+| 8     | "Request with an action verb: <verb or phrase>" | The text has a request phrase, or its first word is an action verb. Needs a session.                                                                        |
+| 9     | "No question or request"                        | No earlier rule matched. No session.                                                                                                                        |
+
+A request phrase is one of `can you`, `could you`, `would you`, `please`, `pls`, `need you to` and `can someone`. An action verb is one of `check`, `review`, `fix`, `look`, `investigate`, `deploy`, `update`, `merge`, `approve`, `test`, `debug`, `run`, `add` and `remove`. The check for a first word skips a leading acknowledgement word, greeting word, broadcast token (`<!here>`, `<!channel>`, `<!everyone>`, with or without a label) and broadcast word (`fyi`, `heads up`, `psa`, `announcement`). A leading word of this kind does not hide a request. For example, "hey look at this", "<!here> deploy the hotfix" and "heads up, deploy the thing" are requests.
+
+The classifier reads only the first 4000 characters of the text. A `?` inside a link (`<...>`) does not count as a question.
+
+An item stored before this change has no `relevanceReason`. The UI shows "Not classified" for it. The classifier uses no model pass.
 
 ### Meeting notes
 
