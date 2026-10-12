@@ -106,7 +106,7 @@ const requestMatch = (text: string): string | undefined => {
  */
 const trimTrailingPunctuation = (text: string): string => {
   let end = text.length;
-  while (end > 0 && TRAILING_PUNCTUATION_CHAR.test(text[end - 1]!)) end -= 1;
+  while (end > 0 && TRAILING_PUNCTUATION_CHAR.test(text[end - 1])) end -= 1;
   return text.slice(0, end);
 };
 

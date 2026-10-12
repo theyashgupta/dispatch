@@ -689,3 +689,9 @@ Date: 2026-10-11.
 Change: the decision kinds gain `plan`. The orchestrator raises its plan as one `plan` item with one structured entry for each ticket or group: the reference, the playbook, the order and the size. The server gives a `plan` item the options approve and reject, with approve recommended, and the user answers it as before. The rule book section 5 tells the orchestrator to use the kind `plan`. The tool count stays 29.
 
 Reason: the command centre (LOCAL-104) shows the planned tickets and groups as branches, and a free text plan cannot tell them apart.
+
+### LOCAL-98
+
+Change: `crossSessionInbound` moves from a fixed `refuse` in the hook settings to a setting with the default `accept` (D-3 amendment, 2026-10-10). Roadmap Loop and board orchestrator sessions keep `refuse` unless the board policy or the start request sets a value. The board policy gains the nullable field `crossSessionInbound` (D-6). The start route gains the optional field `crossSessionInbound`, and the card keeps it with the start intent. Settings shows the value next to the Claude arguments.
+
+Reason: the user sends context from a main session to a ticket session with a cross-session message, and the fixed `refuse` blocked each of these messages on 2026-10-09.
