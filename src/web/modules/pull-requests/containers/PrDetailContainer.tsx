@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { PrReviewEvent } from "../../../../shared/types.js";
 import type { PrRow } from "../../../../shared/pr-rows.js";
-import { fixCiPrompt, reviewPrompt } from "../../../../shared/agent-prompt.js";
+import { fixCiPrompt } from "../../../../shared/agent-prompt.js";
 import { isWebUrl } from "../../../../shared/web-url.js";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useSingleFlight } from "@/queries/single-flight";
@@ -20,6 +20,8 @@ import {
 interface PrDetailContainerProps {
   row: PrRow;
   onBack?: () => void;
+  reviewing: boolean;
+  onReview: (row: PrRow) => void;
   onStartAgent: (row: PrRow, prompt: string) => void;
   onNotice: (text: string) => void;
 }
@@ -27,6 +29,8 @@ interface PrDetailContainerProps {
 export function PrDetailContainer({
   row,
   onBack,
+  reviewing,
+  onReview,
   onStartAgent,
   onNotice,
 }: PrDetailContainerProps) {
@@ -92,6 +96,7 @@ export function PrDetailContainer({
         loading={result === undefined}
         loadError={loadError}
         busy={busy}
+        reviewing={reviewing}
         error={error}
         composer={composer}
         draft={draft}
@@ -105,10 +110,7 @@ export function PrDetailContainer({
           setDraft("");
         }}
         onSquashMerge={() => setConfirmMerge(true)}
-        onReviewWithAgent={() =>
-          detail &&
-          onStartAgent(row, reviewPrompt(detail, row.repo, row.number))
-        }
+        onReviewWithAgent={() => onReview(row)}
         onFixCi={() =>
           detail && onStartAgent(row, fixCiPrompt(detail, row.repo, row.number))
         }

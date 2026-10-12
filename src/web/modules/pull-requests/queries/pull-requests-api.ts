@@ -1,4 +1,9 @@
-import type { PrDetail, PrReviewEvent } from "../../../../shared/types.js";
+import type {
+  BoardKey,
+  PrDetail,
+  PrReviewEvent,
+  ReviewCardAnswer,
+} from "../../../../shared/types.js";
 import {
   providerFailure,
   providerFetch,
@@ -20,7 +25,7 @@ export async function getPullRequest(
   return { ok: true, detail: result.data };
 }
 
-/** Post a review on a pull request: POST /api/github/pr/:owner/:repo/:number/review. */
+/** Post a review on a pull request: POST /api/github/pr/:owner/:repo/:number/reviews. */
 export async function reviewPullRequest(
   owner: string,
   repo: string,
@@ -28,7 +33,7 @@ export async function reviewPullRequest(
   event: PrReviewEvent,
   body?: string,
 ): Promise<ProviderResult<object>> {
-  const result = await providerFetch(`${prPath(owner, repo, number)}/review`, {
+  const result = await providerFetch(`${prPath(owner, repo, number)}/reviews`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body ? { event, body } : { event }),
@@ -49,4 +54,34 @@ export async function mergePullRequest(
     body: JSON.stringify({ sha }),
   });
   return result?.ok ? { ok: true } : providerFailure(result);
+}
+
+export async function getGithubRepos(): Promise<
+  ProviderResult<{ repos: string[] }>
+> {
+  const result = await providerFetch<{ repos: string[] }>("/api/github/repos");
+  if (!result?.ok) return providerFailure(result);
+  return { ok: true, repos: result.data.repos };
+}
+
+export async function openReviewCard(
+  owner: string,
+  repo: string,
+  number: number,
+  board?: BoardKey,
+): Promise<ProviderResult<ReviewCardAnswer>> {
+  const result = await providerFetch<ReviewCardAnswer>(
+    `${prPath(owner, repo, number)}/review`,
+    {
+      method: "POST",
+      ...(board !== undefined
+        ? {
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ board }),
+          }
+        : {}),
+    },
+  );
+  if (!result?.ok) return providerFailure(result);
+  return { ok: true, ...result.data };
 }

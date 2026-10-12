@@ -51,6 +51,7 @@ export function useWorkspacePicker(
     pending: boolean;
     run: () => void;
   },
+  preferredFolder: string | null = null,
 ): WorkspacePicker {
   const foldersQuery = useWorkspaceFoldersQuery(board);
   const addMutation = useAddWorkspaceFolderMutation(board);
@@ -68,6 +69,7 @@ export function useWorkspacePicker(
     folders,
     foldersQuery.data?.lastUsed ?? null,
     selection.folder,
+    preferredFolder,
   );
   const noRepositoryBoard =
     startWithout !== undefined &&

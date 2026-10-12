@@ -1,16 +1,21 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { QueryClient } from "@tanstack/react-query";
+import type { BoardKey } from "../../../../shared/types.js";
 import {
+  getGithubRepos,
   getPullRequest,
   mergePullRequest,
+  openReviewCard,
   reviewPullRequest,
 } from "./pull-requests-api.js";
 import {
+  githubReposQueryOptions,
   mergeMutationOptions,
   pullRequestQueryOptions,
   pullRequestsKeys,
   refreshPullRequestAfterMerge,
+  reviewCardMutationOptions,
   reviewMutationOptions,
 } from "./pull-requests-queries.js";
 
@@ -116,7 +121,7 @@ test("reviewPullRequest resolves ok on a 200 and sends the event and body", asyn
   assert.deepEqual(await reviewPullRequest("o", "r", 7, "APPROVE", "lgtm"), {
     ok: true,
   });
-  assert.equal(calls[0]?.url, "/api/github/pr/o/r/7/review");
+  assert.equal(calls[0]?.url, "/api/github/pr/o/r/7/reviews");
   assert.equal(calls[0]?.init?.method, "POST");
   assert.equal(
     calls[0]?.init?.body,
@@ -182,7 +187,7 @@ test("reviewMutationOptions posts the review and resolves ok", async () => {
     }),
     { ok: true },
   );
-  assert.equal(calls[0]?.url, "/api/github/pr/o/r/7/review");
+  assert.equal(calls[0]?.url, "/api/github/pr/o/r/7/reviews");
   assert.equal(
     calls[0]?.init?.body,
     JSON.stringify({ event: "COMMENT", body: "note" }),
@@ -264,4 +269,76 @@ test("refreshPullRequestAfterMerge leaves another pull request detail alone", as
   });
   assert.equal(mergedRuns, 2);
   assert.equal(otherRuns, 1);
+});
+
+test("reviewCardMutationOptions posts the review card route and returns the card", async () => {
+  reply(201, {
+    cardId: "ACME-5",
+    created: true,
+    column: "inbox",
+    boardKey: "ACME",
+  });
+  assert.deepEqual(
+    await reviewCardMutationOptions.mutationFn({
+      owner: "o",
+      repo: "r",
+      number: 7,
+      board: "LOCAL" as BoardKey,
+    }),
+    {
+      ok: true,
+      cardId: "ACME-5",
+      created: true,
+      column: "inbox",
+      boardKey: "ACME",
+    },
+  );
+  assert.equal(calls[0]?.url, "/api/github/pr/o/r/7/review");
+  assert.equal(calls[0]?.init?.method, "POST");
+  assert.deepEqual(JSON.parse(String(calls[0]?.init?.body)), {
+    board: "LOCAL",
+  });
+});
+
+test("openReviewCard without a board sends no body", async () => {
+  reply(200, {
+    cardId: "LOCAL-5",
+    created: false,
+    column: "todo",
+    boardKey: "LOCAL",
+  });
+  await openReviewCard("o", "r", 7);
+  assert.equal(calls[0]?.init?.body, undefined);
+});
+
+test("openReviewCard returns the failure of a pull request no board holds", async () => {
+  reply(409, { error: "no-workspace" });
+  assert.deepEqual(await openReviewCard("o", "r", 7), {
+    ok: false,
+    error: "no-workspace",
+  });
+});
+
+test("openReviewCard returns the unreachable failure when the network fails", async () => {
+  reject();
+  assert.deepEqual(await openReviewCard("o", "r", 7), {
+    ok: false,
+    error: "unreachable",
+  });
+});
+
+test("getGithubRepos reads the repository list", async () => {
+  reply(200, { repos: ["acme/api", "acme/web"] });
+  assert.deepEqual(await getGithubRepos(), {
+    ok: true,
+    repos: ["acme/api", "acme/web"],
+  });
+  assert.equal(calls[0]?.url, "/api/github/repos");
+});
+
+test("githubReposQueryOptions keys the repository list under the module", () => {
+  assert.deepEqual(githubReposQueryOptions().queryKey, [
+    "pull-requests",
+    "repos",
+  ]);
 });

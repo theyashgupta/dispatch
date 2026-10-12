@@ -30,6 +30,9 @@ interface StartFlowInput {
   pending: boolean;
   titled?: boolean;
   allowNoRepository?: boolean;
+  playbookTag?: string;
+  playbook?: string;
+  preferredFolder?: string | null;
   focusRef: RefObject<HTMLElement | null>;
   send: (picks: {
     folder: string | null;
@@ -62,6 +65,9 @@ export function useStartFlow(input: StartFlowInput): StartFlow {
     pending,
     titled,
     allowNoRepository,
+    playbookTag,
+    playbook: preferredPlaybook,
+    preferredFolder,
     focusRef,
     send,
     toFailure,
@@ -71,7 +77,10 @@ export function useStartFlow(input: StartFlowInput): StartFlow {
   const submittingRef = useRef(false);
 
   const clearFailure = useCallback(() => setFailure(null), []);
-  const playbook = usePlaybookPicker(clearFailure);
+  const playbook = usePlaybookPicker(clearFailure, {
+    tag: playbookTag,
+    preferred: preferredPlaybook,
+  });
 
   const startableWith = (picked: Picked) =>
     open &&
@@ -126,6 +135,7 @@ export function useStartFlow(input: StartFlowInput): StartFlow {
           };
         }
       : undefined,
+    preferredFolder ?? null,
   );
   const here = {
     folder: workspace.selectedFolder,
