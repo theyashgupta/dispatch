@@ -45,6 +45,7 @@ import {
   SESSIONS_SHORTCUTS,
   bindShortcuts,
 } from "../../../../shared/shortcuts.js";
+import { hideDisabledSlack } from "../../../../shared/hide-disabled-slack.js";
 import { slackRows } from "../../../../shared/slack-rows.js";
 import { startTarget } from "../../../../shared/start-request.js";
 import type {
@@ -178,7 +179,6 @@ export function ShellContainer({
   const boardKey = useAppStore(appStore, (s) => s.board);
   const doneLimit = useAppStore(appStore, (s) => s.doneLimit);
   const soundEnabled = useAppStore(appStore, (s) => s.soundEnabled);
-  const errorsInFeeds = useAppStore(appStore, (s) => s.errorsInFeeds);
   const activityOpen = useAppStore(appStore, (s) => s.activityOpen);
   const setupWizardOpen = useAppStore(appStore, (s) => s.setupWizard != null);
   const selectedCardId = useAppStore(appStore, (s) => s.selectedCardId);
@@ -327,10 +327,13 @@ export function ShellContainer({
   const items = useItems(board);
   const enabledSources = board?.enabledSources;
   const inboxItems = useMemo(
-    () => inboxFeed(items, errorsInFeeds, enabledSources ?? []),
-    [items, errorsInFeeds, enabledSources],
+    () => inboxFeed(items, enabledSources ?? []),
+    [items, enabledSources],
   );
-  const slack = useMemo(() => slackRows(inboxItems), [inboxItems]);
+  const slack = useMemo(
+    () => slackRows(hideDisabledSlack(items, enabledSources ?? [])),
+    [items, enabledSources],
+  );
   const hasMainOrchestrator =
     boardList?.boards
       .find((b) => b.key === boardKey)
@@ -338,10 +341,6 @@ export function ShellContainer({
   const navItems = useMemo(
     () => visibleNavItems(NAV_ITEMS, enabledSources ?? [], hasMainOrchestrator),
     [enabledSources, hasMainOrchestrator],
-  );
-  const inboxRows = useMemo(
-    () => inboxItems.filter((item) => item.source !== "calendar"),
-    [inboxItems],
   );
 
   useShortcuts(
@@ -367,7 +366,7 @@ export function ShellContainer({
   }
 
   const meetingItems = items.filter((item) => item.source === "meeting");
-  const inboxCount = inboxWaitingCount(board.cards, inboxRows);
+  const inboxCount = inboxWaitingCount(board.cards, inboxItems);
   const sessionRows = flattenSessions(board.cards, nowMs());
   const liveSessionCount = sessionRows.filter((row) => row.running).length;
   const githubEnabled = board.enabledSources?.includes("github") === true;

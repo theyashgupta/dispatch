@@ -4,7 +4,9 @@ import {
   chainPath,
   type Rect,
 } from "../../../../shared/flow-geometry.js";
+import { isOpenItem } from "../../../../shared/feed-items.js";
 import { formatAge } from "../../../../shared/format-age.js";
+import { isInboxDismissed } from "../../../../shared/inbox-count.js";
 
 export const FLOW_SOURCES = [
   { id: "github", label: "GitHub" },
@@ -70,16 +72,14 @@ export function flowRows(
   cards: readonly Card[],
 ): FlowRow[] {
   return [
-    ...items
-      .filter((i) => i.state !== "done")
-      .map((i) => ({
-        id: i.id,
-        source: i.source,
-        score: i.priority,
-        createdAt: i.createdAt,
-      })),
+    ...items.filter(isOpenItem).map((i) => ({
+      id: i.id,
+      source: i.source,
+      score: i.priority,
+      createdAt: i.createdAt,
+    })),
     ...cards
-      .filter((c) => c.column === "inbox")
+      .filter((c) => c.column === "inbox" && !isInboxDismissed(c))
       .map((c) => ({
         id: c.id,
         source: c.source ?? "linear",

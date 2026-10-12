@@ -14,14 +14,12 @@ import { GranolaContainer } from "@/modules/connections/containers/GranolaContai
 import { LinearFiltersContainer } from "@/modules/connections/containers/LinearFiltersContainer";
 import { SlackContainer } from "@/modules/connections/containers/SlackContainer";
 import { RunSetupRow } from "@/modules/connections/components/RunSetupRow";
-import { SentryDetails } from "@/modules/connections/components/SentryDetails";
 import { SoonConnectionCards } from "@/modules/connections/components/SoonConnectionCards";
 import { getSetup } from "@/queries/setup-api";
 
 export function ConnectionsContainer() {
   const { appStore } = useRouteContext({ from: "__root__" });
   const connectionKey = useAppStore(appStore, (s) => s.setupRuns);
-  const errorsInFeeds = useAppStore(appStore, (s) => s.errorsInFeeds);
 
   const openSetupWizard = async (): Promise<boolean> => {
     try {
@@ -46,12 +44,6 @@ export function ConnectionsContainer() {
       <CredentialCardContainer
         meta={SENTRY_CONNECTION}
         errorCopy={SENTRY_ERROR_COPY}
-        details={
-          <SentryDetails
-            errorsInFeeds={errorsInFeeds}
-            onToggleErrorsInFeeds={appStore.setErrorsInFeeds}
-          />
-        }
       />
       <SlackContainer />
       <GranolaContainer />

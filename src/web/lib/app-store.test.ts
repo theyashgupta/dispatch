@@ -63,7 +63,6 @@ test("the initial state has the defaults and an initial value overrides one fiel
   assert.equal(state.setupWizard, null);
   assert.equal(state.setupRuns, 0);
   assert.equal(state.soundEnabled, true);
-  assert.equal(state.errorsInFeeds, false);
   assert.deepEqual(state.tunnelState, { status: "off" });
   assert.equal(state.connection, "connecting");
   assert.equal(state.activityOpen, false);
@@ -385,21 +384,18 @@ test("the preference and live state setters set their field and notify once", ()
   store.setSoundEnabled(false);
   assert.equal(store.getState().soundEnabled, false);
   assert.equal(counter.calls, 1);
-  store.setErrorsInFeeds(true);
-  assert.equal(store.getState().errorsInFeeds, true);
-  assert.equal(counter.calls, 2);
   const tunnel = { status: "starting" } as const;
   store.setTunnelState(tunnel);
   assert.equal(store.getState().tunnelState, tunnel);
-  assert.equal(counter.calls, 3);
+  assert.equal(counter.calls, 2);
   store.setConnection("disconnected");
   assert.equal(store.getState().connection, "disconnected");
-  assert.equal(counter.calls, 4);
+  assert.equal(counter.calls, 3);
   store.setConnection("disconnected");
-  assert.equal(counter.calls, 4);
+  assert.equal(counter.calls, 3);
   store.setActivityOpen(true);
   assert.equal(store.getState().activityOpen, true);
-  assert.equal(counter.calls, 5);
+  assert.equal(counter.calls, 4);
 });
 
 test("the toast shows, undoes, fails, dismisses and ignores a stale id", () => {

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { inboxFeed } from "../../../../shared/feed-items.js";
 import type { Item } from "../../../../shared/types.js";
-import { clampCount, type TodayEntry } from "./p0.js";
+import { clampCount, rankToday, type TodayEntry } from "./p0.js";
 import {
   agendaItems,
   agendaTime,
@@ -83,6 +84,32 @@ test("the agenda never renders without the calendar source", () => {
   assert.deepEqual(
     visibleAgenda(["calendar"], items, at(10, 0)).map((i) => i.id),
     ["standup"],
+  );
+});
+
+test("the agenda reads every item while the ranked list reads the Inbox feed", () => {
+  const meeting = event("standup", at(11, 0).toISOString());
+  const ask: Item = {
+    ...event("slack:1", at(9, 0).toISOString()),
+    source: "slack",
+    type: "dm",
+    meta: { channel: "#ops", needsSession: "true" },
+  };
+  const enabled = ["calendar", "slack"];
+  const all = [meeting, ask];
+  const ranked = rankToday(
+    [],
+    inboxFeed(all, enabled),
+    "today",
+    at(10, 0).getTime(),
+  );
+  assert.deepEqual(
+    visibleAgenda(enabled, all, at(10, 0)).map((i) => i.id),
+    ["standup"],
+  );
+  assert.deepEqual(
+    ranked.map((e) => e.key),
+    ["slack:1"],
   );
 });
 

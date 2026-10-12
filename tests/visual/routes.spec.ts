@@ -24,7 +24,6 @@ for (const theme of ["dark", "light"] as const) {
       await page.emulateMedia({ colorScheme: theme });
       await page.addInitScript((value) => {
         localStorage.setItem("dsp.theme", value);
-        localStorage.setItem("dsp.errorsInFeeds", "on");
       }, theme);
       await page.route("**/api/**", (route) =>
         route.request().method() === "GET" ? route.fallback() : route.abort(),
@@ -59,7 +58,6 @@ test("the theme control flips the live theme and stores it", async ({
   await page.emulateMedia({ colorScheme: "dark" });
   await page.addInitScript(() => {
     localStorage.setItem("dsp.theme", "dark");
-    localStorage.setItem("dsp.errorsInFeeds", "on");
   });
   await page.route("**/api/**", (route) =>
     route.request().method() === "GET" ? route.fallback() : route.abort(),

@@ -105,6 +105,21 @@ void test("a done item and a card outside the Inbox are not rows", () => {
   );
 });
 
+void test("a dismissed item and a dismissed Inbox card are not rows", () => {
+  const dismissedCard = {
+    ...card("c", "inbox", 2),
+    inboxDismissedAt: "2026-09-25T00:00:00.000Z",
+  };
+  const rows = flowRows(
+    [item("a", "slack", 50, "dismissed"), item("b", "slack", 50)],
+    [dismissedCard, card("d", "inbox", 1)],
+  );
+  assert.deepEqual(
+    rows.map((r) => r.id),
+    ["b", "d"],
+  );
+});
+
 void test("card priorities map onto the item scale", () => {
   const rows = flowRows(
     [],
