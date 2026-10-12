@@ -900,7 +900,10 @@ class BoardStore extends EventEmitter {
     if (!card.memberIds || card.memberIds.length === 0) return;
     for (const id of card.memberIds) {
       const member = this.cards.get(id);
-      if (member && boardOf(member) === boardOf(card)) member.column = column;
+      if (member && boardOf(member) === boardOf(card)) {
+        member.column = column;
+        delete member.inboxDismissedAt;
+      }
     }
   }
 
@@ -1832,6 +1835,32 @@ class BoardStore extends EventEmitter {
       if (card) card.startIntent = intent;
       return [];
     });
+  }
+
+  /**
+   * Dismiss or restore a Linear Inbox card, stamping the dismissal time inside the queue.
+   *
+   * @remarks Setting checks the column inside the queue so a concurrent start cannot stamp a card that already left the Inbox. Clearing is allowed in any column.
+   */
+  setInboxDismissed(
+    id: string,
+    dismissed: boolean,
+  ): Promise<"ok" | "unknown" | "not-in-inbox"> {
+    let outcome: "ok" | "unknown" | "not-in-inbox" = "unknown";
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      if (!dismissed) {
+        delete card.inboxDismissedAt;
+      } else if (card.column !== "inbox") {
+        outcome = "not-in-inbox";
+        return [];
+      } else {
+        card.inboxDismissedAt = new Date().toISOString();
+      }
+      outcome = "ok";
+      return [];
+    }).then(() => outcome);
   }
 
   /**
@@ -2780,6 +2809,7 @@ class BoardStore extends EventEmitter {
       for (const m of members) {
         m.groupId = undefined;
         m.column = destination;
+        delete m.inboxDismissedAt;
         m.statusReason = undefined;
         m.updatedAt = row.archivedAt;
       }
@@ -2845,6 +2875,7 @@ class BoardStore extends EventEmitter {
         if (!live) continue;
         live.groupId = card.id;
         live.column = card.column;
+        delete live.inboxDismissedAt;
         live.updatedAt = card.updatedAt;
       }
       result = { ok: true, card };
@@ -3557,6 +3588,9 @@ class BoardStore extends EventEmitter {
       if (from === "inbox" && column === "todo") {
         c.promotedAt = new Date().toISOString();
       }
+      if (from === "inbox" && column !== "inbox") {
+        delete c.inboxDismissedAt;
+      }
       if (column !== "needs_input" && column !== "agent_done") {
         c.statusReason = undefined;
       }
@@ -3928,6 +3962,7 @@ class BoardStore extends EventEmitter {
       card.lastMarker = undefined;
       card.statusReason = undefined;
       card.promotedAt = undefined;
+      delete card.inboxDismissedAt;
       card.outputChangedAt = undefined;
       card.provisioningStep = null;
       card.startError = null;

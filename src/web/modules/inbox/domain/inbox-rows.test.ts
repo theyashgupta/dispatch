@@ -207,6 +207,32 @@ test("today, 3 days and week boundaries hold against a fixed now", () => {
   );
 });
 
+test("a dismissed, never-opened card is not unread; a live one stays unread", () => {
+  const [dismissed, live] = mergeInboxRows(
+    [],
+    [
+      card("LIN-D", { inboxDismissedAt: ago(1000) }),
+      card("LIN-L", { priority: 4 }),
+    ],
+    {},
+  );
+  assert.equal(dismissed.id, "LIN-D");
+  assert.equal(dismissed.unread, false);
+  assert.equal(live.unread, true);
+});
+
+test("unread only drops a dismissed card", () => {
+  const merged = mergeInboxRows(
+    [],
+    [card("LIN-D", { inboxDismissedAt: ago(1000) }), card("LIN-L")],
+    {},
+  );
+  const ids = filterInboxRows(merged, { ...base, unreadOnly: true }).map(
+    (r) => r.id,
+  );
+  assert.deepEqual(ids, ["LIN-L"]);
+});
+
 test("unread only drops read rows and keeps unopened cards", () => {
   const ids = filterInboxRows(rows(), { ...base, unreadOnly: true }).map(
     (r) => r.id,

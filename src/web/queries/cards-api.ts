@@ -27,6 +27,24 @@ export async function moveCard(id: string, column: Column): Promise<void> {
   }
 }
 
+/** Set or clear a card's Inbox dismissal: POST /api/cards/:id/inbox-dismiss. */
+export async function setCardInboxDismissed(
+  id: string,
+  dismissed: boolean,
+): Promise<void> {
+  const result = await http(
+    `/api/cards/${encodeURIComponent(id)}/inbox-dismiss`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dismissed }),
+    },
+  );
+  if (!result.ok) {
+    throw httpError("setCardInboxDismissed", result);
+  }
+}
+
 /**
  * Persist a reviewed ticket draft: POST /api/cards.
  *

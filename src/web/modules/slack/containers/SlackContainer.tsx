@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useRouteContext, useRouter } from "@tanstack/react-router";
-import { inboxFeed } from "../../../../shared/feed-items.js";
+import { hideDisabledSlack } from "../../../../shared/hide-disabled-slack.js";
 import { startAgentFor } from "../../../../shared/item-actions.js";
 import type { BoardSnapshot } from "../../../../shared/types.js";
 import { pageLocation } from "../../../../shared/route.js";
@@ -42,12 +42,11 @@ export function SlackContainer({ selectedId }: { selectedId: string | null }) {
     boardKey,
     useAppStore(appStore, (s) => s.doneLimit),
   );
-  const errorsInFeeds = useAppStore(appStore, (s) => s.errorsInFeeds);
   const items = useItems(board);
   const enabledSources = board?.enabledSources;
   const rows = useMemo(
-    () => slackRows(inboxFeed(items, errorsInFeeds, enabledSources ?? [])),
-    [items, errorsInFeeds, enabledSources],
+    () => slackRows(hideDisabledSlack(items, enabledSources ?? [])),
+    [items, enabledSources],
   );
   if (board == null) return null;
   return (

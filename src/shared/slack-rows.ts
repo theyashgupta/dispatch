@@ -1,3 +1,4 @@
+import { isOpenItem } from "./feed-items.js";
 import type { Item } from "./types.js";
 
 export interface SlackPill {
@@ -23,10 +24,10 @@ export interface SlackRow {
 
 const TYPE_PILL: Record<string, string> = { dm: "DM", mention: "Mention" };
 
-/** Return the rows for the Slack items that are not done, newest first. */
+/** Return the rows for the Slack items that are neither done nor dismissed, newest first. */
 export function slackRows(items: readonly Item[]): SlackRow[] {
   return items
-    .filter((item) => item.source === "slack" && item.state !== "done")
+    .filter((item) => item.source === "slack" && isOpenItem(item))
     .map((item) => ({
       id: item.id,
       title: item.title,
@@ -37,6 +38,11 @@ export function slackRows(items: readonly Item[]): SlackRow[] {
       item,
     }))
     .sort((a, b) => b.time.localeCompare(a.time) || a.id.localeCompare(b.id));
+}
+
+/** Return the stored relevance reason, or "Not classified" for a row stored before U3-03. */
+export function slackReason(item: Item): string {
+  return item.meta.relevanceReason || "Not classified";
 }
 
 /**

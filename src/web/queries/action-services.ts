@@ -10,6 +10,7 @@ import {
   cleanupCard,
   moveCard,
   resumeCard,
+  setCardInboxDismissed,
   switchSession,
 } from "./cards-api.js";
 import { promoteItem, setItemState, snoozeItem } from "./item-actions-api.js";
@@ -23,6 +24,7 @@ export function actionApi(board: BoardKey): ActionApi {
     setItemState,
     snoozeItem,
     moveCard,
+    setCardInboxDismissed,
     cleanupCard,
     switchSession,
     resumeCard,
@@ -67,5 +69,6 @@ export function actionServices(deps: {
         extraDirection,
       ),
     askAbout: deps.askAbout,
+    openStart: deps.openStart,
   };
 }

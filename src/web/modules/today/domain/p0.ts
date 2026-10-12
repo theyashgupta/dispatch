@@ -1,5 +1,6 @@
 import type { Card, Item } from "../../../../shared/types.js";
 import { cardPriorityScore } from "../../../../shared/card-priority.js";
+import { isInboxDismissed } from "../../../../shared/inbox-count.js";
 import { COLUMN_LABELS } from "../../../../shared/event-copy.js";
 
 export type TodayWindow = "today" | "week";
@@ -22,6 +23,7 @@ const WEEK_MS = 604_800_000;
 const AGENT_DONE_FLOOR = 75;
 
 function cardTier(card: Card): TodayEntry["tier"] | null {
+  if (isInboxDismissed(card)) return null;
   if (card.column === "needs_input") return 1;
   if (card.priority === 1 && card.column !== "done" && card.column !== "parked")
     return 2;

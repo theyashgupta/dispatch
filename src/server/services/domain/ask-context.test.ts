@@ -103,6 +103,20 @@ void test("non-done items rank with active cards and done items fill after them"
   assert.deepEqual(keys, ["i-open", "i-done", "C-1"]);
 });
 
+void test("a dismissed item is not active and ranks after open items like a done one", () => {
+  const lines = buildAskContext(
+    [],
+    [
+      item("i-dismissed", { state: "dismissed", createdAt: minutesAgo(0) }),
+      item("i-open", { createdAt: minutesAgo(500) }),
+    ],
+    META,
+    NOW,
+  );
+  const keys = records(lines).map((r) => r.identifier ?? r.id);
+  assert.deepEqual(keys, ["i-open", "i-dismissed"]);
+});
+
 void test("a card carrying secret and path fields yields a line with none of those keys", () => {
   const secretCard = card("LOCAL-1", {
     hookToken: "tok-secret",

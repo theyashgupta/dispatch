@@ -21,7 +21,6 @@ const ROUTE_KEY = "dsp.route";
 const BOARD_STORAGE_KEY = "dsp.board";
 const LEGACY_VIEW_KEY = "dsp.view";
 const SOUND_KEY = "dsp.sound";
-const ERRORS_IN_FEEDS_KEY = "dsp.errorsInFeeds";
 
 const leavingProtocolRelativePath = window.location.pathname.startsWith("//");
 if (leavingProtocolRelativePath) {
@@ -48,7 +47,6 @@ if (!leavingProtocolRelativePath && start !== window.location.hash) {
 
 const appStore = createAppStore({
   soundEnabled: readStorage(SOUND_KEY) !== "off",
-  errorsInFeeds: readStorage(ERRORS_IN_FEEDS_KEY) === "on",
 });
 
 if (!leavingProtocolRelativePath) {
@@ -72,15 +70,18 @@ function writeStorage(key: string, value: string): void {
   } catch {}
 }
 
+try {
+  localStorage.removeItem("dsp.errorsInFeeds");
+} catch {}
+
 let persisted = "";
 
 function persistPreferences(): void {
-  const { soundEnabled, errorsInFeeds } = appStore.getState();
-  const next = `${soundEnabled}:${errorsInFeeds}`;
+  const { soundEnabled } = appStore.getState();
+  const next = String(soundEnabled);
   if (next === persisted) return;
   persisted = next;
   writeStorage(SOUND_KEY, soundEnabled ? "on" : "off");
-  writeStorage(ERRORS_IN_FEEDS_KEY, errorsInFeeds ? "on" : "off");
 }
 persistPreferences();
 appStore.subscribe(persistPreferences);

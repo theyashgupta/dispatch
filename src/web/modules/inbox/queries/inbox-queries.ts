@@ -1,5 +1,6 @@
 import { useMutation } from "@tanstack/react-query";
 import type { BoardKey, SettableItemState } from "../../../../shared/types.js";
+import { setCardInboxDismissed } from "@/queries/cards-api";
 import {
   promoteItem,
   setItemState,
@@ -9,6 +10,11 @@ import {
 interface SetItemStateVariables {
   id: string;
   state: SettableItemState;
+}
+
+interface SetCardInboxDismissedVariables {
+  id: string;
+  dismissed: boolean;
 }
 
 interface SnoozeItemVariables {
@@ -33,6 +39,18 @@ export function setItemStateMutationOptions() {
   };
 }
 
+/**
+ * Build the mutation options that set or clear a card's Inbox dismissal.
+ *
+ * @remarks Like the item state mutation, it writes no cache; the next board frame carries the change.
+ */
+export function setCardInboxDismissedMutationOptions() {
+  return {
+    mutationFn: ({ id, dismissed }: SetCardInboxDismissedVariables) =>
+      setCardInboxDismissed(id, dismissed),
+  };
+}
+
 /** Build the mutation options that snooze an item until an ISO time. */
 export function snoozeItemMutationOptions() {
   return {
@@ -50,6 +68,11 @@ export function promoteItemMutationOptions(board: BoardKey) {
 
 export function useSetItemStateMutation() {
   return useMutation(setItemStateMutationOptions());
+}
+
+/** Dismiss or restore a Linear Inbox card, moving it out of or back into the waiting list. */
+export function useSetCardInboxDismissedMutation() {
+  return useMutation(setCardInboxDismissedMutationOptions());
 }
 
 export function useSnoozeItemMutation() {

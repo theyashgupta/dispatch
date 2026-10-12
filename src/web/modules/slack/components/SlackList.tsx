@@ -9,6 +9,7 @@ import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
 import {
   slackAuthor,
   slackPills,
+  slackReason,
   type SlackGroup,
   type SlackRow,
 } from "../../../../shared/slack-rows.js";
@@ -65,6 +66,7 @@ export function SlackList({
                 leading={<SourceBadge source="slack" />}
                 title={slackAuthor(row.item)}
                 snippet={row.snippet}
+                detail={slackReason(row.item)}
                 meta={
                   <>
                     {slackPills(row.item)

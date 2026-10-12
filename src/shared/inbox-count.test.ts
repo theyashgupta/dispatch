@@ -2,7 +2,13 @@ import { DEFAULT_BOARD_KEY } from "./board-key.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Card, Item } from "./types.js";
-import { inboxWaitingCount, isInboxWaiting } from "./inbox-count.js";
+import {
+  inboxWaitingCount,
+  isInboxDismissed,
+  isInboxWaiting,
+} from "./inbox-count.js";
+
+const NOW_ISO = "2026-09-24T11:00:00.000Z";
 
 const card = (id: string, extra: Partial<Card> = {}): Card => ({
   id,
@@ -38,4 +44,28 @@ test("the Inbox count is waiting cards plus listed items, group members excluded
   assert.equal(isInboxWaiting(cards[1]), false);
   assert.equal(inboxWaitingCount(cards), 1);
   assert.equal(inboxWaitingCount(cards, [item("fake:a"), item("fake:b")]), 3);
+});
+
+test("a dismissed Inbox card is not waiting and is not counted", () => {
+  const dismissed = card("LIN-4", { inboxDismissedAt: NOW_ISO });
+  assert.equal(isInboxWaiting(dismissed), false);
+  assert.equal(inboxWaitingCount([card("LIN-1"), dismissed]), 1);
+});
+
+test("isInboxDismissed needs the Inbox column, no group and a dismissal stamp", () => {
+  assert.equal(
+    isInboxDismissed(card("A", { inboxDismissedAt: NOW_ISO })),
+    true,
+  );
+  assert.equal(isInboxDismissed(card("B")), false);
+  assert.equal(
+    isInboxDismissed(card("C", { column: "todo", inboxDismissedAt: NOW_ISO })),
+    false,
+  );
+  assert.equal(
+    isInboxDismissed(
+      card("D", { groupId: "GROUP-1", inboxDismissedAt: NOW_ISO }),
+    ),
+    false,
+  );
 });

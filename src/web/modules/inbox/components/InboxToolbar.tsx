@@ -9,7 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Toggle } from "@/components/ui/toggle";
 import {
   INBOX_RANGES,
   isInboxRange,
@@ -27,6 +27,9 @@ interface InboxToolbarProps {
   onRangeChange: (range: InboxRange) => void;
   unreadOnly: boolean;
   onUnreadOnlyChange: (value: boolean) => void;
+  showDismissed: boolean;
+  onShowDismissedChange: (value: boolean) => void;
+  dismissedCount: number;
   groupBy: InboxGroupBy;
   onGroupByChange: (value: InboxGroupBy) => void;
   unreadCount: number;
@@ -59,6 +62,9 @@ export function InboxToolbar({
   onRangeChange,
   unreadOnly,
   onUnreadOnlyChange,
+  showDismissed,
+  onShowDismissedChange,
+  dismissedCount,
   groupBy,
   onGroupByChange,
   unreadCount,
@@ -109,19 +115,24 @@ export function InboxToolbar({
           ))}
         </SelectContent>
       </Select>
-      <ToggleGroup
-        type="multiple"
-        role={undefined}
-        rovingFocus={false}
+      <Toggle
         variant="outline"
         size="sm"
-        value={unreadOnly ? ["unread"] : []}
-        onValueChange={(values) =>
-          onUnreadOnlyChange(values.includes("unread"))
-        }
+        className="px-3"
+        pressed={unreadOnly}
+        onPressedChange={onUnreadOnlyChange}
       >
-        <ToggleGroupItem value="unread">Unread only</ToggleGroupItem>
-      </ToggleGroup>
+        Unread only
+      </Toggle>
+      <Toggle
+        variant="outline"
+        size="sm"
+        className="px-3"
+        pressed={showDismissed}
+        onPressedChange={onShowDismissedChange}
+      >
+        {`Dismissed (${dismissedCount})`}
+      </Toggle>
       <Select
         value={groupBy}
         onValueChange={(value) => onGroupByChange(value as InboxGroupBy)}

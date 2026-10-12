@@ -25,7 +25,8 @@ import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
 
 interface TodayPageProps {
   board: BoardSnapshot;
-  items: Item[];
+  inboxItems: Item[];
+  allItems: Item[];
   onSelectCard: (id: string) => void;
   onNavigate: (page: Page, id?: string) => void;
 }
@@ -38,18 +39,18 @@ export function TodayContainer() {
     boardKey,
     useAppStore(appStore, (s) => s.doneLimit),
   );
-  const errorsInFeeds = useAppStore(appStore, (s) => s.errorsInFeeds);
   const items = useItems(board);
   const enabledSources = board?.enabledSources;
   const feed = useMemo(
-    () => inboxFeed(items, errorsInFeeds, enabledSources ?? []),
-    [items, errorsInFeeds, enabledSources],
+    () => inboxFeed(items, enabledSources ?? []),
+    [items, enabledSources],
   );
   if (board == null) return null;
   return (
     <TodayPage
       board={board}
-      items={feed}
+      inboxItems={feed}
+      allItems={items}
       onSelectCard={(id) =>
         appStore.selectCard(id, pinFromBoard(id, board.cards))
       }
@@ -60,16 +61,22 @@ export function TodayContainer() {
   );
 }
 
-function TodayPage({ board, items, onSelectCard, onNavigate }: TodayPageProps) {
+function TodayPage({
+  board,
+  inboxItems,
+  allItems,
+  onSelectCard,
+  onNavigate,
+}: TodayPageProps) {
   const [filter, setFilter] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const { range, setRange, count, setCount } = useP0Preferences();
 
   const nowTs = nowMs();
   const now = new Date(nowTs);
-  const pool = rankToday(board.cards, items, range, nowTs);
+  const pool = rankToday(board.cards, inboxItems, range, nowTs);
   const view = buildTodayModel(pool, count, filter, page);
-  const events = visibleAgenda(board.enabledSources, items, now);
+  const events = visibleAgenda(board.enabledSources, allItems, now);
 
   function handleOpen(entry: TodayEntry) {
     const target = entryTarget(entry);

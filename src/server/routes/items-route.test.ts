@@ -90,6 +90,20 @@ test("POST /items/:id/state changes the state and refuses bad input", async () =
   );
 });
 
+test("POST /items/:id/state dismisses an item and read restores it", async () => {
+  assert.equal(
+    (await post("/items/fake:mid-new/state", { state: "dismissed" })).status,
+    204,
+  );
+  assert.deepEqual(await listIds("?state=dismissed"), ["fake:mid-new"]);
+  assert.equal(
+    (await post("/items/fake:mid-new/state", { state: "read" })).status,
+    204,
+  );
+  assert.deepEqual(await listIds("?state=dismissed"), []);
+  assert.deepEqual(await listIds("?state=read"), ["fake:mid-new", "fake:low"]);
+});
+
 test("POST /items/:id/snooze accepts a future time and refuses past or malformed ones", async () => {
   const future = new Date(Date.now() + 3_600_000).toISOString();
   assert.equal(
@@ -134,6 +148,10 @@ test("POST /items/:id/promote creates once, then returns the same card, and hide
   assert.deepEqual(await listIds("?state=done"), ["fake:high"]);
   const reopen = await post("/items/fake:high/state", { state: "unread" });
   assert.equal(reopen.status, 409);
+  const dismissPromoted = await post("/items/fake:high/state", {
+    state: "dismissed",
+  });
+  assert.equal(dismissPromoted.status, 409);
   const snoozePromoted = await post("/items/fake:high/snooze", {
     until: new Date(Date.now() + 3_600_000).toISOString(),
   });

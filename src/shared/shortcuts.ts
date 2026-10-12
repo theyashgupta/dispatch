@@ -58,6 +58,9 @@ export const INBOX_SHORTCUTS: readonly ShortcutEntry[] = [
   { key: "o", label: "Open link" },
   { key: "u", label: "Toggle read" },
   { key: "a", label: "Ask about this" },
+  { key: "y", label: "Allow" },
+  { key: "d", label: "Dismiss" },
+  { key: "r", label: "Restore" },
 ];
 
 export const SESSIONS_SHORTCUTS: readonly ShortcutEntry[] = [

@@ -82,10 +82,10 @@ test("nothing fires while a modal or a row menu is open", () => {
   );
 });
 
-test("the Inbox shortcut table lists j, k, Enter, e, s, o, u and a once each", () => {
+test("the Inbox shortcut table lists j, k, Enter, e, s, o, u, a, y, d and r once each", () => {
   assert.deepEqual(
     INBOX_SHORTCUTS.map((s) => s.key),
-    ["j", "k", "Enter", "e", "s", "o", "u", "a"],
+    ["j", "k", "Enter", "e", "s", "o", "u", "a", "y", "d", "r"],
   );
 });
 

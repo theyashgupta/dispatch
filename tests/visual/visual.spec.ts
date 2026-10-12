@@ -33,7 +33,7 @@ const screens: {
     name: "inbox",
     url: `${seeded}/#/boards/LOCAL/inbox`,
     ready: (page) =>
-      expect(page.getByText("Review the token rename").first()).toBeVisible(),
+      expect(page.getByText("Inbox ticket").first()).toBeVisible(),
   },
   {
     name: "today",
@@ -157,7 +157,6 @@ for (const theme of ["dark", "light"] as const) {
           await page.clock.setFixedTime(now);
           await page.addInitScript((value) => {
             localStorage.setItem("dsp.theme", value);
-            localStorage.setItem("dsp.errorsInFeeds", "on");
           }, theme);
           if (screen.name === "setup-wizard") {
             await page.route("**/api/setup", (route) =>

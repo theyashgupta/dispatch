@@ -319,6 +319,56 @@ How each action works:
 
 A board with the supervisor **Off** still lists a card at **Needs input**, with a reply field when the card has a session.
 
+## Inbox
+
+The Inbox lists the things that wait for your decision. It shows two kinds of row:
+
+- Slack messages that need a session.
+- Linear Inbox cards.
+
+GitHub, Sentry, Calendar and Meeting items do not show in the Inbox. They stay on their own pages.
+
+### Needs a session
+
+A Slack row has the badge **Needs a session** and a short reason beside it. The reason tells you why Dispatch kept the message. Two examples are "Direct question" and "Request with an action verb: review".
+
+### Act on a row
+
+Select a row, then press a key. Each key acts on the selected row only. You can also choose the button on the row.
+
+| Action      | Key | What it does                                                                                        |
+| ----------- | --- | --------------------------------------------------------------------------------------------------- |
+| **Allow**   | `y` | Opens the Start dialog. The dialog has the playbook picker. Choose a playbook to start the session. |
+| **Dismiss** | `d` | Hides the row. A toast shows **Undo**. Choose **Undo** to bring the row back.                       |
+| **Restore** | `r` | Brings a dismissed row back. It works on a dismissed row only.                                      |
+
+### Dismissed rows
+
+The toggle **Dismissed (n)** shows the rows that you dismissed. The number n is the count of dismissed rows. Choose the toggle again to hide them. With no dismissed row the list shows "No dismissed items."
+
+### Messages that are noise
+
+Dispatch does not list a noise message in the Inbox. The message stays on the **Slack** page. The Slack page shows every open Slack message with its reason.
+
+Slack messages that Dispatch stored before this change have no reason. They show "Not classified" on the **Slack** page and are not in the Inbox.
+
+These reasons mean the message is noise:
+
+- "Bot or app message"
+- "Reaction or emoji only"
+- "Acknowledgement"
+- "Greeting"
+- "FYI or broadcast"
+- "Digest"
+- "No question or request"
+
+These reasons mean the message needs a session:
+
+- "Direct question"
+- "Request with an action verb: <verb or phrase>"
+
+A message that starts with an acknowledgement, a greeting or a broadcast word, and then asks for something, still needs a session.
+
 ## Budgets and usage limits
 
 ### Budget per group

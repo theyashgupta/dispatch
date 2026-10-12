@@ -1,3 +1,4 @@
+import { isOpenItem } from "../../shared/feed-items.js";
 import {
   ITEM_DESCRIPTION_MAX,
   ITEM_TITLE_MAX,
@@ -23,6 +24,8 @@ export interface ItemUpsertResult {
   upserts: Item[];
   counts: { inserted: number; updated: number; resolved: number };
 }
+
+const INTERNAL_META_KEYS = new Set(["needsSession", "relevanceReason"]);
 
 /**
  * Present an expired snooze as unread.
@@ -53,7 +56,7 @@ export function withState(item: Item, state: SettableItemState): Item {
  *
  * @remarks An existing row keeps state, snoozedUntil and cardId. A snapshot pull is the source's
  * whole truth, so it replaces meta and revives a row it had auto-resolved; an append pull merges meta.
- * A complete snapshot pull marks the source's missing rows done; an append or partial pull never does.
+ * A complete snapshot pull marks the source's missing rows done, except dismissed rows; an append or partial pull never does.
  */
 export function applyItemUpserts(
   existing: ReadonlyMap<string, Item>,
@@ -95,7 +98,7 @@ export function applyItemUpserts(
   if (opts.kind === "snapshot" && !opts.partial) {
     for (const item of existing.values()) {
       if (item.source !== opts.source || latest.has(item.id)) continue;
-      if (item.state === "done") continue;
+      if (!isOpenItem(item)) continue;
       upserts.push({ ...withState(item, "done"), autoResolved: true });
       counts.resolved += 1;
     }
@@ -141,7 +144,9 @@ export function buildPromotedCard(
 ): Card {
   const parts = [item.snippet.trim()];
   if (item.url !== undefined) parts.push(`Source: ${item.url}`);
-  const metaLines = Object.entries(item.meta).map(([k, v]) => `- ${k}: ${v}`);
+  const metaLines = Object.entries(item.meta)
+    .filter(([k]) => !INTERNAL_META_KEYS.has(k))
+    .map(([k, v]) => `- ${k}: ${v}`);
   if (metaLines.length > 0) parts.push(metaLines.join("\n"));
   const tail = context?.trim() ? `\n\n## Context\n\n${context.trim()}` : "";
   const head = parts

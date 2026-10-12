@@ -39,7 +39,6 @@ export interface AppState {
   setupWizard: SetupChecks | null;
   setupRuns: number;
   soundEnabled: boolean;
-  errorsInFeeds: boolean;
   tunnelState: TunnelState;
   connection: ConnectionStatus;
   activityOpen: boolean;
@@ -67,7 +66,6 @@ const DEFAULT_STATE: AppState = {
   setupWizard: null,
   setupRuns: 0,
   soundEnabled: true,
-  errorsInFeeds: false,
   tunnelState: { status: "off" },
   connection: "connecting",
   activityOpen: false,
@@ -249,7 +247,6 @@ export function createAppStore(initial: Partial<AppState> = {}) {
       ),
 
     setSoundEnabled: (on: boolean): void => set({ soundEnabled: on }),
-    setErrorsInFeeds: (on: boolean): void => set({ errorsInFeeds: on }),
     setTunnelState: (tunnelState: TunnelState): void => set({ tunnelState }),
     setConnection: (connection: ConnectionStatus): void => set({ connection }),
     setActivityOpen: (open: boolean): void => set({ activityOpen: open }),

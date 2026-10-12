@@ -676,6 +676,12 @@ Change: a playbook can have a `when` line in its front matter, 300 characters or
 
 Reason: the G19 and G20 real runs, and the user note of 2026-10-10.
 
+### LOCAL-98
+
+Change: `crossSessionInbound` moves from a fixed `refuse` in the hook settings to a setting with the default `accept` (D-3 amendment, 2026-10-10). Roadmap Loop and board orchestrator sessions keep `refuse` unless the board policy or the start request sets a value. The board policy gains the nullable field `crossSessionInbound` (D-6). The start route gains the optional field `crossSessionInbound`, and the card keeps it with the start intent. Settings shows the value next to the Claude arguments.
+
+Reason: the user sends context from a main session to a ticket session with a cross-session message, and the fixed `refuse` blocked each of these messages on 2026-10-09.
+
 ### LOCAL-104
 
 Date: 2026-10-11.

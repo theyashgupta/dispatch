@@ -67,6 +67,7 @@ import {
   draftBodySchema,
   groupTitleBodySchema,
   linearStateBodySchema,
+  inboxDismissBodySchema,
   moveBodySchema,
   openEditorBodySchema,
   sessionAccountBodySchema,
@@ -282,6 +283,14 @@ cardsRouter.put("/cards/:id/session/account-pin", async (req, res) => {
   }
   await store.setAccountPinned(card.id, sessionId, pinned);
   res.status(200).json({ pinned });
+});
+
+cardsRouter.post("/cards/:id/inbox-dismiss", async (req, res) => {
+  const { dismissed } = parseOrThrow(inboxDismissBodySchema, req.body);
+  const outcome = await store.setInboxDismissed(req.params.id, dismissed);
+  if (outcome === "unknown") throw new NotFoundError("not-found");
+  if (outcome === "not-in-inbox") throw new ConflictError("not-in-inbox");
+  res.status(204).end();
 });
 
 cardsRouter.post("/cards/:id/session", async (req, res) => {

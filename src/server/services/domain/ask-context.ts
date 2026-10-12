@@ -1,3 +1,4 @@
+import { isOpenItem } from "../../../shared/feed-items.js";
 import type { Card, Item } from "../../../shared/types.js";
 
 const RECORD_LINES = 250;
@@ -72,7 +73,7 @@ function rankItem(item: Item): Ranked {
   return {
     line: toLine(record),
     at: item.createdAt,
-    active: item.state !== "done",
+    active: isOpenItem(item),
   };
 }
 

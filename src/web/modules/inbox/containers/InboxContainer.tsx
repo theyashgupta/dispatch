@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useRouteContext, useRouter } from "@tanstack/react-router";
-import { inboxFeed } from "../../../../shared/feed-items.js";
+import { dismissedFeed, inboxFeed } from "../../../../shared/feed-items.js";
 import {
   pinFromBoard,
   selectedCardOf,
@@ -16,7 +16,10 @@ import {
   type InboxRowModel,
 } from "../../../../shared/item-actions.js";
 import { nowMs } from "../../../../shared/format-age.js";
-import { isInboxWaiting } from "../../../../shared/inbox-count.js";
+import {
+  isInboxDismissed,
+  isInboxWaiting,
+} from "../../../../shared/inbox-count.js";
 import { pageLocation } from "../../../../shared/route.js";
 import {
   INBOX_SHORTCUTS,
@@ -58,6 +61,7 @@ import {
 } from "@/modules/inbox/domain/inbox-rows";
 import {
   usePromoteItemMutation,
+  useSetCardInboxDismissedMutation,
   useSetItemStateMutation,
   useSnoozeItemMutation,
 } from "@/modules/inbox/queries/inbox-queries";
@@ -84,17 +88,13 @@ export function InboxContainer({
     boardKey,
     useAppStore(appStore, (s) => s.doneLimit),
   );
-  const errorsInFeeds = useAppStore(appStore, (s) => s.errorsInFeeds);
   const selectedId = useAppStore(appStore, (s) => s.selectedCardId);
   const pinned = useAppStore(appStore, (s) => s.pinned);
   const items = useItems(board);
   const enabledSources = board?.enabledSources;
   const rows = useMemo(
-    () =>
-      inboxFeed(items, errorsInFeeds, enabledSources ?? []).filter(
-        (item) => item.source !== "calendar",
-      ),
-    [items, errorsInFeeds, enabledSources],
+    () => inboxFeed(items, enabledSources ?? []),
+    [items, enabledSources],
   );
   const services = useMemo(
     () =>
@@ -143,21 +143,43 @@ function InboxPage({
 }: InboxPageProps) {
   const lastOpened = useLastOpened();
   const { mutateAsync: setItemState } = useSetItemStateMutation();
+  const { mutateAsync: setCardInboxDismissed } =
+    useSetCardInboxDismissedMutation();
   const { mutateAsync: snoozeItem } = useSnoozeItemMutation();
   const { mutateAsync: promoteItem } = usePromoteItemMutation(boardKey);
   const [search, setSearch] = useState("");
   const [selectedSourceIds, setSelectedSourceIds] = useState<string[]>([]);
   const [range, setRange] = useState<InboxRange>("all");
   const [unreadOnly, setUnreadOnly] = useState(false);
+  const [showDismissed, setShowDismissed] = useState(false);
   const [groupBy, setGroupBy] = useState<InboxGroupBy>("none");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [openMenu, setOpenMenu] = useState<InboxOpenMenu | null>(null);
   const [cursorId, setCursorId] = useState<string | null>(null);
   const [lastCursorIndex, setLastCursorIndex] = useState(0);
 
+  const dismissedItems = useMemo(
+    () => dismissedFeed(board.items ?? [], board.enabledSources ?? []),
+    [board.items, board.enabledSources],
+  );
+  const dismissedCards = useMemo(
+    () => board.cards.filter(isInboxDismissed),
+    [board.cards],
+  );
+  const dismissedCount = dismissedItems.length + dismissedCards.length;
   const rows = useMemo(
-    () => mergeInboxRows(items, board.cards.filter(isInboxWaiting), lastOpened),
-    [items, board.cards, lastOpened],
+    () =>
+      showDismissed
+        ? mergeInboxRows(dismissedItems, dismissedCards, lastOpened)
+        : mergeInboxRows(items, board.cards.filter(isInboxWaiting), lastOpened),
+    [
+      showDismissed,
+      items,
+      dismissedItems,
+      dismissedCards,
+      board.cards,
+      lastOpened,
+    ],
   );
   const sourceOptions = rowSourceOptions(rows);
   const visibleRows = filterInboxRows(rows, {
@@ -189,12 +211,14 @@ function InboxPage({
       api: {
         ...services.api,
         setItemState: (id, state) => setItemState({ id, state }),
+        setCardInboxDismissed: (id, dismissed) =>
+          setCardInboxDismissed({ id, dismissed }),
         snoozeItem: (id, until) => snoozeItem({ id, until }),
         promoteItem: (id, context) => promoteItem({ id, context }),
       },
       openSnooze: (row) => setOpenMenu({ kind: "snooze", rowId: row.id }),
     }),
-    [services, setItemState, snoozeItem, promoteItem],
+    [services, setItemState, setCardInboxDismissed, snoozeItem, promoteItem],
   );
 
   const handleAction = useCallback(
@@ -269,6 +293,9 @@ function InboxPage({
     o: onCursor((row) => handleAction(row, "open")),
     u: onCursor((row) => handleAction(row, "toggleRead")),
     a: onCursor((row) => handleAction(row, "ask")),
+    y: onCursor((row) => handleAction(row, "allow")),
+    d: onCursor((row) => handleAction(row, "dismiss")),
+    r: onCursor((row) => handleAction(row, "restore")),
   };
   useShortcuts(bindShortcuts(INBOX_SHORTCUTS, runs), {
     menuOpen: openMenu != null,
@@ -303,6 +330,9 @@ function InboxPage({
         onRangeChange={setRange}
         unreadOnly={unreadOnly}
         onUnreadOnlyChange={setUnreadOnly}
+        showDismissed={showDismissed}
+        onShowDismissedChange={setShowDismissed}
+        dismissedCount={dismissedCount}
         groupBy={groupBy}
         onGroupByChange={setGroupBy}
         unreadCount={unreadIds.length}
@@ -312,6 +342,7 @@ function InboxPage({
       />
       <InboxList
         totalCount={rows.length}
+        showDismissed={showDismissed}
         visibleRows={visibleRows}
         groups={groups}
         groupBy={groupBy}
@@ -321,6 +352,7 @@ function InboxPage({
         expandedId={expandedId}
         openMenu={openMenu}
         onSelect={handleSelect}
+        onFocusRow={(row) => setCursorId(row.id)}
         onMenuOpenChange={handleMenuOpenChange}
         onAction={handleAction}
         onPickAction={handlePickAction}
