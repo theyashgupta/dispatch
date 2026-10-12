@@ -210,9 +210,7 @@ test("each sign of a card run by the orchestrator makes it a branch", () => {
     [
       "sessions",
       {
-        sessions: [
-          { id: "s9", createdAt: iso(1), updatedAt: iso(1) },
-        ],
+        sessions: [{ id: "s9", createdAt: iso(1), updatedAt: iso(1) }],
       },
     ],
     ["launch", { launch: { direction: "go" } }],
