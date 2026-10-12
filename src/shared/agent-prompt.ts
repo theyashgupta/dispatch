@@ -1,3 +1,4 @@
+import { reviewBranch } from "./pr-rows.js";
 import type { PrDetail, SentryIssueDetail } from "./types.js";
 import { fenceUntrusted } from "./untrusted.js";
 
@@ -5,17 +6,27 @@ const MARKER = /DISPATCH_STATUS:/gi;
 
 export const PROMPT_CONTEXT_MAX = 6000;
 
-/** The kickoff text for an adversarial review that posts nothing. */
+/**
+ * The kickoff text for an adversarial review that posts only after the user approves.
+ *
+ * @remarks The title and both branch names are written by the PR author, so they sit in a fence
+ * like the body.
+ */
 export function reviewPrompt(
   detail: PrDetail,
   repo: string,
   number: number,
 ): string {
   return [
-    `Review pull request ${detail.url} (${repo}#${number}, ${detail.head} into ${detail.base}).`,
-    `Check it out in this workspace with: gh pr checkout ${number}`,
+    `Review pull request ${detail.url} (${repo}#${number}).`,
+    "PR title and branches:",
+    fenceUntrusted(
+      `Title: ${detail.title}\nHead: ${detail.head}\nBase: ${detail.base}`,
+      PROMPT_CONTEXT_MAX,
+    ),
+    `The worktree is on ${reviewBranch(number)} at the PR head.`,
     "Assume defects exist. Verify each finding against the code before you report it. Rank the findings by severity.",
-    "Post nothing: no review, no comment, no push. Report the findings here.",
+    "Post nothing to GitHub until the user approves it in this session.",
     "PR description:",
     fenceUntrusted(detail.body || "(no description)", PROMPT_CONTEXT_MAX),
   ].join("\n");
