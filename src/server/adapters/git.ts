@@ -1,4 +1,5 @@
 import fsp from "node:fs/promises";
+import { reviewBranch } from "../../shared/pr-rows.js";
 import { run } from "./exec.js";
 
 /**
@@ -62,6 +63,28 @@ export async function fetchBase(repoPath: string, base: string): Promise<void> {
 }
 
 /**
+ * Fetch the head of pull request `number` from `origin` into the local branch `review/pr-<number>`.
+ *
+ * @remarks
+ * The leading `+` lets a re-fetch move the branch when the PR head was force-pushed. Throws before
+ * any git call when `number` is not a positive safe integer, because the value comes from the
+ * persisted card and reaches the refspec.
+ */
+export async function fetchPullHead(
+  repoPath: string,
+  number: number,
+): Promise<void> {
+  if (!Number.isSafeInteger(number) || number <= 0) {
+    throw new Error(`Invalid pull request number: ${String(number)}`);
+  }
+  await run(
+    "git",
+    ["fetch", "origin", `+pull/${number}/head:${reviewBranch(number)}`],
+    { cwd: repoPath, timeout: 60_000, killEscalationMs: 5_000 },
+  );
+}
+
+/**
  * True if a LOCAL branch named `branch` exists. Uses `rev-parse --verify refs/heads/<branch>`;
  * swallows the failure into `false` (never rethrows) — this is a probe, not an operation.
  */
@@ -110,6 +133,28 @@ export async function originHeadRef(repoPath: string): Promise<string | null> {
     const ref = stdout.trim();
     const name = ref.slice(ref.lastIndexOf("/") + 1);
     return name || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The `origin` remote URL of a repository, or null when there is no origin or git fails.
+ *
+ * @remarks Reads the configured URL, not `git remote get-url`, which applies `insteadOf` rewrites and
+ * would hide the GitHub name of a mirrored remote. Any failure swallows into null so a broken
+ * repository is skipped instead of failing the poll.
+ */
+export async function originUrl(repoPath: string): Promise<string | null> {
+  try {
+    const { stdout } = await run(
+      "git",
+      ["config", "--get", "remote.origin.url"],
+      {
+        cwd: repoPath,
+      },
+    );
+    return stdout.trim() || null;
   } catch {
     return null;
   }
