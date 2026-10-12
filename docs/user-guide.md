@@ -369,6 +369,93 @@ These reasons mean the message needs a session:
 
 A message that starts with an acknowledgement, a greeting or a broadcast word, and then asks for something, still needs a session.
 
+## Pull requests
+
+The **Pull requests** page lists every open pull request of the board repositories. It also lists the pull requests that wait on you and the pull requests that your sessions opened.
+
+A board repository is a repository that a board holds. Dispatch reads the `origin` remote of each board repository. It uses the remote only when the remote is on github.com. Dispatch skips a repository that has no GitHub remote. Dispatch also skips every repository of an archived board. Dispatch reads the list of remotes again every 10 minutes.
+
+### The table
+
+The table has these columns:
+
+- The number of the pull request. It links to the pull request on GitHub.
+- The title.
+- The author.
+- The repository.
+- The state.
+- The checks.
+- The age.
+- The linked card.
+
+At a narrow width the table shows only the number, the title and the state. The wide table also has a **Review** button on each row.
+
+The state is one of these texts. Dispatch shows the first text that applies, in this order:
+
+1. "Draft"
+2. "Review requested from me"
+3. "Changes requested"
+4. "Approved"
+5. "Open"
+
+### Filters
+
+The filter bar has four controls. A row must pass every control that you set.
+
+- **Mine** shows only the pull requests that you wrote. Dispatch compares the author with your GitHub login and ignores case.
+- **Review requested** shows only the pull requests with the state "Review requested from me".
+- The **Author** select shows the pull requests of one author.
+- The **Repository** select shows the pull requests of one repository.
+
+### Empty table
+
+The table shows one of these texts when it has no row:
+
+- "No open pull requests in the board repositories."
+- "No board repository has a GitHub remote."
+- "No pull requests match the filters."
+
+The page shows the third text when pull requests exist but the filters hide all of them.
+
+### More than 100 pull requests
+
+Dispatch reads the first 100 open pull requests of the board repositories. If GitHub has more, Dispatch cuts the list. The page then shows this note: "Some pull requests may be missing: GitHub returned more than 100 results in a search, or an organization needs SAML single sign-on."
+
+The page shows the same note in two more cases. In the first case, GitHub answers the open pull request search with an error and with some pull requests. Dispatch keeps the pull requests that GitHub returned and writes the error messages to the server log. In the second case, the open pull request search fails. Dispatch then keeps the pull requests that wait on you and the pull requests that your sessions opened. A rate limit or an authentication error still fails the whole poll.
+
+### Review a pull request
+
+Choose **Review** on a row or in the detail pane. Dispatch does these steps:
+
+1. It makes one card for the pull request. If you choose **Review** again, Dispatch opens the same card. The card goes on the board that you are on, if that board has a repository for the pull request. If not, the card goes on the first open board that has one.
+2. It switches the page to the board of the card, if that board is not the board that you are on.
+3. It moves the card to To Do.
+4. It opens the Start dialog. The dialog lists only the playbooks that have the tag `review`. The playbook "Review a pull request" is selected.
+
+The Start dialog has the review prompt as the extra direction. Start the session from the dialog.
+
+Dispatch matches the pull request to a repository by the GitHub name of the `origin` remote. It ignores case. The session starts in the worktree of that repository on the local branch `review/pr-<number>`. The branch is at the head of the pull request. The other repositories of the workspace stay on the normal card branch. The first prompt of the session names the branch `review/pr-<number>` for the matching repository only. The prompt tells the session to post nothing to GitHub until you approve it in the session.
+
+The card stores the path of the repository that Dispatch matched. The Start dialog of a review card selects the registered folder that is this path or holds this path. If more than one folder holds the path, the dialog selects the longest folder. You can select another folder.
+
+If you tick the repositories in the Start dialog and none of them has the pull request repository as its `origin`, the start fails at the step "creating worktrees".
+
+The **Pull requests** page hides a pull request when the card of the pull request is in Done. A review card that is not in Done keeps the row of its pull request on every board that holds the repository, also when the card is on another board.
+
+If the card is already past To Do, Dispatch opens the card. It does not start a second session.
+
+If no open board has a repository that matches the pull request, the page shows the notice "No board repository matches this pull request." If GitHub is not connected, the page shows the notice "GitHub is not connected. Connect it in Settings."
+
+### The header of a review card
+
+A review card shows a header block for its pull request. The block has these parts:
+
+- The link "PR #<number>". It opens the pull request on GitHub.
+- The checks state: "Checks passing", "Checks failing" or "Checks pending".
+- The verdict. It is the text after "Review verdict: " in the last DONE line of the session.
+
+The block shows no verdict until the session writes a DONE line with "Review verdict: ".
+
 ## Budgets and usage limits
 
 ### Budget per group
@@ -477,7 +564,7 @@ When a branch fails, the flow stops. The block shows "Stopped at <step>: <reason
 
 ## Playbook reference
 
-A playbook is a markdown file with a name. Dispatch gives its text to Claude when a session starts. Dispatch seeds six playbooks on the first boot of a machine. Each seeded playbook is a file in the `playbooks` folder of the Dispatch data folder. Dispatch seeds a name once. If you delete a seeded playbook, it stays deleted. Open **Playbooks** in the sidebar, group **System**, to edit, copy or delete playbooks.
+A playbook is a markdown file with a name. Dispatch gives its text to Claude when a session starts. Dispatch seeds seven playbooks on the first boot of a machine. Each seeded playbook is a file in the `playbooks` folder of the Dispatch data folder. Dispatch seeds a name once. If you delete a seeded playbook, it stays deleted. Open **Playbooks** in the sidebar, group **System**, to edit, copy or delete playbooks.
 
 Every seeded playbook has one input: the extra direction. It is the optional text that you type in the start dialog. The token `{extra}` in the playbook marks where the text goes. When you type nothing, Dispatch removes the block that holds the token.
 
@@ -516,6 +603,14 @@ Every seeded playbook has one input: the extra direction. It is the optional tex
 - **Inputs:** the extra direction.
 - **What it does:** it tells Claude to read every ticket of the group first. In part 1, Claude uses the write-roadmap skill on the whole group and stops for roadmap approval. After the approval, Claude uses the grill-me skill and then the write-prd skill for each unit in order. In part 2, Claude uses the roadmap-loop skill to run every unit. Claude commits each unit to a stacked local branch. Claude never pushes, tags, opens a PR or merges.
 
+### Review a pull request
+
+- **File:** `review-pull-request.md`
+- **When to use:** one pull request to review before it merges. Dispatch selects it when you choose **Review** on the **Pull requests** page.
+- **Inputs:** the extra direction. The Review action fills it with the review prompt.
+- **What it does:** it tells Claude to read the pull request first with `gh pr view` and `gh pr diff`. Then it tells Claude to review the pull request with subagents from three perspectives: correctness, edge cases and security. Claude verifies each finding against the code and drops a finding that the code does not support. Claude shows the comments to you in the session. Claude posts a comment with `gh` only after you approve it in the session. Claude ends with the DONE status line. The summary of that line starts with "Review verdict: ", then approve, request changes or comment, then one line of reason.
+- **Tag:** the playbook has the tag `review`.
+
 ### Board Orchestrator
 
 - **File:** `board-orchestrator.md`
@@ -542,6 +637,16 @@ Every seeded playbook has one input: the extra direction. It is the optional tex
   - Act on another board.
   - Answer its own decision item or approve a permission prompt.
   - Delete a branch, a worktree or a card that it did not create.
+
+### The tags key
+
+A playbook can have a `tags:` line in its front matter. The value is a comma separated list. Dispatch makes each tag lower case and removes a repeated tag.
+
+The Review action of the **Pull requests** page lists only the playbooks that have the tag `review`. To use your own review playbook, add `tags: review` to its front matter. The playbook then shows in the Start dialog of the Review action.
+
+When no playbook has the tag, the Start dialog shows "No playbook has the tag review.".
+
+The Start dialog and the group dialog select the playbook that you used for the last start. They skip this playbook when it has the tag `review`. A start that is not a Review start therefore does not select the review playbook. The Review action still selects "Review a pull request".
 
 ## Replaced manual scripts
 

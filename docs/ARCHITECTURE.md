@@ -477,11 +477,13 @@ Mount prefix: `/api`.
 
 Mount prefix: `/api`.
 
-| Method | Path                                         | Auth | Purpose                                 |
-| ------ | -------------------------------------------- | ---- | --------------------------------------- |
-| GET    | `/api/github/pr/:owner/:repo/:number`        | User | Read a pull request.                    |
-| POST   | `/api/github/pr/:owner/:repo/:number/review` | User | Submit a review on a pull request.      |
-| POST   | `/api/github/pr/:owner/:repo/:number/merge`  | User | Merge a pull request at a given commit. |
+| Method | Path                                          | Auth | Purpose                                                                                                       |
+| ------ | --------------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/github/repos`                           | User | List the GitHub repositories behind the board repositories.                                                   |
+| GET    | `/api/github/pr/:owner/:repo/:number`         | User | Read a pull request.                                                                                          |
+| POST   | `/api/github/pr/:owner/:repo/:number/reviews` | User | Submit a review on a pull request.                                                                            |
+| POST   | `/api/github/pr/:owner/:repo/:number/review`  | User | Create or reuse the card that reviews a pull request (201 new, 200 reused). The optional body is `{ board }`. |
+| POST   | `/api/github/pr/:owner/:repo/:number/merge`   | User | Merge a pull request at a given commit.                                                                       |
 
 ### `routes/profile.route.ts`
 
@@ -799,7 +801,7 @@ source link and the meta pairs) and marks the item `done` with `cardId` in one m
 promote returns the existing card. It is the only item mutation that emits an activity event
 (`item_promoted`).
 
-On the wire, `BoardSnapshot.items` carries every item whose state is not `done`, redacted through
+On the wire, `BoardSnapshot.items` carries every item whose state is not `done`, plus each done GitHub item whose holding card exists and is not done (`source` is `github`, `cardId` is set, and `store.snapshot()` reads the card on any board). A done item of a done card therefore leaves the wire. Every item is redacted through
 `redactItem` (a field pick, so a future field stays off the wire until named), with an expired
 snooze presented as `unread` by the pure `wakeItem` on the read path; the next write to that row
 persists the wake. `GET /api/board` and the SSE `data` frame share the array through
@@ -3436,6 +3438,27 @@ three searches in order, each one page of 100: `is:open is:pr review-requested:@
 category a PR appears in (types `pr_review` at priority 75, `pr_mention` and `pr_assigned` at 50)
 and marks the pull partial when a category has more than 100 results, reports incomplete results,
 or carries the `X-GitHub-SSO: partial-results` header; a partial pull never auto-resolves an item.
+**Open pull request search.** After the three `@me` searches, the poll runs one GraphQL search on the
+same token (`sources/github/github-open-prs.ts`). The query is `is:open is:pr repo:<a> repo:<b> ... sort:updated-desc`
+with `first: 100`. It runs only when the repository reader returns at least one repository. `mapOpenPrs` maps each node to an
+item of type `pr_open`, priority 25, category `open`, with these `meta` keys: `repo`, `number`, `author`, `draft`,
+`reviewDecision`, `reviewRequestedFromMe`, `checks` (`pass`, `fail`, `pending` or empty), `createdAt`, `headRef`,
+`baseRef` and `changedFiles`. `mergeSearchResults` merges these items with the `@me` items. When an item has the
+same id as an `@me` item, the `@me` item keeps its type, category and priority and takes only the other `meta` keys.
+The poll is truncated when the answer has an `errors` array or `issueCount` is above 100.
+When the answer has `errors` and `data`, `mapOpenPrs` keeps the nodes that GitHub returned.
+It also logs the error messages. Each message is cut at 200 characters. The log never holds the token or the body.
+A truncated pull never resolves an item that it did not see (the snapshot rule).
+If the open pull request search throws, `GitHubSource.fetch` logs the message and keeps the `@me` results.
+It also marks the pull truncated. A `RateLimited` error or a `GitHubAuthError` still fails the poll.
+
+**Repository reader.** `bootstrap/index.ts` calls `setGithubReposReader(githubReposReader)`, and
+`sources/registry.ts` gives the reader to `GitHubSource`. The reader (`services/orchestration/github-repos.ts`) skips archived boards. It reads the `origin` URL of every
+repository of every other board, keeps the `owner/name` of each github.com remote, and sorts the list.
+`githubRepoAt` reads one repository with `originUrl` (`adapters/git.ts`). It parses the URL with `repoOfRemote` (`services/domain/ship-checks.ts`). It caches a non-empty list for
+10 minutes. `GET /api/github/repos` reads the same reader, so the route and the source share one cache. Before bootstrap
+installs the reader, the registry default returns an empty list.
+
 Item ids are `github:<owner>/<name>#<number>` and `createdAt` is the PR's last update. A 401 fails
 the poll with last-known-good kept, an exhausted rate limit raises `RateLimited`, and a 403 with
 `X-GitHub-SSO: required` raises `GitHubSsoError` with the authorization URL.
@@ -3448,9 +3471,23 @@ sandbox server's PATH.
 source gateway. `GET /api/github/pr/:owner/:repo/:number` answers the PR with at most 50 files, each
 patch cut at 6000 characters (both cuts flagged), and one check list merged from check runs and
 legacy statuses, sorted fail, pending, pass (`github-pr.ts#classifyCheckRun` passes only success,
-skipped and neutral). `POST .../review` posts `APPROVE`, `REQUEST_CHANGES` or `COMMENT` (a body is
+skipped and neutral). `POST .../reviews` posts `APPROVE`, `REQUEST_CHANGES` or `COMMENT` (a body is
 required for the last two, at most 20000 characters). `POST .../merge` squash merges with the head
-SHA the client saw, so a head that moved answers 409 `not-mergeable`. Owner, repo, number and SHA are
+SHA the client saw, so a head that moved answers 409 `not-mergeable`. `POST .../review` makes or reuses the one local card that reviews the pull request. The body is optional. When present, it is `{ board }`.
+`openReviewSchema` rejects any other field, so a body with `event` answers 400. The route answers:
+
+- 404 `not-found` for an unknown item.
+- 401 `no-credential` for a known item when no GitHub credential exists.
+- 409 `no-workspace` when no open board holds the repository.
+- Otherwise `{ cardId, created, column, boardKey }` with 201 or 200. `boardKey` is the board of the card.
+
+`openReviewCard` (`services/orchestration/github.ts`) prefers the board in `{ board }` when that board holds the repository.
+Otherwise it takes the first open board that holds it. It compares the `origin` name with the pull request repository and ignores case.
+`openReviewCard` stores `reviewPr.repoPath`, the repository path that it matched, and writes the workspace snapshot of the card only when the card has none (`setCardReview`).
+The Start dialog of a review card passes `reviewPr.repoPath` to the workspace picker (`StartContainer.tsx`). `resolveFolder` (`card-actions/domain/workspace-picker.ts`) selects the longest registered folder that is that path or holds it, after the folder that the user chose and before the remembered folder.
+`initialPlaybook` (`card-actions/domain/playbook-picker.ts`) skips a remembered playbook that has the tag `review` (`REVIEW_PLAYBOOK_TAG`), so the Start dialog and the group dialog never preselect it. A Review start names "Review a pull request" in the `playbook` field of the start request, and the picker selects it first.
+`buildPrRows` (`shared/pr-rows.ts`) hides a done GitHub item only when it has no holding card or when the board snapshot holds that card as done. A review card on another board therefore keeps its row on every board that holds the repository.
+The web Review action switches the page to `boardKey` before it moves or opens the card (`pull-requests/domain/review-flow.ts`). The card keeps `source: "local"`, carries `reviewPr`, and its session starts on `review/pr-<n>`, fetched from `refs/pull/<n>/head`. Owner, repo, number and SHA are
 validated before any GitHub call; errors answer an error kind (`rejected`, `not-found`,
 `sso-required`, `rate-limited`, `unreachable`, `no-credential`) and only GitHub's own message text
 for its refusals, never the token or a raw body. A successful write calls `pollNow("github")`.
@@ -5217,6 +5254,21 @@ exactly — the restructure resolved that hazard by extracting the single canoni
 is unchanged and this section is its do-not-change home (cited by the `workspace-paths.ts`
 header): the worktree for a repo lives under the ticket workspace, named by the repo's final path
 segment, and the produced string must remain identical to the construction above.
+
+#### Review worktree
+
+A review card (`card.reviewPr`) starts one repository of its workspace with a different worktree step.
+`createWorktrees` calls `findReviewRepo` (`services/orchestration/steps.ts`).
+It returns the first workspace repository whose `origin` GitHub name equals `reviewPr.repo`, ignoring case. It reads the name with `githubRepoAt`.
+The match uses the remote name, not the position or the folder name, because the Start dialog can send the repositories in any order.
+When no repository matches, the step "creating worktrees" fails with a `StartStepError`.
+The saga keeps the match in `SagaContext.reviewRepo`. The kickoff names `review/pr-<n>` for that repository only (`kickoff.ts#workspaceOrientation`).
+Every other repository gets the normal card branch.
+For the matching repository, `createRepoWorktree` calls `fetchPullHead` (`adapters/git.ts`). It runs
+`git fetch origin +pull/<n>/head:review/pr-<n>` in the repository. Then `worktreeAddExistingBranch` adds the worktree on the branch
+`review/pr-<n>`. The leading `+` lets a new fetch move the branch when the head of the pull request was force-pushed.
+The fetch only reads from `origin` and never pushes. A worktree that is already registered at the path is reused and is not fetched again.
+A fetch or add failure raises a `StartStepError` in the step "creating worktrees".
 
 ### Unwired `StartupErrorScreen` (`BOARD-05`)
 
