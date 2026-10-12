@@ -233,3 +233,54 @@ void test("createDecisionItem refuses tickets on another kind and a proposal wit
   }
   assert.equal(listDecisionItems(SBX).length, before);
 });
+
+void test("a plan item keeps its entries and gets the server options with approve recommended", () => {
+  const plan = {
+    entries: [
+      {
+        ref: "CEN-1",
+        playbook: "Write code directly",
+        order: 1,
+        size: "small" as const,
+      },
+    ],
+  };
+  const item = createDecisionItem(CALLER, {
+    kind: "plan",
+    question: "One ticket.",
+    options: OPTIONS,
+    recommendedOptionId: "a",
+    plan,
+  });
+  assert.deepEqual(item.options, [
+    { id: "approve", label: "Approve the plan" },
+    { id: "reject", label: "Do not approve" },
+  ]);
+  assert.equal(item.recommendedOptionId, "approve");
+  assert.deepEqual(item.plan, plan);
+  assert.deepEqual(store.getDecisionItem(item.id), item);
+});
+
+void test("createDecisionItem refuses a plan on another kind and a plan item with no plan, and stores nothing", () => {
+  const before = listDecisionItems(SBX).length;
+  const plan = {
+    entries: [
+      { ref: "CEN-1", playbook: "p", order: 1, size: "small" as const },
+    ],
+  };
+  for (const input of [
+    { kind: "ruling" as const, plan },
+    { kind: "plan" as const },
+  ]) {
+    assert.throws(
+      () =>
+        createDecisionItem(CALLER, {
+          ...input,
+          question: "q",
+          options: OPTIONS,
+        }),
+      (err) => err instanceof ValidationError && err.code === "invalid-plan",
+    );
+  }
+  assert.equal(listDecisionItems(SBX).length, before);
+});

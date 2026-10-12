@@ -1,8 +1,9 @@
 import { useRef, useState } from "react";
-import { useRouter } from "@tanstack/react-router";
-import { routeHash } from "../../../../shared/route.js";
+import { useRouteContext, useRouter } from "@tanstack/react-router";
+import { pageLocation } from "../../../../shared/route.js";
 import type { ClaudeAccountSummary } from "../../../../shared/types.js";
 import { PageHeaderCount } from "@/components/PageHeaderCount";
+import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { useSidebar } from "@/components/ui/sidebar";
 import { AccountSwitchContainer } from "./AccountSwitchContainer";
 import { AccountChipFrame } from "@/modules/accounts/components/AccountChipFrame";
@@ -14,6 +15,8 @@ import { useAccountsQuery } from "@/queries/accounts-queries";
 
 export function AccountChipContainer() {
   const router = useRouter();
+  const { appStore } = useRouteContext({ from: "__root__" });
+  const boardKey = useAppStore(appStore, (s) => s.board);
   const { isMobile, state } = useSidebar();
   const collapsed = state === "collapsed" && !isMobile;
   const { data } = useAccountsQuery();
@@ -77,7 +80,7 @@ export function AccountChipContainer() {
           onOpenSettings={() => {
             setOpen(false);
             void router.navigate({
-              href: routeHash({ page: "accounts" }).slice(1),
+              href: pageLocation({ page: "accounts" }, boardKey),
             });
           }}
           onCloseAutoFocus={(event) => {

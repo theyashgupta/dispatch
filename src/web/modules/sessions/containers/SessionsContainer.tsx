@@ -4,7 +4,7 @@ import {
   pinFromBoard,
   selectedCardOf,
 } from "../../../../shared/pinned-card.js";
-import { routeHash } from "../../../../shared/route.js";
+import { pageLocation } from "../../../../shared/route.js";
 import {
   bulkOutcomeCopy,
   runBulkCleanup,
@@ -80,7 +80,7 @@ export function SessionsContainer({ scopeId }: { scopeId: string }) {
         openStart: appStore.openStart,
         askAbout: (question) =>
           void router.navigate({
-            href: routeHash({ page: "ask", id: question }).slice(1),
+            href: pageLocation({ page: "ask", id: question }, boardKey),
           }),
       }),
     [appStore, router, boardKey],

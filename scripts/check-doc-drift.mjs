@@ -211,6 +211,7 @@ const LOOP_FORMAT_FILES = [
   /^src\/server\/services\/orchestration\/g19-manual-run-fixture\.test\.ts$/,
   /^src\/shared\/(attention-queue|loop-view)\.test\.ts$/,
   /^src\/web\/modules\/dashboard\/domain\/(activity-rows|attention-rows|progress-rows|time-left)\.test\.ts$/,
+  /^src\/web\/modules\/orchestrator\/domain\/centre-graph\.test\.ts$/,
 ];
 const LOOP_FORMAT_PATTERNS = new Set([
   "ROADMAP",
@@ -233,6 +234,10 @@ const ROADMAP_TOOL_FILES = [
   /^src\/server\/services\/infra\/playbooks\.ts$/,
   /^src\/web\/modules\/orchestrator\/components\/(OverrideFields|PolicyForm)\.tsx$/,
   /^src\/web\/modules\/orchestrator\/domain\/(ownership|policy-form)(\.test)?\.ts$/,
+  /^src\/server\/services\/infra\/playbooks-seed\.test\.ts$/,
+  /^src\/server\/services\/infra\/rulebook\.test\.ts$/,
+  /^src\/web\/modules\/card-actions\/domain\/playbook-picker(\.test)?\.ts$/,
+  /^src\/web\/modules\/orchestrator\/domain\/conversation-view\.test\.ts$/,
 ];
 
 /**

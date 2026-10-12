@@ -2,6 +2,7 @@ import fsp from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
+import { ORCHESTRATOR_KICKOFF_LEAD } from "../../../shared/dispatch-lines.js";
 import type {
   Board,
   BoardKey,
@@ -80,7 +81,7 @@ export interface LifecycleResult {
 }
 
 const busy = new Set<string>();
-const ORCHESTRATOR_PLAYBOOK = { playbook: "Board Orchestrator" };
+export const ORCHESTRATOR_PLAYBOOK = { playbook: "Board Orchestrator" };
 
 /**
  * The command that starts `dispatch mcp` from the running server's own entry files.
@@ -290,6 +291,7 @@ function sessionViewOf(
     state: session?.state ?? null,
     stateReason: session?.stateReason ?? null,
     contextPercent: session?.contextPercent ?? null,
+    cost: session?.cost ?? null,
     model: session?.model ?? null,
     hasTmuxSession: (session?.tmuxSession ?? card.tmuxSession) != null,
     activeSessionId: card.activeSessionId ?? null,
@@ -480,7 +482,7 @@ async function writeMcpConfig(
 }
 
 function kickoffDirection(board: Board, record: OrchestratorRecord): string {
-  return `You are the orchestrator "${record.name}" (id ${record.id}) of board ${board.key}. Use the dispatch tools to coordinate the work of this board.`;
+  return `${ORCHESTRATOR_KICKOFF_LEAD}${record.name}" (id ${record.id}) of board ${board.key}. Use the dispatch tools to coordinate the work of this board.`;
 }
 
 function settledState(cardId: string): "running" | "stopped" {

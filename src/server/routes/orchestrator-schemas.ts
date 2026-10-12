@@ -11,6 +11,9 @@ import {
   ITEM_TITLE_MAX,
   MOVABLE_COLUMNS,
   ORCHESTRATOR_STATE_MAX_BYTES,
+  PLAN_ENTRIES_MAX,
+  PLAN_PLAYBOOK_MAX,
+  PLAN_REF_MAX,
   SESSION_INPUT_MAX,
   SHIP_BODY_MAX,
   SHIP_TITLE_MAX,
@@ -18,13 +21,16 @@ import {
 import {
   DECISION_KINDS,
   ORCHESTRATION_EVENT_KINDS,
+  PLAN_SIZES,
 } from "../../shared/types.js";
 import { hasDispatchMarker } from "../services/infra/playbooks.js";
+import { folderPathSchema } from "./boards-schemas.js";
 import { distinctIds } from "./cards-schemas.js";
 import {
   MARKER_ERROR,
   booleanFilter,
   boundedText,
+  fieldsOf,
   intText,
   unknownFieldError,
 } from "./schema-primitives.js";
@@ -127,20 +133,43 @@ export const baseBranchBodySchema = z.object(
   "unknown-repository",
 );
 
+/**
+ * The orchestrator `create_board` body.
+ *
+ * @remarks A schema message is a board variant (`missing-name`, `folder-missing`) or a plain error
+ * code, as for `POST /boards`. The key is never an input: the service derives it from the name.
+ */
+export const createBoardToolBodySchema = z.preprocess(
+  fieldsOf,
+  z.object(
+    {
+      name: z.string("missing-name"),
+      folder: folderPathSchema.optional(),
+      repositories: z
+        .array(folderPathSchema, "invalid-repository")
+        .optional()
+        .transform((paths) => [...new Set(paths ?? [])]),
+    },
+    "missing-name",
+  ),
+);
+
+const reposField = z
+  .array(
+    z.object({
+      path: z.string("invalid-repos").min(1, "invalid-repos"),
+      base: z.string("invalid-repos").min(1, "invalid-repos"),
+    }),
+    "invalid-repos",
+  )
+  .min(1, "invalid-repos")
+  .optional();
+
 export const createGroupBodySchema = z.object(
   {
     title: ticketTitle,
     memberIds: distinctIds(Infinity, "invalid-member-ids"),
-    repos: z
-      .array(
-        z.object({
-          path: z.string("invalid-repos").min(1, "invalid-repos"),
-          base: z.string("invalid-repos").min(1, "invalid-repos"),
-        }),
-        "invalid-repos",
-      )
-      .min(1, "invalid-repos")
-      .optional(),
+    repos: reposField,
     playbook: z
       .string("invalid-playbook")
       .min(1, "invalid-playbook")
@@ -156,6 +185,23 @@ export const createGroupBodySchema = z.object(
       .optional(),
   },
   "invalid-title",
+);
+
+export const startCardBodySchema = z.object(
+  {
+    playbook: z
+      .string("invalid-playbook")
+      .min(1, "invalid-playbook")
+      .max(200, "invalid-playbook"),
+    direction: z
+      .string("invalid-direction")
+      .max(DIRECTION_MAX, "invalid-direction")
+      .refine(markerFree, MARKER_ERROR)
+      .optional(),
+    folder: z.string("invalid-folder").min(1, "invalid-folder").optional(),
+    repos: reposField,
+  },
+  "invalid-playbook",
 );
 
 export const sendInputBodySchema = z.object(
@@ -243,14 +289,52 @@ const decisionBodyShape = z.object(
       .min(1, "invalid-tickets")
       .max(20, "invalid-tickets")
       .optional(),
+    plan: z
+      .strictObject(
+        {
+          entries: z
+            .array(
+              z.strictObject(
+                {
+                  ref: boundedText(PLAN_REF_MAX, "invalid-plan"),
+                  playbook: boundedText(PLAN_PLAYBOOK_MAX, "invalid-plan"),
+                  order: z
+                    .number("invalid-plan")
+                    .int("invalid-plan")
+                    .min(1, "invalid-plan")
+                    .max(PLAN_ENTRIES_MAX, "invalid-plan"),
+                  size: z.enum(PLAN_SIZES, "invalid-plan"),
+                },
+                "invalid-plan",
+              ),
+              "invalid-plan",
+            )
+            .min(1, "invalid-plan")
+            .max(PLAN_ENTRIES_MAX, "invalid-plan")
+            .refine(
+              (entries) =>
+                new Set(entries.map((e) => e.order)).size === entries.length &&
+                new Set(entries.map((e) => e.ref)).size === entries.length,
+              "invalid-plan",
+            ),
+        },
+        "invalid-plan",
+      )
+      .optional(),
   },
   "invalid-kind",
 );
 
-export const createDecisionBodySchema = decisionBodyShape.refine(
-  (body) => (body.kind === "ticket_proposal") === (body.tickets !== undefined),
-  "invalid-tickets",
-);
+export const createDecisionBodySchema = decisionBodyShape
+  .refine(
+    (body) =>
+      (body.kind === "ticket_proposal") === (body.tickets !== undefined),
+    "invalid-tickets",
+  )
+  .refine(
+    (body) => (body.kind === "plan") === (body.plan !== undefined),
+    "invalid-plan",
+  );
 
 export const waitBodySchema = z.object(
   {

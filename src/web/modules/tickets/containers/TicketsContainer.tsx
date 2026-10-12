@@ -6,7 +6,7 @@ import {
 } from "../../../../shared/pinned-card.js";
 import { startTarget } from "../../../../shared/start-request.js";
 import type { BoardSnapshot, Card, Column } from "../../../../shared/types.js";
-import { routeHash } from "../../../../shared/route.js";
+import { pageLocation } from "../../../../shared/route.js";
 import {
   CAROUSEL_QUERY,
   NARROW_QUERY,
@@ -155,7 +155,7 @@ function TicketsPage({
         renderRow={renderRow}
         onClearSearch={() => setSearch("")}
         onOpenSettings={() => {
-          window.location.hash = routeHash({ page: "settings" });
+          window.location.hash = `#${pageLocation({ page: "settings" }, board.boardKey)}`;
         }}
       />
     </TicketsPane>

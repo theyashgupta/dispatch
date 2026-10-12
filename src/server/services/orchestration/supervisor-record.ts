@@ -1,4 +1,5 @@
 import path from "node:path";
+import { CONTINUE_LEADS } from "../../../shared/dispatch-lines.js";
 import { isHiddenCard } from "../../../shared/hidden-card.js";
 import type {
   BoardPolicy,
@@ -80,13 +81,7 @@ export function continueText(
   session: Session,
   duty: ContinueDuty | "resume" | "usage_limit",
 ): string {
-  const lead = {
-    restart: "The loop stopped without a marker.",
-    api_error: "The last turn ended on an API error.",
-    sleep_cut: "The last turn was cut off while the machine slept.",
-    resume: "The session was restarted.",
-    usage_limit: "The usage limit has reset.",
-  }[duty];
+  const lead = CONTINUE_LEADS[duty];
   const slug = card.loopProgress?.slug;
   if (!slug) return `${lead} Continue from where you stopped.`;
   const root = rootOf(card, session);

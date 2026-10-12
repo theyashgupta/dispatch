@@ -98,7 +98,7 @@ test("startBodySchema reads every field leniently and forms the workspace", () =
         repos: [],
       }),
     ),
-    empty,
+    { ...empty, workspace: { folder: "/f", repos: [] } },
   );
   assert.deepEqual(
     startBodySchema.parse({

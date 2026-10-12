@@ -132,15 +132,20 @@ const NO_CACHE_BASENAMES = new Set(["index.html", "sw.js"]);
  * via the `root` option (never a joined absolute path): send's dotfile policy inspects every
  * segment of a bare absolute path, so an npx install under `~/.npm/_npx/...` (or nvm's
  * `~/.nvm/...`) 404s on the `.npm` segment; with `root` set, only the relative `index.html` is
- * inspected.
+ * inspected. A GET under `/boards/` redirects to the hash route instead, because the build uses
+ * relative asset URLs and `/boards/<KEY>` would load `/boards/assets/*` as HTML.
  */
-const spaFallback: express.RequestHandler = (req, res, next) => {
+export const spaFallback: express.RequestHandler = (req, res, next) => {
   if (req.method !== "GET") {
     next();
     return;
   }
   if (req.path === "/api" || req.path.startsWith("/api/")) {
     next();
+    return;
+  }
+  if (req.path === "/boards" || req.path.startsWith("/boards/")) {
+    res.redirect(302, `/#${req.originalUrl}`);
     return;
   }
   res.set("Cache-Control", "no-cache");

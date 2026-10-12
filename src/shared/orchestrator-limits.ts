@@ -1,6 +1,7 @@
 import { COLUMNS, type Column } from "./types.js";
 
 export const ITEM_TITLE_MAX = 300;
+export const BOARD_NAME_MAX = 100;
 export const ITEM_DESCRIPTION_MAX = 20000;
 export const TEAM_KEY_RE = /^[A-Z][A-Z0-9]{0,9}$/;
 export const CARD_ID_MAX = 200;
@@ -12,6 +13,11 @@ export const DECISION_QUESTION_MAX = 2000;
 export const DECISION_LABEL_MAX = 200;
 export const DECISION_OPTION_ID_RE = /^[a-z0-9_-]{1,40}$/;
 export const DECISION_ID_RE = /^[A-Za-z0-9-]{1,40}$/;
+export const PLAN_ENTRIES_MAX = 20;
+export const PLAN_REF_MAX = 300;
+export const PLAN_PLAYBOOK_MAX = 200;
+export const CONVERSATION_LIMIT_MAX = 200;
+export const CONVERSATION_TEXT_MAX = 8000;
 export const SHIP_TITLE_MAX = 200;
 export const SHIP_BODY_MAX = 20000;
 export const ORCHESTRATOR_STATE_MAX_BYTES = 65536;

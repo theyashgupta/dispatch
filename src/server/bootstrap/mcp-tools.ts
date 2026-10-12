@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { COMMENT_BODY_MAX } from "../../shared/comment-body.js";
 import {
+  BOARD_NAME_MAX,
   CARD_ID_MAX,
   DECISION_ID_RE,
   DECISION_LABEL_MAX,
@@ -12,6 +13,9 @@ import {
   ITEM_TITLE_MAX,
   MOVABLE_COLUMNS,
   ORCHESTRATOR_STATE_MAX_BYTES,
+  PLAN_ENTRIES_MAX,
+  PLAN_PLAYBOOK_MAX,
+  PLAN_REF_MAX,
   SESSION_INPUT_MAX,
   SHIP_BODY_MAX,
   SHIP_TITLE_MAX,
@@ -19,6 +23,7 @@ import {
 import {
   DECISION_KINDS,
   ORCHESTRATION_EVENT_KINDS,
+  PLAN_SIZES,
 } from "../../shared/types.js";
 
 export interface McpTool {
@@ -39,6 +44,11 @@ const descriptionField = z.string().min(1).max(ITEM_DESCRIPTION_MAX);
 const eventId = z.number().int().min(0);
 const limitField = z.number().int().min(1).max(200);
 const optionId = z.string().regex(DECISION_OPTION_ID_RE);
+
+const reposField = z
+  .array(z.object({ path: z.string().min(1), base: z.string().min(1) }))
+  .min(1)
+  .optional();
 
 const seg = (value: unknown) => encodeURIComponent(String(value));
 
@@ -125,10 +135,22 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "get_board_workspace",
     description:
-      "Read the board workspace: the folder, the repositories with their base branch and check command, the playbook names and the group playbook. This tool changes nothing.",
+      "Read the board workspace: the folder, the repositories with their base branch and check command, the playbook names and the group playbook. It also lists all boards with their key, name, archived flag and link. This tool changes nothing.",
     input: {},
     method: "GET",
     path: "/board-workspace",
+  },
+  {
+    name: "create_board",
+    description:
+      "Create a board from a name. The key comes from the name. When you give no folder, the folder is made below the workspaces root. The answer holds the board, with its key, and the link. A blank name is refused.",
+    input: {
+      name: z.string().min(1).max(BOARD_NAME_MAX),
+      folder: z.string().min(1).optional(),
+      repositories: z.array(z.string().min(1)).optional(),
+    },
+    method: "POST",
+    path: "/boards",
   },
   {
     name: "create_ticket",
@@ -188,10 +210,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
     input: {
       title: titleField,
       memberIds: z.array(z.string()).min(2),
-      repos: z
-        .array(z.object({ path: z.string().min(1), base: z.string().min(1) }))
-        .min(1)
-        .optional(),
+      repos: reposField,
       playbook: z.string().min(1).optional(),
       direction: z.string().max(DIRECTION_MAX).optional(),
       dependsOn: z.array(looseId).max(50).optional(),
@@ -282,7 +301,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "create_decision_item",
     description:
-      "Create a decision item for a person to answer. Give 2 to 8 options with distinct ids. For the kind ticket_proposal, give 1 to 20 tickets, each with a title and a description.",
+      "Create a decision item for a person to answer. Give 2 to 8 options with distinct ids. For the kind ticket_proposal, give 1 to 20 tickets, each with a title and a description. For the kind plan, give plan.entries: 1 to 20 entries, each with ref (a card id or a group title, unique), playbook, order (1 to 20, unique) and size (small, medium or large). A plan gets the options approve and reject.",
     input: {
       cardId: looseId.nullable().optional(),
       kind: z.enum(DECISION_KINDS),
@@ -301,6 +320,21 @@ export const MCP_TOOLS: readonly McpTool[] = [
         .array(z.object({ title: titleField, description: descriptionField }))
         .min(1)
         .max(20)
+        .optional(),
+      plan: z
+        .object({
+          entries: z
+            .array(
+              z.object({
+                ref: z.string().min(1).max(PLAN_REF_MAX),
+                playbook: z.string().min(1).max(PLAN_PLAYBOOK_MAX),
+                order: z.number().int().min(1).max(PLAN_ENTRIES_MAX),
+                size: z.enum(PLAN_SIZES),
+              }),
+            )
+            .min(1)
+            .max(PLAN_ENTRIES_MAX),
+        })
         .optional(),
     },
     method: "POST",
@@ -341,5 +375,35 @@ export const MCP_TOOLS: readonly McpTool[] = [
     },
     method: "PUT",
     path: "/state",
+  },
+  {
+    name: "list_playbooks",
+    description:
+      "List the playbooks with the name, the when line and the source, seeded or user. Choose a playbook by its when line. This tool changes nothing.",
+    input: {},
+    method: "GET",
+    path: "/playbooks",
+  },
+  {
+    name: "get_rulebook",
+    description:
+      "Read the orchestration rule book. Call it after read_state at the start and after each handoff, and follow it. This tool changes nothing.",
+    input: {},
+    method: "GET",
+    path: "/rulebook",
+  },
+  {
+    name: "start_card",
+    description:
+      "Start the session of one ticket card with a playbook and a direction, the way the start dialog does. Omit repos to use the stored workspace of the card, else the board repositories with their base branch. A stored workspace with no repository counts as none, and a board with no repository answers no-repositories. A group card, a running card, a card in Done or Inbox, the Board Orchestrator playbook and a start at the concurrency cap are refused.",
+    input: {
+      ...cardIdParam,
+      playbook: z.string().min(1).max(200),
+      direction: z.string().max(DIRECTION_MAX).optional(),
+      folder: z.string().min(1).optional(),
+      repos: reposField,
+    },
+    method: "POST",
+    path: "/cards/:cardId/start",
   },
 ];

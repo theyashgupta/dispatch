@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useRouteContext, useRouter } from "@tanstack/react-router";
-import { routeHash, type Page } from "../../../../shared/route.js";
+import { pageLocation, type Page } from "../../../../shared/route.js";
 import { useThemeState } from "@/components/ThemeProvider";
 import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { playChime } from "@/components/ui/hooks/chime";
@@ -28,9 +28,13 @@ export function SettingsContainer({
   const router = useRouter();
   const tunnelState = useAppStore(appStore, (s) => s.tunnelState);
   const soundEnabled = useAppStore(appStore, (s) => s.soundEnabled);
+  const boardKey = useAppStore(appStore, (s) => s.board);
   const { preference, setPreference } = useThemeState();
   const navigate = (page: Page, id?: string, replace?: boolean) =>
-    void router.navigate({ href: routeHash({ page, id }).slice(1), replace });
+    void router.navigate({
+      href: pageLocation({ page, id }, boardKey),
+      replace,
+    });
   const onSaved = () => appStore.notice("Settings saved.");
 
   return (

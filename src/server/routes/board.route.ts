@@ -51,7 +51,6 @@ import {
 import { httpErrorHandler } from "./error-handler.js";
 import { parseOrThrow } from "./parse-input.js";
 import {
-  assertNotLastRepository,
   isBoardRepository,
   resolveBoard,
   resolveBoardForCreate,
@@ -141,7 +140,6 @@ boardRouter.delete("/workspace-folders", async (req, res) => {
   const { key } = resolveBoard(parseBoardParam(req.query));
 
   const abs = expandPath(rawPath);
-  assertNotLastRepository(key, abs);
   await store.removeWorkspaceFolder(key, abs);
   res.status(200).json({ ok: true });
 });

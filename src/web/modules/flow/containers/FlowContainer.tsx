@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouteContext, useRouter } from "@tanstack/react-router";
-import { routeHash } from "../../../../shared/route.js";
+import { pageLocation } from "../../../../shared/route.js";
 import type { BoardSnapshot } from "../../../../shared/types.js";
 import { nowMs } from "../../../../shared/format-age.js";
 import { NARROW_QUERY } from "../../../../shared/media-queries.js";
@@ -49,8 +49,9 @@ function rideToken(row: FlowRow, id: string, speed: Speed): FlowToken {
 export function FlowContainer() {
   const { appStore } = useRouteContext({ from: "__root__" });
   const router = useRouter();
+  const boardKey = useAppStore(appStore, (s) => s.board);
   const board = useBoardSnapshot(
-    useAppStore(appStore, (s) => s.board),
+    boardKey,
     useAppStore(appStore, (s) => s.doneLimit),
   );
   if (board == null) return null;
@@ -58,7 +59,9 @@ export function FlowContainer() {
     <FlowPage
       board={board}
       onOpenList={() =>
-        void router.navigate({ href: routeHash({ page: "inbox" }).slice(1) })
+        void router.navigate({
+          href: pageLocation({ page: "inbox" }, boardKey),
+        })
       }
     />
   );

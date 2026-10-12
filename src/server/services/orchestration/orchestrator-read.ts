@@ -1,3 +1,4 @@
+import { boardLink } from "../../../shared/board-key.js";
 import type {
   BoardKey,
   BoardPolicy,
@@ -13,7 +14,7 @@ import {
 import { ConflictError, ValidationError } from "../domain/errors.js";
 import { effectivePolicy } from "../domain/orchestrator-rules.js";
 import type { OrchestratorIdentity } from "../domain/orchestrator-scope.js";
-import { loadPlaybooks } from "../infra/playbooks.js";
+import { isSeedSlug, loadPlaybooks } from "../infra/playbooks.js";
 import { callerPolicy, getBoard, runningLoops } from "./boards.js";
 
 export type CapturePane = (target: string) => Promise<string>;
@@ -145,6 +146,7 @@ export async function workspaceSummary(caller: OrchestratorIdentity): Promise<{
   repos: { path: string; base: string | null; checkCommand: string }[];
   playbooks: string[];
   groupPlaybook: string | null;
+  boards: { key: string; name: string; archived: boolean; link: string }[];
 }> {
   const board = getBoard(caller.boardKey);
   return {
@@ -156,5 +158,21 @@ export async function workspaceSummary(caller: OrchestratorIdentity): Promise<{
     })),
     playbooks: (await loadPlaybooks()).map((p) => p.name),
     groupPlaybook: callerPolicy(caller).groupPlaybook,
+    boards: store.listBoards().map((b) => ({
+      key: b.key,
+      name: b.name,
+      archived: b.archived,
+      link: boardLink(b.key),
+    })),
   };
+}
+
+export async function playbookSummaries(): Promise<
+  { name: string; when: string; source: "seeded" | "user" }[]
+> {
+  return (await loadPlaybooks()).map((p) => ({
+    name: p.name,
+    when: p.when ?? "",
+    source: p.slug !== undefined && isSeedSlug(p.slug) ? "seeded" : "user",
+  }));
 }

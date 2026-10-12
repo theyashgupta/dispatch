@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { after, afterEach, test, type TestContext } from "node:test";
 import type { Server } from "node:http";
-import type { Card, Config } from "../../shared/types.js";
+import type { BoardKey, Card, Config } from "../../shared/types.js";
 import { isolateEnv, waitFor } from "../test-support/fixtures.js";
 import { issue } from "../test-support/fake-source.js";
 import {
@@ -11,7 +11,7 @@ import {
   queueLinearFetch,
   restoreFetch,
 } from "../test-support/linear-fetch.js";
-import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
+import { DEFAULT_BOARD_KEY, parseBoardKey } from "../../shared/board-key.js";
 
 const env = isolateEnv();
 fs.writeFileSync(
@@ -30,6 +30,8 @@ const { invalidateWorkflow } =
   await import("../services/orchestration/linear-outbound.js");
 const { setOrchestrationConfig } =
   await import("../services/infra/config-holder.js");
+const { sessionStarter } =
+  await import("../services/orchestration/start-session.js");
 const { ATTACHMENTS_DIR } = await import("../services/infra/paths.js");
 const express = (await import("express")).default;
 const { cardsRouter } = await import("./cards.route.js");
@@ -538,7 +540,6 @@ test("POST /cards/:id/start answers 400 for the config, playbook and workspace c
     undefined,
     [],
     { folder: "/x" },
-    { folder: "/x", repos: [] },
     { folder: 5, repos: [{ path: "/x", base: "-x" }] },
     { folder: "/x", repos: [null] },
     { folder: "/x", repos: [["a"]] },
@@ -552,6 +553,49 @@ test("POST /cards/:id/start answers 400 for the config, playbook and workspace c
       none,
       JSON.stringify(body),
     );
+  }
+});
+
+test("POST /cards/:id/start ignores an empty-repos workspace on a board with repositories", async () => {
+  const REPO = parseBoardKey("REPO") as BoardKey;
+  await store.createBoard({
+    key: REPO,
+    name: "Repo",
+    workspaceRoot: "/x",
+    repositories: [{ path: "/x", baseBranch: null, checkCommand: "x" }],
+    linearTeamKeys: [],
+  });
+  const id = (await store.createLocalCard(REPO, "has repos", "")).id;
+  await expectReply(
+    call("POST", `/cards/${id}/start`, { folder: "/x", repos: [] }),
+    400,
+    '{"error":"No workspace selected for this ticket","variant":"config"}',
+  );
+});
+
+test("POST /cards/:id/start answers 409 while a session start is in progress and starts once", async (t) => {
+  const id = await local("start twice");
+  const repo = path.join(env.binDir, "start-twice-repo");
+  fs.mkdirSync(path.join(repo, ".git"), { recursive: true });
+  const start = t.mock.method(sessionStarter, "start", (cardId: string) => {
+    store.beginStart(cardId);
+    return Promise.resolve();
+  });
+  const body = { folder: env.binDir, repos: [{ path: repo, base: "main" }] };
+  try {
+    await expectReply(
+      call("POST", `/cards/${id}/start`, body),
+      202,
+      '{"started":true}',
+    );
+    await expectReply(
+      call("POST", `/cards/${id}/start`, body),
+      409,
+      err("a session start is already in progress"),
+    );
+    assert.equal(start.mock.callCount(), 1);
+  } finally {
+    store.endStart(id);
   }
 });
 
@@ -841,7 +885,6 @@ test("POST /cards/group answers 409 with every ineligible id, then the config, p
   for (const extra of [
     {},
     { folder: "/x" },
-    { folder: "/x", repos: [] },
     { folder: 5, repos: [{ path: "/x", base: "main" }] },
     { folder: "/x", repos: [{ path: "/x" }] },
     { folder: "/x", repos: [null] },

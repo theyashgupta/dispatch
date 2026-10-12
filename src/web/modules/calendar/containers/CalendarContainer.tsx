@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouteContext, useRouter } from "@tanstack/react-router";
-import { routeHash } from "../../../../shared/route.js";
+import { pageLocation } from "../../../../shared/route.js";
 import type { Card, Item } from "../../../../shared/types.js";
 import {
   CALENDAR_ERROR_COPY,
@@ -50,7 +50,7 @@ export function CalendarContainer() {
         openStart: appStore.openStart,
         askAbout: (question) =>
           void router.navigate({
-            href: routeHash({ page: "ask", id: question }).slice(1),
+            href: pageLocation({ page: "ask", id: question }, boardKey),
           }),
       }),
     [appStore, router, boardKey],
@@ -63,7 +63,9 @@ export function CalendarContainer() {
       services={services}
       onStartPromoted={(cardId) => appStore.openStart({ cardId })}
       onOpenSettings={() =>
-        void router.navigate({ href: routeHash({ page: "settings" }).slice(1) })
+        void router.navigate({
+          href: pageLocation({ page: "settings" }, boardKey),
+        })
       }
     />
   );

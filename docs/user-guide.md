@@ -18,31 +18,48 @@ A group is one session that works on several tickets. A loop is a roadmap that a
 ### Create a board
 
 1. Press `Cmd+K` (or `Ctrl+K`) to open the command palette.
-2. Choose **New board**. The dialog **New board** opens.
-3. Fill the fields.
+2. Choose **Manage boards**. On the boards page, choose **New board**. The dialog **New board** opens.
+3. Fill the fields. Only **Name** is required. The repository rows and **Advanced** are optional. **Advanced** is closed at first. It holds **Key**, **Folder** and **Linear team keys**.
 
 | Field                | What to enter                                                                                                                      |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | **Key**              | 2 to 6 capital letters or digits. The key starts with a letter. You cannot change the key later. `LOCAL` and `GROUP` are reserved. |
 | **Name**             | The name of the board.                                                                                                             |
-| **Sessions folder**  | The folder in which Dispatch makes one folder for each session.                                                                    |
+| **Folder**           | The folder in which Dispatch makes one folder for each session.                                                                    |
 | **Repository path**  | The path of a git repository. Choose **Add repository** to add more rows.                                                          |
 | **Base branch**      | The base branch of that repository.                                                                                                |
 | **Check command**    | The command that the ship flow runs as the check of that repository. The row shows the placeholder `npm run check`.                |
 | **Linear team keys** | Linear team keys, separated by commas. New Linear issues of these teams go to this board.                                          |
 
-4. Choose **Create board**. The dialog closes and the message "Board <name> created." shows. You stay on the boards page. The board switcher still shows the old board.
-5. Open the new board. In its row, choose **Board actions**, then **Open board**. Or choose the new board in the board switcher.
+4. Choose **Create**. The dialog closes, the message "Created board <name> (<KEY>)" shows and Dispatch opens the new board.
 
-These fields are required: **Key**, **Name**, **Sessions folder** and the path of one repository. The form shows an error under a field that is empty or wrong. **Base branch**, **Check command** and **Linear team keys** are optional. An empty **Check command** becomes `npm run check`. Enter the sessions folder and the repository path as absolute paths.
+Dispatch derives the key from the name when you give no key. When you give no folder, Dispatch makes the folder `<workspaces root>/<key>`. The form shows an error under a field that is empty or wrong. **Key**, **Folder**, **Repository path**, **Base branch**, **Check command** and **Linear team keys** are optional. An empty **Check command** becomes `npm run check`. Enter the folder and the repository path as absolute paths.
 
-The key must be new. Dispatch refuses a key that another board or a Linear team already uses. A board needs at least one repository.
+In the dialog, **Browse** next to **Repository path** opens the folder browser. Choose a git folder to fill the path. In **Advanced**, **Key** and **Folder** have placeholders that show the values Dispatch uses when you leave them empty.
+
+The key must be new. Dispatch refuses a key that another board or a Linear team already uses. A board can have no repository. Add a repository later in the board settings. The server can also make a local repository in `<board folder>/<lowercase key>`.
 
 ### Switch boards
 
-The sidebar shows the board switcher when more than one board is active. Choose the switcher, or press `B`, and select a board. The switcher shows the number of items that need attention for each board.
+The sidebar has a **Boards** section at its end, after the System group. It lists every active board, in list order. The board you are on is marked. Each row shows the number of items that need attention and the number of running loops. Select a row to open the kanban board of that board. The last row, **Create board**, opens the create dialog.
 
-The palette also has **Switch to board** commands, **Manage boards** and **New board**.
+Select the label **Boards** to fold or unfold the section. Press `Enter` or `Space` on the label to do the same. When the sidebar is narrow, the section is one icon that opens the boards page. On a phone, the section shows in the sidebar sheet, and the sheet closes when you select a board.
+
+Press `B` to open the command palette with the boards only. Type to filter the boards. The palette lists **Switch to board** for each active board except the current one, then **Manage boards** and **Create board**. `B` does nothing while you type in a text field or while a dialog is open. Select a board in the palette to show the same page on that board.
+
+The address of a board page holds the board key. The pages with a keyed address are the board (`/boards/<key>`), the dashboard (`/boards/<key>/dashboard`), the inbox (`/boards/<key>/inbox`), the sessions (`/boards/<key>/sessions`) and the board settings (`/boards/<key>/settings`). The other pages keep the `board` search parameter, for example `/tickets?board=<key>`. The old addresses, such as `/board`, `/inbox` and `/dashboard?board=<key>`, still open the same pages.
+
+### Create a board from the palette
+
+1. Press `Cmd+K` (or `Ctrl+K`). Choose **Create board**.
+2. Type the board name in the field **Board name**. Press `Enter`.
+3. Dispatch shows the message "Created board <name> (<KEY>)" and opens the board.
+
+An empty name does nothing. Press `Escape` to go back to the command list. If Dispatch refuses the name, it shows the reason and keeps the palette open.
+
+### Create a board from the Ask page
+
+Write "create a board called <name>" on the **Ask** page. Dispatch creates the board with the default values. The answer gives the key and the link **Open <name>**. If you write "create a board" with no name, Dispatch asks "What should the board be called?". Write the name, or write "cancel".
 
 ### Manage boards
 
@@ -51,15 +68,27 @@ The palette also has **Switch to board** commands, **Manage boards** and **New b
 The row menu **Board actions** has three items.
 
 - **Open board** opens the board.
-- **Edit** opens the dialog **Edit board**. You can change everything except the key.
-- **Archive** hides the board from the switcher. The cards and sessions stay. The item is off while sessions run on the board. Restore the board from **Archived boards** with **Restore**.
+- **Edit** opens the board settings page (see "Board settings"). You can change the name, the team keys and the repositories. The key and the folder do not change.
+- **Archive** hides the board from the **Boards** section. The cards and sessions stay. The item is off while sessions run on the board. Restore the board from **Archived boards** with **Restore**.
+
+### Board settings
+
+Choose **Edit** in the row menu **Board actions**, or open `/boards/<key>/settings`. The page changes the name, the repositories and the Linear team keys of the board. The key does not change. An active board shows **Create a repository here**. It makes the repository `<folder>/<lowercase key>`.
+
+### Start a card on a board with no repository
+
+If the board has no repository, **Start** shows "This board has no repository." and three actions.
+
+- **Start without a repository** runs the session in the board folder.
+- **Create a repository here** makes the repository and selects it. Then choose **Start**.
+- **Add a repository** opens **Browse**. Choose a git folder. Dispatch adds it to the board and selects it.
 
 ### The default board
 
 `LOCAL` is the default board. It is the board that Dispatch shows when no other board is selected.
 
 - You cannot archive it.
-- Its repositories come from **Settings**, **Workspaces**. A change in its **Edit board** dialog also changes that list. The dialog shows the repository path only.
+- Its repositories come from **Settings**, **Workspaces**. A change on its board settings page also changes that list. The page shows the repository path only.
 - Its supervisor starts **Off**. A new board starts with the supervisor **On**.
 
 ## Orchestrated board setup
@@ -75,7 +104,7 @@ Add the repositories when you create the board, or choose **Edit** later. Each r
 To open the policy form of a board:
 
 1. If the board does not exist, create it (see "Create a board").
-2. Select the board in the board switcher (see "Switch boards").
+2. Select the board in the **Boards** section (see "Switch boards").
 3. Open the board page.
 4. Choose **Orchestrator**, or **Add orchestrator** when the board has none. The panel has four tabs: **Terminal**, **Decisions**, **Policy** and **Orchestrators**.
 5. Open **Policy**. The form is called **Policy for** and the board name.
@@ -100,7 +129,7 @@ Only you can change the policy. The orchestrator reads it. No tool can change it
 Notes on the fields:
 
 - **Roadmap approval** controls how the orchestrator approves the plan of a loop. With **Ask me for each roadmap**, the `approve_roadmap` tool needs your approve answer on a decision item of that group. With the two other values, the tool call is allowed. With **Approve when the rules pass, else ask**, the playbook judges the rules.
-- **Loops at once** is the concurrency cap. Dispatch refuses the orchestrator tool that starts a group above the cap. A group that waits for its dependencies stays queued. The supervisor starts it when the dependencies are done and a slot is free.
+- **Loops at once** is the concurrency cap. It covers groups and the ticket cards that the orchestrator starts. Dispatch refuses the orchestrator tools that start a group or a card above the cap. A card or group in Agent done frees its slot. A group that waits for its dependencies stays queued. The supervisor starts it when the dependencies are done and a slot is free.
 - **Loop model**: The model and effort of the sessions of a group. When you choose a model, Dispatch starts each group session with that model and effort, and it ignores any model or effort in the Settings Claude arguments. When you choose **Session settings**, Dispatch uses the Settings.
 - **Group playbook**: the playbook of a group that the orchestrator creates without one. When the playbook no longer exists, the group starts with no playbook. When the stored name is not in the list of playbooks, the select shows it as "<name> (not found)", and **Save policy** keeps the name.
 - **Wake timer (minutes)**: Wakes an idle orchestrator after this many quiet minutes. 0 turns it off. An extra orchestrator cannot override it.
@@ -112,12 +141,14 @@ The server accepts wider number ranges than the form does. The form ranges in th
 
 ## Add and start an orchestrator
 
-1. Select the board in the board switcher. Open the board page. Every board has its own button. `LOCAL` has one too, and its supervisor starts **Off**.
+1. Select the board in the **Boards** section. Open the board page. Every board has its own button. `LOCAL` has one too, and its supervisor starts **Off**.
 2. Choose **Add orchestrator** in the page header. When the board already has an orchestrator, the button reads **Orchestrator**. The orchestrator panel opens as a side panel over the board. Its header shows the board name.
 3. Make sure the supervisor is **On** in the **Policy** tab. With the supervisor **Off**, the panel shows: "Turn on the supervisor in Policy to start an orchestrator."
 4. Choose **Start orchestrator**.
 
 When the board has no orchestrator record, **Start orchestrator** first adds the main orchestrator. The record has the id `main` and the name "Main orchestrator". Then it starts the orchestrator.
+
+The orchestrator can create a board with the tool `create_board`. It gives a name, and the tool answers the key and the link. The tool `get_board_workspace` lists all boards.
 
 The orchestrator reads the folder and the repositories of the board by itself. It does not ask you for a repository path or a base branch. Set the base branch of each repository in the board settings.
 
@@ -156,6 +187,31 @@ The **Terminal** tab shows the live terminal. The panel buttons depend on the st
 - **Resume orchestrator** shows when the session is lost or Claude exited. It starts Claude again in the open session, or it starts the session again.
 
 The **Decisions** tab lists the open decision items of the board. The **Orchestrators** tab lists the orchestrators. The **Last wake** column, after **Policy**, shows the reasons and the time of the last wake, for example "timer 15 min at 14:05", or **None** when the orchestrator has not woken. An extra orchestrator needs a scope of groups or tickets, and it needs the main orchestrator first. Choose **Add extra orchestrator** to add one.
+
+## How the orchestrator judges and starts work
+
+The orchestrator loads the rule book [`docs/orchestration/rulebook.md`](orchestration/rulebook.md) with the tool `get_rulebook`. It loads it at the start of a session and again after each handoff.
+
+For each ticket or set of tickets, the orchestrator chooses one of three paths. The rule book gives these criteria:
+
+- "Write code directly: one known fix of a few lines with no new surface"
+- "PRD + Ralph Loop: one ticket or one feature of one module, up to a few hundred lines, with phases, QA and a gap analysis"
+- "a group with the Roadmap Loop: two or more related tickets with an order or shared files, or any ticket that spans server, web and docs across modules"
+
+The orchestrator reads the playbooks with the tool `list_playbooks`. The tool gives the name, the when line and the source (seeded or user) of each playbook. The start dialog shows the when line under the name of the playbook. Dispatch seeds a when line for each seeded playbook. A user playbook can have a `when:` line in its front matter. The line must have 300 characters or fewer. The playbook editor keeps the line when you save the playbook.
+
+The orchestrator writes one plan for the whole intake. The plan is a decision item with the options approve and reject. The plan has one line for each ticket or group, with the playbook, the order and the size. With **Ask me for each roadmap**, you approve the plan with one click in the **Decisions** tab. The orchestrator starts no work until you approve.
+
+After the approval, the orchestrator starts the work:
+
+- For a single ticket card, it calls `start_card`. The tool starts the card the way the start dialog does, with a playbook and a direction.
+- For a group, it calls `create_group` and then `start_group`.
+
+The cards that the orchestrator starts count against **Loops at once** together with groups. A card or group in Agent done frees its slot. At the cap, the orchestrator waits for a slot.
+
+A line that you type in the **Terminal** tab of the orchestrator is a direction. The orchestrator handles it like a new intake.
+
+Dispatch updates a seeded playbook file that you never edited at the next start of Dispatch. Dispatch keeps a file that you edited.
 
 ## Groups and loops
 
@@ -197,7 +253,7 @@ The loop also reports each phase gate and unit gate to Dispatch. The report uses
 
 ## The dashboard
 
-Open the dashboard from the sidebar row **Dashboard** (group **Work**), or from the palette command **Go to Dashboard**. The sidebar row and the palette command show only when the board has a main orchestrator. The dashboard shows the board that is selected in the switcher.
+Open the dashboard from the sidebar row **Dashboard** (group **Work**), or from the palette command **Go to Dashboard**. The sidebar row and the palette command show only when the board has a main orchestrator. The dashboard shows the board that is selected in the **Boards** section.
 
 The page has six sections in a fixed order. Each section shows its own loading state and its own error. A section error has the button **Try again**. The other sections stay.
 
@@ -354,7 +410,7 @@ When a branch fails, the flow stops. The block shows "Stopped at <step>: <reason
 
 ## Playbook reference
 
-A playbook is a markdown file with a name. Dispatch gives its text to Claude when a session starts. Dispatch seeds five playbooks on the first boot of a machine. Each seeded playbook is a file in the `playbooks` folder of the Dispatch data folder. Dispatch seeds a name once. If you delete a seeded playbook, it stays deleted. Open **Playbooks** in the sidebar, group **System**, to edit, copy or delete playbooks.
+A playbook is a markdown file with a name. Dispatch gives its text to Claude when a session starts. Dispatch seeds six playbooks on the first boot of a machine. Each seeded playbook is a file in the `playbooks` folder of the Dispatch data folder. Dispatch seeds a name once. If you delete a seeded playbook, it stays deleted. Open **Playbooks** in the sidebar, group **System**, to edit, copy or delete playbooks.
 
 Every seeded playbook has one input: the extra direction. It is the optional text that you type in the start dialog. The token `{extra}` in the playbook marks where the text goes. When you type nothing, Dispatch removes the block that holds the token.
 
@@ -386,26 +442,28 @@ Every seeded playbook has one input: the extra direction. It is the optional tex
 - **Inputs:** the extra direction.
 - **What it does:** it adds no workflow text. The session gets your extra direction. Dispatch still adds its standard kickoff text, such as the workspace orientation and the status protocol.
 
+### Roadmap Loop
+
+- **File:** `roadmap-loop.md`
+- **When to use:** two or more related tickets with an order or shared files, or any ticket that spans server, web and docs across modules.
+- **Inputs:** the extra direction.
+- **What it does:** it tells Claude to read every ticket of the group first. In part 1, Claude uses the write-roadmap skill on the whole group and stops for roadmap approval. After the approval, Claude uses the grill-me skill and then the write-prd skill for each unit in order. In part 2, Claude uses the roadmap-loop skill to run every unit. Claude commits each unit to a stacked local branch. Claude never pushes, tags, opens a PR or merges.
+
 ### Board Orchestrator
 
 - **File:** `board-orchestrator.md`
 - **When to use:** you do not pick this playbook. Dispatch selects it by name when it starts an orchestrator.
 - **Inputs:** the extra direction. For an orchestrator, Dispatch writes it: "You are the orchestrator "<name>" (id <id>) of board <KEY>. Use the dispatch tools to coordinate the work of this board."
 - **What it does:** it tells the orchestrator to keep its state in the tools and not in memory. The orchestrator follows these steps:
-  1. Call `read_state`, then `get_board_workspace`, `list_cards`, `list_events` and `get_policy`. Never ask you for a repository path or a base branch that the board holds.
-  2. Turn a goal into a ticket proposal (a decision item of the kind `ticket_proposal`). Wait for your approval. Then create the tickets with `create_ticket`.
-  3. Write a direction for each group before it starts.
-  4. Start groups only inside the concurrency cap.
-  5. Approve or escalate each roadmap as **Roadmap approval** says.
-  6. Answer loop inputs with `send_input`.
-  7. End every turn with `wait_for_event`. Set `kinds` to `decision_answered`, `group_state` and `intake_submitted`, and `timeoutSeconds` to 55. When it times out, call it again. Never end a turn with only a report.
-  8. Ship in order with `start_ship` when the ship rights allow it. When the ship rights allow it, it ships a group in Agent done without a decision item.
-  9. Report to you. Raise a decision item with `create_decision_item` when a person must decide.
-  10. Call `write_state` after each decision, with the full state.
+  1. Call `read_state`. Then call `get_rulebook` and follow the rule book. Call `get_rulebook` again after each handoff.
+  2. Handle a line that you type in the terminal as a direction, like a new intake.
+  3. Read a message that starts with "Dispatch wake:" as a message from Dispatch. Read the board state with the dispatch tools and continue.
+  4. End every turn with `wait_for_event`. Never end a turn with only a report.
+  5. Call `write_state` after each decision, with the full state.
 
-  A message that starts with "Dispatch wake:" comes from Dispatch. Read the board state with the dispatch tools and continue.
+  The rule book holds the rules for intake, playbook choice, grouping, the plan, starts, directions, monitoring, ship and release (see "How the orchestrator judges and starts work").
 
-  After a usage limit, it checks `get_group_progress` and `read_pane_tail` before it sends input. It tells each loop never to run a dangerous `rm`. It hands off only when asked. The playbook forbids these actions:
+  The rule book tells the orchestrator to check `get_group_progress` and `read_pane_tail` after a usage limit, before it sends input. It tells each loop never to run a dangerous `rm`. The orchestrator hands off only when asked. The playbook forbids these actions:
 
   - Write or edit code or any file in a repository.
   - Commit, push, merge or rebase outside the ship flow.

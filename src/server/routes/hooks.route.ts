@@ -21,6 +21,7 @@ const hookBodySchema = z.preprocess(
     error: z.unknown().optional(),
     transcript_path: z.unknown().optional(),
     source: z.string().max(32).optional().catch(undefined),
+    agent_id: z.unknown().optional(),
   }),
 );
 

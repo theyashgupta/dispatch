@@ -116,7 +116,7 @@ and roles only, it does not restate the layering policy.
 | Frontend entry      | `web/main.tsx`, `web/lib/app-store.ts`, `web/lib/query-client.ts`, `web/lib/http.ts`                                                                                                                                                                                                                                                            | The provider stack (QueryClientProvider, ThemeProvider, RouterProvider and the splash), the app store for cross-module UI state, the query client, and the HTTP client that returns 4xx and 5xx responses as typed data.                                                                                             |
 | Frontend routes     | `web/routes/__root.tsx`, `web/routes/board.{-$id}.lazy.tsx`, `web/modules/shell/containers/ShellContainer.tsx`                                                                                                                                                                                                                                  | Hash routes own the URL and its params. The router context gives the query client and the app store to every container. The root route renders the shell view with module views in its slots: the page, the detail panel and the card action dialogs.                                                                |
 | Frontend modules    | `web/modules/board/views/BoardView.tsx`, `web/modules/board/containers/BoardContainer.tsx`, `web/modules/detail/containers/DetailPanelContainer.tsx`, `web/modules/shell/components/AppSidebar.tsx`                                                                                                                                             | One folder per feature under `web/modules/`, with the layers views, containers, components, hooks, domain and queries. A module never imports a sibling module. [frontend-architecture.md](standards/frontend-architecture.md) has the layer rules.                                                                  |
-| Frontend boards     | `web/modules/boards/views/BoardsView.tsx`, `web/modules/boards/containers/BoardsContainer.tsx`, `web/modules/boards/containers/BoardFormContainer.tsx`, `web/modules/shell/components/BoardSwitcher.tsx`                                                                                                                                        | The boards page (list, create, edit, archive, restore) and the sidebar board switcher. The `board` search parameter selects the board.                                                                                                                                                                               |
+| Frontend boards     | `web/modules/boards/views/BoardsView.tsx`, `web/modules/boards/containers/BoardsContainer.tsx`, `web/modules/boards/containers/BoardFormContainer.tsx`, `web/modules/shell/components/SidebarBoards.tsx`                                                                                                                                        | The boards page (list, create, edit, archive, restore) and the sidebar Boards section. The path key selects the board on the keyed pages (`/boards/<key>`, `/boards/<key>/inbox` and so on). The `board` search parameter selects it on the other pages.                                                             |
 | Orchestrator panel  | `web/modules/orchestrator/views/OrchestratorEntryView.tsx`, `web/modules/orchestrator/containers/OrchestratorPanelContainer.tsx`, `web/modules/orchestrator/containers/PolicyContainer.tsx`, `web/modules/orchestrator/containers/OrchestratorsContainer.tsx`                                                                                   | The header entry button and the orchestrator panel with the tabs Terminal, Decisions, Policy and Orchestrators. The policy form is the only place where a user changes a board policy.                                                                                                                               |
 | Frontend dashboard  | `web/routes/dashboard.{-$id}.lazy.tsx`, `web/modules/dashboard/views/DashboardView.tsx`, `web/modules/dashboard/views/DashboardHeaderView.tsx`, `web/modules/dashboard/containers/use-dashboard-data.ts`                                                                                                                                        | The `/dashboard` page of the selected board. Each section container reads its inputs through `use-dashboard-data.ts` and shows its own loading, error and empty state. The shell page header shows the title and the stale badge.                                                                                    |
 | Frontend shared     | `web/components/ui/button.tsx`, `web/components/ui/hooks/use-app-store.ts`, `web/components/ThemeProvider.tsx`, `web/queries/board-snapshot-queries.ts`                                                                                                                                                                                         | The shadcn primitives and app-wide hooks, the shared components, the queries that two or more modules read (the board snapshot and its SSE stream), and the design tokens in `web/styles/tokens.css`.                                                                                                                |
@@ -148,6 +148,7 @@ Mount prefix: `/api/orchestrator`.
 | GET    | `/api/orchestrator/events`                         | Orchestrator token | Tool `list_events`: list the board events after a cursor, oldest first.                             |
 | GET    | `/api/orchestrator/policy`                         | Orchestrator token | Tool `get_policy`: read the policy of the caller with the running loop count and the group costs.   |
 | GET    | `/api/orchestrator/board-workspace`                | Orchestrator token | Tool `get_board_workspace`: read the board folder, repositories, playbook names and group playbook. |
+| POST   | `/api/orchestrator/boards`                         | Orchestrator token | Tool `create_board`: create a board from a name and answer the key and the link.                    |
 | POST   | `/api/orchestrator/tickets`                        | Orchestrator token | Tool `create_ticket`: create a local ticket marked as created by the caller.                        |
 | PATCH  | `/api/orchestrator/tickets/:id`                    | Orchestrator token | Tool `update_ticket`: change the title or description of a local ticket.                            |
 | POST   | `/api/orchestrator/tickets/:id/move`               | Orchestrator token | Tool `move_card`: move a card to a column under the manual move rules.                              |
@@ -166,6 +167,9 @@ Mount prefix: `/api/orchestrator`.
 | GET    | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `get_ship_state`: read the stored ship flow of a group card.                                   |
 | GET    | `/api/orchestrator/state`                          | Orchestrator token | Tool `read_state`: read the saved state of the calling orchestrator.                                |
 | PUT    | `/api/orchestrator/state`                          | Orchestrator token | Tool `write_state`: replace the saved state of the calling orchestrator.                            |
+| GET    | `/api/orchestrator/playbooks`                      | Orchestrator token | Tool `list_playbooks`: list the playbooks with the name, the when line and the source.              |
+| GET    | `/api/orchestrator/rulebook`                       | Orchestrator token | Tool `get_rulebook`: read the orchestration rule book.                                              |
+| POST   | `/api/orchestrator/cards/:cardId/start`            | Orchestrator token | Tool `start_card`: start the session of one ticket card with a playbook and a direction.            |
 
 ### `routes/board.route.ts`
 
@@ -207,6 +211,7 @@ Mount prefix: `/api`.
 | GET    | `/api/boards/:key/orchestration`           | User | Read the orchestration summary of a board.                                         |
 | GET    | `/api/boards/:key/orchestration/events`    | User | List the orchestration events of a board, the latest ones or those after a cursor. |
 | PATCH  | `/api/boards/:key`                         | User | Change the name, sessions folder, repositories or Linear team keys of a board.     |
+| POST   | `/api/boards/:key/repositories/init`       | User | Make a local repository in the folder of the board and add it to the board.        |
 | POST   | `/api/boards/:key/archive`                 | User | Archive a board.                                                                   |
 | POST   | `/api/boards/:key/restore`                 | User | Restore an archived board.                                                         |
 | POST   | `/api/boards/:key/orchestrators/:id/token` | User | Mint the token of an orchestrator.                                                 |
@@ -224,15 +229,16 @@ Mount prefix: `/api`.
 
 Mount prefix: `/api`.
 
-| Method | Path                                        | Auth | Purpose                                                           |
-| ------ | ------------------------------------------- | ---- | ----------------------------------------------------------------- |
-| GET    | `/api/boards/:key/orchestrators`            | User | List the orchestrators of a board with their session views.       |
-| POST   | `/api/boards/:key/orchestrators`            | User | Add an orchestrator record, main or extra.                        |
-| PATCH  | `/api/boards/:key/orchestrators/:id`        | User | Edit the name, scope or policy override of an orchestrator.       |
-| DELETE | `/api/boards/:key/orchestrators/:id`        | User | Remove a stopped orchestrator and revoke its token.               |
-| POST   | `/api/boards/:key/orchestrators/:id/start`  | User | Start the session of a stopped orchestrator.                      |
-| POST   | `/api/boards/:key/orchestrators/:id/stop`   | User | Stop a running orchestrator.                                      |
-| POST   | `/api/boards/:key/orchestrators/:id/resume` | User | Bring an orchestrator back after a lost session or a Claude exit. |
+| Method | Path                                              | Auth | Purpose                                                                                                                                                                                                  |
+| ------ | ------------------------------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/boards/:key/orchestrators`                  | User | List the orchestrators of a board with their session views.                                                                                                                                              |
+| POST   | `/api/boards/:key/orchestrators`                  | User | Add an orchestrator record, main or extra.                                                                                                                                                               |
+| PATCH  | `/api/boards/:key/orchestrators/:id`              | User | Edit the name, scope or policy override of an orchestrator.                                                                                                                                              |
+| DELETE | `/api/boards/:key/orchestrators/:id`              | User | Remove a stopped orchestrator and revoke its token.                                                                                                                                                      |
+| POST   | `/api/boards/:key/orchestrators/:id/start`        | User | Start the session of a stopped orchestrator.                                                                                                                                                             |
+| POST   | `/api/boards/:key/orchestrators/:id/stop`         | User | Stop a running orchestrator.                                                                                                                                                                             |
+| POST   | `/api/boards/:key/orchestrators/:id/resume`       | User | Bring an orchestrator back after a lost session or a Claude exit.                                                                                                                                        |
+| GET    | `/api/boards/:key/orchestrators/:id/conversation` | User | Read the conversation of an orchestrator from its transcript: user turns, text replies and the lines that Dispatch typed, in order, with no tool calls. `limit` 1 to 200. Refuses an orchestrator token. |
 
 ### `routes/intake.route.ts`
 
@@ -702,7 +708,12 @@ does not clash with `/api/boards/counts`.
 `knownLinearTeamKeys` holds the identifier prefixes of the Linear cards in the store, plus the
 Linear team keys when Linear is on. The server logs a failed Linear read once and does not read again for 60
 seconds. `POST /api/boards` creates a board and returns `201` with
-`{ board }`. `GET /api/boards/:key` and `PATCH /api/boards/:key` return `{ board }`. A patch accepts
+`{ board, link }`, where `link` is `/boards/<key>`. Only `name` is required. The server derives the
+key from the name. The default folder is `<workspaces root>/<key>`, and the server makes it on
+create. Repositories are optional. `POST /api/boards/:key/repositories/init` makes a local
+repository in `<board folder>/<lowercase key>` and adds it to the board. The MCP tool `create_board`
+calls the same service through `POST /api/orchestrator/boards`. The tool `get_board_workspace` lists
+all boards. `GET /api/boards/:key` and `PATCH /api/boards/:key` return `{ board }`. A patch accepts
 only `name`, `workspaceRoot`, `repositories` and `linearTeamKeys`, and the key never changes. A
 patch of `LOCAL` writes `workspaceRoot` to `config.json` and the repository paths to the workspace
 folders. `POST /api/boards/:key/archive` and `POST /api/boards/:key/restore` set and clear the
@@ -743,8 +754,9 @@ activity frame goes only to the clients of the board of the event.
 - `400` `team-key-taken`: "Board <name> lists Linear team <KEY>." Create and patch return it when
   another board lists the same team key. `LOCAL` and `GROUP` as a team key return `reserved-key`.
 - `400` `missing-name`: "Enter a name."
+- `400` `invalid-name`: "Use a name of at most 100 characters on one line."
 - `400` `folder-missing`: "This folder does not exist."
-- `400` `no-repositories`: "Add at least one repository."
+- `400` `no-repositories`: "This board has no repository. Add one in the board settings."
 - `409` `sessions-running`: "Stop the <n> running sessions first."
 - `409` `default-board`, `409` `board-archived`, `404` `unknown-board`, `400` `invalid-board`: the
   `error` string is the code.
@@ -1435,6 +1447,8 @@ legal source column(s), target, and owning code path:
 | Hook `UserPromptSubmit`                                      | `FLIP_BACK_SOURCES` (`needs_input`, `agent_done`, `in_review`)                   | `in_progress`                                    | `hook-events.ts#applyPromptSubmit` → `board.store.ts#flipBack`                            |
 | Hook `PreToolUse` (pause-class tool)                         | any except `APPLY_MARKER_EXCLUDED_SOURCES`                                       | `needs_input`                                    | `hook-events.ts#applyPreToolUseEvent` → `applyMarker`                                     |
 | Hook `PostToolUse` (pause-class tool)                        | `FLIP_BACK_SOURCES`                                                              | `in_progress`                                    | `applyHookEvent`'s `PostToolUse` branch → `flipBack`                                      |
+| Hook `PostToolUseFailure` (pause-class tool)                 | `FLIP_BACK_SOURCES`                                                              | `in_progress`                                    | same as above                                                                             |
+| Hook `PostToolUse` or `Stop` while a pause-tool marker holds | `needs_input` ONLY                                                               | `in_progress`                                    | `applyHookEvent` reading `heldByPauseTool` → `flipBack`                                   |
 | Watcher marker decision (pane-parsed)                        | any except `APPLY_MARKER_EXCLUDED_SOURCES`                                       | `needs_input` / `agent_done`                     | `watcher.ts#scanSession` reading pure `scan-decision.ts#decideScan` → `applyMarker`       |
 | Watcher flip-back decision                                   | `needs_input` ONLY                                                               | `in_progress`                                    | same path → `flipBack`                                                                    |
 | Manual drag / `POST /cards/:id/move`                         | any except `agent_done` as a target, and never `todo → in_progress` (`BOARD-07`) | any allowed pair                                 | `board.store.ts#moveCardManual`, gated by `routes/cards.route.ts`                         |
@@ -4207,8 +4221,8 @@ watcher's per-session maps.
 fires at the pause, so `applyStopEvent`'s marker-text parsing (the mechanism every other pause
 class relies on) never runs for it, and answering the question delivers the reply as a tool
 result, not a fresh prompt, so `UserPromptSubmit` never fires either. Both gaps were confirmed
-live (not inferred from docs) against the installed CLI before any fix landed. The fix is two
-layers, ordered lowest-risk first:
+live (not inferred from docs) against the installed CLI before any fix landed. The fix has three
+parts, ordered lowest-risk first:
 
 1. `kickoff.ts`'s `STATUS_PROTOCOL` carries a fourth instruction line asking the agent to print
    the `NEEDS_INPUT` marker as a standalone reply before calling a pausing tool. Live-measured
@@ -4246,6 +4260,14 @@ layers, ordered lowest-risk first:
    pause flips the card to Needs Input, answering flips it back, a plain `pane`-mode session stays
    structurally unable to detect the pause (unregressed, pre-existing, out of this fix's scope),
    and a manual drag still wins over any marker.
+3. A subagent cannot show a dialog. A hook payload with an `agent_id` comes from a subagent, so
+   `applyHookEvent` ignores its pause-tool `PreToolUse`, `PostToolUse` and `PostToolUseFailure`
+   events. A pause-tool call can also fail without a dialog. The hook settings register
+   `PostToolUseFailure`, and a pause-tool failure flips the card back. If a pause-tool marker still
+   holds the card in Needs Input when the main session runs a tool (`PostToolUse`) or ends a turn
+   (`Stop`), the main session is not blocked on a dialog, so the card flips back. A text
+   `DISPATCH_STATUS: NEEDS_INPUT` marker does not start with the pause-tool key, so this rule does
+   not release it.
 
 **Accepted residuals.** Under `auto`, the window between a card becoming watcher-visible and its
 first authenticated hook event has BOTH channels live and can double-stamp the same activity (two
@@ -4702,7 +4724,7 @@ in `docs/standards/design-contract.md`'s Deferred decisions rows 2 and 5.
 **Keyboard.** Every key binding goes through one hook, `useShortcuts(bindings, { menuOpen,
 scopeId })` in `src/web/components/ui/hooks/use-shortcuts.ts`, over the pure `resolveShortcut` and the binding
 tables in `src/shared/shortcuts.ts`: `GLOBAL_SHORTCUTS` (Cmd or Ctrl+K opens the command
-palette, n opens New ticket, ? opens the cheat sheet), mounted once in `ShellContainer.tsx`; `BOARD_SHORTCUTS`
+palette, n opens New ticket, ? opens the cheat sheet, b opens the palette with the Boards group only), mounted once in `ShellContainer.tsx`; `BOARD_SHORTCUTS`
 (j, k, h, l move the focused card, 1 to 7 move it to a column through the board's own move path;
 Enter stays with the focused card, a role button that opens itself, as the resolver leaves Enter
 to activatable targets);
@@ -5258,6 +5280,22 @@ such a session has. This degrade path pre-dates this phase: it is the same below
 branch the hooks feature has always had, not a new gap this phase introduced, and it means VLT-08's
 guarantee is conditional on hooks capability rather than universal. Cross-references `T-105-06`.
 
+### Check slot count (`DISPATCH_CHECK_SLOTS`)
+
+The slot gate (`scripts/with-check-slot.mjs`) lets a fixed number of heavy checks run at the same
+time on one machine. The default is 1 slot for each 8 GB of RAM, rounded down, with a minimum of 1.
+On an 8 GB Mac the default is 1 slot. A larger count on that machine causes heavy swap: with 4 agent
+loops, 3 concurrent full checks took the load average to 24 and made timing tests fail.
+
+To change the count, set `DISPATCH_CHECK_SLOTS` to a positive integer in the environment of every
+agent session on the machine. All sessions must use the same value, because each gate counts only
+the slots below its own value. A value that is not a positive integer gives the default.
+
+A slot file that is older than the last boot is dead. The gate calculates the boot time from the
+system uptime and the wall clock. If the wall clock moves forward by a large step after a slot is
+taken, the gate can find a live slot to be dead. This can occur on Linux early in a boot. It does
+not occur on macOS.
+
 ## Verification Gates
 
 Dev tooling plus one small `node:test` suite. Each gate answers one narrow, mechanically-checkable
@@ -5265,10 +5303,54 @@ question; none of them read prose for truth.
 
 - **`npm run check`** — the standing CI-shaped gate: `format:check`, `lint`, `typecheck`, `test`,
   `deadcode` (knip), `replay-gate`, `doc-drift`, and `invariants` (all below), run in sequence.
+- **`npm run lint`** and **`npm run lint:typed`**: two ESLint modes. `lint` runs every rule that does not
+  need type information, which includes all custom rules, and does not build a TypeScript program.
+  It is the local default and a step of `npm run check`. `lint:typed` sets `DISPATCH_LINT_TYPED=1`,
+  which adds `recommendedTypeChecked`, the project service and the two type-aware rule overrides.
+  The CI check job runs `lint:typed` after `npm run check`. Only `lint:typed` reports unused
+  `eslint-disable` directives, because a directive for a type-aware rule looks unused to `lint`, and
+  `lint:fix` would delete it. Each mode has its own cache directory.
+- **`npm run typecheck`**: `tsgo --noEmit` from `@typescript/native-preview`, once for the root
+  project and once for `src/web/tsconfig.json`. Each project writes its build info to
+  `node_modules/.cache/tsgo/`, apart from the `tsc` build info. The CI check job also runs
+  `npm run typecheck:tsc`, the same two checks with `tsc`, because tsgo is a preview build.
+  `npm run build:server` still uses `tsc`, because only `tsc` emits the server build.
+- **`scripts/with-check-slot.mjs`**: the slot gate for heavy checks. `lint`, `lint:fix`,
+  `lint:typed`, `typecheck`, `deadcode`, `check`, `check:static` and `check:changed` run their
+  command through it. The number of gated commands that run at the same time on the machine, across
+  all worktrees, is the slot count. The slot count is `DISPATCH_CHECK_SLOTS`, or by default 1 slot
+  for each 8 GB of RAM, minimum 1 (see [Check slot count](#check-slot-count-dispatch_check_slots)).
+  A slot is the file `~/.dispatch/locks/check-slot-<n>`, which holds the pid of the gate process.
+  The gate creates it with a hard link, so it cannot replace a slot that exists. A caller that finds
+  no free slot prints the holder pids, then waits. A slot is dead when its pid is not alive, when
+  its content is not a pid, or when it is older than the last boot. A dead slot is removed only
+  while the caller holds the `.reclaim` guard directory with its own token. This prevents the removal
+  of a live slot, except in one race: 3 or more gates that act on a guard older than 60 seconds. The gate sets `DISPATCH_CHECK_SLOT_HELD=1` for its command, so the steps of
+  `npm run check` run in the slot of the chain and do not take a second slot. The command runs in
+  its own process group, and the gate sends SIGINT, SIGTERM and SIGHUP to the full group. After 5400
+  seconds of waiting, the gate exits with code 75. If it cannot use the lock directory, it exits
+  with code 2. `DISPATCH_CHECK_LOCK_DIR` and `DISPATCH_CHECK_WAIT_SECONDS` change the lock directory
+  and the wait limit. Limit: if the gate gets SIGKILL, its command continues to run without a slot.
+  For this reason, the Stop hook in `.claude/settings.json` sends SIGTERM at its
+  timeout and SIGKILL only 5 seconds later. The Stop hook also sets the wait limit to 30 seconds
+  less than its own timeout. When no slot becomes free, it reports that the checks were skipped and
+  lets the stop continue. Each gated step has its own wait limit. If the steps before a waiting
+  step take more than 30 seconds, the timeout occurs first, and the hook lets the stop continue
+  with no report.
+- **`npm run check:changed`** (`scripts/check-changed.mjs`): the fast check for one agent session.
+  It holds one slot for the full run. It selects the files changed since `origin/main`, plus staged,
+  unstaged and untracked files, and removes deleted files. It runs `prettier --check` on these
+  files and the untyped ESLint on the lintable files, then runs `npm run typecheck`. If
+  `origin/main` does not exist, it exits with code 2 and names the ref. Run `git fetch origin main`
+  first to compare with the current base.
+- **Format hook** (the `PostToolUse` hook in `.claude/settings.json`): after each Edit or Write in a Claude
+  session, it runs `prettier --write` on the edited file. It does not format files under `.claude/`
+  or Prettier, ESLint and package config files.
 - **`npm test`**: two `node --import tsx --test` passes, `src/server` and `src/shared` under the root
   tsconfig, then `src/web` with `TSX_TSCONFIG_PATH=src/web/tsconfig.json`: unit tests on pure modules and
   wiring tests that boot a router on port 0 under a temporary `HOME`. No framework beyond Node's
-  built-in runner; test files are excluded from the server build.
+  built-in runner; test files are excluded from the server build. A last pass runs
+  `scripts/**/*.test.mjs` with `node --test`.
 - **`node scripts/check-invariants.mjs`** (`npm run invariants`, wired into `npm run check`) —
   invariant-home audit: every ID in the frozen baseline (`scripts/invariant-baseline.txt`) must
   have a durable home (a JSDoc block in `src/` or anywhere in this doc). It was previously
@@ -5601,6 +5683,8 @@ Scenario 4 (tests/e2e/scenario-4-no-loop-ship.e2e.ts) proves that a group with n
 
 Scenario 5 (tests/e2e/scenario-5-wake.e2e.ts) proves that the server wakes the orchestrator. The board has one group of two tickets, and the fake orchestrator replays its tool calls under busy status rows and waits under idle rows. The test answers the orchestrator decision item through `POST /api/decisions/:id/answer` and checks that the `Dispatch wake: decision` line reaches the fake in 30 s or less. It then makes the group commit, print the done marker and report Stop, and checks that an Agent done wake line follows at least 20 s after the first, after which the orchestrator calls `start_ship` and the PR merges into the bare origin. The test also checks that every wake line has one confirmed `orchestrator_wake` row and that no wake line or row falls inside a busy status window of the fake. The scenario types no key into any pane, and a static check of its own files enforces that.
 
+Scenario 6 (tests/e2e/scenario-6-intake-judgment.e2e.ts) proves that the orchestrator judges an intake and starts three loops inside a cap of 2. The board has four tickets (a quick fix, a single feature and two related tickets), the policy **Ask me for each roadmap** and a cap of 2. The fake orchestrator reads the rule book and the playbooks, raises one plan decision item and waits for it. The test answers the plan through `POST /api/decisions/:id/answer`. The orchestrator then calls `start_card` for the quick fix with "Write code directly" and for the single feature with "PRD + Ralph Loop", and creates a group of the two related tickets with "Roadmap Loop". The test checks that the accepted `start_card` and `start_group` rows are in that order, that each card and the group carry their playbook, and that the first `start_group` answers 403 `policy-refused` and starts no session. The test then makes the quick fix card reach Agent done with a Stop hook, which frees a slot, and checks that the second `start_group` starts the group. A watcher checks that no more than 2 cards or groups hold a slot at any time. The scenario types no key into any pane, and a static check of its own files enforces that.
+
 The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
 ## Orchestration Initiative
@@ -5904,7 +5988,7 @@ reads the identity or writes, `assertAheadAndClean` resolves the base once. The 
 `branch-not-ahead`) and the worktree must be clean (409 `worktree-dirty`). A failed git call of
 these two checks answers 409 `no-workspace`. A group with loop progress keeps the D-8 rules.
 
-**MCP server.** `dispatch mcp` serves the 26 tools over stdio. `bootstrap/cli.ts` reads and checks
+**MCP server.** `dispatch mcp` serves the 30 tools over stdio. `bootstrap/cli.ts` reads and checks
 `DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and
 `bootstrap/mcp-tools.ts` holds the zod input and the description of each tool. The dependency
 cruiser rule `mcp-server-isolated` refuses an import of `routes`, `services`, `store`, `adapters`
@@ -5988,6 +6072,8 @@ hidden card, links the card to the record, leaves the record `stopped` and answe
 seed (`board-orchestrator` in `playbooks.ts`) that holds the duties, the ten rules of D-9 and the two
 rules of F13 and F18. It tells the session to act on an `intake_submitted` or `decision_answered` event
 only when `data.orchestratorId` names its own id, so an extra ignores the intake of the main.
+
+**Playbook when line and seed upgrade.** A playbook can have a `when` line in its front matter, 300 characters or fewer, and `list_playbooks` and the start dialog picker show it. A seeded playbook without the line gets the `when` line of its seed. `seedPlaybooks` rewrites a seeded file only when the SHA-256 hash of its content is in the retired set of its slug, so a file that the user edited stays as it is. The rule book `docs/orchestration/rulebook.md` ships in the package, and `get_rulebook` reads it. The Board Orchestrator playbook tells the session to load it.
 
 **Remove and boot.** Remove revokes the token. It is refused with 409 `orchestrator-running` unless the
 record is `stopped`, and with 409 `orchestrator-session-live` while the tmux session of the hidden card is
