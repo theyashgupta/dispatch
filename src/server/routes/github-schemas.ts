@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { parseBoardKey } from "../../shared/board-key.js";
+import type { BoardKey } from "../../shared/types.js";
 
 const NAME = /^[A-Za-z0-9_.-]{1,100}$/;
 const SHA = /^[0-9a-f]{40}$/;
@@ -55,4 +57,21 @@ export const mergeSchema = z.object(
     sha: z.string("invalid sha").refine((sha) => SHA.test(sha), "invalid sha"),
   },
   "invalid sha",
+);
+
+/**
+ * The optional body of the open-review-card route: the board the user is on.
+ *
+ * @remarks Strict so an old client that submits a GitHub review (`event`) to this path gets a 400
+ * instead of a silent card.
+ */
+export const openReviewSchema = z.strictObject(
+  {
+    board: z
+      .string("invalid review")
+      .refine((key) => parseBoardKey(key) !== null, "invalid review")
+      .transform((key) => key as BoardKey)
+      .optional(),
+  },
+  "invalid review",
 );

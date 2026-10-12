@@ -118,7 +118,7 @@ await call("DELETE", "/boards/SBX/orchestrators/orc-old/token");
 
 type Summary = { name: string; when: string; source: string };
 
-void test("list_playbooks answers six seeded playbooks and a user playbook", async () => {
+void test("list_playbooks answers seven seeded playbooks and a user playbook", async () => {
   const made = await createPlaybook({
     name: "My notes",
     body: "## Rules\n{extra}\n",
@@ -128,7 +128,7 @@ void test("list_playbooks answers six seeded playbooks and a user playbook", asy
   assert.equal(reply.status, 200);
   const playbooks = reply.body.playbooks as Summary[];
   const seeded = playbooks.filter((p) => p.source === "seeded");
-  assert.equal(seeded.length, 6);
+  assert.equal(seeded.length, 7);
   for (const p of seeded) assert.ok(p.when.length > 0, p.name);
   const mine = playbooks.find((p) => p.name === "My notes");
   assert.equal(mine?.source, "user");

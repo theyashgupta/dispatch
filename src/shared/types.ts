@@ -255,6 +255,14 @@ export interface Card {
   workspacePath?: string;
   /** Chosen workspace snapshot at start — absolute repo paths so resume/restart/cleanup never re-read the folder registry. */
   workspace?: { folder: string; repos: { path: string; base: string }[] };
+  reviewPr?: {
+    repo: string;
+    number: number;
+    url: string;
+    head: string;
+    base: string;
+    repoPath?: string;
+  };
   /** Branch name used for the ticket's worktrees. Mirrors the ACTIVE session's own `branch`. */
   branch?: string;
   /**
@@ -996,6 +1004,7 @@ export interface Playbook {
   /** On-disk filename stem (no `.md`), used ONLY for CRUD addressing — kickoff/picker resolution stays name-keyed. */
   slug?: string;
   when?: string;
+  tags?: string[];
 }
 
 /** A playbook file that failed to load, paired with a fixed-vocabulary reason safe to render client-side. */
@@ -1767,6 +1776,17 @@ export interface SentryIssueDetail {
 export type BoardKey = string & { readonly __brand: "BoardKey" };
 
 export type BoardScope = BoardKey | "*";
+
+export interface ReviewCardAnswer {
+  cardId: string;
+  created: boolean;
+  column: Column;
+  boardKey: BoardKey;
+}
+
+export type ProviderResult<T> =
+  | ({ ok: true } & T)
+  | { ok: false; error: string; message?: string; ssoUrl?: string };
 
 export interface BoardWorkspaceRepo {
   path: string;

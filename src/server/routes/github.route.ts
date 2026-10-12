@@ -6,10 +6,12 @@ import {
   SourceRateLimited,
 } from "../adapters/source-gateway.js";
 import { pollNow } from "../adapters/poller.js";
+import { githubReposReader } from "../services/orchestration/github-repos.js";
 import {
   getPullRequest,
   GithubNotConnected,
   mergePullRequest,
+  openReviewCard,
   reviewPullRequest,
 } from "../services/orchestration/github.js";
 import {
@@ -19,7 +21,12 @@ import {
   UpstreamError,
 } from "../services/domain/errors.js";
 import { httpErrorHandler } from "./error-handler.js";
-import { mergeSchema, reviewSchema, targetSchema } from "./github-schemas.js";
+import {
+  mergeSchema,
+  openReviewSchema,
+  reviewSchema,
+  targetSchema,
+} from "./github-schemas.js";
 import { parseOrThrow } from "./parse-input.js";
 
 /**
@@ -63,6 +70,10 @@ function toHttpError(err: unknown): HttpError {
   return new UpstreamError("unreachable");
 }
 
+githubRouter.get("/github/repos", async (_req, res) => {
+  res.status(200).json({ repos: await githubReposReader() });
+});
+
 githubRouter.get("/github/pr/:owner/:repo/:number", async (req, res) => {
   const pr = parseOrThrow(targetSchema, req.params);
   try {
@@ -73,7 +84,7 @@ githubRouter.get("/github/pr/:owner/:repo/:number", async (req, res) => {
 });
 
 githubRouter.post(
-  "/github/pr/:owner/:repo/:number/review",
+  "/github/pr/:owner/:repo/:number/reviews",
   async (req, res) => {
     const pr = parseOrThrow(targetSchema, req.params);
     const { event, text } = parseOrThrow(reviewSchema, req.body);
@@ -87,6 +98,23 @@ githubRouter.post(
     }
     pollNow("github");
     res.status(200).json({ ok: true });
+  },
+);
+
+githubRouter.post(
+  "/github/pr/:owner/:repo/:number/review",
+  async (req, res) => {
+    const pr = parseOrThrow(targetSchema, req.params);
+    const { board } = parseOrThrow(openReviewSchema, req.body ?? {});
+    const answer = await openReviewCard(
+      pr.owner,
+      pr.repo,
+      pr.number,
+      board,
+    ).catch((err: unknown) => {
+      throw err instanceof HttpError ? err : toHttpError(err);
+    });
+    res.status(answer.created ? 201 : 200).json(answer);
   },
 );
 

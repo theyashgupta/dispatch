@@ -1305,7 +1305,14 @@ class BoardStore extends EventEmitter {
           : redactCard(c),
       ),
       doneCounts,
-      items: this.wireItems().filter((i) => i.state !== "done"),
+      items: this.wireItems().filter((i) => {
+        if (i.state !== "done") return true;
+        const held =
+          i.source === "github" && i.cardId !== undefined
+            ? this.cards.get(i.cardId)
+            : undefined;
+        return held !== undefined && held.column !== "done";
+      }),
       enabledSources: this.enabledSourceIds,
     };
   }
@@ -1939,6 +1946,33 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) this.setActiveSession(card, { workspace });
+      return [];
+    });
+  }
+
+  /**
+   * Link a card to the pull request it reviews: the PR fields, the PR url and the workspace.
+   *
+   * @remarks
+   * The workspace is written only when the card has none, so a card that already started keeps its
+   * snapshot.
+   */
+  setCardReview(
+    id: string,
+    review: {
+      reviewPr: NonNullable<Card["reviewPr"]>;
+      url: string;
+      workspace: NonNullable<Card["workspace"]>;
+    },
+  ): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      card.reviewPr = review.reviewPr;
+      card.url = review.url;
+      if (!card.workspace) {
+        this.setActiveSession(card, { workspace: review.workspace });
+      }
       return [];
     });
   }

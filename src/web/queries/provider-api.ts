@@ -1,8 +1,7 @@
+import type { ProviderResult } from "../../shared/types.js";
 import { http, type ApiResult } from "@/lib/http";
 
-export type ProviderResult<T> =
-  | ({ ok: true } & T)
-  | { ok: false; error: string; message?: string; ssoUrl?: string };
+export type { ProviderResult };
 
 type ProviderResponse<T> = ApiResult<T> | null;
 
