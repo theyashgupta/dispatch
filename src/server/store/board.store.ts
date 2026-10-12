@@ -93,7 +93,11 @@ import {
   isStartingCard,
   reconcile,
 } from "./mapping.js";
-import { latestClaudeSession, touchClaudeSession } from "./claude-sessions.js";
+import {
+  latestClaudeSession,
+  startClaudeSession,
+  touchClaudeSession,
+} from "./claude-sessions.js";
 
 export const BOARD_PATH = path.join(DISPATCH_DATA_DIR, "board.json");
 
@@ -2023,6 +2027,37 @@ class BoardStore extends EventEmitter {
         new Date().toISOString(),
       );
       if (next === undefined) return [];
+      target.claudeSessions = next;
+      this.setActiveSession(
+        card,
+        { claudeSessionId: latestClaudeSession(next)?.id },
+        targetId,
+      );
+      return [];
+    });
+  }
+
+  /**
+   * Record a SessionStart for Claude conversation `sid` and re-derive the session's
+   * `claudeSessionId` mirror from the newest started non-missing node.
+   *
+   * @remarks Never throttled: a start moves the conversation to the front of the start order,
+   * and it clears a missing mark because the conversation provably exists.
+   * @see docs/ARCHITECTURE.md#hooks-status-channel
+   */
+  startClaudeSession(
+    id: string,
+    sessionId: string | undefined,
+    sid: string,
+    at: string,
+  ): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      const targetId = sessionId ?? card.activeSessionId;
+      const target = card.sessions?.find((s) => s.id === targetId);
+      if (!target) return [];
+      const next = startClaudeSession(target.claudeSessions, sid, at);
       target.claudeSessions = next;
       this.setActiveSession(
         card,

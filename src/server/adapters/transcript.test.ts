@@ -1,10 +1,13 @@
-import test, { after } from "node:test";
+import test, { after, mock } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import {
   isTranscriptPath,
+  listConversations,
+  projectsDirOf,
   readTranscriptTail,
   resolveTranscriptPath,
 } from "./transcript.js";
@@ -116,4 +119,71 @@ void test("a hook transcript path must be an absolute .jsonl under a projects fo
     false,
   );
   assert.equal(isTranscriptPath(42), false);
+});
+
+void test("listConversations lists top level jsonl files by id and ignores nested ones", async () => {
+  const dir = path.join(root, "conversations");
+  fs.mkdirSync(path.join(dir, "sub"), { recursive: true });
+  fs.writeFileSync(path.join(dir, "aaa.jsonl"), "");
+  fs.writeFileSync(path.join(dir, "bbb.jsonl"), "");
+  fs.writeFileSync(path.join(dir, "notes.txt"), "");
+  fs.writeFileSync(path.join(dir, "sub", "nested.jsonl"), "");
+  const found = await listConversations(dir);
+  assert.deepEqual(found.map((c) => c.id).sort(), ["aaa", "bbb"]);
+  assert.ok(found.every((c) => c.bornAtMs > 0));
+});
+
+void test("listConversations skips a file whose name is not a valid session id", async () => {
+  const dir = path.join(root, "bad-names");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "good-1.jsonl"), "");
+  fs.writeFileSync(path.join(dir, ".jsonl"), "");
+  fs.writeFileSync(path.join(dir, "-x.jsonl"), "");
+  assert.deepEqual(
+    (await listConversations(dir)).map((c) => c.id),
+    ["good-1"],
+  );
+});
+
+void test("listConversations leaves out top level agent subagent transcripts", async () => {
+  const dir = path.join(root, "agent-names");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "real-1.jsonl"), "");
+  fs.writeFileSync(path.join(dir, "agent-a1b2c3.jsonl"), "");
+  assert.deepEqual(
+    (await listConversations(dir)).map((c) => c.id),
+    ["real-1"],
+  );
+});
+
+void test("listConversations of a missing folder is empty", async () => {
+  assert.deepEqual(await listConversations(path.join(root, "nowhere")), []);
+});
+
+void test("listConversations falls back to the modified time only when the file system reports no birth time", async () => {
+  const dir = path.join(root, "birth-times");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "no-birth.jsonl"), "");
+  fs.writeFileSync(path.join(dir, "has-birth.jsonl"), "");
+  const stats: Record<string, { birthtimeMs: number; mtimeMs: number }> = {
+    "no-birth.jsonl": { birthtimeMs: 0, mtimeMs: 2_000 },
+    "has-birth.jsonl": { birthtimeMs: 1_000, mtimeMs: 2_000 },
+  };
+  const stat = mock.method(fsp, "stat", (file: string) =>
+    Promise.resolve({ isFile: () => true, ...stats[path.basename(file)] }),
+  );
+  try {
+    const found = await listConversations(dir);
+    const bornAt = Object.fromEntries(found.map((c) => [c.id, c.bornAtMs]));
+    assert.deepEqual(bornAt, { "no-birth": 2_000, "has-birth": 1_000 });
+  } finally {
+    stat.mock.restore();
+  }
+});
+
+void test("projectsDirOf encodes the working directory the way Claude Code does", () => {
+  assert.equal(
+    projectsDirOf("/cfg", "/Users/a.b/c_d"),
+    path.join("/cfg", "projects", "-Users-a-b-c-d"),
+  );
 });

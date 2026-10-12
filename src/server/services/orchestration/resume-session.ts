@@ -1,9 +1,16 @@
 import path from "node:path";
-import { DEFAULT_CLAUDE_ACCOUNT_ID } from "../../../shared/types.js";
+import {
+  DEFAULT_CLAUDE_ACCOUNT_ID,
+  type ResumeTarget,
+} from "../../../shared/types.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import { hasSession, killSession } from "../../adapters/tmux.js";
 import { resolveLaunchAccount } from "./claude-accounts.js";
 import { launchClaude, RESUME_MISSING, StartStepError } from "./steps.js";
+import {
+  recordNewestConversation,
+  recordResumeTarget,
+} from "./resume-target.js";
 import { registerHookToken } from "./hook-tokens.js";
 import { REATTACH_STATUS_CLEAR_MS } from "./start-session.js";
 import { ensureTerminal } from "./terminal.js";
@@ -68,10 +75,9 @@ export async function reconnectTerminal(cardId: string): Promise<void> {
  * `card.hookToken` in place: reading it after the mint would hand `registerHookToken` the token it
  * is about to register, degenerating re-mint hygiene into `delete(token)` then `set(token)` and
  * leaving the genuinely stale credential resolving forever.
- * @remarks (LOCAL-13) The resume id is the session's `claudeSessionId` mirror, the newest
- * conversation node by activity. A "No conversation found" refusal stamps THAT node missing via
- * `store.markClaudeSessionMissing`, so the next Resume falls back to the previous node on the same
- * branch and only reaches `--continue` when none is left.
+ * @remarks The resume id comes from the folder choice in `resume-target.ts`, which compares the
+ * conversation files in the project folder with the stored nodes. A refused id is stamped missing
+ * with `store.markClaudeSessionMissing`, and its file is left out of the next choice.
  * @remarks (LOCAL-2) Resume targets the ACTIVE session record, whatever its ordinal: the tmux
  * name derives from that record's own `branch` (fallback: the workspacePath basename, identical
  * for every generation of card), NEVER from `card.identifier`, which is only session 1's name and
@@ -96,8 +102,6 @@ export async function resumeSession(cardId: string): Promise<void> {
     const session =
       "dsp-" + (active?.branch ?? path.basename(card.workspacePath));
     killTarget = session;
-    attempted = card.claudeSessionId;
-    const resumeArgs = attempted ? ["--resume", attempted] : ["--continue"];
 
     if (await hasSession(`=${session}`)) {
       if (card.hookToken && card.activeSessionId) {
@@ -122,18 +126,30 @@ export async function resumeSession(cardId: string): Promise<void> {
         "config",
       );
     });
+    const target: ResumeTarget = active
+      ? await recordResumeTarget(card, active)
+      : { mode: "continue" };
+    attempted = target.mode === "resume" ? target.sessionId : undefined;
     killTarget = null;
+    let hookSilent = false;
     await launchClaude({
       cardId,
       sessionId,
       tmuxSession: session,
       cwd: card.workspacePath,
-      leadingArgs: resumeArgs,
+      leadingArgs:
+        target.mode === "resume"
+          ? ["--resume", target.sessionId]
+          : ["--continue"],
       account,
       onCreated: () => {
         killTarget = session;
       },
+      onHookSilent: () => {
+        hookSilent = true;
+      },
     });
+    if (hookSilent) await recordNewestConversation(cardId, sessionId);
     await store.resumeSession(cardId, { session }, sessionId);
     setTimeout(
       () => void store.setStatusReason(cardId, null),

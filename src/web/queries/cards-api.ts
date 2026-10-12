@@ -4,6 +4,7 @@ import type {
   BoardKey,
   Card,
   Column,
+  ResumeTarget,
   UnwindDestination,
 } from "../../shared/types.js";
 import { http, httpError } from "@/lib/http";
@@ -349,6 +350,22 @@ export async function getCard(
   }
   if (!result.ok) {
     throw httpError("getCard", result);
+  }
+  return result.data;
+}
+
+/**
+ * Read which conversation Resume will open: GET /api/cards/:id/resume-target.
+ *
+ * @remarks
+ * A 404 (unknown card) or 409 (no session) throws, so the caller shows the error line.
+ */
+export async function getResumeTarget(id: string): Promise<ResumeTarget> {
+  const result = await http<ResumeTarget>(
+    `/api/cards/${encodeURIComponent(id)}/resume-target`,
+  );
+  if (!result.ok) {
+    throw httpError("getResumeTarget", result);
   }
   return result.data;
 }

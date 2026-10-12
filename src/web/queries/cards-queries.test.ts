@@ -8,15 +8,18 @@ import {
   createLocalTicket,
   generateGroupTitle,
   generateTicketDraft,
+  getResumeTarget,
   resetCard,
   startCard,
   startGroup,
   syncCardToLinear,
 } from "./cards-api.js";
 import {
+  cardsKeys,
   createLocalTicketMutationOptions,
   generateGroupTitleMutationOptions,
   generateTicketDraftMutationOptions,
+  resumeTargetQueryOptions,
   startCardMutationOptions,
   startGroupMutationOptions,
   syncCardToLinearMutationOptions,
@@ -670,4 +673,41 @@ test("resetCard returns the server reason for a refusal and throws without one",
 test("the draft and create mutations drop their variables at once", () => {
   assert.equal(generateTicketDraftMutationOptions().gcTime, 0);
   assert.equal(createLocalTicketMutationOptions(LOCAL).gcTime, 0);
+});
+
+test("getResumeTarget reads the resume-target route", async () => {
+  reply(200, { mode: "resume", sessionId: "abc" });
+  assert.deepEqual(await getResumeTarget("c 1"), {
+    mode: "resume",
+    sessionId: "abc",
+  });
+  assert.equal(calls[0]?.url, "/api/cards/c%201/resume-target");
+});
+
+test("getResumeTarget throws on 404 and 409", async () => {
+  reply(404, { error: "unknown card" });
+  await assert.rejects(getResumeTarget("c1"));
+  reply(409, { error: "no session" });
+  await assert.rejects(getResumeTarget("c1"));
+});
+
+test("resumeTargetQueryOptions uses its own key per card", () => {
+  assert.deepEqual(resumeTargetQueryOptions("c1").queryKey, [
+    "cards",
+    "c1",
+    "resume-target",
+  ]);
+  assert.deepEqual(
+    resumeTargetQueryOptions("c1").queryKey,
+    cardsKeys.resumeTarget("c1"),
+  );
+  assert.notDeepEqual(
+    resumeTargetQueryOptions("c1").queryKey,
+    resumeTargetQueryOptions("c2").queryKey,
+  );
+});
+
+test("resumeTargetQueryOptions honours the enabled flag", () => {
+  assert.equal(resumeTargetQueryOptions("c1").enabled, true);
+  assert.equal(resumeTargetQueryOptions("c1", false).enabled, false);
 });

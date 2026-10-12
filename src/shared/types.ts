@@ -688,6 +688,20 @@ export interface Session {
   transcriptPath?: string;
 }
 
+export type ResumeTarget =
+  | {
+      mode: "resume";
+      sessionId: string;
+      startedAt: string;
+      replaced?: ResumeReplaced;
+    }
+  | { mode: "continue"; replaced?: ResumeReplaced };
+
+export interface ResumeReplaced {
+  storedId: string;
+  reason: "newer-on-disk" | "no-conversation";
+}
+
 export interface ClaudeSession {
   /** The Claude CLI `session_id` from the hook payload. */
   id: string;
@@ -697,6 +711,7 @@ export interface ClaudeSession {
   lastActiveAt: string;
   /** ISO timestamp of the resume attempt that found this conversation's file gone. */
   missingAt?: string;
+  startedAt?: string;
 }
 
 /**

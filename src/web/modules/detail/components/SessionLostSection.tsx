@@ -6,17 +6,21 @@ import {
   type ResumeOutcome,
 } from "@/components/ui/hooks/use-resume-feedback";
 import { PanelAlert } from "./PanelNotice";
+import { ResumeTargetLine } from "./ResumeTargetLine";
+import type { ResumeLine } from "../domain/resume-target";
 
 interface SessionLostSectionProps {
   card: CardModel;
   resume: (id: string) => Promise<ResumeOutcome>;
   onRestart: (card: CardModel) => void;
+  resumeLine?: ResumeLine;
 }
 
 export function SessionLostSection({
   card,
   resume,
   onRestart,
+  resumeLine,
 }: SessionLostSectionProps) {
   const { resuming, resumeFailed, watchdogFired, failureCopy, onResume } =
     useResumeFeedback(card, resume);
@@ -51,6 +55,8 @@ export function SessionLostSection({
       )}
 
       {resumeFailed && <PanelAlert>{failureCopy}</PanelAlert>}
+
+      {canResume && resumeLine && <ResumeTargetLine {...resumeLine} />}
 
       {canResume ? (
         <div className="flex gap-(--space-sm)">

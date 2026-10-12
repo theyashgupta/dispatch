@@ -49,6 +49,7 @@ import {
   getHooksRuntime,
   getOrchestrationConfig,
 } from "../infra/config-holder.js";
+import { recordNewestConversation } from "./resume-target.js";
 import { newHookTokenValue, registerHookToken } from "./hook-tokens.js";
 import { HOOK_SETTINGS_PATH } from "../infra/paths.js";
 import { worktreePath as buildWorktreePath } from "../domain/workspace-paths.js";
@@ -107,6 +108,7 @@ const POLL_INTERVAL_MS = 500;
 const LAUNCH_CLEAR_MS = 3_000;
 const LAUNCH_CLEAR_POLL_MS = 150;
 const PASTE_SETTLE_MS = 500;
+const NEWEST_CONVERSATION_DELAY_MS = 5_000;
 
 /**
  * Mutable saga bookkeeping. `run` records creations here; `undo` compensates against these
@@ -139,6 +141,7 @@ export interface SagaContext {
   tmuxSessionCreated: boolean;
   /** The Claude account the REPL launched on, set by the start-claude step for `completeStart`. */
   claudeAccountId?: string;
+  hookSilent?: boolean;
   /**
    * True when this saga run is a RESTART of a previously-lost session (card.sessionLost). Threads
    * into the kickoff so the agent is told to `git status` first; also the condition under which an
@@ -507,6 +510,7 @@ export interface LaunchClaudeInput {
   leadingArgs: string[];
   account: LaunchAccount;
   onCreated?: () => void;
+  onHookSilent?: () => void;
 }
 
 /** Marks a tmux session whose pane root is the login shell, so a relaunch may type into it. */
@@ -532,6 +536,7 @@ export async function launchClaude(input: LaunchClaudeInput): Promise<boolean> {
   const hooks = created
     ? await mintHooks(cardId, sessionId)
     : existingHooks(store.getCard(cardId));
+  if (hooks === null) input.onHookSilent?.();
   const card = store.getCard(cardId);
   const launch = await buildLaunch(account, leadingArgs, hooks, card);
   if (created) {
@@ -784,6 +789,9 @@ const startClaude: SagaStep = {
       onCreated: () => {
         ctx.tmuxSessionCreated = true;
       },
+      onHookSilent: () => {
+        ctx.hookSilent = true;
+      },
     });
   },
   async undo(ctx) {
@@ -823,6 +831,14 @@ const sendKickoff: SagaStep = {
       await sendKeys(paneTarget, ["Enter"]);
     } finally {
       await fsp.unlink(tmpFile).catch(() => {});
+    }
+    if (ctx.hookSilent === true) {
+      const launchedSessionId =
+        ctx.sessionId ?? store.getCard(ctx.card.id)?.activeSessionId;
+      setTimeout(
+        () => void recordNewestConversation(ctx.card.id, launchedSessionId),
+        NEWEST_CONVERSATION_DELAY_MS,
+      ).unref();
     }
   },
   async undo() {},

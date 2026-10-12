@@ -235,6 +235,12 @@ export const createCardBodySchema = z
     return { title, fullDescription, images: images.data };
   });
 
+/** The `GET /cards/:id/resume-target` params. */
+export const resumeTargetParamsSchema = z.object(
+  { id: z.string("invalid-id").regex(CARD_ID_RE, "invalid-id") },
+  "invalid-id",
+);
+
 /** The `GET /cards/:id/attachments/:name` params. */
 export const attachmentParamsSchema = z.object(
   {

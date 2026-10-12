@@ -20,6 +20,10 @@ if (process.argv[2] === "mcp" && process.argv[3] === "list") {
   process.exit(0);
 }
 
+if (process.env.FAKE_CLAUDE_ARGV_FILE) {
+  fs.appendFileSync(process.env.FAKE_CLAUDE_ARGV_FILE, JSON.stringify(process.argv.slice(2)) + "\n");
+}
+
 process.stdout._handle?.setBlocking?.(false);
 
 for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) {

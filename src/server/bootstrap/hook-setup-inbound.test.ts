@@ -8,6 +8,14 @@ const { installHookArtifacts } = await import("./hook-setup.js");
 const { HOOK_SETTINGS_PATH } = await import("../services/infra/paths.js");
 after(() => env.cleanup());
 
+void test("the session hook settings register SessionStart with a 5 s timeout", async () => {
+  await installHookArtifacts();
+  const settings = JSON.parse(fs.readFileSync(HOOK_SETTINGS_PATH, "utf8")) as {
+    hooks: Record<string, { hooks: { timeout: number }[] }[]>;
+  };
+  assert.equal(settings.hooks.SessionStart?.[0]?.hooks[0]?.timeout, 5);
+});
+
 void test("the session hook settings refuse cross-session inbound messages", async () => {
   await installHookArtifacts();
   const settings = JSON.parse(fs.readFileSync(HOOK_SETTINGS_PATH, "utf8")) as {

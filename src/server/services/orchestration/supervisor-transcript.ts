@@ -8,7 +8,8 @@ import { CLAUDE_HOME_DIR } from "../infra/paths.js";
 import { accountDir } from "./claude-accounts.js";
 import { rootOf } from "./supervisor-record.js";
 
-function configDirOf(session: Session): string {
+/** The Claude config folder of the account a session runs on. */
+export function configDirOf(session: Session): string {
   const account = session.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID;
   if (account !== DEFAULT_CLAUDE_ACCOUNT_ID) {
     try {
