@@ -43,6 +43,7 @@ import {
 } from "@/queries/cards-queries";
 import { useSessionAccountMove } from "@/queries/session-account-queries";
 import { useAppStore } from "@/components/ui/hooks/use-app-store";
+import { useItems } from "@/components/ui/hooks/use-items";
 import { stampLastOpened } from "@/components/ui/hooks/use-last-opened";
 import { CAROUSEL_QUERY } from "../../../../shared/media-queries.js";
 import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
@@ -72,6 +73,8 @@ import { SessionSwitcher } from "@/modules/detail/components/SessionSwitcher";
 import { StartAnotherSessionButton } from "@/modules/detail/components/StartAnotherSessionButton";
 import { TerminalRegion } from "@/modules/detail/components/TerminalRegion";
 import { UnknownProbeRow } from "@/modules/detail/components/UnknownProbeRow";
+import { reviewHeader as buildReviewHeader } from "@/modules/detail/domain/review-header";
+import { heldPrItems } from "../../../../shared/pr-rows.js";
 import { panelEscapeAction } from "@/modules/detail/domain/panel-escape";
 import { hasSessionFlow } from "@/modules/detail/domain/session-flow";
 import { useFocusReturn } from "@/modules/detail/hooks/use-focus-return";
@@ -335,6 +338,12 @@ export function DetailPanelContainer() {
     c.groupId == null &&
     c.workspacePath != null;
 
+  const items = useItems(board);
+  const reviewHeader =
+    c == null
+      ? null
+      : buildReviewHeader(c, [...items, ...heldPrItems(board?.items ?? [])]);
+
   const hasLiveSession = !!(c?.tmuxSession && !c.sessionLost);
   const activeSessionLost = c?.activeSessionId != null && !c.tmuxSession;
   const resumeTarget = useResumeTargetQuery(c?.id ?? "", activeSessionLost);
@@ -428,6 +437,7 @@ export function DetailPanelContainer() {
             onSyncRequest={onSyncRequest}
             onAskRequest={onAskRequest}
             resumeLine={resumeLine}
+            reviewHeader={reviewHeader}
           />
 
           {sessionAccount != null && (
