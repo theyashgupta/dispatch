@@ -36,7 +36,7 @@ function card(id: string, patch: Partial<Card> = {}): Card {
     column: "in_progress",
     updatedAt: "2026-10-08T10:00:00.000Z",
     ...patch,
-  } as Card;
+  };
 }
 
 function live(
@@ -211,7 +211,7 @@ test("each sign of a card run by the orchestrator makes it a branch", () => {
       "sessions",
       {
         sessions: [
-          { id: "s9", createdAt: iso(1), updatedAt: iso(1) } as Session,
+          { id: "s9", createdAt: iso(1), updatedAt: iso(1) },
         ],
       },
     ],
