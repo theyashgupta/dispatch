@@ -68,6 +68,7 @@ function source(): InstanceType<typeof GitHubSource> {
   return new GitHubSource(
     () => Promise.resolve({ token: "g5-fake-gh-token", via: "gh" }),
     10,
+    () => Promise.resolve([]),
   );
 }
 
