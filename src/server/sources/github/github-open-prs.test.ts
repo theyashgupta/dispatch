@@ -176,7 +176,7 @@ test("fetch posts one GraphQL search per poll and flags truncation", async () =>
   mock.method(globalThis, "fetch", (input: string, init?: RequestInit) => {
     const url = new URL(input);
     if (url.pathname === "/graphql") {
-      calls.push({ url: input, body: JSON.parse(String(init?.body)) });
+      calls.push({ url: input, body: JSON.parse(init?.body as string) });
       return Promise.resolve(jsonResponse(answer([node(4)], 150)));
     }
     if (url.pathname === "/user") {
