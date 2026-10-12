@@ -2,6 +2,7 @@ import path from "node:path";
 import type {
   Card,
   Config,
+  CrossSessionInbound,
   SessionFields,
   StartError,
 } from "../../../shared/types.js";
@@ -91,14 +92,16 @@ export async function completeStartAndPush(
  * reverse over saga bookkeeping on any failure, leaving the card in To Do (ORCH-01/03). The
  * one-saga-per-card in-flight guard is a synchronous check-then-set on the store (not a
  * module-local Set) so the poller's reconcile can see it and refuse to remove a card whose start
- * is in flight (CR-01). Every start lands the card on In Progress — a request carrying no
- * `playbook` falls back to the intent persisted at the original start (`card.startIntent`), so
- * Retry after a failed start and a bare Restart reproduce the chosen playbook instead of silently
- * degrading to a playbook-less session; a request carrying the field is a fresh, complete intent
- * and never mixes with the stored one. Route validation only covers names arriving in the request
- * body, so a stored playbook name that no longer resolves (renamed or deleted since the original
- * start) is surfaced as a start warning via the same channel as the fetch-fallback notice — the
- * warning must ride `ctx.warnings` because `completeStart` clears `startWarning`. The
+ * is in flight (CR-01). Every start lands the card on In Progress. A primary start saves the
+ * request's `playbook` and `crossSessionInbound` into `card.startIntent` only once the saga
+ * proceeds to launch, merging per field so a request carrying one keeps the stored other. A
+ * new-session request leaves the stored intent alone and applies its own fields to that session's
+ * first launch only, and a request without `playbook` falls back to the stored one, so Retry after
+ * a failed start and a bare Restart reproduce the chosen playbook instead of silently degrading to
+ * a playbook-less session. Route validation only covers names arriving in the request body, so a
+ * stored playbook name that no longer resolves (renamed or deleted since the original start) is
+ * surfaced as a start warning via the same channel as the fetch-fallback notice. The warning must
+ * ride `ctx.warnings` because `completeStart` clears `startWarning`. The
  * already-running reattach branch re-registers the card's persisted hook token (mirroring
  * resume's reattach) so a live session adopted after a backend restart — e.g. an interrupted
  * saga plus Retry, which never reaches boot reconcile because only completeStart sets
@@ -140,7 +143,12 @@ export async function startSession(
   cardId: string,
   extraDirection: string,
   config: Config,
-  opts?: { playbook?: string; newSession?: boolean; inheritFrom?: string },
+  opts?: {
+    playbook?: string;
+    crossSessionInbound?: CrossSessionInbound;
+    newSession?: boolean;
+    inheritFrom?: string;
+  },
 ): Promise<void> {
   if (store.isStarting(cardId)) return;
   store.beginStart(cardId);
@@ -150,8 +158,7 @@ export async function startSession(
     const card = store.getCard(cardId);
     if (!card) return;
 
-    const stored = opts?.playbook === undefined ? card.startIntent : undefined;
-    const playbookName = opts?.playbook ?? stored?.playbook;
+    const playbookName = opts?.playbook ?? card.startIntent?.playbook;
 
     const activeRecord = card.sessions?.find(
       (s) => s.id === card.activeSessionId,
@@ -199,8 +206,17 @@ export async function startSession(
       return;
     }
 
-    if (opts?.playbook !== undefined) {
-      await store.setStartIntent(cardId, { playbook: opts.playbook });
+    if (
+      !wantsNewSession &&
+      (opts?.playbook !== undefined || opts?.crossSessionInbound !== undefined)
+    ) {
+      await store.setStartIntent(cardId, {
+        ...card.startIntent,
+        ...(opts.playbook !== undefined && { playbook: opts.playbook }),
+        ...(opts.crossSessionInbound !== undefined && {
+          crossSessionInbound: opts.crossSessionInbound,
+        }),
+      });
     }
 
     const playbookBody = playbookName
@@ -212,6 +228,18 @@ export async function startSession(
     }
 
     await store.setExtraDirection(cardId, extraDirection);
+
+    const launchIntent =
+      wantsNewSession &&
+      (opts?.playbook !== undefined || opts?.crossSessionInbound !== undefined)
+        ? {
+            ...card.startIntent,
+            ...(opts.playbook !== undefined && { playbook: opts.playbook }),
+            ...(opts.crossSessionInbound !== undefined && {
+              crossSessionInbound: opts.crossSessionInbound,
+            }),
+          }
+        : undefined;
 
     const ctx: SagaContext = {
       card,
@@ -229,6 +257,7 @@ export async function startSession(
       playbookBody,
       warnings,
       inheritBaseRef: reserved?.parentBranch,
+      launchIntent,
     };
 
     const done: SagaStep[] = [];
@@ -286,6 +315,7 @@ export async function startSession(
 export interface CardStartInput {
   extraDirection: string;
   playbook?: string | undefined;
+  crossSessionInbound?: CrossSessionInbound | undefined;
   newSession?: boolean | undefined;
   inheritFrom?: string | undefined;
   workspace?: NonNullable<Card["workspace"]> | undefined;
@@ -398,6 +428,7 @@ export async function commitCardStart(
   await beforeStart?.();
   void sessionStarter.start(id, input.extraDirection, config, {
     playbook: input.playbook,
+    crossSessionInbound: input.crossSessionInbound,
     newSession: input.newSession,
     inheritFrom: input.inheritFrom,
   });

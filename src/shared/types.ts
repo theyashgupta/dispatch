@@ -502,12 +502,13 @@ export interface Card {
    */
   source?: string;
   /**
-   * The playbook name captured when a start request carries one, persisted BEFORE the saga runs
-   * (the extraDirection precedent) so Retry after a failed start and a bare Restart reproduce the
-   * original start — playbook body included — instead of degrading to a playbook-less start.
+   * The playbook name and inbound value a primary start request carries, saved once the start
+   * is sure to launch so Retry after a failed start and a bare Restart reproduce the original
+   * start instead of degrading to a playbook-less one.
    */
   startIntent?: {
     playbook?: string;
+    crossSessionInbound?: CrossSessionInbound;
   };
 
   /**
@@ -1024,6 +1025,14 @@ export interface PlaybookPickerResponse {
  */
 export type StatusChannel = "hooks" | "pane" | "auto";
 
+export const CROSS_SESSION_INBOUND_VALUES = [
+  "accept",
+  "hold",
+  "refuse",
+] as const;
+export type CrossSessionInbound = (typeof CROSS_SESSION_INBOUND_VALUES)[number];
+export const DEFAULT_CROSS_SESSION_INBOUND: CrossSessionInbound = "accept";
+
 /**
  * Per-binary presence result surfaced by the boot probe and the setup wizard. Shared here
  * so the `/api/setup` route and the web client agree on the shape without either reaching across the
@@ -1312,6 +1321,7 @@ export interface Config {
   workspaceRoot?: string;
   /** Status-source selection (`hooks | pane | auto`); absent resolves to `auto` at load. */
   statusChannel?: StatusChannel;
+  crossSessionInbound?: CrossSessionInbound;
   sources?: {
     linear?: SourceConfig;
     github?: ItemSourceConfig;
@@ -1770,6 +1780,7 @@ export interface BoardPolicy {
   supervisor: "on" | "off";
   groupPlaybook: string | null;
   wakeMinutes: number;
+  crossSessionInbound: CrossSessionInbound | null;
 }
 
 export type OrchestratorPolicyOverride = Partial<

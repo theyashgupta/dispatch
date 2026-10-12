@@ -124,6 +124,8 @@ New server code goes in the existing layers: supervisor files in `services/orche
 
 **Evidence:** research section 3.1 (A8 to A14, A17, A18 (the engine file part; the Done move is in D-8) and A22 go to the supervisor; A15 becomes the dependency hold; A21 becomes the dashboard (D-5 progress, D-6 budget); A26 is not needed, because the policy (D-6) and the playbook hold the rulings; for A27, LOCAL-89 adds `crossSessionInbound: refuse` to the generated hook settings (`server/bootstrap/hook-setup.ts`, H30:26), and no `.roadmap` link is needed, because the link served the resume script (H30:33) and the reader reads `.roadmap` at the session root; A4 and A6 are deterministic too, but they stay with the orchestrator because they carry out its own calls A2, A3 and A5), section 3.2 (F1 to F25), section 2 (the marker watcher reads the pane at `server/adapters/markers/watcher.ts:150`; the start saga already answers dialogs at `server/services/orchestration/steps.ts:387-408`); research section 6 (Composio settle window, Operator silence threshold).
 
+Amendment, 2026-10-10 (LOCAL-98): `crossSessionInbound` is a setting now, not a fixed `refuse`. `Config.crossSessionInbound` is `accept`, `hold` or `refuse`, and the default is `accept`. The value applies to a session that a user starts from a ticket. A session that runs a playbook whose name starts with "Roadmap Loop", and a board orchestrator session, get `refuse`, unless the board policy field `crossSessionInbound` or the start request sets a value. The order for each launch is: the start request value, then for a Roadmap Loop or orchestrator launch the board policy value or `refuse`, then the config value. Reason: a held message from the claude-mem observer stopped an unattended loop and once removed a roadmap approval (research F9), but the user sends context to a ticket session from a main session. The server writes one settings file for each value, and each launch passes the file of its value. The supervisor still denies a held peer message dialog, which can occur only with `hold`.
+
 ### D-4: Control surface
 
 **Date:** 2026-10-05
@@ -681,3 +683,9 @@ Date: 2026-10-11.
 Change: the decision kinds gain `plan`. The orchestrator raises its plan as one `plan` item with one structured entry for each ticket or group: the reference, the playbook, the order and the size. The server gives a `plan` item the options approve and reject, with approve recommended, and the user answers it as before. The rule book section 5 tells the orchestrator to use the kind `plan`. The tool count stays 29.
 
 Reason: the command centre (LOCAL-104) shows the planned tickets and groups as branches, and a free text plan cannot tell them apart.
+
+### LOCAL-98
+
+Change: `crossSessionInbound` moves from a fixed `refuse` in the hook settings to a setting with the default `accept` (D-3 amendment, 2026-10-10). Roadmap Loop and board orchestrator sessions keep `refuse` unless the board policy or the start request sets a value. The board policy gains the nullable field `crossSessionInbound` (D-6). The start route gains the optional field `crossSessionInbound`, and the card keeps it with the start intent. Settings shows the value next to the Claude arguments.
+
+Reason: the user sends context from a main session to a ticket session with a cross-session message, and the fixed `refuse` blocked each of these messages on 2026-10-09.

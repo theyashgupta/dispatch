@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-query";
 import { TERMINAL_APPEARANCE_CHANNEL } from "../../../../shared/terminal-appearance.js";
 import type {
+  CrossSessionInbound,
   TerminalAppearance,
   UserProfile,
 } from "../../../../shared/types.js";
@@ -17,12 +18,14 @@ import {
   enableRemote,
   getCleanupDelay,
   getClaudeArgs,
+  getCrossSessionInbound,
   getProfile,
   getTerminalAppearance,
   isIOSDevice,
   readPushSubscription,
   saveClaudeArgs,
   saveCleanupDelay,
+  saveCrossSessionInbound,
   saveProfile,
   saveTerminalAppearance,
 } from "./settings-api.js";
@@ -33,6 +36,7 @@ export const settingsKeys = {
   cleanupDelay: ["settings", "cleanup-delay"] as const,
   terminal: ["settings", "terminal"] as const,
   claudeArgs: ["settings", "claude-args"] as const,
+  crossSessionInbound: ["settings", "cross-session-inbound"] as const,
   linearStateMap: ["settings", "linear-state-map"] as const,
   profile: ["settings", "profile"] as const,
   archiveRetention: ["settings", "archive-retention"] as const,
@@ -57,6 +61,13 @@ export function claudeArgsQueryOptions() {
   return queryOptions({
     queryKey: settingsKeys.claudeArgs,
     queryFn: getClaudeArgs,
+  });
+}
+
+export function crossSessionInboundQueryOptions() {
+  return queryOptions({
+    queryKey: settingsKeys.crossSessionInbound,
+    queryFn: getCrossSessionInbound,
   });
 }
 
@@ -94,6 +105,13 @@ export function useCleanupDelayQuery() {
 
 export function useClaudeArgsQuery() {
   return useQuery({ ...claudeArgsQueryOptions(), refetchOnMount: "always" });
+}
+
+export function useCrossSessionInboundQuery() {
+  return useQuery({
+    ...crossSessionInboundQueryOptions(),
+    refetchOnMount: "always",
+  });
 }
 
 export function useTerminalAppearanceQuery() {
@@ -175,6 +193,35 @@ export function saveClaudeArgsMutationOptions(queryClient: QueryClient) {
 export function useSaveClaudeArgsMutation() {
   const queryClient = useQueryClient();
   return useMutation(saveClaudeArgsMutationOptions(queryClient));
+}
+
+/**
+ * Build the mutation options that save the cross-session messages value.
+ *
+ * @remarks
+ * An accepted save writes the saved value into the cache. A refusal resolves `{ ok: false }`.
+ */
+export function saveCrossSessionInboundMutationOptions(
+  queryClient: QueryClient,
+) {
+  return {
+    mutationFn: saveCrossSessionInbound,
+    onSuccess: (
+      result: Awaited<ReturnType<typeof saveCrossSessionInbound>>,
+      crossSessionInbound: CrossSessionInbound,
+    ) => {
+      if (result.ok) {
+        queryClient.setQueryData(settingsKeys.crossSessionInbound, {
+          crossSessionInbound,
+        });
+      }
+    },
+  };
+}
+
+export function useSaveCrossSessionInboundMutation() {
+  const queryClient = useQueryClient();
+  return useMutation(saveCrossSessionInboundMutationOptions(queryClient));
 }
 
 /**

@@ -22,6 +22,7 @@ const { launchClaude, steps } = await import("./steps.js");
 const { projectsDirOf } = await import("../../adapters/transcript.js");
 const { setHooksRuntime, setOrchestrationConfig } =
   await import("../infra/config-holder.js");
+const { hookSettingsPath } = await import("../infra/paths.js");
 setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
 const HOSTILE_ARG = "be terse; $(id) `id` && echo pwned | cat";
 setOrchestrationConfig({
@@ -179,6 +180,47 @@ void test(
         "conv-before-restart",
       );
     } finally {
+      await env.killServer();
+    }
+  },
+);
+
+void test(
+  "launchClaude passes the refuse settings file when the launch intent names the Roadmap Loop playbook",
+  { skip: !env.canRunRealTmux },
+  async () => {
+    const argvFile = path.join(env.root, "claude-argv-intent.txt");
+    writeFakeRepl(env, argvFile);
+    await store.load();
+    const card = await store.createLocalCard(
+      DEFAULT_BOARD_KEY,
+      "intent reaches argv",
+      "",
+    );
+    const tmuxSession = `dsp-intenttest-${process.pid}`;
+    const cwd = path.join(env.root, "worktree-intent");
+    fs.mkdirSync(cwd, { recursive: true });
+    setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
+    try {
+      assert.equal(
+        await launchClaude({
+          cardId: card.id,
+          tmuxSession,
+          cwd,
+          leadingArgs: [],
+          account: { id: "default" },
+          launchIntent: { playbook: "Roadmap Loop (autonomous)" },
+        }),
+        true,
+      );
+      const argv = readArgv(argvFile) ?? [];
+      assert.equal(
+        argv[argv.indexOf("--settings") + 1],
+        hookSettingsPath("refuse"),
+      );
+      assert.ok(argv.some((a) => a.endsWith("hook-settings-refuse.json")));
+    } finally {
+      await tmux.killSession(`=${tmuxSession}`);
       await env.killServer();
     }
   },

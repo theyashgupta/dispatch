@@ -234,6 +234,10 @@ const ROADMAP_TOOL_FILES = [
   /^src\/server\/services\/infra\/playbooks\.ts$/,
   /^src\/web\/modules\/orchestrator\/components\/(OverrideFields|PolicyForm)\.tsx$/,
   /^src\/web\/modules\/orchestrator\/domain\/(ownership|policy-form)(\.test)?\.ts$/,
+  /^src\/server\/bootstrap\/config\.ts$/,
+  /^src\/server\/services\/domain\/cross-session-inbound(\.test)?\.ts$/,
+  /^src\/server\/services\/orchestration\/(build-launch|start-session-reattach|steps)\.test\.ts$/,
+  /^src\/web\/modules\/settings\/components\/CrossSessionInboundSection\.tsx$/,
   /^src\/server\/services\/infra\/playbooks-seed\.test\.ts$/,
   /^src\/server\/services\/infra\/rulebook\.test\.ts$/,
   /^src\/web\/modules\/card-actions\/domain\/playbook-picker(\.test)?\.ts$/,
@@ -243,7 +247,7 @@ const ROADMAP_TOOL_FILES = [
 /**
  * Class 2 — scan every src/**\/*.{ts,tsx} line for planning-process vocabulary.
  * @remarks Files in `LOOP_FORMAT_FILES` parse roadmap loop files, so `.planning/`, ROADMAP and phase lines are their input format and skip those patterns only.
- * Files in `ROADMAP_TOOL_FILES` serve the orchestrator's roadmap approval tool, whose route and texts name the roadmap, so they skip ROADMAP only.
+ * Files in `ROADMAP_TOOL_FILES` serve the orchestrator's roadmap approval tool or match the "Roadmap Loop" playbook name, so they skip ROADMAP only.
  * @returns Violation report lines.
  */
 function checkPlanningVocabulary() {

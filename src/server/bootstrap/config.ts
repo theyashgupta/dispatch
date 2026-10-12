@@ -4,6 +4,7 @@ import path from "node:path";
 import writeFileAtomic from "write-file-atomic";
 import type {
   Config,
+  CrossSessionInbound,
   ItemSourceConfig,
   LinearStateMap,
   SlackSourceConfig,
@@ -16,8 +17,10 @@ import type {
 } from "../../shared/types.js";
 import {
   CLAUDE_ACCOUNTS_BOUNDS,
+  CROSS_SESSION_INBOUND_VALUES,
   DEFAULT_CLAUDE_ARGS,
   DEFAULT_CLEANUP_DELAY_DAYS,
+  DEFAULT_CROSS_SESSION_INBOUND,
   DEFAULT_ARCHIVE_RETENTION_DAYS,
   ARCHIVE_RETENTION_MAX_DAYS,
   CALENDAR_TITLE_MAX,
@@ -63,6 +66,9 @@ const CONFIG_TEMPLATE = {
   "// statusChannel":
     'Status source: "hooks", "pane", or "auto" (prefer hooks per session, pane fallback). Default "auto".',
   statusChannel: "auto",
+  "// crossSessionInbound":
+    'How sessions you start from a ticket treat messages from other Claude sessions: "accept", "hold" or "refuse". Roadmap Loop and orchestrator sessions refuse unless the board policy or the start request sets a value. Default "accept".',
+  crossSessionInbound: DEFAULT_CROSS_SESSION_INBOUND,
   "// updateCheck":
     "Set to false to disable the on-boot update check. Default true.",
   updateCheck: true,
@@ -94,6 +100,26 @@ function readStatusChannel(parsed: Record<string, unknown>): StatusChannel {
   throw new StartupError(
     `statusChannel in ${CONFIG_PATH} must be one of "hooks", "pane", "auto". Fix it and restart.`,
   );
+}
+
+/**
+ * Read the `crossSessionInbound` key: absent resolves to the default, `accept`.
+ *
+ * @remarks An unknown value also resolves to the default, with one warning instead of a
+ * `StartupError`, so a typo never blocks boot.
+ */
+function readCrossSessionInbound(
+  parsed: Record<string, unknown>,
+): CrossSessionInbound {
+  const value = parsed.crossSessionInbound;
+  if (value === undefined) return DEFAULT_CROSS_SESSION_INBOUND;
+  const known = CROSS_SESSION_INBOUND_VALUES.find((v) => v === value);
+  if (known) return known;
+  const choices = CROSS_SESSION_INBOUND_VALUES.map((v) => `"${v}"`).join(", ");
+  console.warn(
+    `[config] crossSessionInbound in ${CONFIG_PATH} must be one of ${choices}; using "${DEFAULT_CROSS_SESSION_INBOUND}".`,
+  );
+  return DEFAULT_CROSS_SESSION_INBOUND;
 }
 
 /**
@@ -529,6 +555,7 @@ export function loadConfig(): Config {
         : DEFAULT_POLL_INTERVAL_MS,
     workspaceRoot,
     statusChannel: readStatusChannel(parsed),
+    crossSessionInbound: readCrossSessionInbound(parsed),
     updateCheck: readUpdateCheck(parsed),
     linearSyncViaClaude: parsed.linearSyncViaClaude === true,
     sources: {

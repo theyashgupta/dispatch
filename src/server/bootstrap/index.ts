@@ -34,6 +34,7 @@ import {
 import { loadOrCreateVapidKeys } from "../services/infra/push-keys.js";
 import { VAPID_KEYS_PATH } from "../services/infra/paths.js";
 import {
+  getCrossSessionInbound,
   setHooksRuntime,
   setOrchestrationConfig,
 } from "../services/infra/config-holder.js";
@@ -364,7 +365,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   console.log(`[push] VAPID keypair loaded from ${VAPID_KEYS_PATH}`);
 
   const statusChannel = config.statusChannel ?? "auto";
-  await installHookArtifacts();
+  await installHookArtifacts(getCrossSessionInbound());
   await installPtyShim();
   const { capable, version } = await checkHooksCapability();
   if (statusChannel === "hooks" && !capable) {

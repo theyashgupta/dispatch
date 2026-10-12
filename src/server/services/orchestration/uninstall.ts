@@ -12,6 +12,7 @@ import {
   DISPATCH_DIR,
   HOOK_SCRIPT_PATH,
   HOOK_SETTINGS_PATH,
+  hookSettingsPath,
   PTY_SHIM_PATH,
   SERVICE_LABEL,
   SERVICE_PLIST_PATH,
@@ -22,6 +23,7 @@ import {
   VAULT_SCHEMA_PATH,
   VAULT_VALUES_PATH,
 } from "../infra/paths.js";
+import { CROSS_SESSION_INBOUND_VALUES } from "../../../shared/types.js";
 import { worktreePath } from "../domain/workspace-paths.js";
 import { run } from "../../adapters/exec.js";
 
@@ -125,6 +127,7 @@ export async function scanFootprint(opts: {
   const regenerables = [
     HOOK_SCRIPT_PATH,
     HOOK_SETTINGS_PATH,
+    ...CROSS_SESSION_INBOUND_VALUES.map(hookSettingsPath),
     PTY_SHIM_PATH,
     VAULT_RUN_PATH,
     VAULT_GUARD_PATH,

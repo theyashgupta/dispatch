@@ -5,6 +5,10 @@ import {
   defaultBoardPolicy,
 } from "../../../../shared/board-key.js";
 import {
+  crossSessionInboundFromSelect,
+  crossSessionInboundOptions,
+  crossSessionInboundSelectValue,
+  POLICY_INBOUND_UNSET,
   groupPlaybookFromSelect,
   groupPlaybookOptions,
   groupPlaybookSelectValue,
@@ -136,6 +140,7 @@ test("a form is dirty when any field differs from the saved values", () => {
     { budgetPerGroup: "10" },
     { supervisor: saved.supervisor === "on" ? "off" : "on" },
     { groupPlaybook: "Write code directly" },
+    { crossSessionInbound: "accept" },
   ];
   for (const patch of patches) {
     assert.equal(
@@ -146,7 +151,7 @@ test("a form is dirty when any field differs from the saved values", () => {
   }
 });
 
-test("the payload holds the twelve policy fields with numbers, null and the stored model", () => {
+test("the payload holds the thirteen policy fields with numbers, null and the stored model", () => {
   const payload = policyPayload(
     edit({
       concurrencyCap: "4",
@@ -157,6 +162,7 @@ test("the payload holds the twelve policy fields with numbers, null and the stor
   assert.deepEqual(Object.keys(payload).sort(), [
     "budgetPerGroup",
     "concurrencyCap",
+    "crossSessionInbound",
     "groupPlaybook",
     "handoffHardPercent",
     "handoffPercent",
@@ -185,6 +191,42 @@ test("the form values and the payload keep the group playbook, a name or null", 
   });
   assert.equal(named.groupPlaybook, "Write code directly");
   assert.equal(policyPayload(named).groupPlaybook, "Write code directly");
+});
+
+test("the form values and the payload carry the cross-session messages value", () => {
+  assert.equal(saved.crossSessionInbound, null);
+  assert.equal(policyPayload(saved).crossSessionInbound, null);
+  const hold = policyFormValues({
+    ...defaultBoardPolicy(DEFAULT_BOARD_KEY),
+    crossSessionInbound: "hold",
+  });
+  assert.equal(hold.crossSessionInbound, "hold");
+  assert.equal(policyPayload(hold).crossSessionInbound, "hold");
+});
+
+test("the cross-session messages options read Refuse (default), Accept, Hold for review", () => {
+  assert.deepEqual(
+    crossSessionInboundOptions.map((o) => o.label),
+    ["Refuse (default)", "Accept", "Hold for review"],
+  );
+});
+
+test("Refuse (default) stores null and each option round-trips", () => {
+  assert.equal(crossSessionInboundFromSelect(POLICY_INBOUND_UNSET), null);
+  assert.equal(crossSessionInboundSelectValue(null), POLICY_INBOUND_UNSET);
+  assert.equal(crossSessionInboundSelectValue("refuse"), POLICY_INBOUND_UNSET);
+  for (const option of crossSessionInboundOptions) {
+    const stored = crossSessionInboundFromSelect(option.value);
+    assert.equal(crossSessionInboundSelectValue(stored), option.value);
+  }
+  const picked = edit({
+    crossSessionInbound: crossSessionInboundFromSelect("accept"),
+  });
+  assert.equal(policyPayload(picked).crossSessionInbound, "accept");
+  const cleared = edit({
+    crossSessionInbound: crossSessionInboundFromSelect(POLICY_INBOUND_UNSET),
+  });
+  assert.equal(policyPayload(cleared).crossSessionInbound, null);
 });
 
 test("the group playbook options list None first, then the names in order", () => {

@@ -22,6 +22,7 @@ const board: BoardPolicy = {
   budgetPerGroup: 20,
   supervisor: "on",
   groupPlaybook: null,
+  crossSessionInbound: null,
   wakeMinutes: 15,
 };
 

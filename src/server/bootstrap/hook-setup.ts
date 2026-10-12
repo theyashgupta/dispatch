@@ -2,12 +2,12 @@ import fsp from "node:fs/promises";
 import writeFileAtomic from "write-file-atomic";
 import { run } from "../adapters/exec.js";
 import { resolveBinaryPath } from "../adapters/resolve-binary.js";
-import { PAUSE_TOOL_NAMES } from "../services/orchestration/hook-events.js";
+import { writeHookSettings } from "../services/infra/hook-settings.js";
+import type { CrossSessionInbound } from "../../shared/types.js";
 import { ensureVaultScaffold } from "../services/infra/vault.js";
 import {
   DISPATCH_DIR,
   HOOK_SCRIPT_PATH,
-  HOOK_SETTINGS_PATH,
   VAULT_RUN_PATH,
   VAULT_GUARD_PATH,
   VAULT_VALUES_PATH,
@@ -377,77 +377,17 @@ deny(
 `;
 
 /**
- * Build the `--settings` layer content: Stop + StopFailure + UserPromptSubmit + PostToolUse (unmatched, catch-all)
- * plus a matched `PreToolUse` entry whose matcher is derived from {@link PAUSE_TOOL_NAMES} —
- * the single source of truth shared with hook-events' enter/flip-back branches, so extending the
- * pause-tool set can never half-wire (a hardcoded matcher edited out of sync would leave the
- * catch-all PostToolUse flipping back on a tool the matcher never delivers). Claude Code matchers
- * accept regex alternation, and a single name degenerates to the exact string. Each entry carries
- * an explicit per-entry timeout (the CLI default is 600s and a timeout-less slow hook blocks the
- * turn for its full runtime). PostToolUse feeds the unseen-activity dot via hook-events' throttled
- * `outputChangedAt` stamp, AND (HOOK-03) carries the flip-back signal for a tool-mediated pause.
- * PreToolUse (HOOK-03) is the structural safety net for the same pause class: live-verified
- * (48-DIAGNOSIS.md) to fire reliably on the installed CLI, catching the pause regardless of
- * whether the agent follows the STATUS_PROTOCOL wording (kickoff.ts) that asks it to print a
- * marker line first. SessionStart feeds the conversation start order.
- *
- * The vault's `permissions.deny` rule and its second `PreToolUse` guard entry are two layers over
- * two different tools, not two spellings of the same block: the deny rule governs the Read tool
- * (and a Bash command that places the literal absolute values path as an argument), while the
- * guard governs the Bash tool for every command shape the deny rule cannot see. Both are enforced
- * by the CLI's own permission engine rather than by prompt engineering, and both are recorded able
- * to survive bypass-permissions mode, plan 01's eight-cell enforcement table (105-01-SUMMARY.md)
- * is the local evidence. The deny entry's `Read(/${VAULT_VALUES_PATH})` interpolation reads as a
- * single extra leading slash, but `VAULT_VALUES_PATH` already carries its own, so the rendered
- * rule ends up with the double-leading-slash form the same spike proved load-bearing: a single
- * total slash was a silent no-op on the installed CLI. Both layers ride this `--settings` flag, so
- * a launch below the hooks floor, under a forced pane status channel
- * (`runtime.statusChannel === "pane"`, see `steps.ts`'s `startClaude`), or with hooks
- * env-disabled carries neither layer, leaving the runner's own refusal gate as the session's only
- * remaining protection.
- * @remarks Ratified as `T-105-03` (the deny rule, ACCEPTED best-effort defense-in-depth, not
- * confirmed to hold alone on the currently installed CLI) and `T-105-06` (the below-floor degrade
- * that carries neither layer), see docs/ARCHITECTURE.md#security-threat-model.
- * @see docs/ARCHITECTURE.md#hooks-status-channel
- * @see docs/ARCHITECTURE.md#security-threat-model
- */
-function hookSettingsJson(): string {
-  const entry = [
-    { hooks: [{ type: "command", command: HOOK_SCRIPT_PATH, timeout: 5 }] },
-  ];
-  const settings = {
-    permissions: {
-      deny: [`Read(/${VAULT_VALUES_PATH})`],
-    },
-    crossSessionInbound: "refuse",
-    hooks: {
-      SessionStart: entry,
-      Stop: entry,
-      StopFailure: entry,
-      UserPromptSubmit: entry,
-      PostToolUse: entry,
-      PostToolUseFailure: entry,
-      PreToolUse: [
-        { matcher: [...PAUSE_TOOL_NAMES].join("|"), hooks: entry[0].hooks },
-        {
-          matcher: "Bash",
-          hooks: [{ type: "command", command: VAULT_GUARD_PATH, timeout: 5 }],
-        },
-      ],
-    },
-  };
-  return JSON.stringify(settings, null, 2) + "\n";
-}
-
-/**
  * Idempotently (re)write every `~/.dispatch` boot artifact: the hook script, the vault-run
- * runner, the vault-guard PreToolUse hook, the settings JSON, and the vault store scaffold.
+ * runner, the vault-guard PreToolUse hook, the four settings files (`hook-settings.json` holding
+ * `inbound`, plus one file per inbound value), and the vault store scaffold.
  * Regenerating every boot self-heals manual edits or moves and keeps the script paths in the
  * settings current. Atomic writes via write-file-atomic (repo standard); all three scripts must
  * be executable for claude to spawn them. `write-file-atomic`'s `mode` option is create-only, so
  * each executable write is followed by an explicit `chmod`.
  */
-export async function installHookArtifacts(): Promise<void> {
+export async function installHookArtifacts(
+  inbound: CrossSessionInbound,
+): Promise<void> {
   await fsp.mkdir(DISPATCH_DIR, { recursive: true, mode: 0o700 });
   await writeFileAtomic(HOOK_SCRIPT_PATH, HOOK_SCRIPT, { mode: 0o755 });
   await fsp.chmod(HOOK_SCRIPT_PATH, 0o755);
@@ -455,9 +395,7 @@ export async function installHookArtifacts(): Promise<void> {
   await fsp.chmod(VAULT_RUN_PATH, 0o755);
   await writeFileAtomic(VAULT_GUARD_PATH, VAULT_GUARD_SCRIPT, { mode: 0o755 });
   await fsp.chmod(VAULT_GUARD_PATH, 0o755);
-  await writeFileAtomic(HOOK_SETTINGS_PATH, hookSettingsJson(), {
-    mode: 0o644,
-  });
+  await writeHookSettings(inbound);
   await ensureVaultScaffold();
 }
 

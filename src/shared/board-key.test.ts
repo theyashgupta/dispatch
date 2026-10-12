@@ -53,10 +53,12 @@ void test("the default policy has the D-6 values and the supervisor off only on 
     supervisor: "off",
     groupPlaybook: null,
     wakeMinutes: 15,
+    crossSessionInbound: null,
   });
   const acme = parseBoardKey("ACME");
   assert.ok(acme);
   assert.equal(defaultBoardPolicy(acme).supervisor, "on");
+  assert.equal(defaultBoardPolicy(acme).crossSessionInbound, null);
 });
 
 void test("deriveBoardKey follows the truth table", () => {

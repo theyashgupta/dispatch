@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CROSS_SESSION_INBOUND_VALUES } from "../../shared/types.js";
 import { MOVABLE_COLUMNS } from "../../shared/orchestrator-limits.js";
 import { validateCommentBody } from "../../shared/comment-body.js";
 import { hasDispatchMarker } from "../services/infra/playbooks.js";
@@ -110,7 +111,11 @@ export const moveBodySchema = z.object(
   COLUMN_CODE,
 );
 
-/** The `POST /cards/:id/start` body; every field is optional and a wrong type reads as absent. */
+/**
+ * The `POST /cards/:id/start` body; every field is optional and a wrong type reads as absent.
+ *
+ * @remarks The one exception is `crossSessionInbound`: a value outside the known list answers 400.
+ */
 export const startBodySchema = z
   .preprocess(
     fieldsOf,
@@ -119,6 +124,9 @@ export const startBodySchema = z
       folder: z.unknown().optional(),
       repos: z.unknown().optional(),
       playbook: optionalString,
+      crossSessionInbound: z
+        .enum(CROSS_SESSION_INBOUND_VALUES, "invalid crossSessionInbound")
+        .optional(),
       newSession: z
         .unknown()
         .optional()

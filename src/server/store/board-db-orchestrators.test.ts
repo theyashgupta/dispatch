@@ -138,7 +138,7 @@ void test("an existing database without the column gains it on open with no sche
   after.close();
 });
 
-void test("a stored policy with no groupPlaybook reads the default and keeps its other values", () => {
+void test("a stored policy with no groupPlaybook or crossSessionInbound reads the default and keeps its other values", () => {
   const OLD = parseBoardKey("OLD") as BoardKey;
   const legacy: Record<string, unknown> = {
     ...defaultBoardPolicy(OLD),
@@ -146,6 +146,7 @@ void test("a stored policy with no groupPlaybook reads the default and keeps its
     shipRights: "merge",
   };
   delete legacy.groupPlaybook;
+  delete legacy.crossSessionInbound;
   const conn = raw();
   conn
     .prepare(
@@ -158,6 +159,7 @@ void test("a stored policy with no groupPlaybook reads the default and keeps its
     .readBoards()
     .find((b) => b.key === OLD);
   assert.equal(read?.policy.groupPlaybook, null);
+  assert.equal(read?.policy.crossSessionInbound, null);
   assert.equal(read?.policy.concurrencyCap, 7);
   assert.equal(read?.policy.shipRights, "merge");
 });

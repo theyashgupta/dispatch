@@ -46,12 +46,17 @@ import { boardRepository as store } from "../../store/board-repository.js";
 import { buildKickoff } from "../infra/kickoff.js";
 import { parseClaudeArgs } from "../domain/claude-args.js";
 import {
+  getCrossSessionInbound,
   getHooksRuntime,
   getOrchestrationConfig,
 } from "../infra/config-holder.js";
 import { recordNewestConversation } from "./resume-target.js";
 import { newHookTokenValue, registerHookToken } from "./hook-tokens.js";
-import { HOOK_SETTINGS_PATH } from "../infra/paths.js";
+import { hookSettingsPath } from "../infra/paths.js";
+import {
+  isGuardedLaunch,
+  resolveCrossSessionInbound,
+} from "../domain/cross-session-inbound.js";
 import { worktreePath as buildWorktreePath } from "../domain/workspace-paths.js";
 import { boardWorkspace } from "../domain/board-workspace.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
@@ -165,6 +170,8 @@ export interface SagaContext {
    * not exist — a consumer must not attempt to fetch it.
    */
   inheritBaseRef?: string;
+  /** A new-session request's merged start intent; the card's stored intent is not written for it. */
+  launchIntent?: NonNullable<Card["startIntent"]>;
 }
 
 type StartVariant = NonNullable<StartError["variant"]>;
@@ -511,6 +518,7 @@ export interface LaunchClaudeInput {
   account: LaunchAccount;
   onCreated?: () => void;
   onHookSilent?: () => void;
+  launchIntent?: NonNullable<Card["startIntent"]>;
 }
 
 /** Marks a tmux session whose pane root is the login shell, so a relaunch may type into it. */
@@ -538,7 +546,13 @@ export async function launchClaude(input: LaunchClaudeInput): Promise<boolean> {
     : existingHooks(store.getCard(cardId));
   if (hooks === null) input.onHookSilent?.();
   const card = store.getCard(cardId);
-  const launch = await buildLaunch(account, leadingArgs, hooks, card);
+  const launch = await buildLaunch(
+    account,
+    leadingArgs,
+    hooks,
+    card,
+    input.launchIntent,
+  );
   if (created) {
     await newSession(tmuxSession, cwd, [], {
       ...launch.env,
@@ -705,22 +719,42 @@ function cardPolicyArgs(
 /**
  * Build the claude argv and env every launch site shares: the resolved binary, the Settings
  * arguments, the hooks settings layer, and the account config dir.
+ *
+ * @remarks The cross-session inbound value comes from the card as stored now, not from the
+ * caller's copy, because a start saga saves the start intent after it read the card. A given
+ * `launchIntent` replaces the card's stored intent, for a new session whose request fields are
+ * never written to the card.
  */
 export async function buildLaunch(
   account: LaunchAccount,
   leadingArgs: string[],
   hooks: LaunchHooks,
   card?: Card,
+  launchIntent?: NonNullable<Card["startIntent"]>,
 ): Promise<{ argv: string[]; env: Record<string, string> }> {
   const configured = parseClaudeArgs(
     getOrchestrationConfig()?.claudeArgs ?? DEFAULT_CLAUDE_ARGS,
   );
   const policy = card ? cardPolicyArgs(card, configured) : null;
+  const current = card ? (store.getCard(card.id) ?? card) : undefined;
+  const effective = current
+    ? { ...current, startIntent: launchIntent ?? current.startIntent }
+    : undefined;
+  const guarded = effective ? isGuardedLaunch(effective) : false;
+  const inbound = resolveCrossSessionInbound({
+    intent: effective?.startIntent?.crossSessionInbound,
+    guarded,
+    policy: guarded
+      ? store.getBoard(current?.boardKey ?? DEFAULT_BOARD_KEY)?.policy
+          .crossSessionInbound
+      : null,
+    config: getCrossSessionInbound(),
+  });
   return buildClaudeLaunch({
     claudePath: (await resolveBinaryPath("claude")) ?? "claude",
     claudeArgs: policy?.claudeArgs ?? configured,
     leadingArgs: [...(policy?.leadingArgs ?? []), ...leadingArgs],
-    settingsPath: HOOK_SETTINGS_PATH,
+    settingsPath: hookSettingsPath(inbound),
     hooks,
     configDir: account.configDir,
   });
@@ -786,6 +820,7 @@ const startClaude: SagaStep = {
       cwd: ctx.workspacePath,
       leadingArgs: [],
       account,
+      launchIntent: ctx.launchIntent,
       onCreated: () => {
         ctx.tmuxSessionCreated = true;
       },

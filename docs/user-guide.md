@@ -111,20 +111,21 @@ To open the policy form of a board:
 
 Only you can change the policy. The orchestrator reads it. No tool can change it.
 
-| Label                               | Allowed values                                                                                   | Default                     |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------- |
-| **Roadmap approval**                | **Ask me for each roadmap**, **Approve when the rules pass, else ask**, **Approve each roadmap** | **Ask me for each roadmap** |
-| **Loops at once**                   | A whole number from 1 to 10                                                                      | 3                           |
-| **Loop model**                      | **Session settings**, or a model with the effort `high` or `max`                                 | **Session settings**        |
-| **Group playbook**                  | **None**, or a playbook name                                                                     | **None**                    |
-| **Orchestrator model**              | **Opus 5.5**, **Sonnet 5.5**, **Fable 5.1**                                                      | **Opus 5.5**                |
-| **Handoff at context percent**      | A whole number from 10 to 95                                                                     | 50                          |
-| **Hard handoff at context percent** | A whole number above the handoff percent, up to 100                                              | 80                          |
-| **Wake timer (minutes)**            | A whole number from 0 to 1440                                                                    | 15                          |
-| **At a usage limit**                | **Wait for the reset**, **Stop and ask me**                                                      | **Wait for the reset**      |
-| **Ship rights**                     | **None, I ship**, **Open PRs**, **Open and merge PRs**                                           | **None, I ship**            |
-| **Budget per group (USD)**          | An amount above 0 and at most 100000, or empty for **No limit**                                  | Empty (**No limit**)        |
-| **Supervisor**                      | **On**, **Off**                                                                                  | **On** (**Off** on `LOCAL`) |
+| Label                                                     | Allowed values                                                                                   | Default                     |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------- |
+| **Roadmap approval**                                      | **Ask me for each roadmap**, **Approve when the rules pass, else ask**, **Approve each roadmap** | **Ask me for each roadmap** |
+| **Loops at once**                                         | A whole number from 1 to 10                                                                      | 3                           |
+| **Loop model**                                            | **Session settings**, or a model with the effort `high` or `max`                                 | **Session settings**        |
+| **Group playbook**                                        | **None**, or a playbook name                                                                     | **None**                    |
+| **Messages from other sessions (loops and orchestrator)** | **Refuse (default)**, **Accept**, **Hold for review**                                            | **Refuse (default)**        |
+| **Orchestrator model**                                    | **Opus 5.5**, **Sonnet 5.5**, **Fable 5.1**                                                      | **Opus 5.5**                |
+| **Handoff at context percent**                            | A whole number from 10 to 95                                                                     | 50                          |
+| **Hard handoff at context percent**                       | A whole number above the handoff percent, up to 100                                              | 80                          |
+| **Wake timer (minutes)**                                  | A whole number from 0 to 1440                                                                    | 15                          |
+| **At a usage limit**                                      | **Wait for the reset**, **Stop and ask me**                                                      | **Wait for the reset**      |
+| **Ship rights**                                           | **None, I ship**, **Open PRs**, **Open and merge PRs**                                           | **None, I ship**            |
+| **Budget per group (USD)**                                | An amount above 0 and at most 100000, or empty for **No limit**                                  | Empty (**No limit**)        |
+| **Supervisor**                                            | **On**, **Off**                                                                                  | **On** (**Off** on `LOCAL`) |
 
 Notes on the fields:
 
@@ -132,12 +133,28 @@ Notes on the fields:
 - **Loops at once** is the concurrency cap. It covers groups and the ticket cards that the orchestrator starts. Dispatch refuses the orchestrator tools that start a group or a card above the cap. A card or group in Agent done frees its slot. A group that waits for its dependencies stays queued. The supervisor starts it when the dependencies are done and a slot is free.
 - **Loop model**: The model and effort of the sessions of a group. When you choose a model, Dispatch starts each group session with that model and effort, and it ignores any model or effort in the Settings Claude arguments. When you choose **Session settings**, Dispatch uses the Settings.
 - **Group playbook**: the playbook of a group that the orchestrator creates without one. When the playbook no longer exists, the group starts with no playbook. When the stored name is not in the list of playbooks, the select shows it as "<name> (not found)", and **Save policy** keeps the name.
+- **Messages from other sessions (loops and orchestrator)**: how a Roadmap Loop session and the orchestrator session of this board treat a message from another Claude session on this computer. **Refuse (default)** blocks the message. **Accept** delivers it. **Hold for review** shows a dialog in the session. The supervisor denies that dialog only when the board supervisor is **On**. When it is **Off**, you answer the dialog in the terminal. The value applies at the next session start. An extra orchestrator cannot override it.
 - **Wake timer (minutes)**: Wakes an idle orchestrator after this many quiet minutes. 0 turns it off. An extra orchestrator cannot override it.
 - **Supervisor** must be **On** to start an orchestrator. The form says: "The supervisor watches the loops of this board. An orchestrator needs it."
 - Choose **Save policy** to save. The button is off until a field changes. The message "Policy saved." confirms the save.
 - The number fields are text inputs. The form checks the ranges while you type and shows an error under the field. **Save policy** saves nothing while a field has an error.
 
 The server accepts wider number ranges than the form does. The form ranges in the table are the ones to use.
+
+### Messages from other Claude sessions
+
+Another Claude session on this computer can send a message to a session that Dispatch started. To set how a session that you start from a ticket treats these messages:
+
+1. Open **Settings**.
+2. Open **Board**.
+3. In **Messages from other Claude sessions**, choose **Accept**, **Hold for review** or **Refuse**. The default is **Accept**.
+4. Choose **Save**.
+
+The page says: "Applies to sessions that you start from a ticket. Roadmap Loop and orchestrator sessions refuse these messages unless the board policy or the start request sets a value. A running session keeps its value until it restarts."
+
+A session that runs a playbook whose name starts with "Roadmap Loop", and an orchestrator session, use the board policy value (see "Board policy"). The start route also accepts the field `crossSessionInbound` for one card; the card keeps that value for each later launch only when the request starts the session of the card itself. A "start another session" request applies the value to the first launch of that new session only.
+
+A session that starts without hooks gets no settings file, so this value does not apply to it. A session starts without hooks when the status channel is the pane, when the Claude CLI is below the hooks version, or when hooks are off.
 
 ## Add and start an orchestrator
 

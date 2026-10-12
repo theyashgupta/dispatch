@@ -1823,7 +1823,10 @@ class BoardStore extends EventEmitter {
    * the original playbook choice instead of silently degrading to a playbook-less session.
    * No-op if the id is unknown.
    */
-  setStartIntent(id: string, intent: { playbook?: string }): Promise<void> {
+  setStartIntent(
+    id: string,
+    intent: NonNullable<Card["startIntent"]>,
+  ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) card.startIntent = intent;

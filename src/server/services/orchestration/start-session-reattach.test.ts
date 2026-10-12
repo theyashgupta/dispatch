@@ -11,6 +11,12 @@ const env = await isolateTmuxEnv();
 const tmux = await import("../../adapters/tmux.js");
 const { store } = await import("../../store/board.store.js");
 const { startSession } = await import("./start-session.js");
+const { steps } = await import("./steps.js");
+const { isGuardedLaunch, resolveCrossSessionInbound } =
+  await import("../domain/cross-session-inbound.js");
+
+const ROADMAP_LOOP = "Roadmap Loop (autonomous)";
+const config = (): Config => ({ workspaceRoot: env.root }) as Config;
 
 void test(
   "a reattach keeps the stored session folder after the board folder changes",
@@ -138,6 +144,131 @@ void test(
     } finally {
       await env.killServer();
       fs.rmSync(reposRoot, { recursive: true, force: true });
+    }
+  },
+);
+
+void test(
+  "a one-field start keeps the other stored intent field, in both directions",
+  { skip: !env.canRunRealTmux },
+  async (t) => {
+    await store.load();
+    t.mock.method(store, "setProvisioning", () =>
+      Promise.reject(new Error("saga stopped by the test")),
+    );
+    const card = await store.createLocalCard(DEFAULT_BOARD_KEY, "merge", "");
+    await store.setStartIntent(card.id, {
+      playbook: "Ship it",
+      crossSessionInbound: "hold",
+    });
+
+    await startSession(card.id, "", config(), {
+      crossSessionInbound: "refuse",
+    });
+    assert.deepEqual(store.getCard(card.id)?.startIntent, {
+      playbook: "Ship it",
+      crossSessionInbound: "refuse",
+    });
+
+    await startSession(card.id, "", config(), { playbook: "Other" });
+    assert.deepEqual(store.getCard(card.id)?.startIntent, {
+      playbook: "Other",
+      crossSessionInbound: "refuse",
+    });
+  },
+);
+
+void test(
+  "a new-session start leaves the card intent alone and a later primary launch stays guarded",
+  { skip: !env.canRunRealTmux },
+  async (t) => {
+    await store.load();
+    t.mock.method(store, "setProvisioning", () =>
+      Promise.reject(new Error("saga stopped by the test")),
+    );
+    const card = await store.createLocalCard(DEFAULT_BOARD_KEY, "loop", "");
+    await store.setStartIntent(card.id, { playbook: ROADMAP_LOOP });
+    await store.completeStart(card.id, undefined, {
+      workspacePath: path.join(env.root, card.identifier),
+      branch: card.identifier,
+      tmuxSession: `dsp-${card.identifier}`,
+    });
+
+    await startSession(card.id, "", config(), {
+      newSession: true,
+      crossSessionInbound: "accept",
+      playbook: "Other",
+    });
+
+    const after = store.getCard(card.id);
+    assert.ok(after);
+    assert.match(after.startError?.stderr ?? "", /saga stopped by the test/);
+    assert.equal(isGuardedLaunch(after), true);
+    assert.equal(
+      resolveCrossSessionInbound({
+        intent: after.startIntent?.crossSessionInbound,
+        guarded: true,
+        policy: null,
+        config: "accept",
+      }),
+      "refuse",
+    );
+    assert.deepEqual(after.startIntent, { playbook: ROADMAP_LOOP });
+  },
+);
+
+void test(
+  "a new-session start hands the merged request intent to the launch and keeps the card intent",
+  { skip: !env.canRunRealTmux },
+  async (t) => {
+    await store.load();
+    let launchIntent: unknown = "unset";
+    t.mock.method(steps[0], "run", (ctx: { launchIntent?: unknown }) => {
+      launchIntent = ctx.launchIntent;
+      return Promise.reject(new Error("saga stopped by the test"));
+    });
+    const card = await store.createLocalCard(DEFAULT_BOARD_KEY, "ticket", "");
+    await store.completeStart(card.id, undefined, {
+      workspacePath: path.join(env.root, card.identifier),
+      branch: card.identifier,
+      tmuxSession: `dsp-${card.identifier}`,
+    });
+
+    await startSession(card.id, "", config(), {
+      newSession: true,
+      playbook: ROADMAP_LOOP,
+    });
+
+    assert.deepEqual(launchIntent, { playbook: ROADMAP_LOOP });
+    assert.equal(store.getCard(card.id)?.startIntent, undefined);
+  },
+);
+
+void test(
+  "a start that reattaches to a live session does not save the request intent",
+  { skip: !env.canRunRealTmux },
+  async () => {
+    await store.load();
+    const card = await store.createLocalCard(DEFAULT_BOARD_KEY, "live", "");
+    await store.setStartIntent(card.id, { playbook: ROADMAP_LOOP });
+    const workspacePath = path.join(env.root, card.identifier);
+    fs.mkdirSync(workspacePath, { recursive: true });
+    const tmuxSession = `dsp-${card.identifier}`;
+    await tmux.newSession(tmuxSession, workspacePath, ["sleep", "60"]);
+    try {
+      await store.completeStart(card.id, undefined, {
+        workspacePath,
+        branch: card.identifier,
+        tmuxSession,
+      });
+      await startSession(card.id, "", config(), {
+        crossSessionInbound: "accept",
+      });
+      assert.deepEqual(store.getCard(card.id)?.startIntent, {
+        playbook: ROADMAP_LOOP,
+      });
+    } finally {
+      await tmux.killSession(`=${tmuxSession}`);
     }
   },
 );

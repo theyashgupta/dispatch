@@ -229,6 +229,7 @@ const policy: BoardPolicy = {
   budgetPerGroup: null,
   supervisor: "on",
   groupPlaybook: null,
+  crossSessionInbound: null,
   wakeMinutes: 15,
 };
 
@@ -247,7 +248,7 @@ test("the panel decisions query polls on the shared decisions key", async () => 
   assert.equal(calls[0]?.url, "/api/decisions?board=LOCAL&state=open");
 });
 
-test("Save policy puts the twelve fields and no credits value, then updates the board list", async () => {
+test("Save policy puts the thirteen fields and no credits value, then updates the board list", async () => {
   const client = newClient();
   const stored = { key: LOCAL, policy: { ...policy, concurrencyCap: 4 } };
   client.setQueryData(boardListKeys.list, {
@@ -258,11 +259,12 @@ test("Save policy puts the twelve fields and no credits value, then updates the 
   const result = await new MutationObserver(
     client,
     savePolicyMutationOptions(client, LOCAL),
-  ).mutate({ ...policy, concurrencyCap: 4 });
+  ).mutate({ ...policy, concurrencyCap: 4, crossSessionInbound: "accept" });
   assert.equal(result.ok, true);
   assert.equal(calls[0]?.url, "/api/boards/LOCAL/policy");
   assert.equal(calls[0]?.init?.method, "PUT");
-  assert.equal(Object.keys(body(0) as object).length, 12);
+  assert.equal(Object.keys(body(0) as object).length, 13);
+  assert.equal((body(0) as BoardPolicy).crossSessionInbound, "accept");
   assert.equal(/credit/i.test(calls[0]?.init?.body as string), false);
   const list = client.getQueryData<{ boards: { policy: BoardPolicy }[] }>(
     boardListKeys.list,
