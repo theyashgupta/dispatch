@@ -1,17 +1,29 @@
 import type { Card, Item } from "./types.js";
 
 /**
- * The single predicate for "this card is a ticket waiting in the Inbox".
+ * Whether a card is a ticket waiting in the Inbox: in the Inbox, not dismissed, not a group member.
  *
- * @remarks Excluding group members matches the counting convention already used by
- * `buildWorkspaceGroups` (orca-selectors.ts) and `StatusPillSwitcher`'s per-column count, a
- * deliberate alignment, not an arbitrary choice. Exported (rather than inlined per call site) so
- * the strip badge, the To Do empty state, the Inbox list and its project filter cannot drift onto
- * two different definitions of the same number. A member is also not independently promotable:
- * `/move` 409s it via `groupedMemberError`, so it must never render its own Inbox row.
+ * @remarks Exported so the strip badge, the To Do empty state and the Inbox list cannot drift onto two definitions of the same number. A member is excluded because `/move` 409s it via `groupedMemberError`, and this matches `buildWorkspaceGroups` and `StatusPillSwitcher`.
  */
 export function isInboxWaiting(card: Card): boolean {
-  return card.column === "inbox" && card.groupId == null;
+  return (
+    card.column === "inbox" &&
+    card.groupId == null &&
+    card.inboxDismissedAt == null
+  );
+}
+
+/**
+ * Whether a card is a dismissed Inbox ticket, shown under Dismissed.
+ *
+ * @remarks Group members are excluded for the same reason as {@link isInboxWaiting}.
+ */
+export function isInboxDismissed(card: Card): boolean {
+  return (
+    card.column === "inbox" &&
+    card.groupId == null &&
+    card.inboxDismissedAt != null
+  );
 }
 
 /** Counts the Inbox rows: cards waiting (group members excluded) plus the listed items. */

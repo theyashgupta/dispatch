@@ -156,6 +156,12 @@ export const sessionAccountBodySchema = z.object(
   "invalid-id",
 );
 
+/** Validates the Inbox dismiss or restore body. */
+export const inboxDismissBodySchema = z.object(
+  { dismissed: z.boolean("invalid-dismissed") },
+  "invalid-dismissed",
+);
+
 export const sessionPinBodySchema = sessionBodySchema.extend({
   pinned: z.boolean("invalid-pinned"),
 });

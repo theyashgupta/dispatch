@@ -157,6 +157,10 @@ export interface BoardRepository {
     id: string,
     intent: NonNullable<Card["startIntent"]>,
   ): Promise<void>;
+  setInboxDismissed(
+    id: string,
+    dismissed: boolean,
+  ): Promise<"ok" | "unknown" | "not-in-inbox">;
   addWorkspaceFolder(board: BoardKey, path: string): Promise<void>;
   removeWorkspaceFolder(board: BoardKey, path: string): Promise<void>;
   setLastUsedFolder(board: BoardKey, path: string): Promise<void>;
