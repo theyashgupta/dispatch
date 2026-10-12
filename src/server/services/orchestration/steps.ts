@@ -12,6 +12,7 @@ import { sleep } from "../../adapters/exec.js";
 import {
   branchExists,
   fetchBase,
+  fetchPullHead,
   gitCommonDir,
   revParseVerify,
   worktreeAddExistingBranch,
@@ -53,6 +54,7 @@ import {
 import { recordNewestConversation } from "./resume-target.js";
 import { newHookTokenValue, registerHookToken } from "./hook-tokens.js";
 import { hookSettingsPath } from "../infra/paths.js";
+import { githubRepoAt } from "./github-repos.js";
 import {
   isGuardedLaunch,
   resolveCrossSessionInbound,
@@ -61,6 +63,7 @@ import { worktreePath as buildWorktreePath } from "../domain/workspace-paths.js"
 import { boardWorkspace } from "../domain/board-workspace.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { isHiddenCard } from "../../../shared/hidden-card.js";
+import { reviewBranch } from "../../../shared/pr-rows.js";
 import { DISPATCH_DATA_DIR } from "../../store/data-dir.js";
 import {
   orchestratorLaunchArgs,
@@ -172,6 +175,7 @@ export interface SagaContext {
   inheritBaseRef?: string;
   /** A new-session request's merged start intent; the card's stored intent is not written for it. */
   launchIntent?: NonNullable<Card["startIntent"]>;
+  reviewRepo?: string;
 }
 
 type StartVariant = NonNullable<StartError["variant"]>;
@@ -295,12 +299,28 @@ async function createRepoWorktree(
   ctx: SagaContext,
   repoPath: string,
   base: string,
+  reviewNumber?: number,
 ): Promise<void> {
   await worktreePrune(repoPath);
 
   const worktreePath = buildWorktreePath(ctx.workspacePath, repoPath);
 
   if (await worktreeRegistered(repoPath, worktreePath)) {
+    return;
+  }
+
+  if (reviewNumber !== undefined) {
+    try {
+      await fetchPullHead(repoPath, reviewNumber);
+      await worktreeAddExistingBranch(
+        repoPath,
+        worktreePath,
+        reviewBranch(reviewNumber),
+      );
+    } catch (err) {
+      throw new StartStepError("creating worktrees", stderrOf(err), "generic");
+    }
+    ctx.createdWorktrees.push({ repoPath, worktreePath });
     return;
   }
 
@@ -363,6 +383,25 @@ async function createRepoWorktree(
 }
 
 /**
+ * The path of the workspace repository whose `origin` is the GitHub repository `prRepo`, or null.
+ *
+ * @remarks Matches by remote name, not by position or folder name: the Start dialog may send any
+ * repo order, and a checkout folder need not carry the GitHub repository name.
+ */
+async function findReviewRepo(
+  repos: { path: string }[],
+  prRepo: string,
+): Promise<string | null> {
+  for (const { path: repoPath } of repos) {
+    const name = await githubRepoAt(repoPath);
+    if (name !== null && name.toLowerCase() === prRepo.toLowerCase()) {
+      return repoPath;
+    }
+  }
+  return null;
+}
+
+/**
  * Saga Step 2: create the per-repo worktrees, recording each creation onto `ctx` so undo can
  * compensate in reverse.
  * @remarks Runs the restart-idempotency check (`worktreeRegistered`) BEFORE the base-ref fetch, so
@@ -399,7 +438,20 @@ const createWorktrees: SagaStep = {
       );
     }
     const seenCommonDirs = new Set<string>();
-    for (const { path: repoPath, base } of ctx.card.workspace?.repos ?? []) {
+    const repos = ctx.card.workspace?.repos ?? [];
+    const reviewPr = ctx.card.reviewPr;
+    const reviewRepo = reviewPr
+      ? await findReviewRepo(repos, reviewPr.repo)
+      : null;
+    if (reviewRepo !== null) ctx.reviewRepo = reviewRepo;
+    if (reviewPr && reviewRepo === null) {
+      throw new StartStepError(
+        "creating worktrees",
+        `No repository of this workspace has ${reviewPr.repo} as its origin`,
+        "generic",
+      );
+    }
+    for (const { path: repoPath, base } of repos) {
       if (base.startsWith("-")) {
         throw new StartStepError(
           "creating worktrees",
@@ -418,7 +470,12 @@ const createWorktrees: SagaStep = {
         seenCommonDirs.add(commonDir);
       }
       await withRepoLock(commonDir ?? path.resolve(repoPath), () =>
-        createRepoWorktree(ctx, repoPath, base),
+        createRepoWorktree(
+          ctx,
+          repoPath,
+          base,
+          repoPath === reviewRepo ? reviewPr?.number : undefined,
+        ),
       );
     }
   },
@@ -848,6 +905,10 @@ const sendKickoff: SagaStep = {
       .map((id) => store.getCard(id))
       .filter((c): c is Card => c != null);
     const kickoff = buildKickoff(ctx.card, ctx.extraDirection, repoNames, {
+      reviewRepoName:
+        ctx.reviewRepo === undefined
+          ? undefined
+          : path.basename(ctx.reviewRepo),
       restarted: ctx.restarted,
       playbookBody: ctx.playbookBody,
       members,

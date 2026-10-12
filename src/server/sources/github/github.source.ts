@@ -6,13 +6,17 @@ import type {
   SourceIssue,
 } from "../../../shared/types.js";
 import { RateLimited, type TicketSource } from "../ticket.source.js";
+import {
+  githubItem,
+  mapOpenPrs,
+  openPrsRequest,
+  type OpenPrsAnswer,
+} from "./github-open-prs.js";
 
 export const GITHUB_API_URL =
   process.env.DISPATCH_GITHUB_API_URL ?? "https://api.github.com";
 
 const GITHUB_TIMEOUT_MS = 30_000;
-
-const SNIPPET_MAX = 280;
 
 const PAGE_SIZE = 100;
 
@@ -142,9 +146,13 @@ function repoOf(repositoryUrl: string): { owner: string; name: string } | null {
  * @remarks Results arrive in category order and a PR an earlier category returned is not repeated,
  * so a review request that also mentions the user stays a review. The pull is partial when any
  * category has more than one page, reports incomplete results, or hides SSO-protected orgs; a
- * partial pull must never resolve items it did not see.
+ * partial pull must never resolve items it did not see. An open-PR item with the same id as a
+ * `@me` item keeps the `@me` type, category and priority and only adds its state fields.
  */
-export function mergeSearchResults(results: readonly SearchResult[]): {
+export function mergeSearchResults(
+  results: readonly SearchResult[],
+  openItems: readonly Item[] = [],
+): {
   items: Item[];
   partial: boolean;
 } {
@@ -157,24 +165,34 @@ export function mergeSearchResults(results: readonly SearchResult[]): {
       const key = `${repo.owner}/${repo.name}#${raw.number}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      items.push({
-        id: `github:${key}`,
-        source: "github",
-        type: result.category.type,
-        title: raw.title,
-        snippet: (raw.body ?? "").trim().slice(0, SNIPPET_MAX),
-        url: raw.html_url,
-        createdAt: raw.updated_at,
-        priority: result.category.priority,
-        state: "unread",
-        meta: {
+      items.push(
+        githubItem({
           repo: `${repo.owner}/${repo.name}`,
-          number: String(raw.number),
-          author: raw.user?.login ?? "",
-          draft: raw.draft === true ? "true" : "false",
-          category: result.category.category,
-        },
-      });
+          number: raw.number,
+          type: result.category.type,
+          title: raw.title,
+          body: raw.body,
+          url: raw.html_url,
+          updatedAt: raw.updated_at,
+          priority: result.category.priority,
+          meta: {
+            author: raw.user?.login ?? "",
+            draft: raw.draft === true ? "true" : "false",
+            category: result.category.category,
+          },
+        }),
+      );
+    }
+  }
+  const byId = new Map(items.map((item) => [item.id, item]));
+  for (const open of openItems) {
+    const existing = byId.get(open.id);
+    if (existing) {
+      for (const [key, value] of Object.entries(open.meta)) {
+        if (key !== "category") existing.meta[key] = value;
+      }
+    } else {
+      items.push(open);
     }
   }
   const partial = results.some(
@@ -228,6 +246,18 @@ export async function fetchGithubLogin(
   }
 }
 
+async function searchOpenPrs(
+  token: string,
+  repos: readonly string[],
+): Promise<{ items: Item[]; truncated: boolean }> {
+  const login = (await fetchGithubLogin(token))?.account ?? "";
+  const res = await githubRequest(token, "/graphql", {
+    method: "POST",
+    body: openPrsRequest(repos),
+  });
+  return mapOpenPrs((await res.json()) as OpenPrsAnswer, login);
+}
+
 export class GitHubSource implements TicketSource {
   readonly id = "github";
   readonly kind = "snapshot" as const;
@@ -237,6 +267,7 @@ export class GitHubSource implements TicketSource {
   constructor(
     private resolveCredential: () => Promise<SourceCredential | null>,
     readonly pollIntervalMs: number,
+    private readRepos: () => Promise<string[]>,
   ) {}
 
   async fetch(): Promise<{
@@ -250,8 +281,21 @@ export class GitHubSource implements TicketSource {
     for (const category of SEARCH_CATEGORIES) {
       results.push(await search(credential.token, category));
     }
-    const { items, partial } = mergeSearchResults(results);
-    return { issues: [], items, truncated: partial };
+    const repos = await this.readRepos();
+    const open =
+      repos.length > 0
+        ? await searchOpenPrs(credential.token, repos).catch((err: unknown) => {
+            if (err instanceof RateLimited || err instanceof GitHubAuthError) {
+              throw err;
+            }
+            console.warn(
+              `[github] open pull request search failed: ${err instanceof Error ? err.message : "unknown"}`,
+            );
+            return { items: [], truncated: true };
+          })
+        : { items: [], truncated: false };
+    const { items, partial } = mergeSearchResults(results, open.items);
+    return { issues: [], items, truncated: partial || open.truncated };
   }
 
   listOptions(): Promise<{ options: FilterOption[]; truncated: boolean }> {

@@ -39,8 +39,8 @@ await seedPlaybooks();
 const all = await loadPlaybooks();
 const orchestrator = all.find((p) => p.name === "Board Orchestrator");
 
-void test("the seed adds the Roadmap Loop and the Board Orchestrator to the four earlier playbooks", () => {
-  assert.equal(all.length, 6);
+void test("the seed adds the Roadmap Loop, the Review a pull request playbook and the Board Orchestrator to the four earlier playbooks", () => {
+  assert.equal(all.length, 7);
   assert.ok(orchestrator);
   assert.equal(orchestrator.slug, "board-orchestrator");
 });
@@ -97,6 +97,26 @@ void test("the Roadmap Loop seed sits before the Board Orchestrator and holds it
   assert.ok(
     roadmap?.body.includes("Run the roadmap-loop skill on the roadmap."),
   );
+});
+
+const review = all.find((p) => p.slug === "review-pull-request");
+
+void test("the Review a pull request seed is loaded with its name and the review tag", () => {
+  assert.ok(review);
+  assert.equal(review.name, "Review a pull request");
+  assert.deepEqual(review.tags, ["review"]);
+  assert.ok(review.when && review.when.length > 0);
+});
+
+void test("the Review a pull request body holds the extra slot, the verdict rule and no reserved marker", () => {
+  assert.ok(review);
+  assert.ok(review.body.startsWith("## Extra direction\n{extra}\n"));
+  assert.ok(review.body.includes("\n## Workflow\n"));
+  assert.ok(review.body.includes('Its summary starts with "Review verdict: "'));
+  assert.equal(hasDispatchMarker(review.body), false);
+  assert.equal(hasDispatchMarker(review.when ?? ""), false);
+  assert.doesNotMatch(review.body, /\u2014/);
+  assert.equal(review.body.includes("-".repeat(2)), false);
 });
 
 void test("a v4.5.0 Board Orchestrator file is rewritten with the current seed", async () => {

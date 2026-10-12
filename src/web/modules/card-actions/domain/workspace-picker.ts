@@ -4,14 +4,21 @@ import type { RepoChoice } from "./start-request.js";
 /**
  * Pick the folder that is selected for the picker.
  *
- * @remarks Keeps the chosen folder while it is registered, else the remembered folder, else the first one.
+ * @remarks Keeps the chosen folder while it is registered, else the longest registered folder that is `preferred` or holds it, else the remembered folder, else the first one.
  */
 export function resolveFolder(
   folders: readonly string[],
   lastUsed: string | null,
   chosen: string | null,
+  preferred: string | null = null,
 ): string | null {
   if (chosen !== null && folders.includes(chosen)) return chosen;
+  if (preferred !== null) {
+    const holders = folders
+      .filter((f) => f === preferred || preferred.startsWith(f + "/"))
+      .sort((a, b) => b.length - a.length);
+    if (holders[0] !== undefined) return holders[0];
+  }
   return lastUsed !== null && folders.includes(lastUsed)
     ? lastUsed
     : (folders[0] ?? null);

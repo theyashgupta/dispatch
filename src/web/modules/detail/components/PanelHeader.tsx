@@ -29,6 +29,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { ResumeTargetLine } from "./ResumeTargetLine";
 import type { ResumeLine } from "../domain/resume-target";
+import type { ReviewHeader } from "../domain/review-header";
+import { ReviewPrBlock } from "./ReviewPrBlock";
 import { UnwindPicker } from "./UnwindPicker";
 
 interface PanelHeaderProps {
@@ -52,6 +54,7 @@ interface PanelHeaderProps {
   onSyncRequest?: (id: string) => void;
   onAskRequest?: (card: CardModel) => void;
   resumeLine?: ResumeLine;
+  reviewHeader?: ReviewHeader | null;
 }
 
 const ICON_BUTTON_CLASS = "text-muted-foreground hover:text-muted-foreground";
@@ -77,6 +80,7 @@ export function PanelHeader({
   onSyncRequest,
   onAskRequest,
   resumeLine,
+  reviewHeader,
 }: PanelHeaderProps) {
   const c = card;
   const unwindIdentifier = c?.source === "group" ? c.identifier : c?.groupId;
@@ -289,6 +293,7 @@ export function PanelHeader({
           </Button>
         )}
       </div>
+      {reviewHeader != null && <ReviewPrBlock {...reviewHeader} />}
     </div>
   );
 }

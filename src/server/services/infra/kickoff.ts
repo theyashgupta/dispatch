@@ -1,4 +1,5 @@
 import { isHiddenCard } from "../../../shared/hidden-card.js";
+import { reviewBranch } from "../../../shared/pr-rows.js";
 import type { Card } from "../../../shared/types.js";
 import { fenceUntrusted } from "../../../shared/untrusted.js";
 import { attachmentLinks, withAbsoluteAttachments } from "./attachments.js";
@@ -9,22 +10,30 @@ import { VAULT_RUN_PATH, VAULT_SCHEMA_PATH } from "./paths.js";
  * Describe the workspace layout for any repo count (N ≥ 1): a comma-joined list of `<name>/`
  * folders, phrased so a single repo reads naturally and multiple repos invite Claude to pick.
  */
-function workspaceOrientation(repoNames: string[], identifier: string): string {
+function workspaceOrientation(
+  repoNames: string[],
+  identifier: string,
+  review?: { repo: string; branch: string },
+): string {
   const folders = repoNames.map((n) => `${n}/`);
   if (folders.length === 0) {
     return `This folder is the session root for ${identifier}. It holds no repository checkout.`;
   }
   if (folders.length === 1) {
+    const branch = review?.repo === repoNames[0] ? review.branch : identifier;
     return (
       `This folder contains a git worktree for the repo ${folders[0]}, ` +
-      `on branch ${identifier}. Work there.`
+      `on branch ${branch}. Work there.`
     );
   }
   const joined =
     folders.slice(0, -1).join(", ") + " and " + folders[folders.length - 1];
+  const except = review
+    ? `, except ${review.repo}/ which is on branch ${review.branch}`
+    : "";
   return (
     `This folder contains git worktrees for ${folders.length} repos: ${joined}, ` +
-    `each on branch ${identifier}. Decide which repo(s) this ticket touches and work there.`
+    `each on branch ${identifier}${except}. Decide which repo(s) this ticket touches and work there.`
   );
 }
 
@@ -255,6 +264,7 @@ export function buildKickoff(
     playbookBody?: string;
     members?: Card[];
     builtFromBranch?: string;
+    reviewRepoName?: string;
   } = {},
 ): string {
   const slim = (card.source ?? "linear") === "linear";
@@ -322,7 +332,16 @@ export function buildKickoff(
       : []),
     ``,
     `## Workspace`,
-    workspaceOrientation(repoNames, card.identifier),
+    workspaceOrientation(
+      repoNames,
+      card.identifier,
+      card.reviewPr && opts.reviewRepoName
+        ? {
+            repo: opts.reviewRepoName,
+            branch: reviewBranch(card.reviewPr.number),
+          }
+        : undefined,
+    ),
     ``,
     ...STATUS_PROTOCOL,
     ``,

@@ -4,7 +4,7 @@ import type {
   PrReviewEvent,
 } from "../../../../shared/types.js";
 
-export type PrTone = "neutral" | "danger" | "warning" | "success";
+export type PrTone = "neutral" | "accent" | "danger" | "warning" | "success";
 
 export type PatchLineKind = "add" | "remove" | "hunk" | "context";
 

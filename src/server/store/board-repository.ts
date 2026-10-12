@@ -168,6 +168,14 @@ export interface BoardRepository {
     id: string,
     workspace: { folder: string; repos: { path: string; base: string }[] },
   ): Promise<void>;
+  setCardReview(
+    id: string,
+    review: {
+      reviewPr: NonNullable<Card["reviewPr"]>;
+      url: string;
+      workspace: NonNullable<Card["workspace"]>;
+    },
+  ): Promise<void>;
   setStatusReason(id: string, reason: string | null): Promise<void>;
   setSyncing(id: string, syncing: boolean): Promise<void>;
   mintHookChannel(

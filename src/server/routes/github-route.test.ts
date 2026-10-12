@@ -221,7 +221,7 @@ test("a disconnected source answers 401 no-credential although gh is logged in",
   });
   for (const [method, route, body] of [
     ["GET", "/github/pr/acme/api/12", undefined],
-    ["POST", "/github/pr/acme/api/12/review", { event: "APPROVE" }],
+    ["POST", "/github/pr/acme/api/12/reviews", { event: "APPROVE" }],
     ["POST", "/github/pr/acme/api/12/merge", { sha: SHA }],
   ] as const) {
     const res = await call(method, route, body);
@@ -241,7 +241,7 @@ test("a review with an unknown event or a missing body answers 400 and posts not
     {},
   ];
   for (const review of bad) {
-    const res = await call("POST", "/github/pr/acme/api/12/review", review);
+    const res = await call("POST", "/github/pr/acme/api/12/reviews", review);
     assert.equal(res.status, 400, JSON.stringify(review).slice(0, 60));
   }
   assert.equal(calls.length, 0);
@@ -264,7 +264,7 @@ test("approve and comment post reviews and each triggers a GitHub poll", async (
   const before = polls;
   answer = () => json(200, { id: 1 });
   assert.equal(
-    (await call("POST", "/github/pr/acme/api/12/review", { event: "APPROVE" }))
+    (await call("POST", "/github/pr/acme/api/12/reviews", { event: "APPROVE" }))
       .status,
     200,
   );
@@ -272,7 +272,7 @@ test("approve and comment post reviews and each triggers a GitHub poll", async (
   assert.equal(polls, before + 1);
   assert.equal(
     (
-      await call("POST", "/github/pr/acme/api/12/review", {
+      await call("POST", "/github/pr/acme/api/12/reviews", {
         event: "COMMENT",
         body: " Looks good ",
       })
@@ -310,7 +310,7 @@ test("a failed review triggers no poll", async () => {
   const before = polls;
   answer = () => json(401, {});
   assert.equal(
-    (await call("POST", "/github/pr/acme/api/12/review", { event: "APPROVE" }))
+    (await call("POST", "/github/pr/acme/api/12/reviews", { event: "APPROVE" }))
       .status,
     401,
   );
@@ -321,7 +321,7 @@ test("a failed review triggers no poll", async () => {
 test("a review GitHub refuses answers 422 with GitHub's message", async () => {
   answer = () =>
     json(422, { message: "Can not approve your own pull request" });
-  const res = await call("POST", "/github/pr/acme/api/12/review", {
+  const res = await call("POST", "/github/pr/acme/api/12/reviews", {
     event: "APPROVE",
   });
   assert.equal(res.status, 422);
@@ -393,7 +393,7 @@ test("request changes posts its body and a confirmed merge triggers a GitHub pol
   await settle();
   const before = polls;
   answer = () => json(200, { merged: true });
-  const changes = await call("POST", "/github/pr/acme/api/12/review", {
+  const changes = await call("POST", "/github/pr/acme/api/12/reviews", {
     event: "REQUEST_CHANGES",
     body: "Add a test",
   });
@@ -411,7 +411,7 @@ test("request changes posts its body and a confirmed merge triggers a GitHub pol
 });
 
 test("a review body over 20000 characters answers 400 and posts nothing", async () => {
-  const res = await call("POST", "/github/pr/acme/api/12/review", {
+  const res = await call("POST", "/github/pr/acme/api/12/reviews", {
     event: "COMMENT",
     body: "x".repeat(20001),
   });
@@ -430,7 +430,7 @@ test("no route writes the token to the console", async () => {
   await call("GET", "/github/pr/acme/api/12");
   answer = () => json(401, { message: "Bad credentials" });
   await call("GET", "/github/pr/acme/api/12");
-  await call("POST", "/github/pr/acme/api/12/review", { event: "APPROVE" });
+  await call("POST", "/github/pr/acme/api/12/reviews", { event: "APPROVE" });
   answer = () => {
     throw new TypeError("fetch failed");
   };

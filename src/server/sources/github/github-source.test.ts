@@ -40,6 +40,7 @@ function source(token: string | null = TOKEN): GitHubSource {
   return new GitHubSource(
     () => Promise.resolve(token === null ? null : { token, via: "gh" }),
     60_000,
+    () => Promise.resolve([]),
   );
 }
 
@@ -189,4 +190,75 @@ test("fetchGithubLogin answers the login, null for a rejected token, and throws 
   mock.restoreAll();
   stubFetch(() => jsonResponse(502, {}));
   await assert.rejects(fetchGithubLogin(TOKEN));
+});
+
+function graphqlNode(number: number) {
+  return {
+    number,
+    title: `PR ${number}`,
+    body: "",
+    url: `https://github.com/acme/api/pull/${number}`,
+    createdAt: "2026-09-01T00:00:00Z",
+    updatedAt: "2026-09-26T09:00:00Z",
+    isDraft: false,
+    reviewDecision: "APPROVED",
+    headRefName: `feat/${number}`,
+    baseRefName: "main",
+    changedFiles: 4,
+    author: { login: "octo" },
+    repository: { nameWithOwner: "acme/api" },
+    reviewRequests: { nodes: [] },
+    commits: {
+      nodes: [{ commit: { statusCheckRollup: { state: "FAILURE" } } }],
+    },
+  };
+}
+
+function sourceWithRepos(repos: string[]): GitHubSource {
+  return new GitHubSource(
+    () => Promise.resolve({ token: TOKEN, via: "gh" }),
+    60_000,
+    () => Promise.resolve(repos),
+  );
+}
+
+test("a PR from the review search and the GraphQL search keeps the review type and gains the open fields", async () => {
+  stubFetch((url) => {
+    if (url.pathname === "/graphql") {
+      return jsonResponse(200, {
+        data: {
+          search: {
+            issueCount: 2,
+            nodes: [graphqlNode(12), graphqlNode(20)],
+          },
+        },
+      });
+    }
+    if (url.pathname === "/user") return jsonResponse(200, { login: "me" });
+    const q = url.searchParams.get("q") ?? "";
+    return jsonResponse(
+      200,
+      q.includes("review-requested") ? searchBody([12]) : searchBody([]),
+    );
+  });
+  const { items, truncated } = await sourceWithRepos(["acme/api"]).fetch();
+  assert.equal(truncated, false);
+  const review = items.find((i) => i.id === "github:acme/api#12");
+  assert.equal(review?.type, "pr_review");
+  assert.equal(review?.priority, 75);
+  assert.equal(review?.meta.category, "review");
+  assert.equal(review?.meta.checks, "fail");
+  assert.equal(review?.meta.headRef, "feat/12");
+  assert.equal(review?.meta.changedFiles, "4");
+  const open = items.find((i) => i.id === "github:acme/api#20");
+  assert.equal(open?.type, "pr_open");
+  assert.equal(open?.meta.category, "open");
+  assert.equal(items.length, 2);
+});
+
+test("no repositories runs the three searches only", async () => {
+  const seen = stubFetch(() => jsonResponse(200, searchBody([])));
+  await sourceWithRepos([]).fetch();
+  assert.equal(seen.length, 3);
+  assert.ok(seen.every((s) => s.url.includes("/search/issues")));
 });

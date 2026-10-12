@@ -64,11 +64,13 @@ import { startArtifactDetectionLoop } from "../adapters/artifact-detect.js";
 import {
   buildRegistry,
   setCredentialResolver,
+  setGithubReposReader,
   setMacCalendarReader,
 } from "../sources/registry.js";
 import { readMacEvents } from "../adapters/calendar-mac.js";
 import { resolveIcalCredential } from "../services/orchestration/calendar.js";
 import { resolveGithubToken } from "../services/orchestration/github-token.js";
+import { githubReposReader } from "../services/orchestration/github-repos.js";
 import { resolveSentryToken } from "../services/infra/sentry-token.js";
 import { resolveSlackToken } from "../services/infra/slack-token.js";
 import {
@@ -356,6 +358,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   setOrchestrationConfig(config);
   setBoardRepository(store);
   setCredentialResolver("github", resolveGithubToken);
+  setGithubReposReader(githubReposReader);
   setCredentialResolver("sentry", resolveSentryToken);
   setCredentialResolver("slack", resolveSlackToken);
   setMacCalendarReader(readMacEvents);

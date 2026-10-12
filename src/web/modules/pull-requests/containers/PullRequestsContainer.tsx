@@ -4,8 +4,11 @@ import { startAgentFor } from "../../../../shared/item-actions.js";
 import type { BoardSnapshot, Item } from "../../../../shared/types.js";
 import {
   buildPrRows,
-  groupPrRows,
-  type PrGroupBy,
+  heldPrItems,
+  filterPrRows,
+  NO_PR_FILTERS,
+  prFilterOptions,
+  type PrFilters,
   type PrRow,
 } from "../../../../shared/pr-rows.js";
 import { pageLocation } from "../../../../shared/route.js";
@@ -18,14 +21,22 @@ import { useItems } from "@/components/ui/hooks/use-items";
 import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
 import { actionApi } from "@/queries/action-services";
 import { setItemState } from "@/queries/item-actions-api";
+import { useSourceConnectionQuery } from "@/queries/source-connection-queries";
 import { PrList } from "@/modules/pull-requests/components/PrList";
+import { prEmptyText } from "@/modules/pull-requests/domain/pr-list-copy";
+import { useGithubReposQuery } from "@/modules/pull-requests/queries/pull-requests-queries";
 import { PrDetailContainer } from "./PrDetailContainer";
+import { useReviewFlow } from "./use-review-flow";
 
 interface PullRequestsPageProps {
   board: BoardSnapshot;
   items: Item[];
   selectedKey: string | null;
   onSelect: (key: string | null) => void;
+  login: string | null;
+  boardRepos: string[] | null;
+  reviewingKey: string | null;
+  onReview: (row: PrRow) => void;
   onMarkRead: (itemId: string) => void;
   onStartAgent: (row: PrRow, prompt: string) => void;
   onNotice: (text: string) => void;
@@ -44,12 +55,19 @@ export function PullRequestsContainer({
     useAppStore(appStore, (s) => s.doneLimit),
   );
   const items = useItems(board);
+  const connection = useSourceConnectionQuery("github");
+  const repos = useGithubReposQuery();
+  const { review, reviewingKey } = useReviewFlow();
   if (board == null) return null;
   return (
     <PullRequestsPage
       board={board}
       items={items}
       selectedKey={selectedKey}
+      login={connection.data?.account ?? null}
+      boardRepos={repos.data?.ok ? repos.data.repos : null}
+      reviewingKey={reviewingKey}
+      onReview={(row) => void review(row)}
       onSelect={(key) =>
         void router.navigate({
           href: pageLocation(
@@ -80,18 +98,28 @@ function PullRequestsPage({
   board,
   items,
   selectedKey,
+  login,
+  boardRepos,
+  reviewingKey,
+  onReview,
   onSelect,
   onMarkRead,
   onStartAgent,
   onNotice,
 }: PullRequestsPageProps) {
   const narrow = useMediaQuery(CAROUSEL_QUERY);
-  const [groupBy, setGroupBy] = useState<PrGroupBy>("repo");
+  const [filters, setFilters] = useState<PrFilters>(NO_PR_FILTERS);
   const rows = useMemo(
-    () => buildPrRows(items, board.cards),
-    [items, board.cards],
+    () =>
+      buildPrRows([...items, ...heldPrItems(board.items ?? [])], board.cards),
+    [items, board.items, board.cards],
   );
-  const groups = useMemo(() => groupPrRows(rows, groupBy), [rows, groupBy]);
+  const visibleRows = useMemo(
+    () => filterPrRows(rows, filters, login),
+    [rows, filters, login],
+  );
+  const authors = useMemo(() => prFilterOptions(rows, "author"), [rows]);
+  const repoOptions = useMemo(() => prFilterOptions(rows, "repo"), [rows]);
   const connected = board.enabledSources?.includes("github") === true;
   const partial = board.syncWarning?.startsWith("github ") === true;
   const selectedRow = connected
@@ -108,15 +136,22 @@ function PullRequestsPage({
       only={narrow ? (selectedRow !== null ? "detail" : "list") : undefined}
       list={
         <PrList
-          groups={groups}
+          rows={visibleRows}
           selectedKey={selectedKey}
           narrow={narrow}
-          groupBy={groupBy}
           connected={connected}
           partial={partial}
-          empty={rows.length === 0}
-          onGroupByChange={setGroupBy}
+          emptyText={prEmptyText({
+            repos: boardRepos,
+            hasRows: rows.length > 0,
+          })}
+          filters={filters}
+          authors={authors}
+          repos={repoOptions}
+          reviewingKey={reviewingKey}
+          onFiltersChange={setFilters}
           onSelect={handleSelect}
+          onReview={onReview}
           onOpenSettings={() => {
             window.location.hash = `#${pageLocation({ page: "settings" }, board.boardKey)}`;
           }}
@@ -128,6 +163,8 @@ function PullRequestsPage({
             key={selectedRow.key}
             row={selectedRow}
             onBack={narrow ? () => onSelect(null) : undefined}
+            reviewing={reviewingKey === selectedRow.key}
+            onReview={onReview}
             onStartAgent={onStartAgent}
             onNotice={onNotice}
           />

@@ -4,6 +4,8 @@ export interface StartRequest {
   cardId: string;
   newSession?: boolean;
   extraDirection?: string;
+  playbookTag?: string;
+  playbook?: string;
 }
 
 /** The board card a start request names, for the start rule to check. */

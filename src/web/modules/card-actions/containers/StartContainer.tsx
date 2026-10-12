@@ -17,6 +17,8 @@ interface StartContainerProps {
   card: Card;
   newSession?: boolean;
   extraDirection?: string;
+  playbookTag?: string;
+  playbook?: string;
   onClose: () => void;
   onEditPlaybooks: () => void;
 }
@@ -25,6 +27,8 @@ export function StartContainer({
   card,
   newSession,
   extraDirection: initialExtraDirection,
+  playbookTag,
+  playbook,
   onClose,
   onEditPlaybooks,
 }: StartContainerProps) {
@@ -42,6 +46,9 @@ export function StartContainer({
     requestClose,
     pending: start.isPending,
     allowNoRepository: true,
+    playbookTag,
+    playbook,
+    preferredFolder: card.reviewPr?.repoPath ?? null,
     focusRef: textareaRef,
     send: (picks) =>
       start.mutateAsync(
@@ -102,6 +109,8 @@ export function StartRequestContainer() {
       card={card}
       newSession={request.newSession === true}
       extraDirection={request.extraDirection}
+      playbookTag={request.playbookTag}
+      playbook={request.playbook}
       onClose={appStore.closeStart}
       onEditPlaybooks={() => {
         appStore.closeStart();
