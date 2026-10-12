@@ -213,6 +213,15 @@ test("R1 a connected list and the valid round make the two items once, with the 
   assert.equal(log("env.log"), "60000\n");
 });
 
+test("R1a an item written by the round carries the relevance meta", async () => {
+  configure("mcp");
+  stub(CONNECTED);
+  await runSlackRound();
+  const meta = store.getItem(`slack:D0TESTDM1:${DM_TS}`)?.meta;
+  assert.equal(meta?.needsSession, "false");
+  assert.equal(meta?.relevanceReason, "Greeting");
+});
+
 test("R1b the call hides every other Slack tool with --disallowedTools", async () => {
   stub(CONNECTED);
   await runSlackRound();

@@ -1,4 +1,5 @@
 import type { Item } from "../../../shared/types.js";
+import { slackRelevance } from "./slack-relevance.js";
 
 export interface SlackMessage {
   ts: string;
@@ -132,7 +133,7 @@ export function slackPlace(
  * Map one classified Slack message to an Inbox item.
  *
  * @remarks The id "slack:<channelId>:<ts>" is the dedupe key, so the same message polled twice is
- * one item (R-04, U2-08).
+ * one item (R-04, U2-08); meta carries the relevance verdict (U3-03, U3-04).
  */
 export function slackItem(input: {
   message: SlackMessage;
@@ -147,6 +148,11 @@ export function slackItem(input: {
   const { message, channelId, conversation, author } = input;
   const rendered = renderSlackText(message.text ?? "", input.names);
   const place = slackPlace(conversation, input.channelName);
+  const relevance = slackRelevance({
+    text: message.text ?? "",
+    subtype: message.subtype,
+    botId: message.bot_id,
+  });
   return {
     id: `slack:${channelId}:${message.ts}`,
     source: "slack",
@@ -164,6 +170,8 @@ export function slackItem(input: {
       authorId: message.user ?? "",
       ts: message.ts,
       conversation,
+      needsSession: String(relevance.needsSession),
+      relevanceReason: relevance.reason,
       ...(message.thread_ts ? { threadTs: message.thread_ts } : {}),
       ...(message.reply_count !== undefined
         ? { replyCount: String(message.reply_count) }
