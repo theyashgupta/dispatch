@@ -8,7 +8,7 @@ import {
   type PrGroupBy,
   type PrRow,
 } from "../../../../shared/pr-rows.js";
-import { routeHash } from "../../../../shared/route.js";
+import { pageLocation } from "../../../../shared/route.js";
 import { DetailPlaceholder, DetailScroll } from "@/components/DetailPaneBody";
 import { SplitPane } from "@/components/SplitPane";
 import { CAROUSEL_QUERY } from "../../../../shared/media-queries.js";
@@ -52,10 +52,10 @@ export function PullRequestsContainer({
       selectedKey={selectedKey}
       onSelect={(key) =>
         void router.navigate({
-          href: routeHash({
-            page: "pull-requests",
-            id: key ?? undefined,
-          }).slice(1),
+          href: pageLocation(
+            { page: "pull-requests", id: key ?? undefined },
+            boardKey,
+          ),
           replace: true,
         })
       }
@@ -118,7 +118,7 @@ function PullRequestsPage({
           onGroupByChange={setGroupBy}
           onSelect={handleSelect}
           onOpenSettings={() => {
-            window.location.hash = routeHash({ page: "settings" });
+            window.location.hash = `#${pageLocation({ page: "settings" }, board.boardKey)}`;
           }}
         />
       }

@@ -748,7 +748,7 @@ const newTreeZones = [
  * required) so the suffix subtrees are precisely as strict as the base block.
  */
 const KEBAB = "+([a-z])*([a-z0-9])*(-+([a-z0-9]))";
-const ROUTE_FILE = `@(__root|${KEBAB}.\\{-$id\\}?(.lazy))`;
+const ROUTE_FILE = `@(__root|${KEBAB}.\\{-$id\\}?(.lazy)|${KEBAB}.index?(.lazy)|${KEBAB}.\\$key.@(settings|index)?(.lazy)|${KEBAB}.\\$key.${KEBAB}.\\{-$id\\}?(.lazy))`;
 
 const typed = process.env.DISPATCH_LINT_TYPED === "1";
 

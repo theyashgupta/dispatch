@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 import { PAGES, parseRoute } from "./route.js";
 import { NAV_ITEMS, navGroups, visibleNavItems } from "./nav-items.js";
 
-test("every route page except settings and boards has exactly one nav row", () => {
+test("every route page except settings, boards and board settings has exactly one nav row", () => {
   for (const page of PAGES) {
     const rows = NAV_ITEMS.filter((item) => item.page === page).length;
-    const sidebarless = page === "settings" || page === "boards";
+    const sidebarless =
+      page === "settings" || page === "boards" || page === "board-settings";
     assert.equal(rows, sidebarless ? 0 : 1, page);
   }
 });

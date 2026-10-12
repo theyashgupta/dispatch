@@ -3,7 +3,7 @@ import type { Page, Route } from "../../../../shared/route.js";
 import { useSidebar } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 import { AppSidebar } from "@/modules/shell/components/AppSidebar";
-import type { BoardSwitcherData } from "./BoardSwitcher";
+import type { SidebarBoardsData } from "./SidebarBoards";
 import { PageHeader } from "@/modules/shell/components/PageHeader";
 import { TopBar } from "@/modules/shell/components/TopBar";
 import type { NavCounts, NavItem } from "../../../../shared/nav-items.js";
@@ -23,7 +23,7 @@ interface ShellFrameProps {
   activityUnseen: boolean;
   activityOpen: boolean;
   carousel: boolean;
-  switcher?: BoardSwitcherData;
+  boards: SidebarBoardsData;
   pageTitle: string;
   pageCount?: number;
   headerView?: ReactNode;
@@ -44,7 +44,7 @@ export function ShellFrame({
   activityUnseen,
   activityOpen,
   carousel,
-  switcher,
+  boards,
   pageTitle,
   pageCount,
   headerView,
@@ -66,10 +66,6 @@ export function ShellFrame({
   useEffect(() => {
     if (!isMobile) setOpenMobile(false);
   }, [isMobile, setOpenMobile]);
-  const switcherOpen = switcher?.open === true;
-  useEffect(() => {
-    if (isMobile && switcherOpen) setOpenMobile(true);
-  }, [isMobile, switcherOpen, setOpenMobile]);
   useEffect(() => {
     onMobileOpenChange?.(phoneSheetOpen);
   }, [phoneSheetOpen, onMobileOpenChange]);
@@ -95,19 +91,17 @@ export function ShellFrame({
         activityUnseen={activityUnseen}
         activityOpen={activityOpen}
         carousel={carousel}
-        switcher={
-          switcher && {
-            ...switcher,
-            onSelect: (key) => {
-              switcher.onSelect(key);
-              setOpenMobile(false);
-            },
-            onManage: () => {
-              switcher.onManage();
-              setOpenMobile(false);
-            },
-          }
-        }
+        boards={{
+          ...boards,
+          onOpenBoard: (key) => {
+            boards.onOpenBoard(key);
+            setOpenMobile(false);
+          },
+          onCreate: () => {
+            boards.onCreate();
+            setOpenMobile(false);
+          },
+        }}
         onNavigate={(page) => {
           onNavigate(page);
           setOpenMobile(false);

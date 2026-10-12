@@ -1,14 +1,23 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { Board, BoardKey } from "../../../../shared/types.js";
+import type { BoardKey } from "../../../../shared/types.js";
 import {
+  addRepository,
+  changeRepository,
   checkBoardForm,
   EMPTY_FORM,
+  EMPTY_REPOSITORY,
   failureText,
-  formValuesFromBoard,
+  folderPlaceholder,
   parseTeamKeys,
+  previewKey,
+  refusalErrors,
+  refusalFieldError,
+  removeRepository,
+  rowOfPath,
+  takenKeySet,
   toCreateInput,
-  toUpdateInput,
+  visibleErrors,
   type BoardFormContext,
   type BoardFormValues,
 } from "./board-form.js";
@@ -19,8 +28,6 @@ const boards = [
 ];
 
 const create: BoardFormContext = {
-  mode: "create",
-  isDefault: false,
   boards,
   knownLinearTeamKeys: ["ENG"],
 };
@@ -40,9 +47,35 @@ test("a valid create form has no errors", () => {
   assert.deepEqual(checkBoardForm(values(), create), {});
 });
 
-test("a key that breaks the rule gets the key rule copy", () => {
+test("only the name is required", () => {
+  assert.deepEqual(
+    checkBoardForm(
+      values({ key: "", workspaceRoot: "", repositories: [] }),
+      create,
+    ),
+    {},
+  );
+  assert.deepEqual(checkBoardForm(EMPTY_FORM, create), {
+    name: "Enter a name.",
+  });
+});
+
+test("a blank name gets the name copy", () => {
+  assert.equal(
+    checkBoardForm(values({ name: "  " }), create).name,
+    "Enter a name.",
+  );
+});
+
+test("an empty or blank key is not checked", () => {
+  for (const key of ["", "   "]) {
+    assert.equal(checkBoardForm(values({ key }), create).key, undefined);
+  }
+});
+
+test("a typed key that breaks the rule gets the key rule copy", () => {
   const copy = "Use 2 to 6 capital letters or digits, starting with a letter.";
-  for (const key of ["", "pl", "A", "1AB", "ABCDEFG", "AB-C", "AB C"]) {
+  for (const key of ["pl", "A", "1AB", "ABCDEFG", "AB-C", "AB C"]) {
     assert.equal(checkBoardForm(values({ key }), create).key, copy, key);
   }
 });
@@ -56,64 +89,69 @@ test("LOCAL and GROUP are reserved", () => {
   }
 });
 
-test("a key that another board has names that board", () => {
-  assert.equal(
-    checkBoardForm(values({ key: "PLAT" }), create).key,
-    "Board Platform uses this key.",
-  );
+test("a key that another board has names that board and suggests a free key", () => {
+  const errors = checkBoardForm(values({ key: "PLAT" }), create);
+  assert.equal(errors.key, "Board Platform uses this key.");
+  assert.equal(errors.keySuggestion, "PLAT2");
 });
 
-test("a key that a known Linear team has names the team", () => {
-  assert.equal(
-    checkBoardForm(values({ key: "ENG" }), create).key,
-    "Linear team ENG uses this key.",
-  );
+test("a key that a known Linear team has names the team and suggests a free key", () => {
+  const errors = checkBoardForm(values({ key: "ENG" }), create);
+  assert.equal(errors.key, "Linear team ENG uses this key.");
+  assert.equal(errors.keySuggestion, "ENG2");
 });
 
-test("a blank name gets the name copy", () => {
+test("a free key carries no suggestion", () => {
   assert.equal(
-    checkBoardForm(values({ name: "  " }), create).name,
-    "Enter a name.",
-  );
-});
-
-test("a blank sessions folder gets the sessions folder copy in create mode only", () => {
-  assert.equal(
-    checkBoardForm(values({ workspaceRoot: "  " }), create).workspaceRoot,
-    "Enter the sessions folder.",
-  );
-  assert.equal(
-    checkBoardForm(values({ workspaceRoot: "" }), { ...create, mode: "edit" })
-      .workspaceRoot,
+    checkBoardForm(values({ key: "ACME" }), create).keySuggestion,
     undefined,
   );
 });
 
-test("no repository path gets the repository copy", () => {
-  const empty = [{ path: " ", baseBranch: "main", checkCommand: "" }];
-  assert.equal(
-    checkBoardForm(values({ repositories: empty }), create).repositories,
-    "Add at least one repository.",
+test("the folder and the repositories are optional, and empty rows are no error", () => {
+  const blank = [{ path: " ", baseBranch: "main", checkCommand: "" }];
+  assert.deepEqual(
+    checkBoardForm(
+      values({ workspaceRoot: "  ", repositories: blank }),
+      create,
+    ),
+    {},
   );
-  assert.equal(
-    checkBoardForm(values({ repositories: [] }), create).repositories,
-    "Add at least one repository.",
-  );
+  assert.deepEqual(checkBoardForm(values({ repositories: [] }), create), {});
 });
 
-test("edit mode skips the key checks", () => {
-  const edit: BoardFormContext = { ...create, mode: "edit" };
-  assert.deepEqual(checkBoardForm(values({ key: "PLAT" }), edit), {});
-  assert.deepEqual(checkBoardForm(values({ key: "x" }), edit), {});
+test("takenKeySet joins board keys and Linear team keys", () => {
+  assert.deepEqual([...takenKeySet(boards, ["ENG"])].sort(), [
+    "ENG",
+    "LOCAL",
+    "PLAT",
+  ]);
 });
 
-test("the default board skips the repository check", () => {
-  const edit: BoardFormContext = { ...create, mode: "edit", isDefault: true };
-  assert.deepEqual(checkBoardForm(values({ repositories: [] }), edit), {});
-  assert.equal(
-    checkBoardForm(values({ name: "", repositories: [] }), edit).name,
-    "Enter a name.",
-  );
+test("previewKey derives a free key, and is null for a blank name or no free key", () => {
+  const taken = takenKeySet(boards, ["ENG"]);
+  assert.equal(previewKey("Payments", taken), "PAYMEN");
+  assert.equal(previewKey("Platform", taken), "PLATFO");
+  assert.equal(previewKey("Plat", taken), "PLAT2");
+  assert.equal(previewKey("Local", taken), "LOCAL2");
+  assert.equal(previewKey("  ", taken), null);
+  assert.equal(previewKey("Payments", new Set(["PAYMEN"])), "PAYME2");
+});
+
+test("previewKey is null when every candidate is taken", () => {
+  const all = new Set<string>(["AB"]);
+  for (let d = 2; d <= 9; d++) all.add(`AB${d}`);
+  for (let n = 10; n <= 99; n++) all.add(`AB${n}`);
+  assert.equal(previewKey("ab", all), null);
+});
+
+test("folderPlaceholder joins the root and the key, and is empty without a root or a key", () => {
+  assert.equal(folderPlaceholder("/work", "ACME"), "/work/ACME");
+  assert.equal(folderPlaceholder("/work/", "ACME"), "/work/ACME");
+  assert.equal(folderPlaceholder(null, "ACME"), "");
+  assert.equal(folderPlaceholder(undefined, "ACME"), "");
+  assert.equal(folderPlaceholder("", "ACME"), "");
+  assert.equal(folderPlaceholder("/work", ""), "");
 });
 
 test("parseTeamKeys upper-cases, trims, drops empties and repeats", () => {
@@ -122,11 +160,18 @@ test("parseTeamKeys upper-cases, trims, drops empties and repeats", () => {
   assert.deepEqual(parseTeamKeys(""), []);
 });
 
-test("toCreateInput trims and drops empty rows and empty fields", () => {
+test("toCreateInput sends the name alone for a name-only form", () => {
+  assert.deepEqual(toCreateInput({ ...EMPTY_FORM, name: " Acme " }), {
+    name: "Acme",
+  });
+});
+
+test("toCreateInput sends each optional field only when filled", () => {
   const input = toCreateInput(
     values({
       key: " ACME ",
       name: " Acme ",
+      workspaceRoot: " /work/acme ",
       repositories: [
         { path: " /r/a ", baseBranch: " main ", checkCommand: " make " },
         { path: "/r/b", baseBranch: "", checkCommand: "" },
@@ -136,8 +181,8 @@ test("toCreateInput trims and drops empty rows and empty fields", () => {
     }),
   );
   assert.deepEqual(input, {
-    key: "ACME",
     name: "Acme",
+    key: "ACME",
     workspaceRoot: "/work/acme",
     repositories: [
       { path: "/r/a", baseBranch: "main", checkCommand: "make" },
@@ -147,64 +192,138 @@ test("toCreateInput trims and drops empty rows and empty fields", () => {
   });
 });
 
-test("toUpdateInput sends the default board paths only and no team keys", () => {
-  const input = toUpdateInput(
+test("toCreateInput leaves out blank fields and rows with an empty path", () => {
+  const input = toCreateInput(
     values({
-      repositories: [
-        { path: "/r/a", baseBranch: "main", checkCommand: "make" },
-      ],
-      linearTeamKeys: "eng",
+      key: " ",
+      workspaceRoot: " ",
+      repositories: [EMPTY_REPOSITORY],
+      linearTeamKeys: " , ",
     }),
-    "LOCAL",
   );
-  assert.deepEqual(input, {
-    name: "Acme",
-    workspaceRoot: "/work/acme",
-    repositories: [{ path: "/r/a" }],
+  assert.deepEqual(input, { name: "Acme" });
+});
+
+test("refusalFieldError maps duplicate-key to the key with the suggestion", () => {
+  assert.deepEqual(
+    refusalFieldError({
+      error: "Board Acme uses this key.",
+      code: "duplicate-key",
+      suggestion: "ACME2",
+    }),
+    {
+      field: "key",
+      message: "Board Acme uses this key.",
+      suggestion: "ACME2",
+    },
+  );
+  assert.deepEqual(
+    refusalFieldError({
+      error: "Board Acme uses this key.",
+      code: "duplicate-key",
+    }),
+    { field: "key", message: "Board Acme uses this key." },
+  );
+});
+
+test("refusalFieldError maps folder-missing to the folder or to a repository row", () => {
+  const copy = "This folder does not exist.";
+  assert.deepEqual(refusalFieldError({ error: copy, code: "folder-missing" }), {
+    field: "workspaceRoot",
+    message: copy,
   });
+  assert.deepEqual(
+    refusalFieldError({
+      error: copy,
+      code: "folder-missing",
+      field: "workspaceRoot",
+    }),
+    { field: "workspaceRoot", message: copy },
+  );
+  assert.deepEqual(
+    refusalFieldError({
+      error: copy,
+      code: "folder-missing",
+      field: "repositories",
+      path: "/nope",
+    }),
+    { field: "repositories", message: copy, path: "/nope" },
+  );
 });
 
-test("toUpdateInput sends the team keys of another board", () => {
-  const input = toUpdateInput(values({ linearTeamKeys: "eng" }), "ACME");
-  assert.deepEqual(input.linearTeamKeys, ["ENG"]);
-  assert.deepEqual(input.repositories, [
-    { path: "/repo/acme", baseBranch: null },
-  ]);
+test("refusalFieldError maps missing-name and invalid-name to the name and anything else to the form", () => {
+  assert.deepEqual(
+    refusalFieldError({ error: "Enter a name.", code: "missing-name" }),
+    { field: "name", message: "Enter a name." },
+  );
+  assert.deepEqual(
+    refusalFieldError({ error: "One line.", code: "invalid-name" }),
+    { field: "name", message: "One line." },
+  );
+  for (const code of ["invalid-key", "no-workspaces-root", "unknown"]) {
+    assert.deepEqual(refusalFieldError({ error: "Nope.", code }), {
+      field: "form",
+      message: "Nope.",
+    });
+  }
 });
 
-test("formValuesFromBoard fills the form and keeps one empty row for no repository", () => {
-  const board = {
-    key: "ACME" as BoardKey,
-    name: "Acme",
-    workspaceRoot: null,
-    repositories: [],
-    linearTeamKeys: ["ACME", "ENG"],
-  } as unknown as Board;
-  const form = formValuesFromBoard(board);
-  assert.equal(form.workspaceRoot, "");
-  assert.equal(form.repositories.length, 1);
-  assert.equal(form.linearTeamKeys, "ACME, ENG");
-  assert.deepEqual(EMPTY_FORM.repositories[0], form.repositories[0]);
-});
-
-test("formValuesFromBoard copies each repository and blanks a missing base branch", () => {
-  const board = {
-    key: "ACME" as BoardKey,
-    name: "Acme",
-    workspaceRoot: "/work/acme",
+test("refusalErrors places each refusal on its field", () => {
+  const form = values({
     repositories: [
-      { path: "/repo/api", baseBranch: "main", checkCommand: "npm test" },
-      { path: "/repo/web", baseBranch: null, checkCommand: "" },
+      { path: "/ok", baseBranch: "", checkCommand: "" },
+      { path: " /nope ", baseBranch: "", checkCommand: "" },
     ],
-    linearTeamKeys: [],
-  } as unknown as Board;
-  const form = formValuesFromBoard(board);
-  assert.equal(form.workspaceRoot, "/work/acme");
-  assert.deepEqual(form.repositories, [
-    { path: "/repo/api", baseBranch: "main", checkCommand: "npm test" },
-    { path: "/repo/web", baseBranch: "", checkCommand: "" },
-  ]);
-  assert.equal(form.linearTeamKeys, "");
+  });
+  assert.deepEqual(
+    refusalErrors(
+      { error: "Dup.", code: "duplicate-key", suggestion: "ACME2" },
+      form,
+    ),
+    { errors: { key: "Dup.", keySuggestion: "ACME2" }, form: null },
+  );
+  assert.deepEqual(
+    refusalErrors({ error: "Name.", code: "missing-name" }, form),
+    {
+      errors: { name: "Name." },
+      form: null,
+    },
+  );
+  assert.deepEqual(
+    refusalErrors({ error: "Gone.", code: "folder-missing" }, form),
+    { errors: { workspaceRoot: "Gone." }, form: null },
+  );
+  assert.deepEqual(
+    refusalErrors(
+      {
+        error: "Gone.",
+        code: "folder-missing",
+        field: "repositories",
+        path: "/nope",
+      },
+      form,
+    ),
+    { errors: { repositoryRows: { 1: "Gone." } }, form: null },
+  );
+  assert.deepEqual(
+    refusalErrors(
+      {
+        error: "Gone.",
+        code: "folder-missing",
+        field: "repositories",
+        path: "/other",
+      },
+      form,
+    ),
+    { errors: { repositories: "Gone." }, form: null },
+  );
+  assert.deepEqual(
+    refusalErrors({ error: "Set it.", code: "no-workspaces-root" }, form),
+    {
+      errors: {},
+      form: "Set it.",
+    },
+  );
 });
 
 test("failureText ends with one period", () => {
@@ -215,5 +334,66 @@ test("failureText ends with one period", () => {
   assert.equal(
     failureText("Save failed", "This folder does not exist."),
     "Save failed: This folder does not exist.",
+  );
+});
+
+test("add, change and remove edit the repository rows without changing the input", () => {
+  const form = values({
+    repositories: [
+      { path: "/a", baseBranch: "main", checkCommand: "" },
+      { path: "/b", baseBranch: "", checkCommand: "" },
+    ],
+  });
+  const added = addRepository(form);
+  assert.equal(added.repositories.length, 3);
+  assert.equal(added.repositories[2], EMPTY_REPOSITORY);
+  assert.equal(form.repositories.length, 2);
+  const changed = changeRepository(form, 0, { baseBranch: "develop" });
+  assert.equal(changed.repositories[0]?.baseBranch, "develop");
+  assert.equal(changed.repositories[0]?.path, "/a");
+  assert.deepEqual(removeRepository(form, 0).repositories, [
+    form.repositories[1],
+  ]);
+});
+
+test("rowOfPath finds the row by trimmed path and gives -1 for no row", () => {
+  const rows = [
+    { path: "/a", baseBranch: "", checkCommand: "" },
+    { path: " /b ", baseBranch: "", checkCommand: "" },
+  ];
+  assert.equal(rowOfPath(rows, "/b"), 1);
+  assert.equal(rowOfPath(rows, "/c"), -1);
+  assert.equal(rowOfPath(rows, undefined), -1);
+});
+
+test("visibleErrors shows refusals always and checked errors by state", () => {
+  const found = {
+    key: "Bad key.",
+    keySuggestion: "ACME2",
+    name: "Enter a name.",
+  };
+  const refused = { workspaceRoot: "Gone." };
+  const idle = { attempted: false, keyTouched: false, hidden: false };
+  assert.deepEqual(visibleErrors(found, {}, idle), {});
+  assert.deepEqual(visibleErrors(found, refused, idle), refused);
+  assert.deepEqual(visibleErrors(found, {}, { ...idle, keyTouched: true }), {
+    key: "Bad key.",
+    keySuggestion: "ACME2",
+  });
+  assert.deepEqual(
+    visibleErrors({ name: "Enter a name." }, {}, { ...idle, keyTouched: true }),
+    {},
+  );
+  assert.deepEqual(
+    visibleErrors(found, {}, { ...idle, attempted: true }),
+    found,
+  );
+  assert.deepEqual(
+    visibleErrors(found, refused, {
+      attempted: true,
+      keyTouched: true,
+      hidden: true,
+    }),
+    refused,
   );
 });

@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { resolveBoard } from "../services/orchestration/boards.js";
+import { readOrchestratorConversation } from "../services/orchestration/orchestrator-conversation.js";
 import {
   addOrchestrator,
   editOrchestrator,
@@ -13,9 +14,11 @@ import { parseBoardKeyParam } from "./boards-schemas.js";
 import { httpErrorHandler, orFail } from "./error-handler.js";
 import {
   addBodySchema,
+  conversationQuerySchema,
   editBodySchema,
   orchestratorIdSchema,
 } from "./orchestrators-schemas.js";
+import { refuseOrchestratorToken } from "./orchestrator.route.js";
 import { parseOrThrow } from "./parse-input.js";
 
 export const orchestratorsRouter = Router({ caseSensitive: true });
@@ -24,6 +27,17 @@ orchestratorsRouter.get("/boards/:key/orchestrators", (req, res) => {
   const board = resolveBoard(parseBoardKeyParam(req.params.key));
   res.status(200).json({ orchestrators: listOrchestrators(board) });
 });
+
+orchestratorsRouter.get(
+  "/boards/:key/orchestrators/:id/conversation",
+  async (req, res) => {
+    refuseOrchestratorToken(req);
+    const board = resolveBoard(parseBoardKeyParam(req.params.key));
+    const id = parseOrThrow(orchestratorIdSchema, req.params.id);
+    const { limit } = parseOrThrow(conversationQuerySchema, req.query);
+    res.status(200).json(await readOrchestratorConversation(board, id, limit));
+  },
+);
 
 orchestratorsRouter.post("/boards/:key/orchestrators", async (req, res) => {
   const board = resolveBoard(parseBoardKeyParam(req.params.key));

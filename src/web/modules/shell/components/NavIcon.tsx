@@ -44,6 +44,7 @@ export const NAV_ICON: Record<Page, ComponentType<{ size?: number }>> = {
   boards: LayoutGrid,
   dashboard: Gauge,
   settings: Settings,
+  "board-settings": Settings,
 };
 
 interface NavIconProps {

@@ -40,6 +40,7 @@ function setup() {
       turns: [],
       pending: null,
       error: null,
+      generation: 0,
     };
   const send = (question: string) =>
     runAskAction(client, { type: "send", question });
@@ -53,6 +54,7 @@ test("the conversation options start empty and never go stale", () => {
     turns: [],
     pending: null,
     error: null,
+    generation: 0,
   });
   assert.equal(options.staleTime, Infinity);
 });
@@ -102,6 +104,7 @@ test("a cancel aborts the request and a late reply is ignored", async () => {
     turns: [{ role: "user", text: "slow" }],
     pending: null,
     error: null,
+    generation: 0,
   });
 });
 
@@ -112,7 +115,12 @@ test("a clear during a run empties the conversation and drops the reply", async 
   await runAskAction(client, { type: "clear" });
   net.resolve(200, { answer: "late" });
   await run;
-  assert.deepEqual(state(), { turns: [], pending: null, error: null });
+  assert.deepEqual(state(), {
+    turns: [],
+    pending: null,
+    error: null,
+    generation: 1,
+  });
 });
 
 test("a failure keeps the question and retry resends it once", async () => {
@@ -138,4 +146,36 @@ test("a network error becomes a failed turn", async () => {
   globalThis.fetch = () => Promise.reject(new TypeError("offline"));
   await send("q");
   assert.equal(state().error, "failed");
+});
+
+test("local turns write the cache and make no request", async () => {
+  const { client, state } = setup();
+  const net = deferredFetch();
+  await runAskAction(client, {
+    type: "local",
+    turn: { role: "user", text: "new board" },
+  });
+  await runAskAction(client, {
+    type: "local",
+    turn: { role: "assistant", text: "What should the board be called?" },
+  });
+  assert.equal(state().turns.length, 2);
+  assert.equal(net.calls.length, 0);
+});
+
+test("a clear during an unfinished local create drops its late answer", async () => {
+  const { client, state } = setup();
+  const generation = state().generation;
+  await runAskAction(client, {
+    type: "local",
+    turn: { role: "user", text: "create a board called Ops" },
+    generation,
+  });
+  await runAskAction(client, { type: "clear" });
+  await runAskAction(client, {
+    type: "local",
+    turn: { role: "assistant", text: "Created board Ops" },
+    generation,
+  });
+  assert.deepEqual(state().turns, []);
 });

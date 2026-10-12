@@ -1819,6 +1819,7 @@ export interface OrchestratorSessionView {
   state: SupervisorState | null;
   stateReason: string | null;
   contextPercent: number | null;
+  cost: number | null;
   model: string | null;
   hasTmuxSession: boolean;
   activeSessionId: string | null;
@@ -2064,7 +2065,17 @@ export const DECISION_KINDS = [
   "ship_failure",
   "ticket_proposal",
   "other",
+  "plan",
 ] as const;
+
+export const PLAN_SIZES = ["small", "medium", "large"] as const;
+
+export interface PlanEntry {
+  ref: string;
+  playbook: string;
+  order: number;
+  size: (typeof PLAN_SIZES)[number];
+}
 
 export interface DecisionItem {
   id: string;
@@ -2084,6 +2095,20 @@ export interface DecisionItem {
     tickets: { title: string; description: string }[];
     usedIndexes: number[];
   };
+  plan?: { entries: PlanEntry[] };
+}
+
+export interface ConversationMessage {
+  id: string;
+  at: string | null;
+  role: "user" | "orchestrator" | "system";
+  text: string;
+}
+
+export interface OrchestratorConversation {
+  status: "ok" | "no-session" | "no-transcript" | "unreadable";
+  messages: ConversationMessage[];
+  truncated: boolean;
 }
 
 export interface SessionMeters {

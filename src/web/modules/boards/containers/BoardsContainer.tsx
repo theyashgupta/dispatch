@@ -21,17 +21,15 @@ import {
   useBoardCountsQuery,
   useBoardListQuery,
 } from "@/queries/board-list-queries";
-import { BoardEditContainer } from "./BoardEditContainer";
 import { BoardFormContainer } from "./BoardFormContainer";
 
 export function BoardsContainer() {
   const nav = useBoardsNavigation();
-  const search = useSearch({ from: "/boards/{-$id}" });
+  const search = useSearch({ from: "/boards/" });
   const list = useBoardListQuery();
   const counts = useBoardCountsQuery();
   const archive = useArchiveBoardMutation();
   const restore = useRestoreBoardMutation();
-  const [editKey, setEditKey] = useState<BoardKey | null>(null);
   const [archiveTarget, setArchiveTarget] = useState<Board | null>(null);
   const [restoringKeys, setRestoringKeys] = useState<ReadonlySet<BoardKey>>(
     new Set(),
@@ -71,6 +69,7 @@ export function BoardsContainer() {
   if (list.data === undefined) {
     return (
       <BoardsError
+        title="Boards did not load"
         message={list.error?.message ?? "The request failed"}
         onRetry={() => void list.refetch()}
       />
@@ -87,13 +86,13 @@ export function BoardsContainer() {
       <BoardsTable
         rows={rows}
         onOpen={(board) => nav.openBoard(board.key)}
-        onEdit={(board) => setEditKey(board.key)}
+        onEdit={(board) => nav.openSettings(board.key)}
         onArchive={setArchiveTarget}
       />
       <BoardsList
         rows={rows}
         onOpen={(board) => nav.openBoard(board.key)}
-        onEdit={(board) => setEditKey(board.key)}
+        onEdit={(board) => nav.openSettings(board.key)}
         onArchive={setArchiveTarget}
       />
       {onlyDefault && <BoardsEmpty onNewBoard={nav.openCreateDialog} />}
@@ -104,19 +103,9 @@ export function BoardsContainer() {
       />
       {search.dialog === "new" && (
         <BoardFormContainer
-          target={{ mode: "create" }}
           boards={boards}
           knownLinearTeamKeys={knownLinearTeamKeys}
           onClose={nav.closeCreateDialog}
-        />
-      )}
-      {editKey !== null && (
-        <BoardEditContainer
-          key={editKey}
-          boardKey={editKey}
-          boards={boards}
-          knownLinearTeamKeys={knownLinearTeamKeys}
-          onClose={() => setEditKey(null)}
         />
       )}
       {archiveTarget !== null && (

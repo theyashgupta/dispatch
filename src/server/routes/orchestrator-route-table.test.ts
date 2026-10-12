@@ -19,6 +19,7 @@ const ROUTES = [
   "GET /events",
   "GET /policy",
   "GET /board-workspace",
+  "POST /boards",
   "GET /playbooks",
   "GET /rulebook",
   "POST /cards/:cardId/start",
@@ -50,8 +51,8 @@ const routes = (orchestratorRouter.stack as Layer[]).flatMap((layer) =>
     : [],
 );
 
-void test("the orchestrator router holds exactly the 29 tool routes", () => {
-  assert.equal(ROUTES.length, 29);
+void test("the orchestrator router holds exactly the 30 tool routes", () => {
+  assert.equal(ROUTES.length, 30);
   assert.deepEqual([...routes].sort(), [...ROUTES].sort());
 });
 
