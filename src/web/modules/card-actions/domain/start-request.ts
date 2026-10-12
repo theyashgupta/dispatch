@@ -25,20 +25,21 @@ export interface StartGroupRequest {
 /**
  * Tell whether the Start button is enabled.
  *
- * @remarks A start needs a workspace and one ticked repo, and a selected playbook is not required. A missing-repo refusal keeps it off until the user changes the form.
+ * @remarks A start needs a workspace and one ticked repo, and a selected playbook is not required. Zero repos is allowed only on a board with no repository, where the workspace is the board folder. A missing-repo refusal keeps it off until the user changes the form.
  */
 export function canStart(input: {
   pending: boolean;
   configError: boolean;
   folder: string | null;
   repoCount: number;
+  noRepositoryBoard: boolean;
   titled?: boolean;
 }): boolean {
   return (
     !input.pending &&
     !input.configError &&
     input.folder !== null &&
-    input.repoCount > 0 &&
+    (input.repoCount > 0 || input.noRepositoryBoard) &&
     (input.titled ?? true)
   );
 }

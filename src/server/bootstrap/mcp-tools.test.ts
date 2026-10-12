@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { z } from "zod";
+import { ITEM_TITLE_MAX } from "../../shared/orchestrator-limits.js";
 import { MCP_TOOLS, splitInput, type McpTool } from "./mcp-tools.js";
 
 const EXPECTED = [
   "add_comment",
   "approve_roadmap",
   "create_base_branch",
+  "create_board",
   "create_decision_item",
   "create_group",
   "create_ticket",
@@ -48,7 +50,7 @@ const accepts = (name: string, input: unknown) =>
   assert.equal(z.object(byName(name).input).safeParse(input).success, true);
 
 describe("mcp tool table", () => {
-  it("holds exactly the 29 tools", () => {
+  it("holds exactly the 30 tools", () => {
     assert.deepEqual(MCP_TOOLS.map((t) => t.name).sort(), EXPECTED);
   });
 
@@ -94,6 +96,17 @@ describe("mcp tool table", () => {
     refuses("move_card", { id: good, column: "nowhere" });
     refuses("add_comment", { id: good, body: "" });
     refuses("create_base_branch", { repository: "r", name: "n" });
+    refuses("create_board", {});
+    refuses("create_board", { name: "" });
+    refuses("create_board", { name: "x".repeat(ITEM_TITLE_MAX + 1) });
+    refuses("create_board", { name: "Pay", folder: "" });
+    refuses("create_board", { name: "Pay", repositories: [""] });
+    accepts("create_board", { name: "Pay" });
+    accepts("create_board", {
+      name: "Pay",
+      folder: "/work/pay",
+      repositories: ["/work/pay/pay"],
+    });
     refuses("create_group", {
       title: "g",
       memberIds: ["ABC-1"],
@@ -139,6 +152,7 @@ describe("mcp tool table", () => {
       move_card: `/tickets/${id}/move`,
       add_comment: `/tickets/${id}/comments`,
       create_base_branch: "/base-branches",
+      create_board: "/boards",
       create_group: "/groups",
       start_group: `/groups/${id}/start`,
       send_input: `/sessions/${id}/input`,
@@ -160,6 +174,7 @@ describe("mcp tool table", () => {
         tool.name,
       );
     }
+    assert.equal(byName("create_board").method, "POST");
     assert.equal(byName("update_ticket").method, "PATCH");
     assert.equal(byName("get_ship_state").method, "GET");
     assert.equal(byName("start_ship").method, "POST");

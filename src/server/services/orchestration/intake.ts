@@ -1,7 +1,7 @@
+import { mainOrchestrator } from "../../../shared/orchestrator-owner.js";
 import type { Board } from "../../../shared/types.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import { ConflictError } from "../domain/errors.js";
-import { mainOrchestrator } from "../domain/orchestrator-rules.js";
 
 /**
  * Hand a goal and optional pasted requirements to the main orchestrator of a board.

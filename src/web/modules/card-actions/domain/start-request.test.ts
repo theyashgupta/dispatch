@@ -11,6 +11,7 @@ const ready = {
   configError: false,
   folder: "/w",
   repoCount: 1,
+  noRepositoryBoard: false,
 };
 
 test("start is enabled with a workspace and one repo", () => {
@@ -28,6 +29,19 @@ test("start is disabled after a missing-repo refusal", () => {
 test("start is disabled without a workspace or without a ticked repo", () => {
   assert.equal(canStart({ ...ready, folder: null }), false);
   assert.equal(canStart({ ...ready, repoCount: 0 }), false);
+});
+
+test("zero repos is allowed only on a board with no repository", () => {
+  const none = { ...ready, repoCount: 0 };
+  assert.equal(canStart({ ...none, noRepositoryBoard: true }), true);
+  assert.equal(canStart({ ...none, noRepositoryBoard: false }), false);
+});
+
+test("a board with no repository still needs its folder and an idle form", () => {
+  const none = { ...ready, repoCount: 0, noRepositoryBoard: true };
+  assert.equal(canStart({ ...none, folder: null }), false);
+  assert.equal(canStart({ ...none, pending: true }), false);
+  assert.equal(canStart({ ...none, configError: true }), false);
 });
 
 test("a group start is disabled for a blank title", () => {
@@ -56,6 +70,12 @@ test("a first start sends the folder, repos, playbook and direction", () => {
     newSession: false,
     inheritFrom: undefined,
   });
+});
+
+test("a start on a board with no repository sends the board folder and no repos", () => {
+  const request = buildStartCardRequest({ ...card, repos: [] });
+  assert.equal(request.folder, "/w");
+  assert.deepEqual(request.repos, []);
 });
 
 test("a missing folder and playbook are left out of the request", () => {

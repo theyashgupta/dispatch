@@ -34,6 +34,7 @@ export const GLOBAL_SHORTCUTS: readonly ShortcutEntry[] = [
   { key: "k", label: "Command palette", meta: true },
   { key: "n", label: "New ticket" },
   { key: "?", label: "Keyboard shortcuts" },
+  { key: "b", label: "Switch board" },
 ];
 
 export const BOARD_SHORTCUTS: readonly ShortcutEntry[] = [

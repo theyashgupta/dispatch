@@ -18,7 +18,7 @@ export function ArchiveBoardDialog({
     <ConfirmDialog
       label={title}
       title={title}
-      description="The board leaves the switcher. Its cards and sessions stay. You can restore it from Archived boards."
+      description="The board leaves the sidebar Boards section. Its cards and sessions stay. You can restore it from Archived boards."
       cancelLabel="Cancel"
       confirmLabel="Archive board"
       pendingLabel="Archive board"

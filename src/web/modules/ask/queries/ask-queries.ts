@@ -23,7 +23,8 @@ export type AskAction =
   | { type: "send"; question: string }
   | { type: "retry" }
   | { type: "cancel" }
-  | { type: "clear" };
+  | { type: "clear" }
+  | Extract<AskEvent, { type: "local" }>;
 
 let controller: AbortController | null = null;
 
@@ -101,6 +102,8 @@ export async function runAskAction(
     case "clear":
       cancel(client);
       return dispatch(client, { type: "clear" });
+    case "local":
+      return dispatch(client, action);
     case "retry": {
       const current = readConversation(client);
       const last = current.turns.at(-1);

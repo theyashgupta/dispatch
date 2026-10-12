@@ -3,7 +3,7 @@ import { useRouteContext, useRouter } from "@tanstack/react-router";
 import { inboxFeed } from "../../../../shared/feed-items.js";
 import { pinFromBoard } from "../../../../shared/pinned-card.js";
 import { nowMs } from "../../../../shared/format-age.js";
-import { routeHash, type Page } from "../../../../shared/route.js";
+import { pageLocation, type Page } from "../../../../shared/route.js";
 import type { BoardSnapshot, Item } from "../../../../shared/types.js";
 import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { useItems } from "@/components/ui/hooks/use-items";
@@ -34,8 +34,9 @@ interface TodayPageProps {
 export function TodayContainer() {
   const { appStore } = useRouteContext({ from: "__root__" });
   const router = useRouter();
+  const boardKey = useAppStore(appStore, (s) => s.board);
   const board = useBoardSnapshot(
-    useAppStore(appStore, (s) => s.board),
+    boardKey,
     useAppStore(appStore, (s) => s.doneLimit),
   );
   const items = useItems(board);
@@ -54,7 +55,7 @@ export function TodayContainer() {
         appStore.selectCard(id, pinFromBoard(id, board.cards))
       }
       onNavigate={(page, id) =>
-        void router.navigate({ href: routeHash({ page, id }).slice(1) })
+        void router.navigate({ href: pageLocation({ page, id }, boardKey) })
       }
     />
   );

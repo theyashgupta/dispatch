@@ -1,18 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  bindShortcuts,
-  resolveShortcut,
-  type ShortcutEvent,
-} from "../../../../shared/shortcuts.js";
 import type { BoardKey } from "../../../../shared/types.js";
-import {
-  attentionLabel,
-  collapsedLabel,
-  showSwitcher,
-  switcherItems,
-  switcherShortcuts,
-} from "./board-switcher.js";
+import { attentionLabel, loopsLabel, switcherItems } from "./board-switcher.js";
 
 const LOCAL = "LOCAL" as BoardKey;
 const ACME = "ACME" as BoardKey;
@@ -24,48 +13,45 @@ const boards = [
   { key: ACME, name: "Acme", archived: false },
 ];
 
-test("showSwitcher needs more than one active board", () => {
-  assert.equal(showSwitcher(boards, false, LOCAL), true);
-  assert.equal(showSwitcher(boards.slice(0, 2), false, LOCAL), false);
-  assert.equal(showSwitcher(boards.slice(0, 1), false, LOCAL), false);
-});
-
-test("showSwitcher hides while the list has not loaded", () => {
-  assert.equal(showSwitcher(undefined, false, ACME), false);
-  assert.equal(showSwitcher(undefined, false, LOCAL), false);
-});
-
-test("showSwitcher with a failed list shows only for a board other than LOCAL", () => {
-  assert.equal(showSwitcher(undefined, true, ACME), true);
-  assert.equal(showSwitcher(undefined, true, LOCAL), false);
-});
-
-test("showSwitcher keeps the cached list when a refetch failed", () => {
-  assert.equal(showSwitcher(boards, true, LOCAL), true);
-  assert.equal(showSwitcher(boards.slice(0, 1), true, ACME), false);
-});
+const loop = (groupId: string) => ({ groupId, percent: null });
 
 test("switcherItems lists active boards in order with counts and the selected mark", () => {
   const counts = [
     { key: LOCAL, running: 0, openGroups: 0, attention: 2, loops: [] },
-    { key: ACME, running: 1, openGroups: 0, attention: 0, loops: [] },
+    {
+      key: ACME,
+      running: 1,
+      openGroups: 0,
+      attention: 0,
+      loops: [loop("g1"), loop("g2")],
+    },
   ];
   assert.deepEqual(switcherItems(boards, counts, ACME), [
-    { key: LOCAL, name: "Dispatch", attention: 2, selected: false },
-    { key: ACME, name: "Acme", attention: 0, selected: true },
+    { key: LOCAL, name: "Dispatch", attention: 2, loops: 0, selected: false },
+    { key: ACME, name: "Acme", attention: 0, loops: 2, selected: true },
   ]);
 });
 
-test("switcherItems reads zero attention before the counts load", () => {
+test("switcherItems never lists an archived board, even the selected one", () => {
   assert.deepEqual(
-    switcherItems(boards, undefined, LOCAL).map((item) => item.attention),
-    [0, 0],
+    switcherItems(boards, undefined, OLD).map((item) => item.key),
+    [LOCAL, ACME],
+  );
+  assert.equal(
+    switcherItems(boards, undefined, OLD).some((item) => item.selected),
+    false,
   );
 });
 
-test("collapsedLabel takes the first two letters of the key", () => {
-  assert.equal(collapsedLabel(LOCAL), "LO");
-  assert.equal(collapsedLabel(ACME), "AC");
+test("switcherItems reads zero counts before the counts load", () => {
+  const items = switcherItems(boards, undefined, LOCAL);
+  assert.deepEqual(
+    items.map((item) => [item.attention, item.loops]),
+    [
+      [0, 0],
+      [0, 0],
+    ],
+  );
 });
 
 test("attentionLabel names the count", () => {
@@ -74,71 +60,7 @@ test("attentionLabel names the count", () => {
   assert.equal(attentionLabel(1284), "1,284 items need attention");
 });
 
-test("switcherShortcuts adds the Switch board row only while the switcher shows", () => {
-  assert.deepEqual(
-    switcherShortcuts(true).filter((row) => row.key === "b"),
-    [{ key: "b", label: "Switch board" }],
-  );
-  assert.equal(
-    switcherShortcuts(false).some((row) => row.key === "b"),
-    false,
-  );
-});
-
-function press(
-  target: ShortcutEvent["target"],
-  context: { modalOpen?: boolean; menuOpen?: boolean },
-  show = true,
-) {
-  const bindings = bindShortcuts(switcherShortcuts(show), { b: () => {} });
-  return resolveShortcut(
-    { key: "b", metaKey: false, ctrlKey: false, altKey: false, target },
-    bindings,
-    { modalOpen: false, menuOpen: false, inScope: true, ...context },
-  );
-}
-
-test("b fires with the switcher shown and nothing else open", () => {
-  assert.equal(press({ tagName: "DIV" }, {})?.key, "b");
-  assert.equal(press(null, {})?.key, "b");
-});
-
-test("b is inert in a text field", () => {
-  assert.equal(press({ tagName: "INPUT" }, {}), null);
-  assert.equal(press({ tagName: "TEXTAREA" }, {}), null);
-  assert.equal(press({ tagName: "DIV", isContentEditable: true }, {}), null);
-});
-
-test("b is inert while a dialog is open", () => {
-  assert.equal(press({ tagName: "DIV" }, { modalOpen: true }), null);
-});
-
-test("b is inert while a menu is open", () => {
-  assert.equal(press({ tagName: "DIV" }, { menuOpen: true }), null);
-});
-
-test("b has no binding with one board", () => {
-  assert.equal(press({ tagName: "DIV" }, {}, false), null);
-});
-
-test("b is inert with a modifier held", () => {
-  const bindings = bindShortcuts(switcherShortcuts(true), { b: () => {} });
-  const context = { modalOpen: false, menuOpen: false, inScope: true };
-  const base = { key: "b", target: null, altKey: false };
-  assert.equal(
-    resolveShortcut(
-      { ...base, metaKey: true, ctrlKey: false },
-      bindings,
-      context,
-    ),
-    null,
-  );
-  assert.equal(
-    resolveShortcut(
-      { ...base, metaKey: false, ctrlKey: true },
-      bindings,
-      context,
-    ),
-    null,
-  );
+test("loopsLabel names the count", () => {
+  assert.equal(loopsLabel(1), "1 running loop");
+  assert.equal(loopsLabel(2), "2 running loops");
 });

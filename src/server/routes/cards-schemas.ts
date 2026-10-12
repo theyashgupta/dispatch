@@ -59,10 +59,10 @@ const imagesSchema = z
     return images;
   });
 
-/** A workspace payload: a folder and at least one repo, each with a string path and base. */
+/** A workspace payload: a folder and zero or more repos, each with a string path and base. */
 const workspaceSchema = z.object({
   folder: z.string(),
-  repos: z.array(z.object({ path: z.string(), base: z.string() })).min(1),
+  repos: z.array(z.object({ path: z.string(), base: z.string() })),
 });
 
 /** Replace the raw `folder` and `repos` fields with the workspace they form, or undefined. */

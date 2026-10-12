@@ -116,7 +116,7 @@ and roles only, it does not restate the layering policy.
 | Frontend entry      | `web/main.tsx`, `web/lib/app-store.ts`, `web/lib/query-client.ts`, `web/lib/http.ts`                                                                                                                                                                                                                                                            | The provider stack (QueryClientProvider, ThemeProvider, RouterProvider and the splash), the app store for cross-module UI state, the query client, and the HTTP client that returns 4xx and 5xx responses as typed data.                                                                                             |
 | Frontend routes     | `web/routes/__root.tsx`, `web/routes/board.{-$id}.lazy.tsx`, `web/modules/shell/containers/ShellContainer.tsx`                                                                                                                                                                                                                                  | Hash routes own the URL and its params. The router context gives the query client and the app store to every container. The root route renders the shell view with module views in its slots: the page, the detail panel and the card action dialogs.                                                                |
 | Frontend modules    | `web/modules/board/views/BoardView.tsx`, `web/modules/board/containers/BoardContainer.tsx`, `web/modules/detail/containers/DetailPanelContainer.tsx`, `web/modules/shell/components/AppSidebar.tsx`                                                                                                                                             | One folder per feature under `web/modules/`, with the layers views, containers, components, hooks, domain and queries. A module never imports a sibling module. [frontend-architecture.md](standards/frontend-architecture.md) has the layer rules.                                                                  |
-| Frontend boards     | `web/modules/boards/views/BoardsView.tsx`, `web/modules/boards/containers/BoardsContainer.tsx`, `web/modules/boards/containers/BoardFormContainer.tsx`, `web/modules/shell/components/BoardSwitcher.tsx`                                                                                                                                        | The boards page (list, create, edit, archive, restore) and the sidebar board switcher. The `board` search parameter selects the board.                                                                                                                                                                               |
+| Frontend boards     | `web/modules/boards/views/BoardsView.tsx`, `web/modules/boards/containers/BoardsContainer.tsx`, `web/modules/boards/containers/BoardFormContainer.tsx`, `web/modules/shell/components/SidebarBoards.tsx`                                                                                                                                        | The boards page (list, create, edit, archive, restore) and the sidebar Boards section. The path key selects the board on the keyed pages (`/boards/<key>`, `/boards/<key>/inbox` and so on). The `board` search parameter selects it on the other pages.                                                             |
 | Orchestrator panel  | `web/modules/orchestrator/views/OrchestratorEntryView.tsx`, `web/modules/orchestrator/containers/OrchestratorPanelContainer.tsx`, `web/modules/orchestrator/containers/PolicyContainer.tsx`, `web/modules/orchestrator/containers/OrchestratorsContainer.tsx`                                                                                   | The header entry button and the orchestrator panel with the tabs Terminal, Decisions, Policy and Orchestrators. The policy form is the only place where a user changes a board policy.                                                                                                                               |
 | Frontend dashboard  | `web/routes/dashboard.{-$id}.lazy.tsx`, `web/modules/dashboard/views/DashboardView.tsx`, `web/modules/dashboard/views/DashboardHeaderView.tsx`, `web/modules/dashboard/containers/use-dashboard-data.ts`                                                                                                                                        | The `/dashboard` page of the selected board. Each section container reads its inputs through `use-dashboard-data.ts` and shows its own loading, error and empty state. The shell page header shows the title and the stale badge.                                                                                    |
 | Frontend shared     | `web/components/ui/button.tsx`, `web/components/ui/hooks/use-app-store.ts`, `web/components/ThemeProvider.tsx`, `web/queries/board-snapshot-queries.ts`                                                                                                                                                                                         | The shadcn primitives and app-wide hooks, the shared components, the queries that two or more modules read (the board snapshot and its SSE stream), and the design tokens in `web/styles/tokens.css`.                                                                                                                |
@@ -148,6 +148,7 @@ Mount prefix: `/api/orchestrator`.
 | GET    | `/api/orchestrator/events`                         | Orchestrator token | Tool `list_events`: list the board events after a cursor, oldest first.                             |
 | GET    | `/api/orchestrator/policy`                         | Orchestrator token | Tool `get_policy`: read the policy of the caller with the running loop count and the group costs.   |
 | GET    | `/api/orchestrator/board-workspace`                | Orchestrator token | Tool `get_board_workspace`: read the board folder, repositories, playbook names and group playbook. |
+| POST   | `/api/orchestrator/boards`                         | Orchestrator token | Tool `create_board`: create a board from a name and answer the key and the link.                    |
 | POST   | `/api/orchestrator/tickets`                        | Orchestrator token | Tool `create_ticket`: create a local ticket marked as created by the caller.                        |
 | PATCH  | `/api/orchestrator/tickets/:id`                    | Orchestrator token | Tool `update_ticket`: change the title or description of a local ticket.                            |
 | POST   | `/api/orchestrator/tickets/:id/move`               | Orchestrator token | Tool `move_card`: move a card to a column under the manual move rules.                              |
@@ -210,6 +211,7 @@ Mount prefix: `/api`.
 | GET    | `/api/boards/:key/orchestration`           | User | Read the orchestration summary of a board.                                         |
 | GET    | `/api/boards/:key/orchestration/events`    | User | List the orchestration events of a board, the latest ones or those after a cursor. |
 | PATCH  | `/api/boards/:key`                         | User | Change the name, sessions folder, repositories or Linear team keys of a board.     |
+| POST   | `/api/boards/:key/repositories/init`       | User | Make a local repository in the folder of the board and add it to the board.        |
 | POST   | `/api/boards/:key/archive`                 | User | Archive a board.                                                                   |
 | POST   | `/api/boards/:key/restore`                 | User | Restore an archived board.                                                         |
 | POST   | `/api/boards/:key/orchestrators/:id/token` | User | Mint the token of an orchestrator.                                                 |
@@ -227,15 +229,16 @@ Mount prefix: `/api`.
 
 Mount prefix: `/api`.
 
-| Method | Path                                        | Auth | Purpose                                                           |
-| ------ | ------------------------------------------- | ---- | ----------------------------------------------------------------- |
-| GET    | `/api/boards/:key/orchestrators`            | User | List the orchestrators of a board with their session views.       |
-| POST   | `/api/boards/:key/orchestrators`            | User | Add an orchestrator record, main or extra.                        |
-| PATCH  | `/api/boards/:key/orchestrators/:id`        | User | Edit the name, scope or policy override of an orchestrator.       |
-| DELETE | `/api/boards/:key/orchestrators/:id`        | User | Remove a stopped orchestrator and revoke its token.               |
-| POST   | `/api/boards/:key/orchestrators/:id/start`  | User | Start the session of a stopped orchestrator.                      |
-| POST   | `/api/boards/:key/orchestrators/:id/stop`   | User | Stop a running orchestrator.                                      |
-| POST   | `/api/boards/:key/orchestrators/:id/resume` | User | Bring an orchestrator back after a lost session or a Claude exit. |
+| Method | Path                                              | Auth | Purpose                                                                                                                                                                                                  |
+| ------ | ------------------------------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/boards/:key/orchestrators`                  | User | List the orchestrators of a board with their session views.                                                                                                                                              |
+| POST   | `/api/boards/:key/orchestrators`                  | User | Add an orchestrator record, main or extra.                                                                                                                                                               |
+| PATCH  | `/api/boards/:key/orchestrators/:id`              | User | Edit the name, scope or policy override of an orchestrator.                                                                                                                                              |
+| DELETE | `/api/boards/:key/orchestrators/:id`              | User | Remove a stopped orchestrator and revoke its token.                                                                                                                                                      |
+| POST   | `/api/boards/:key/orchestrators/:id/start`        | User | Start the session of a stopped orchestrator.                                                                                                                                                             |
+| POST   | `/api/boards/:key/orchestrators/:id/stop`         | User | Stop a running orchestrator.                                                                                                                                                                             |
+| POST   | `/api/boards/:key/orchestrators/:id/resume`       | User | Bring an orchestrator back after a lost session or a Claude exit.                                                                                                                                        |
+| GET    | `/api/boards/:key/orchestrators/:id/conversation` | User | Read the conversation of an orchestrator from its transcript: user turns, text replies and the lines that Dispatch typed, in order, with no tool calls. `limit` 1 to 200. Refuses an orchestrator token. |
 
 ### `routes/intake.route.ts`
 
@@ -706,7 +709,12 @@ does not clash with `/api/boards/counts`.
 `knownLinearTeamKeys` holds the identifier prefixes of the Linear cards in the store, plus the
 Linear team keys when Linear is on. The server logs a failed Linear read once and does not read again for 60
 seconds. `POST /api/boards` creates a board and returns `201` with
-`{ board }`. `GET /api/boards/:key` and `PATCH /api/boards/:key` return `{ board }`. A patch accepts
+`{ board, link }`, where `link` is `/boards/<key>`. Only `name` is required. The server derives the
+key from the name. The default folder is `<workspaces root>/<key>`, and the server makes it on
+create. Repositories are optional. `POST /api/boards/:key/repositories/init` makes a local
+repository in `<board folder>/<lowercase key>` and adds it to the board. The MCP tool `create_board`
+calls the same service through `POST /api/orchestrator/boards`. The tool `get_board_workspace` lists
+all boards. `GET /api/boards/:key` and `PATCH /api/boards/:key` return `{ board }`. A patch accepts
 only `name`, `workspaceRoot`, `repositories` and `linearTeamKeys`, and the key never changes. A
 patch of `LOCAL` writes `workspaceRoot` to `config.json` and the repository paths to the workspace
 folders. `POST /api/boards/:key/archive` and `POST /api/boards/:key/restore` set and clear the
@@ -747,8 +755,9 @@ activity frame goes only to the clients of the board of the event.
 - `400` `team-key-taken`: "Board <name> lists Linear team <KEY>." Create and patch return it when
   another board lists the same team key. `LOCAL` and `GROUP` as a team key return `reserved-key`.
 - `400` `missing-name`: "Enter a name."
+- `400` `invalid-name`: "Use a name of at most 100 characters on one line."
 - `400` `folder-missing`: "This folder does not exist."
-- `400` `no-repositories`: "Add at least one repository."
+- `400` `no-repositories`: "This board has no repository. Add one in the board settings."
 - `409` `sessions-running`: "Stop the <n> running sessions first."
 - `409` `default-board`, `409` `board-archived`, `404` `unknown-board`, `400` `invalid-board`: the
   `error` string is the code.
@@ -4789,7 +4798,7 @@ in `docs/standards/design-contract.md`'s Deferred decisions rows 2 and 5.
 **Keyboard.** Every key binding goes through one hook, `useShortcuts(bindings, { menuOpen,
 scopeId })` in `src/web/components/ui/hooks/use-shortcuts.ts`, over the pure `resolveShortcut` and the binding
 tables in `src/shared/shortcuts.ts`: `GLOBAL_SHORTCUTS` (Cmd or Ctrl+K opens the command
-palette, n opens New ticket, ? opens the cheat sheet), mounted once in `ShellContainer.tsx`; `BOARD_SHORTCUTS`
+palette, n opens New ticket, ? opens the cheat sheet, b opens the palette with the Boards group only), mounted once in `ShellContainer.tsx`; `BOARD_SHORTCUTS`
 (j, k, h, l move the focused card, 1 to 7 move it to a column through the board's own move path;
 Enter stays with the focused card, a role button that opens itself, as the resolver leaves Enter
 to activatable targets);
@@ -6053,7 +6062,7 @@ reads the identity or writes, `assertAheadAndClean` resolves the base once. The 
 `branch-not-ahead`) and the worktree must be clean (409 `worktree-dirty`). A failed git call of
 these two checks answers 409 `no-workspace`. A group with loop progress keeps the D-8 rules.
 
-**MCP server.** `dispatch mcp` serves the 29 tools over stdio. `bootstrap/cli.ts` reads and checks
+**MCP server.** `dispatch mcp` serves the 30 tools over stdio. `bootstrap/cli.ts` reads and checks
 `DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and
 `bootstrap/mcp-tools.ts` holds the zod input and the description of each tool. The dependency
 cruiser rule `mcp-server-isolated` refuses an import of `routes`, `services`, `store`, `adapters`

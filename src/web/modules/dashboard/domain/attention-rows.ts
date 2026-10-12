@@ -1,11 +1,11 @@
 import { activeSessionView } from "../../../../shared/active-session.js";
 import type { AttentionItem } from "../../../../shared/attention-queue.js";
-import { withBoard } from "../../../../shared/board-select.js";
 import {
   REPLY_COPY,
   type DecisionView,
   type ReplyResult,
 } from "../../../../shared/decision-view.js";
+import { routeHash } from "../../../../shared/route.js";
 import { SESSION_STATES } from "../../../../shared/session-states.js";
 import {
   DEFAULT_CLAUDE_ACCOUNT_ID,
@@ -173,7 +173,7 @@ function itemRow(item: AttentionItem, ctx: AttentionContext): AttentionRow {
     action: ACTIONS[item.kind] ?? null,
     changeBudgetHref:
       item.kind === "budget_stop"
-        ? withBoard("#/board?panel=orchestrator&tab=policy", ctx.boardKey)
+        ? `${routeHash({ page: "board", board: ctx.boardKey })}?panel=orchestrator&tab=policy`
         : null,
   };
 }

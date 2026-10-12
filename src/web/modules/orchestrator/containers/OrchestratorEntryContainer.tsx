@@ -17,7 +17,8 @@ export function OrchestratorEntryContainer() {
         entry={entry}
         onOpen={() =>
           void navigate({
-            to: "/board/{-$id}",
+            to: "/boards/$key",
+            params: { key: boardKey },
             search: (prev) => ({ ...prev, panel: "orchestrator" as const }),
           })
         }

@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import type { AskTurn } from "../../../../shared/types.js";
 import { askHistory, askReducer, type AskState } from "./ask-conversation.js";
 
-const EMPTY: AskState = { turns: [], pending: null, error: null };
+const EMPTY: AskState = {
+  turns: [],
+  pending: null,
+  error: null,
+  generation: 0,
+};
 
 function sent(question = "what needs me?"): AskState {
   return askReducer(EMPTY, { type: "send", question });
@@ -14,6 +19,7 @@ test("send appends the user turn and sets pending", () => {
     turns: [{ role: "user", text: "what needs me?" }],
     pending: "what needs me?",
     error: null,
+    generation: 0,
   });
 });
 
@@ -38,7 +44,10 @@ test("a send while pending is ignored", () => {
 
 test("clear empties the conversation", () => {
   const answered = askReducer(sent(), { type: "answer", answer: "a" });
-  assert.deepEqual(askReducer(answered, { type: "clear" }), EMPTY);
+  assert.deepEqual(askReducer(answered, { type: "clear" }), {
+    ...EMPTY,
+    generation: 1,
+  });
 });
 
 test("cancel clears pending without removing the user turn", () => {
@@ -50,6 +59,51 @@ test("cancel clears pending without removing the user turn", () => {
 test("retry drops the unanswered user turn and clears the error", () => {
   const failed = askReducer(sent(), { type: "fail", error: "failed" });
   assert.deepEqual(askReducer(failed, { type: "retry" }), EMPTY);
+});
+
+const USER_TURN: AskTurn = { role: "user", text: "create a board" };
+
+test("a local turn is appended without a pending run", () => {
+  const next = askReducer(EMPTY, { type: "local", turn: USER_TURN });
+  assert.deepEqual(next, { ...EMPTY, turns: [USER_TURN] });
+});
+
+test("a local turn is dropped while a run is pending", () => {
+  const state = sent();
+  assert.equal(askReducer(state, { type: "local", turn: USER_TURN }), state);
+});
+
+test("a local turn clears the error", () => {
+  const failed = askReducer(sent(), { type: "fail", error: "failed" });
+  const next = askReducer(failed, { type: "local", turn: USER_TURN });
+  assert.equal(next.error, null);
+  assert.equal(next.turns.at(-1), USER_TURN);
+});
+
+test("a local turn from before a clear is dropped, one with no generation is kept", () => {
+  const cleared = askReducer(EMPTY, { type: "clear" });
+  assert.equal(
+    askReducer(cleared, { type: "local", turn: USER_TURN, generation: 0 }),
+    cleared,
+  );
+  assert.deepEqual(
+    askReducer(cleared, { type: "local", turn: USER_TURN, generation: 1 })
+      .turns,
+    [USER_TURN],
+  );
+  assert.deepEqual(
+    askReducer(cleared, { type: "local", turn: USER_TURN }).turns,
+    [USER_TURN],
+  );
+});
+
+test("an assistant turn can carry a markdown link", () => {
+  const text = "Created board A with key AAA. [Open A](#/boards/AAA)";
+  const next = askReducer(EMPTY, {
+    type: "local",
+    turn: { role: "assistant", text },
+  });
+  assert.equal(next.turns[0]?.text, text);
 });
 
 test("the history for the 22nd turn carries the last 20", () => {

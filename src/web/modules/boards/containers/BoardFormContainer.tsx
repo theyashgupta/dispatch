@@ -1,49 +1,48 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { createdBoardText } from "../../../../shared/board-create.js";
 import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import type { Board } from "../../../../shared/types.js";
 import { BoardFormDialog } from "@/modules/boards/components/BoardFormDialog";
-import { keyClash } from "@/modules/boards/domain/board-archive";
 import {
+  addRepository,
+  changeRepository,
   checkBoardForm,
   EMPTY_FORM,
-  EMPTY_REPOSITORY,
   failureText,
-  formValuesFromBoard,
+  folderPlaceholder,
+  previewKey,
+  refusalErrors,
+  removeRepository,
+  takenKeySet,
   toCreateInput,
-  toUpdateInput,
+  visibleErrors,
   type BoardFormErrors,
   type BoardFormValues,
 } from "@/modules/boards/domain/board-form";
-import {
-  useCreateBoardMutation,
-  useUpdateBoardMutation,
-} from "@/modules/boards/queries/boards-queries";
-
-export type BoardFormTarget =
-  { mode: "create" } | { mode: "edit"; board: Board };
+import { useCreateBoardMutation } from "@/queries/board-create-queries";
+import { useBoardsNavigation } from "./use-boards-navigation";
+import { useRepositoryBrowser } from "./use-repository-browser";
 
 interface BoardFormContainerProps {
-  target: BoardFormTarget;
   boards: Board[];
   knownLinearTeamKeys: string[];
   onClose: () => void;
 }
 
 export function BoardFormContainer({
-  target,
   boards,
   knownLinearTeamKeys,
   onClose,
 }: BoardFormContainerProps) {
   const create = useCreateBoardMutation();
-  const update = useUpdateBoardMutation();
-  const [values, setValues] = useState<BoardFormValues>(
-    target.mode === "edit" ? formValuesFromBoard(target.board) : EMPTY_FORM,
-  );
+  const nav = useBoardsNavigation();
+  const [values, setValues] = useState<BoardFormValues>(EMPTY_FORM);
   const [attempted, setAttempted] = useState(false);
+  const [done, setDone] = useState(false);
   const [keyTouched, setKeyTouched] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
+  const [refused, setRefused] = useState<BoardFormErrors>({});
   const submitting = useRef(false);
   const mounted = useRef(false);
   useEffect(() => {
@@ -53,92 +52,79 @@ export function BoardFormContainer({
     };
   }, []);
 
-  const isDefault =
-    target.mode === "edit" && target.board.key === DEFAULT_BOARD_KEY;
-  const pending = create.isPending || update.isPending;
-  const found = checkBoardForm(values, {
-    mode: target.mode,
-    isDefault,
-    boards,
-    knownLinearTeamKeys,
+  const found = checkBoardForm(values, { boards, knownLinearTeamKeys });
+  const errors = visibleErrors(found, refused, {
+    attempted,
+    keyTouched,
+    hidden: done || create.isPending,
   });
-  let errors: BoardFormErrors = {};
-  if (attempted) errors = found;
-  else if (keyTouched && found.key !== undefined) errors = { key: found.key };
+  const taken = takenKeySet(boards, knownLinearTeamKeys);
+  const preview = previewKey(values.name, taken);
+  const localRoot = boards.find(
+    (board) => board.key === DEFAULT_BOARD_KEY,
+  )?.workspaceRoot;
+
+  const edit = (apply: (prev: BoardFormValues) => BoardFormValues) => {
+    setRefused({});
+    setValues(apply);
+  };
+  const repositoryBrowser = useRepositoryBrowser((index, path) =>
+    edit((prev) => changeRepository(prev, index, { path })),
+  );
 
   const submit = async () => {
-    if (submitting.current) return;
+    if (submitting.current || done) return;
     setAttempted(true);
     if (Object.keys(found).length > 0) return;
     setFailure(null);
+    setRefused({});
     submitting.current = true;
-    let result;
     try {
-      result =
-        target.mode === "create"
-          ? await create.mutateAsync(toCreateInput(values))
-          : await update.mutateAsync({
-              key: target.board.key,
-              input: toUpdateInput(values, target.board.key),
-            });
+      const created = await create.mutateAsync(toCreateInput(values));
+      if (created.ok) {
+        toast.success(createdBoardText(created.board));
+      }
+      if (!mounted.current) return;
+      if (created.ok) {
+        setDone(true);
+        nav.openBoard(created.board.key);
+        return;
+      }
+      const placed = refusalErrors(created, values);
+      setRefused(placed.errors);
+      if (placed.form !== null) {
+        setFailure(failureText("Create board failed", placed.form));
+      }
     } finally {
       submitting.current = false;
     }
-    if (!mounted.current) return;
-    if (!result.ok) {
-      setFailure(
-        failureText(
-          target.mode === "create" ? "Create board failed" : "Save failed",
-          result.error,
-        ),
-      );
-      return;
-    }
-    toast.success(
-      `Board ${result.board.name} ${target.mode === "create" ? "created" : "saved"}.`,
-    );
-    onClose();
   };
 
   return (
     <BoardFormDialog
-      mode={target.mode}
-      title={
-        target.mode === "create"
-          ? "New board"
-          : `Edit board ${target.board.name}`
-      }
-      isDefault={isDefault}
       values={values}
       errors={errors}
-      clashingTeamKey={
-        target.mode === "edit" && keyClash(target.board, knownLinearTeamKeys)
-          ? target.board.key
-          : null
-      }
       failure={failure}
-      pending={pending}
-      onChange={(patch) => setValues((prev) => ({ ...prev, ...patch }))}
+      pending={create.isPending || done}
+      placeholderKey={preview ?? ""}
+      placeholderFolder={folderPlaceholder(
+        localRoot,
+        values.key.trim() || preview || "",
+      )}
+      browser={{
+        ...repositoryBrowser.browser,
+        onSelect: repositoryBrowser.select,
+      }}
+      onChange={(patch) => edit((prev) => ({ ...prev, ...patch }))}
       onRepositoryChange={(index, patch) =>
-        setValues((prev) => ({
-          ...prev,
-          repositories: prev.repositories.map((repo, i) =>
-            i === index ? { ...repo, ...patch } : repo,
-          ),
-        }))
+        edit((prev) => changeRepository(prev, index, patch))
       }
-      onAddRepository={() =>
-        setValues((prev) => ({
-          ...prev,
-          repositories: [...prev.repositories, EMPTY_REPOSITORY],
-        }))
-      }
+      onAddRepository={() => edit(addRepository)}
       onRemoveRepository={(index) =>
-        setValues((prev) => ({
-          ...prev,
-          repositories: prev.repositories.filter((_, i) => i !== index),
-        }))
+        edit((prev) => removeRepository(prev, index))
       }
+      onBrowse={repositoryBrowser.open}
+      onUseKey={(key) => edit((prev) => ({ ...prev, key }))}
       onKeyBlur={() => setKeyTouched(true)}
       onSubmit={() => void submit()}
       onClose={() => {

@@ -20,7 +20,7 @@ import {
   isInboxDismissed,
   isInboxWaiting,
 } from "../../../../shared/inbox-count.js";
-import { routeHash } from "../../../../shared/route.js";
+import { pageLocation } from "../../../../shared/route.js";
 import {
   INBOX_SHORTCUTS,
   bindShortcuts,
@@ -105,7 +105,7 @@ export function InboxContainer({
         openStart: appStore.openStart,
         askAbout: (question) =>
           void router.navigate({
-            href: routeHash({ page: "ask", id: question }).slice(1),
+            href: pageLocation({ page: "ask", id: question }, boardKey),
           }),
       }),
     [appStore, router, boardKey],
@@ -359,7 +359,7 @@ function InboxPage({
         onPickSnooze={handlePickSnooze}
         onClearFilters={handleClearFilters}
         onOpenSettings={() => {
-          window.location.hash = routeHash({ page: "settings" });
+          window.location.hash = `#${pageLocation({ page: "settings" }, boardKey)}`;
         }}
         renderSlackThread={renderSlackThread}
       />

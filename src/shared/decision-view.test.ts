@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   actionFailedText,
+  decisionViews,
   liveReplyResults,
   refusalText,
   replyKey,
 } from "./decision-view.js";
+import type { BoardKey } from "./types.js";
 
 const row = {
   kind: "needs_input",
@@ -164,4 +166,41 @@ test("every refusal code a user route can return has plain text", () => {
     );
     assert.ok(!/\u2014|--/.test(text), code);
   }
+});
+
+test("a plan is a gate with its rows in plan order and no other answer", () => {
+  const entries = [
+    { ref: "CEN-2", playbook: "PRD + Ralph Loop", order: 2, size: "medium" },
+    { ref: "CEN-1", playbook: "Write code directly", order: 1, size: "small" },
+  ] as const;
+  const [view] = decisionViews(
+    [
+      {
+        id: "d1",
+        boardKey: "CEN" as BoardKey,
+        cardId: null,
+        orchestratorId: "main",
+        kind: "plan",
+        question: "Two tickets.",
+        options: [
+          { id: "approve", label: "Approve the plan" },
+          { id: "reject", label: "Do not approve" },
+        ],
+        recommendedOptionId: "approve",
+        state: "open",
+        answer: null,
+        createdAt: "2026-10-11T10:00:00.000Z",
+        answeredAt: null,
+        plan: { entries: [...entries] },
+      },
+    ],
+    new Map(),
+    Date.parse("2026-10-11T10:05:00.000Z"),
+  );
+  assert.equal(view?.otherOptionId, null);
+  assert.deepEqual(
+    view?.planRows.map((r) => r.ref),
+    ["CEN-1", "CEN-2"],
+  );
+  assert.deepEqual(view?.proposalTitles, []);
 });

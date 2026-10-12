@@ -11,7 +11,7 @@ import type {
 } from "../../../../shared/types.js";
 import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import {
-  boardSearch,
+  boardSwitchTarget,
   cardBoardSwitch,
 } from "../../../../shared/board-select.js";
 import { askAboutQuestion } from "../../../../shared/ask.js";
@@ -21,7 +21,7 @@ import {
   actionablePinnedMembers,
   selectedCardOf,
 } from "../../../../shared/pinned-card.js";
-import { routeFromMatch, routeHash } from "../../../../shared/route.js";
+import { pageLocation, routeFromMatch } from "../../../../shared/route.js";
 import {
   accountName,
   sessionAccountView,
@@ -93,7 +93,8 @@ export function DetailPanelContainer() {
   const router = useRouter();
   const leaf = useRouterState({ select: (s) => s.matches.at(-1) });
   const pathname = useLocation({ select: (l) => l.pathname });
-  const docked = routeFromMatch(leaf, pathname).page === "workspace";
+  const routePage = routeFromMatch(leaf, pathname).page;
+  const docked = routePage === "workspace";
   const boardKey = useAppStore(appStore, (s) => s.board);
   const board = useBoardSnapshot(
     boardKey,
@@ -146,7 +147,7 @@ export function DetailPanelContainer() {
       title: target.title,
     });
     void router.navigate({
-      href: routeHash({ page: "ask", id: question }).slice(1),
+      href: pageLocation({ page: "ask", id: question }, boardKey),
     });
   };
   const onUnwindRequest = (id: string, to: UnwindDestination) => {
@@ -182,8 +183,10 @@ export function DetailPanelContainer() {
   const open = card != null;
 
   const selectedBoardRef = useRef(boardKey);
+  const routePageRef = useRef(routePage);
   useEffect(() => {
     selectedBoardRef.current = boardKey;
+    routePageRef.current = routePage;
   });
   const cardId = card?.id;
   const cardBoard = card?.boardKey;
@@ -192,8 +195,7 @@ export function DetailPanelContainer() {
     const target = cardBoardSwitch(cardBoard, selectedBoardRef.current);
     if (target === null) return;
     void router.navigate({
-      to: ".",
-      search: (prev) => ({ ...prev, ...boardSearch(target) }),
+      ...boardSwitchTarget(routePageRef.current, target),
       replace: true,
     });
   }, [cardId, cardBoard, router]);
