@@ -295,7 +295,7 @@ test("reviewCardMutationOptions posts the review card route and returns the card
   );
   assert.equal(calls[0]?.url, "/api/github/pr/o/r/7/review");
   assert.equal(calls[0]?.init?.method, "POST");
-  assert.deepEqual(JSON.parse(String(calls[0]?.init?.body)), {
+  assert.deepEqual(JSON.parse(calls[0]?.init?.body as string), {
     board: "LOCAL",
   });
 });
