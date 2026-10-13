@@ -6353,8 +6353,9 @@ Its label is "Add orchestrator" on a board with no record. Its label is "Orchest
 record. It reads only the `Board` that the board list holds.
 
 The toolbar of the centre shows one control for the selected record. It is Start on a board with no
-record and on a stopped record. It is Stop on a running record. It is Resume when the session state is
-`lost` or `shell_prompt`. The control calls the lifecycle routes. The toolbar shows no control while the
+record. It is also Start on a stopped record, unless the session state is `lost` or `shell_prompt`. It is
+Stop on a running record. It is Resume when the session state is `lost` or `shell_prompt`, also on a
+stopped record. The control calls the lifecycle routes. The toolbar shows no control while the
 record starts or stops. Every control is off while the board stream is down. Start is also off while the
 board policy has the supervisor off. Stop is off while the session state is `permission_prompt`,
 `usage_limit_dialog` or `usage_limit_wait`.
