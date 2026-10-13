@@ -85,6 +85,6 @@ export function defaultBoardPolicy(key: BoardKey): BoardPolicy {
     wakeMinutes: 15,
     crossSessionInbound: null,
     memoryFloorMb: 1024,
-    swapCeilingMb: 4096,
+    swapCeilingMb: 8192,
   };
 }
