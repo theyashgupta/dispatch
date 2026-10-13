@@ -57,3 +57,13 @@ void test("the rule book has no em dash, no double hyphen, no user path and no s
   assert.equal(markdown.includes("/Users/"), false);
   assert.equal(markdown.includes("DISPATCH_STATUS"), false);
 });
+
+void test("the rule book names get_card_progress and the single card handoff, and not supervisor_state", () => {
+  assert.ok(markdown.includes("get_card_progress"));
+  assert.ok(
+    markdown.includes(
+      "For a group or a single card at the handoff percent, call `request_handoff`.",
+    ),
+  );
+  assert.equal(markdown.includes("supervisor_state"), false);
+});

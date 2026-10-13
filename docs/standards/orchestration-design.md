@@ -314,19 +314,19 @@ The checks 1 to 3 use no git call. The check 4 reads one file and runs before an
 
 ## Tool reference
 
-This section is the reference for the 29 tools. Each tool calls one route under `/api/orchestrator/`. Each call is checked against the board scope and, for a write, the policy (D-6), and is recorded as a `tool_call` row in `orchestration_events`. A tool call on a card that another orchestrator owns (D-7) returns 403 `other-owner`.
+This section is the reference for the 30 tools. Each tool calls one route under `/api/orchestrator/`. Each call is checked against the board scope and, for a write, the policy (D-6), and is recorded as a `tool_call` row in `orchestration_events`. A tool call on a card that another orchestrator owns (D-7) returns 403 `other-owner`.
 
-| Family    | Tools                                                                                                                                                                   | Notes                                                                                    |
-| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Read      | `list_cards`, `get_card`, `list_sessions`, `get_group_progress`, `read_pane_tail`, `list_events`, `get_policy`, `get_board_workspace`, `list_playbooks`, `get_rulebook` | `list_events` takes a `since` cursor                                                     |
-| Tickets   | `create_ticket`, `update_ticket`, `move_card`, `add_comment`                                                                                                            | `update_ticket` closes F25                                                               |
-| Groups    | `create_base_branch`, `create_group`, `start_group`                                                                                                                     | `create_group` takes members, optional repos, playbook, direction and `dependsOn`        |
-| Cards     | `start_card`                                                                                                                                                            | starts one ticket card with a playbook and a direction                                   |
-| Sessions  | `send_input`, `approve_roadmap`, `request_handoff`, `resume_loop`, `stop_session`                                                                                       | `send_input` returns `confirmed` or `unconfirmed` (D-4); `resume_loop` per Key rules     |
-| Ship      | `start_ship`, `get_ship_state`                                                                                                                                          | D-8                                                                                      |
-| Decisions | `create_decision_item`                                                                                                                                                  | the user answers; the answer returns as an event                                         |
-| Wait      | `wait_for_event`                                                                                                                                                        | blocks until an event matches a filter or a time limit passes                            |
-| State     | `read_state`, `write_state`                                                                                                                                             | the orchestrator keeps its state in the store, because it has no file write tool (U4-05) |
+| Family    | Tools                                                                                                                                                                                        | Notes                                                                                    |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Read      | `list_cards`, `get_card`, `list_sessions`, `get_group_progress`, `get_card_progress`, `read_pane_tail`, `list_events`, `get_policy`, `get_board_workspace`, `list_playbooks`, `get_rulebook` | `list_events` takes a `since` cursor                                                     |
+| Tickets   | `create_ticket`, `update_ticket`, `move_card`, `add_comment`                                                                                                                                 | `update_ticket` closes F25                                                               |
+| Groups    | `create_base_branch`, `create_group`, `start_group`                                                                                                                                          | `create_group` takes members, optional repos, playbook, direction and `dependsOn`        |
+| Cards     | `start_card`                                                                                                                                                                                 | starts one ticket card with a playbook and a direction                                   |
+| Sessions  | `send_input`, `approve_roadmap`, `request_handoff`, `resume_loop`, `stop_session`                                                                                                            | `send_input` returns `confirmed` or `unconfirmed` (D-4); `resume_loop` per Key rules     |
+| Ship      | `start_ship`, `get_ship_state`                                                                                                                                                               | D-8                                                                                      |
+| Decisions | `create_decision_item`                                                                                                                                                                       | the user answers; the answer returns as an event                                         |
+| Wait      | `wait_for_event`                                                                                                                                                                             | blocks until an event matches a filter or a time limit passes                            |
+| State     | `read_state`, `write_state`                                                                                                                                                                  | the orchestrator keeps its state in the store, because it has no file write tool (U4-05) |
 
 Every route sits under `/api/orchestrator/`, and the paths below are relative to it. Each tool is one entry of `src/server/bootstrap/mcp-tools.ts`, and each route is declared in `src/server/routes/orchestrator.route.ts`, its handler is in `src/server/routes/orchestrator.handlers.ts` and its zod schema is in `src/server/routes/orchestrator-schemas.ts`. These rules hold for every route, so the entries do not repeat them:
 
@@ -364,6 +364,14 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 - Input: `id` (card id).
 - Description: "Get the progress of one group card. A card outside your board is refused."
 - Refusals: 400 `not-group-card`.
+
+### `get_card_progress`
+
+- Route: `GET /cards/:id/progress`.
+- Input: `id` (card id).
+- Description: "Get the progress of one ticket card that start_card started: the phases from its PRD, the gate state of each phase, the loop engine state and the last status marker. A group card or a card that start_card did not start is refused. This tool changes nothing."
+- Result: `{ cardId, loopProgress, lastMarker }`. `loopProgress` is the one-unit loop model of a single PRD loop. Its phases come from the PRD headings. Its gate state comes from the `gate=pass` lines of `state.md` and the RED lines of `attempts.md`. Its engine state comes from the engine file, and it holds `prdFile`. `loopProgress` is null before the engine file exists.
+- Refusals: 400 `not-launched-card` for a group card or for a ticket card that `start_card` did not start. 404 `unknown-card`. 403 for a card outside the caller scope.
 
 ### `read_pane_tail`
 
@@ -661,3 +669,21 @@ Change: the concurrency cap of D-6 now counts a running group and a running tick
 Change: a playbook can have a `when` line in its front matter, 300 characters or fewer. The seeded playbooks carry one. A seeded file gets the current seed when the SHA-256 hash of its content is in the retired set of its slug, so a file that the user edited stays as it is. A new seeded playbook, Roadmap Loop, runs several related tickets as one stack. The Board Orchestrator playbook now loads the rule book and holds only the loader steps and the rules of D-9. Part 2 follows: monitoring of a single card, and ship and release of a single card.
 
 Reason: the G19 and G20 real runs, and the user note of 2026-10-10.
+
+### LOCAL-109
+
+Date: 2026-10-11.
+
+Change: a loop card is a group card, or a ticket card that `start_card` started. The loop progress reader reads a single PRD loop of a loop card. It takes the PRD path and the slug from the engine file. It stores one unit with the phases of the PRD.
+
+Change: a new read tool, `get_card_progress`, gives that progress and the last status marker. The tool count is 30.
+
+Change: the `group_state` events, the `loop_gate` reports and the wake cover every loop card. A failed start of a launched ticket card writes `group_state` `start_failed`. Held starts and the budget stop stay group only. This amends LOCAL-96.
+
+Change: the handoff request and the resume prompt of a single PRD loop name `resume.md` in the feature folder of the PRD. The request has no progress ledger step.
+
+Change: the dashboard progress section shows a running loop card.
+
+Change: a single PRD loop that prints its completion promise gets the close loop action, the same as a roadmap loop.
+
+Reason: the orchestrator could not follow a single card that it started (LOCAL-109 scope items 1 and 2).

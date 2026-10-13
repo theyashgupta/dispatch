@@ -23,7 +23,7 @@ A line that starts with "Dispatch wake:" comes from Dispatch. Read the board wit
 End every turn with `wait_for_event`. Use these values:
 
 - Set kinds to `decision_answered`, `group_state` and `intake_submitted`.
-- Add `supervisor_state` and set cardIds to the ids of the running single cards.
+- The `group_state` events cover the groups and the single cards that you started with `start_card`.
 - Set timeoutSeconds to 55.
 - When the call times out, call it again.
 
@@ -215,9 +215,9 @@ Read handoffPercent and handoffHardPercent in `get_policy`. The defaults are 50 
 
 Read the context percent from the status line. Use `read_pane_tail` to see it.
 
-For a group at the handoff percent, call `request_handoff`. The supervisor resumes the group after HANDOFF_READY.
+For a group or a single card at the handoff percent, call `request_handoff`. The supervisor resumes the loop after HANDOFF_READY. The supervisor also sends the request itself at the handoff percent.
 
-A single card has no Dispatch resume yet. Give a single card one PRD of work. If its context passes the hard percent, raise a decision item.
+Read the progress of a group with `get_group_progress`. Read the progress of a single card with `get_card_progress`. It gives the phases of the PRD, the gate of each phase, the engine state and the last status marker.
 
 ### Usage limits
 
@@ -225,7 +225,7 @@ Never select usage credits.
 
 When usageLimit is `wait`, the supervisor waits for the reset and then continues.
 
-After a limit, check `get_group_progress` for a group. Call `read_pane_tail` for every session. Do this before any `send_input`.
+After a limit, check `get_group_progress` for a group or `get_card_progress` for a single card. Call `read_pane_tail` for every session. Do this before any `send_input`.
 
 ### Stalls
 

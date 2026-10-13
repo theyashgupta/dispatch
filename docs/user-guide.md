@@ -217,7 +217,7 @@ The loop also reports each phase gate and unit gate to Dispatch. The report uses
 ### How progress shows
 
 - The boards page **Loops** column shows each running loop as a group id and a percent.
-- The dashboard section **Progress per group** shows one row for each group that has a loop.
+- The dashboard section **Progress per group** shows one row for each group that has a loop. It also shows each single card that the orchestrator started, with the phases of its PRD.
 - The dashboard section **Activity log** shows the gate events.
 
 ## The dashboard
@@ -327,6 +327,8 @@ When the loop shows the state **Handing off** and the engine file says `handoff-
 5. If a step is not confirmed, the session moves to **Needs input**.
 
 If a repeated handoff request arrives in the first five minutes after the resume, the supervisor sends one line that cancels it.
+
+The supervisor also hands off a single PRD loop at the handoff percent. The loop writes its resume prompt in its feature folder.
 
 An orchestrator uses the same thresholds. Its request tells it to call `write_state` with the full state and `handoffReady` set to true. Then it prints `HANDOFF_READY <orchestrator id>`. The fresh session starts with a prompt to call `read_state` first.
 

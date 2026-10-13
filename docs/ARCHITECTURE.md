@@ -144,6 +144,7 @@ Mount prefix: `/api/orchestrator`.
 | GET    | `/api/orchestrator/cards/:id`                      | Orchestrator token | Tool `get_card`: read one card of the board with its members.                                       |
 | GET    | `/api/orchestrator/sessions`                       | Orchestrator token | Tool `list_sessions`: list the sessions of the board, only the live ones when asked.                |
 | GET    | `/api/orchestrator/groups/:id/progress`            | Orchestrator token | Tool `get_group_progress`: read the loop progress of one group card.                                |
+| GET    | `/api/orchestrator/cards/:id/progress`             | Orchestrator token | Tool `get_card_progress`: read the loop progress of one ticket card that `start_card` started.      |
 | GET    | `/api/orchestrator/sessions/:cardId/pane`          | Orchestrator token | Tool `read_pane_tail`: read the last lines of the terminal of a session.                            |
 | GET    | `/api/orchestrator/events`                         | Orchestrator token | Tool `list_events`: list the board events after a cursor, oldest first.                             |
 | GET    | `/api/orchestrator/policy`                         | Orchestrator token | Tool `get_policy`: read the policy of the caller with the running loop count and the group costs.   |
@@ -5670,8 +5671,9 @@ root (`card.workspacePath`): the one `.roadmap/<slug>/progress.md`, the roadmap 
 that `progress.md` line 1 names (else the only `ROADMAP*.md`), the loop engine file
 `.claude/ralph-loop.local.md` (else its `.done` copy), and for each unit its PRD and the
 `state.md` and `attempts.md` files of `<repo>/.planning/<slug>-unit-<n>/`. The pure parsers are in
-`loop-progress.ts`. The result is `Card.loopProgress`. A tracked card is a group card that is not
-in Done and has a `workspacePath`.
+`loop-progress.ts`. The result is `Card.loopProgress`. A tracked card is a loop card
+(a group card, or a ticket card that `start_card` started) that is not in Done and has a
+`workspacePath`. For a ticket card the reader reads its single PRD loop.
 
 **Refresh.** The reader reads a tracked card when a watched folder changes (300 ms debounce per
 card) and every 60 s. The watched folders are the session root, `.claude/`, `.roadmap/<slug>/`
@@ -5953,7 +5955,7 @@ reads the identity or writes, `assertAheadAndClean` resolves the base once. The 
 `branch-not-ahead`) and the worktree must be clean (409 `worktree-dirty`). A failed git call of
 these two checks answers 409 `no-workspace`. A group with loop progress keeps the D-8 rules.
 
-**MCP server.** `dispatch mcp` serves the 29 tools over stdio. `bootstrap/cli.ts` reads and checks
+**MCP server.** `dispatch mcp` serves the 30 tools over stdio. `bootstrap/cli.ts` reads and checks
 `DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and
 `bootstrap/mcp-tools.ts` holds the zod input and the description of each tool. The dependency
 cruiser rule `mcp-server-isolated` refuses an import of `routes`, `services`, `store`, `adapters`
