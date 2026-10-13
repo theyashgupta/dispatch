@@ -80,7 +80,7 @@ export function CentreToolbar({
           className={
             inline
               ? "w-full"
-              : "absolute top-full right-0 z-10 mt-(--space-xs) w-max max-w-120"
+              : "absolute top-full right-0 z-10 mt-(--space-xs) w-max max-w-120 rounded-md border bg-popover px-3 py-2 shadow-md"
           }
         >
           <PanelAlertBar
