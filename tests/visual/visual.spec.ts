@@ -17,6 +17,32 @@ const SETUP_STATUS = {
   node: { ok: true, version: "22.22.0", floor: "22.22" },
   storage: { ok: true, path: "/home/visual/.dispatch/board.db" },
 };
+const at = (minutesAgo: number) =>
+  new Date(now - minutesAgo * 60_000).toISOString();
+const CONVERSATION = {
+  status: "ok",
+  truncated: false,
+  messages: [
+    {
+      id: "m1",
+      at: at(40),
+      role: "user",
+      text: "Start the billing migration after the schema unit ships.",
+    },
+    {
+      id: "m2",
+      at: at(38),
+      role: "orchestrator",
+      text: "Started GROUP-21 at unit 2. I will ask before the cutover.",
+    },
+    {
+      id: "m3",
+      at: at(20),
+      role: "system",
+      text: "GROUP-22 failed the Phase 5 gate.",
+    },
+  ],
+};
 
 const screens: {
   name: string;
@@ -92,6 +118,20 @@ const screens: {
       expect(page.getByText("Plain todo ticket").first()).toBeVisible(),
   },
   {
+    name: "command-centre",
+    url: `${orchestrated}/#/boards/ORC/orchestrator`,
+    ready: async (page) => {
+      if ((page.viewportSize()?.width ?? 0) < 768)
+        await page.getByRole("tab", { name: "Conversation" }).first().click();
+      await expect(
+        page.getByText(/Started GROUP-21 at unit 2/).first(),
+      ).toBeVisible();
+      await expect(
+        page.getByText(/Retry the Phase 5 gate now/).first(),
+      ).toBeVisible();
+    },
+  },
+  {
     name: "sidebar-boards",
     url: `${orchestrated}/#/boards/ORC`,
     ready: async (page) => {
@@ -163,6 +203,25 @@ for (const theme of ["dark", "light"] as const) {
               route.request().method() === "GET"
                 ? route.fulfill({ json: SETUP_STATUS })
                 : route.fallback(),
+            );
+          }
+          if (screen.name === "command-centre") {
+            await page.route(
+              "**/api/boards/ORC/orchestrators/orch-main/conversation",
+              (route) => route.fulfill({ json: CONVERSATION }),
+            );
+            await page.route(
+              (url) => url.pathname === "/api/decisions",
+              async (route) => {
+                const response = await route.fetch();
+                const { items } = (await response.json()) as {
+                  items: { id: string }[];
+                };
+                await route.fulfill({
+                  response,
+                  json: { items: items.filter((i) => i.id.startsWith("dec-")) },
+                });
+              },
             );
           }
           await page.route("**/api/**", (route) =>
