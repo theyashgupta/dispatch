@@ -7,6 +7,7 @@ import {
   costText,
   countsText,
   noSessionSendText,
+  orchestratorsTabLabel,
   regionErrorText,
   regionState,
   selectedRecord,
@@ -222,4 +223,10 @@ test("a send with no session names the orchestrator and ends in one period", () 
     noSessionSendText("Main"),
     "Message failed: Main has no session. Start it first.",
   );
+});
+
+test("the Orchestrators tab shows its count once the records loaded", () => {
+  assert.equal(orchestratorsTabLabel(null), "Orchestrators");
+  assert.equal(orchestratorsTabLabel(0), "Orchestrators (0)");
+  assert.equal(orchestratorsTabLabel(2), "Orchestrators (2)");
 });
