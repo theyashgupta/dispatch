@@ -1,0 +1,8 @@
+⏺ Usage limit reached · continuing automatically at 3:40pm · esc to cancel
+✻ Worked for 2h 23m 33s · done 1:05 PM
+❯ 
+  ⚠ Usage limit reached · limit resets 3:40pm
+    Continuing shortly · esc to cancel
+  Opus 5.5 · high  │  █████░░░░░   52%  523k/1.0M                                                                                              ✔ Update installed · Restart to update
+  g13-modules-b-unit-1  │  feat/LOCAL-74-unit-1-daily-pages  │  thinking  │  Attention-kind  │  7d 47%  │  12h25m  │  +3898/-35  │  $117.00    new task? /clear to save 524.5k tokens
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents

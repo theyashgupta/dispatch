@@ -61,6 +61,7 @@ const BACKGROUND_EXIT_MENU = /Background work is running/;
 const LIMIT_CLEAR_MS = 10_000;
 const LIMIT_POLL_MS = 200;
 const FOOTER_LINES = 5;
+const LIMIT_TAIL_LINES = 15;
 
 /**
  * Poll a pane until `done` holds for a capture; `null` when the wait runs out or a capture fails.
@@ -88,12 +89,24 @@ async function awaitPane(
  *
  * @remarks Text higher up can be stale scrollback, so readiness is read from the footer only.
  */
-function footer(pane: string): string {
+function footer(pane: string, lines = FOOTER_LINES): string {
   return pane
     .split("\n")
     .filter((line) => line.trim() !== "")
-    .slice(-FOOTER_LINES)
+    .slice(-lines)
     .join("\n");
+}
+
+/** Log the last lines of a fresh pane capture and return `limit-unknown`. */
+async function warnLimitUnknown(
+  cardId: string,
+  paneTarget: string,
+): Promise<"limit-unknown"> {
+  const pane = await capturePane(paneTarget).catch(() => "");
+  console.warn(
+    `[account-move] limit-unknown for card ${cardId}, pane tail:\n${footer(pane, LIMIT_TAIL_LINES)}`,
+  );
+  return "limit-unknown";
 }
 
 /**
@@ -218,11 +231,11 @@ export async function continueAtLimit(
     const pane = await capturePane(paneTarget).catch(() => null);
     if (pane === null || paneTurnState(pane) !== "limit") return "none";
     if ((await clearLimitSurface(paneTarget, pane)) === null) {
-      return "limit-unknown";
+      return warnLimitUnknown(cardId, paneTarget);
     }
     return (await sendContinuePrompt(cardId, sessionId))
       ? "continued"
-      : "limit-unknown";
+      : warnLimitUnknown(cardId, paneTarget);
   });
 }
 
@@ -270,7 +283,7 @@ export async function moveSessionAccount(
       if (turn === "limit") {
         const surfaced = parseLimitSurface(pane) !== null;
         const cleared = await clearLimitSurface(paneTarget, pane);
-        if (cleared === null) return "limit-unknown";
+        if (cleared === null) return warnLimitUnknown(card.id, paneTarget);
         if (surfaced) seen.leftLimit = true;
         pane = cleared;
         turn = paneTurnState(cleared);

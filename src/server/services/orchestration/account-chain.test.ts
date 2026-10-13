@@ -695,6 +695,22 @@ void test("continueAtLimit sends no key to a busy pane that still shows surface 
   assert.deepEqual(paneCalls("cl-busy"), []);
 });
 
+void test("continueAtLimit sends no key to the cancelled post-menu screen even with a hook limit (C-03b)", async () => {
+  await begin();
+  stop();
+  const pane = fs.readFileSync(
+    new URL(
+      "../../test-support/fixtures/panes/limit-cancelled.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const s = await sessionCard("cl-cancelled", pane);
+  recordTurnEvent(s.cardId, s.sessionId, "StopFailure", "rate_limit");
+  assert.equal(await continueAtLimit(s.cardId, s.sessionId), "none");
+  assert.deepEqual(paneCalls("cl-cancelled"), []);
+});
+
 void test("pinning a queued session drops its queued move, and a chain-queued move checks the pin again before it runs (U2-15)", async () => {
   await begin();
   const busy = await sessionCard("pn-busy", BUSY_PANE);

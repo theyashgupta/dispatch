@@ -2879,11 +2879,13 @@ After a server restart the state is unknown until the next hook event, and the p
 A session is at a safe point when its state is idle or limit. The service treats an unknown state
 as busy.
 
-**A limit surface is cleared before the move.** `limit-surface.ts` holds the limit surface
-patterns. On the auto-continue line, the service sends Escape. On the options menu, it sends only the
-keys that select the stop option, or the wait option when no stop option shows. It never selects an
-option that matches `CREDITS_OPTION`. When the menu shows no stop option and no wait option, it sends
-no key and returns `limit-unknown`.
+**A limit surface is cleared before the move.** `limit-surface.ts` holds the limit surface patterns.
+It reads only the lines below the last input line, because limit text above it is scrollback that
+can never clear, and a move that waited on it returned `limit-unknown` (LOCAL-112). The server logs
+the last 15 pane lines with every `limit-unknown`. On the auto-continue line, the service sends
+Escape. On the options menu, it sends only the keys that select the stop option, or the wait option
+when no stop option shows. It never selects an option that matches `CREDITS_OPTION`. When the menu
+shows no stop option and no wait option, it sends no key and returns `limit-unknown`.
 
 **A busy session gets a pending move.** The service never interrupts a turn.
 `session-account-apply.ts#moveOrQueue` writes `pendingClaudeAccountId` on a busy session. The move
