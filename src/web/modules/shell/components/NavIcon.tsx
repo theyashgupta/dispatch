@@ -9,6 +9,7 @@ import {
   KeyRound,
   LayoutGrid,
   MessageCircleQuestion,
+  Network,
   PanelLeft,
   Settings,
   SquareTerminal,
@@ -43,7 +44,9 @@ export const NAV_ICON: Record<Page, ComponentType<{ size?: number }>> = {
   flow: Workflow,
   boards: LayoutGrid,
   dashboard: Gauge,
+  orchestrator: Network,
   settings: Settings,
+  "board-settings": Settings,
 };
 
 interface NavIconProps {

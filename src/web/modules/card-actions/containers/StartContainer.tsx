@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useRouteContext, useRouter } from "@tanstack/react-router";
 import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import { actionablePinnedCard } from "../../../../shared/pinned-card.js";
-import { routeHash } from "../../../../shared/route.js";
+import { pageLocation } from "../../../../shared/route.js";
 import type { Card } from "../../../../shared/types.js";
 import { StartDialog } from "@/modules/card-actions/components/StartDialog";
 import { useStartFlow } from "./use-start-flow";
@@ -17,6 +17,8 @@ interface StartContainerProps {
   card: Card;
   newSession?: boolean;
   extraDirection?: string;
+  playbookTag?: string;
+  playbook?: string;
   onClose: () => void;
   onEditPlaybooks: () => void;
 }
@@ -25,6 +27,8 @@ export function StartContainer({
   card,
   newSession,
   extraDirection: initialExtraDirection,
+  playbookTag,
+  playbook,
   onClose,
   onEditPlaybooks,
 }: StartContainerProps) {
@@ -41,6 +45,10 @@ export function StartContainer({
     open,
     requestClose,
     pending: start.isPending,
+    allowNoRepository: true,
+    playbookTag,
+    playbook,
+    preferredFolder: card.reviewPr?.repoPath ?? null,
     focusRef: textareaRef,
     send: (picks) =>
       start.mutateAsync(
@@ -84,8 +92,9 @@ export function StartContainer({
 export function StartRequestContainer() {
   const { appStore } = useRouteContext({ from: "__root__" });
   const router = useRouter();
+  const boardKey = useAppStore(appStore, (s) => s.board);
   const board = useBoardSnapshot(
-    useAppStore(appStore, (s) => s.board),
+    boardKey,
     useAppStore(appStore, (s) => s.doneLimit),
   );
   const request = useAppStore(appStore, (s) => s.start);
@@ -100,11 +109,13 @@ export function StartRequestContainer() {
       card={card}
       newSession={request.newSession === true}
       extraDirection={request.extraDirection}
+      playbookTag={request.playbookTag}
+      playbook={request.playbook}
       onClose={appStore.closeStart}
       onEditPlaybooks={() => {
         appStore.closeStart();
         void router.navigate({
-          href: routeHash({ page: "playbooks" }).slice(1),
+          href: pageLocation({ page: "playbooks" }, boardKey),
         });
       }}
     />

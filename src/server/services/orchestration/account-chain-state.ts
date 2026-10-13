@@ -27,7 +27,13 @@ const CHAIN_STATES = new Set([
  * Return a chain state with no accounts, no dwell start, no exhausted record and no moves.
  */
 export function emptyChainState(): ChainStateFile {
-  return { accounts: {}, inUseSince: null, exhausted: null, moves: [] };
+  return {
+    accounts: {},
+    inUseSince: null,
+    exhausted: null,
+    moves: [],
+    loginExpiryNotified: {},
+  };
 }
 
 function isRecord(raw: unknown): raw is Record<string, unknown> {
@@ -56,6 +62,15 @@ function validAccounts(
     }
   }
   return accounts;
+}
+
+function validNotified(raw: unknown): Record<string, string> {
+  if (!isRecord(raw)) return {};
+  return Object.fromEntries(
+    Object.entries(raw).filter(
+      (pair): pair is [string, string] => typeof pair[1] === "string",
+    ),
+  );
 }
 
 /**
@@ -87,6 +102,7 @@ export async function readChainState(): Promise<ChainStateFile> {
     moves: Array.isArray(parsed.moves)
       ? (parsed.moves as ChainMove[]).slice(-MAX_CHAIN_MOVES)
       : [],
+    loginExpiryNotified: validNotified(parsed.loginExpiryNotified),
   };
 }
 

@@ -15,8 +15,10 @@ import {
   ValidationError,
 } from "../services/domain/errors.js";
 import {
+  getCrossSessionInbound,
   getOrchestrationConfig,
   updateClaudeArgs,
+  updateCrossSessionInbound,
   updateCleanupDelayDays,
   updateArchiveRetentionDays,
   updateTerminalAppearance,
@@ -41,6 +43,7 @@ import {
   boardQuerySchema,
   claudeArgsBodySchema,
   cleanupDelayBodySchema,
+  crossSessionInboundBodySchema,
   dirsQuerySchema,
   filtersBodySchema,
   optionsQuerySchema,
@@ -51,7 +54,6 @@ import {
 import { httpErrorHandler } from "./error-handler.js";
 import { parseOrThrow } from "./parse-input.js";
 import {
-  assertNotLastRepository,
   isBoardRepository,
   resolveBoard,
   resolveBoardForCreate,
@@ -141,7 +143,6 @@ boardRouter.delete("/workspace-folders", async (req, res) => {
   const { key } = resolveBoard(parseBoardParam(req.query));
 
   const abs = expandPath(rawPath);
-  assertNotLastRepository(key, abs);
   await store.removeWorkspaceFolder(key, abs);
   res.status(200).json({ ok: true });
 });
@@ -266,6 +267,19 @@ boardRouter.put("/config/claude-args", (req, res) => {
   const { claudeArgs: args } = parseOrThrow(claudeArgsBodySchema, req.body);
   updateClaudeArgs(args);
   res.status(200).json({ claudeArgs: args });
+});
+
+boardRouter.get("/config/cross-session-inbound", (_req, res) => {
+  res.status(200).json({ crossSessionInbound: getCrossSessionInbound() });
+});
+
+boardRouter.put("/config/cross-session-inbound", async (req, res) => {
+  const { crossSessionInbound } = parseOrThrow(
+    crossSessionInboundBodySchema,
+    req.body,
+  );
+  await updateCrossSessionInbound(crossSessionInbound);
+  res.status(200).json({ crossSessionInbound });
 });
 
 boardRouter.use(httpErrorHandler);

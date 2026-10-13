@@ -6,6 +6,10 @@ import writeFileAtomic from "write-file-atomic";
 import type { InvalidPlaybook, Playbook } from "../../../shared/types.js";
 import { DISPATCH_DIR } from "./paths.js";
 import { hasDispatchMarker } from "../../../shared/marker-key.js";
+import {
+  REVIEW_PLAYBOOK_NAME,
+  REVIEW_PLAYBOOK_TAG,
+} from "../../../shared/review-playbook.js";
 
 const PLAYBOOKS_DIR = path.join(DISPATCH_DIR, "playbooks");
 
@@ -77,6 +81,21 @@ Part 2, execution:
 3. Run the roadmap-loop skill on the roadmap. It executes every unit through the ralph-loop per-phase flow, audits each unit with readiness-audit, records deviations in changed-decisions.md and deferrals in todo.md, and commits each unit to a stacked local branch.
 4. Never push, tag, open a PR or merge. On completion, hand back with the end-of-run report.`;
 
+const REVIEW_PULL_REQUEST_PLAYBOOK = `---
+name: ${REVIEW_PLAYBOOK_NAME}
+when: One pull request to review before it merges.
+tags: ${REVIEW_PLAYBOOK_TAG}
+---
+## Extra direction
+{extra}
+
+## Workflow
+Read the pull request first with gh pr view and gh pr diff. Review it from three perspectives with subagents: correctness, edge cases and security. Verify each finding against the code before you report it, and drop a finding that the code does not support.
+
+Present the comments to the user in this session. Post a comment with gh only after the user approves it in this session.
+
+End with the DONE status line. Its summary starts with "Review verdict: " followed by approve, request changes or comment, then one line of reason.`;
+
 const BOARD_ORCHESTRATOR_PLAYBOOK = `---
 name: Board Orchestrator
 when: Only the board orchestrator session. Dispatch starts it; never start a ticket with it.
@@ -111,9 +130,10 @@ An orchestrator never:
 /**
  * Parse the front matter of a playbook file, or null when the fences are absent or `name` is empty.
  *
- * @remarks Only `name` and `when` are read, and a `when` that is empty or longer than
- * {@link PLAYBOOK_WHEN_MAX} is dropped without failing the parse. Every other key, such as a legacy
- * `stage:` line, is ignored, and the rest of the file is the verbatim body.
+ * @remarks Only `name`, `when` and `tags` are read, and a `when` that is empty or longer than
+ * {@link PLAYBOOK_WHEN_MAX} is dropped without failing the parse. `tags` is a comma separated list
+ * (a surrounding `[ ]` and quotes around each tag are stripped), lower cased and deduplicated, and
+ * is set only when it holds at least one tag.
  */
 function parseFrontMatter(raw: string): Playbook | null {
   if (!raw.startsWith("---\n")) return null;
@@ -125,6 +145,7 @@ function parseFrontMatter(raw: string): Playbook | null {
 
   let name = "";
   let when = "";
+  let tags: string[] = [];
   for (const line of fmRegion.split("\n")) {
     const idx = line.indexOf(":");
     if (idx === -1) continue;
@@ -132,11 +153,33 @@ function parseFrontMatter(raw: string): Playbook | null {
     const value = line.slice(idx + 1).trim();
     if (key === "name") name = value;
     if (key === "when") when = value;
+    if (key === "tags") {
+      tags = [
+        ...new Set(
+          value
+            .replace(/^\[|\]$/g, "")
+            .split(",")
+            .map((t) =>
+              t
+                .trim()
+                .replace(/^["']|["']$/g, "")
+                .trim()
+                .toLowerCase(),
+            )
+            .filter((t) => t !== ""),
+        ),
+      ];
+    }
   }
 
   if (name === "") return null;
-  if (when === "" || when.length > PLAYBOOK_WHEN_MAX) return { name, body };
-  return { name, body, when };
+  const keepWhen = when !== "" && when.length <= PLAYBOOK_WHEN_MAX;
+  return {
+    name,
+    body,
+    ...(keepWhen ? { when } : {}),
+    ...(tags.length > 0 ? { tags } : {}),
+  };
 }
 
 export { hasDispatchMarker };
@@ -274,6 +317,7 @@ const SEED_PLAYBOOKS: { slug: string; content: string }[] = [
   { slug: "gsd", content: GSD_PLAYBOOK },
   { slug: "write-code-directly", content: WRITE_CODE_DIRECTLY_PLAYBOOK },
   { slug: "roadmap-loop", content: ROADMAP_LOOP_PLAYBOOK },
+  { slug: "review-pull-request", content: REVIEW_PULL_REQUEST_PLAYBOOK },
   { slug: "board-orchestrator", content: BOARD_ORCHESTRATOR_PLAYBOOK },
 ];
 
@@ -399,9 +443,15 @@ export async function seedPlaybooks(): Promise<void> {
   }
 }
 
-function assembleContent(input: PlaybookWriteInput, when?: string): string {
-  const whenLine = when ? `when: ${when}\n` : "";
-  return `---\nname: ${input.name}\n${whenLine}---\n${input.body}`;
+function assembleContent(
+  input: PlaybookWriteInput,
+  stored?: Pick<Playbook, "when" | "tags"> | null,
+): string {
+  const whenLine = stored?.when ? `when: ${stored.when}\n` : "";
+  const tagsLine = stored?.tags?.length
+    ? `tags: ${stored.tags.join(", ")}\n`
+    : "";
+  return `---\nname: ${input.name}\n${whenLine}${tagsLine}---\n${input.body}`;
 }
 
 async function slugExists(slug: string): Promise<boolean> {
@@ -486,9 +536,9 @@ export async function updatePlaybook(
     return { ok: false, error: "footgun" };
   }
 
-  const storedWhen = await fsp.readFile(oldPath, "utf8").then(
-    (raw) => parseFrontMatter(raw)?.when,
-    () => undefined,
+  const stored = await fsp.readFile(oldPath, "utf8").then(
+    (raw) => parseFrontMatter(raw),
+    () => null,
   );
   const existing = await loadPlaybooks();
   const collision = existing.some(
@@ -500,7 +550,7 @@ export async function updatePlaybook(
 
   const newSlug = await uniqueSlug(input.name, slug);
   const newPath = path.join(PLAYBOOKS_DIR, `${newSlug}.md`);
-  await writeFileAtomic(newPath, assembleContent(input, storedWhen), {
+  await writeFileAtomic(newPath, assembleContent(input, stored), {
     mode: 0o600,
   });
   if (newSlug !== slug) {
@@ -511,10 +561,10 @@ export async function updatePlaybook(
   return {
     ok: true,
     playbook: {
+      ...stored,
       name: input.name,
       body: input.body,
       slug: newSlug,
-      ...(storedWhen ? { when: storedWhen } : {}),
     },
   };
 }

@@ -1,3 +1,4 @@
+import { REVIEW_PLAYBOOK_TAG } from "../../../../shared/review-playbook.js";
 import type { Playbook } from "../../../../shared/types.js";
 
 const SEED_SLUG_ORDER = [
@@ -30,17 +31,35 @@ export function splitPlaybooks(valid: readonly Playbook[]): {
   return { seedRows, restRows: valid.filter((p) => !seedRows.includes(p)) };
 }
 
+export function filterPlaybooksByTag(
+  valid: readonly Playbook[],
+  tag: string | undefined,
+): Playbook[] {
+  return tag === undefined
+    ? [...valid]
+    : valid.filter((p) => p.tags?.includes(tag) === true);
+}
+
+export function noTaggedPlaybookText(tag: string): string {
+  return `No playbook has the tag ${tag}.`;
+}
+
 /**
  * Pick the playbook that is selected before the user chooses one.
  *
- * @remarks Prefers the remembered default, then "Write code directly", then the first row in picker order.
+ * @remarks Prefers the requested playbook when listed, then the remembered default, then "Write code directly", then the first row in picker order. The remembered default is skipped when its playbook has the review tag, so only a Review start preselects it.
  */
 export function initialPlaybook(
   valid: readonly Playbook[],
   lastUsed: string | null,
+  preferred: string | null = null,
 ): string | null {
   const names = new Set(valid.map((p) => p.name));
-  if (lastUsed !== null && names.has(lastUsed)) return lastUsed;
+  if (preferred !== null && names.has(preferred)) return preferred;
+  const remembered = valid.find((p) => p.name === lastUsed);
+  if (remembered && !remembered.tags?.includes(REVIEW_PLAYBOOK_TAG)) {
+    return remembered.name;
+  }
   if (names.has(WRITE_CODE_DIRECTLY_NAME)) return WRITE_CODE_DIRECTLY_NAME;
   const { seedRows, restRows } = splitPlaybooks(valid);
   return [...seedRows, ...restRows][0]?.name ?? null;
@@ -51,8 +70,9 @@ export function resolvePlaybook(
   valid: readonly Playbook[],
   lastUsed: string | null,
   chosen: string | null,
+  preferred: string | null = null,
 ): string | null {
   return chosen !== null && valid.some((p) => p.name === chosen)
     ? chosen
-    : initialPlaybook(valid, lastUsed);
+    : initialPlaybook(valid, lastUsed, preferred);
 }

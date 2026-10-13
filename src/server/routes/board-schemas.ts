@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   ARCHIVE_RETENTION_MAX_DAYS,
+  CROSS_SESSION_INBOUND_VALUES,
   type SourceFilters,
 } from "../../shared/types.js";
 import { parseDoneLimit } from "../../shared/done-limit.js";
@@ -17,6 +18,7 @@ const CLEANUP_CODE =
   "cleanup delay must be a whole number of days between 0 and 90";
 const RETENTION_CODE =
   "archive retention must be a whole number of days between 0 and 365";
+const CROSS_SESSION_INBOUND_CODE = `crossSessionInbound must be one of ${CROSS_SESSION_INBOUND_VALUES.join(", ")}`;
 const CLAUDE_ARGS_MAX = 4000;
 const CLAUDE_ARGS_CODE = `claude arguments must be a string of ${CLAUDE_ARGS_MAX} characters or fewer with no control characters`;
 
@@ -153,4 +155,15 @@ export const claudeArgsBodySchema = z.object(
       ),
   },
   CLAUDE_ARGS_CODE,
+);
+
+/** The `PUT /config/cross-session-inbound` body. */
+export const crossSessionInboundBodySchema = z.object(
+  {
+    crossSessionInbound: z.enum(
+      CROSS_SESSION_INBOUND_VALUES,
+      CROSS_SESSION_INBOUND_CODE,
+    ),
+  },
+  CROSS_SESSION_INBOUND_CODE,
 );

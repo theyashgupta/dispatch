@@ -2,7 +2,18 @@ import { DEFAULT_BOARD_KEY } from "./board-key.js";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Card, Item, PrInfo } from "./types.js";
-import { buildPrRows, groupPrRows, parsePrKey, parsePrUrl } from "./pr-rows.js";
+import {
+  buildPrRows,
+  heldPrItems,
+  filterPrRows,
+  NO_PR_FILTERS,
+  parsePrKey,
+  parsePrUrl,
+  prFilterOptions,
+  prStateText,
+  prUrl,
+  reviewBranch,
+} from "./pr-rows.js";
 
 function item(
   number: number,
@@ -79,10 +90,10 @@ test("each non-done GitHub item becomes a row with its meta", () => {
     [],
   );
   assert.deepEqual(
-    rows.map((r) => [r.key, r.category, r.unread, r.draft, r.author]),
+    rows.map((r) => [r.key, r.state, r.unread, r.author]),
     [
-      ["github:acme/web#7", "mention", false, true, "mchen"],
-      ["github:acme/api#12", "review", true, false, "octo"],
+      ["github:acme/web#7", "Draft", false, "mchen"],
+      ["github:acme/api#12", "Review requested from me", true, "octo"],
     ],
   );
 });
@@ -93,9 +104,7 @@ test("a session PR matching an item merges into that row with Yours", () => {
     [card("LOCAL-9", [pr("https://github.com/acme/api/pull/12")])],
   );
   assert.equal(rows.length, 1);
-  assert.equal(rows[0]?.yours, true);
   assert.equal(rows[0]?.cardId, "LOCAL-9");
-  assert.equal(rows[0]?.category, "review");
   assert.equal(rows[0]?.itemId, "github:acme/api#12");
 });
 
@@ -105,15 +114,8 @@ test("an open session PR with no item becomes its own Yours row", () => {
     [card("LOCAL-9", [pr("https://github.com/acme/api/pull/30")])],
   );
   assert.deepEqual(
-    [
-      row?.key,
-      row?.category,
-      row?.yours,
-      row?.cardId,
-      row?.itemId,
-      row?.number,
-    ],
-    ["github:acme/api#30", "yours", true, "LOCAL-9", undefined, 30],
+    [row?.key, row?.cardId, row?.itemId, row?.number],
+    ["github:acme/api#30", "LOCAL-9", undefined, 30],
   );
 });
 
@@ -140,39 +142,162 @@ test("rows sort newest first with the key as the tiebreak", () => {
   );
 });
 
-test("grouping by repo, author and type keeps row order inside a group", () => {
+test("each state text shows with its precedence", () => {
+  const base = {
+    draft: false,
+    reviewRequestedFromMe: false,
+    reviewDecision: "",
+  };
+  assert.equal(prStateText(base), "Open");
+  assert.equal(
+    prStateText({ ...base, reviewDecision: "APPROVED" }),
+    "Approved",
+  );
+  assert.equal(
+    prStateText({ ...base, reviewDecision: "CHANGES_REQUESTED" }),
+    "Changes requested",
+  );
+  assert.equal(
+    prStateText({
+      ...base,
+      reviewRequestedFromMe: true,
+      reviewDecision: "CHANGES_REQUESTED",
+    }),
+    "Review requested from me",
+  );
+  assert.equal(
+    prStateText({
+      draft: true,
+      reviewRequestedFromMe: true,
+      reviewDecision: "APPROVED",
+    }),
+    "Draft",
+  );
+});
+
+test("a row carries its state, checks, request flag and creation time from the item meta", () => {
+  const [open, mine, draft] = buildPrRows(
+    [
+      item(
+        1,
+        "acme/api",
+        {},
+        {
+          category: "open",
+          reviewDecision: "APPROVED",
+          checks: "pass",
+          createdAt: "2026-09-01T00:00:00Z",
+        },
+      ),
+      item(
+        2,
+        "acme/api",
+        {},
+        { category: "open", reviewRequestedFromMe: "true", checks: "fail" },
+      ),
+      item(3, "acme/api", {}, { category: "open", draft: "true", checks: "?" }),
+    ].sort((a, b) => a.id.localeCompare(b.id)),
+    [],
+  ).sort((a, b) => a.number - b.number);
+  assert.deepEqual(
+    [open?.state, open?.checks, open?.createdAt, open?.reviewRequestedFromMe],
+    ["Approved", "pass", "2026-09-01T00:00:00Z", false],
+  );
+  assert.deepEqual(
+    [mine?.state, mine?.checks, mine?.reviewRequestedFromMe],
+    ["Review requested from me", "fail", true],
+  );
+  assert.deepEqual([draft?.state, draft?.checks], ["Draft", ""]);
+});
+
+test("the age falls back to the item time when the meta has no creation time", () => {
+  const [row] = buildPrRows([item(4)], []);
+  assert.equal(row?.createdAt, "2026-09-25T04:00:00Z");
+});
+
+test("the @me review category counts as review requested from me", () => {
+  const [row] = buildPrRows([item(5)], []);
+  assert.equal(row?.reviewRequestedFromMe, true);
+  assert.equal(row?.state, "Review requested from me");
+});
+
+test("a done item with a card stays with the card and one without is hidden", () => {
   const rows = buildPrRows(
     [
-      item(12),
-      item(7, "acme/web", {}, { author: "mchen", category: "mention" }),
-      item(15, "acme/api", {}, { category: "assigned" }),
+      item(6, "acme/api", { state: "done", cardId: "LOCAL-5" }),
+      item(7, "acme/api", { state: "done" }),
     ],
-    [
-      card(
-        "LOCAL-9",
-        [pr("https://github.com/acme/api/pull/30")],
-        "2026-09-25T09:30:00Z",
-      ),
-    ],
+    [card("LOCAL-5", [])],
   );
   assert.deepEqual(
-    groupPrRows(rows, "repo").map((g) => [
-      g.label,
-      g.rows.map((r) => r.number),
-    ]),
-    [
-      ["acme/api", [30, 15, 12]],
-      ["acme/web", [7]],
-    ],
+    rows.map((r) => [r.number, r.cardId, r.unread]),
+    [[6, "LOCAL-5", false]],
   );
+});
+
+test("an open item that a session PR also names is one row", () => {
+  const rows = buildPrRows(
+    [item(8, "acme/api", {}, { category: "open" })],
+    [card("LOCAL-9", [pr("https://github.com/acme/api/pull/8")])],
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.cardId, "LOCAL-9");
+});
+
+const filterRows = buildPrRows(
+  [
+    item(1, "acme/api", {}, { author: "yash", category: "open" }),
+    item(2, "acme/api", {}, { author: "mchen", category: "review" }),
+    item(
+      3,
+      "acme/web",
+      {},
+      { author: "yash", category: "open", reviewRequestedFromMe: "true" },
+    ),
+    item(4, "acme/web", {}, { author: "mchen", category: "open" }),
+  ],
+  [],
+);
+
+function numbers(filters: Partial<typeof NO_PR_FILTERS>, login = "Yash") {
+  return filterPrRows(filterRows, { ...NO_PR_FILTERS, ...filters }, login)
+    .map((r) => r.number)
+    .sort();
+}
+
+test("no filter keeps every row", () => {
+  assert.deepEqual(numbers({}), [1, 2, 3, 4]);
+});
+
+test("Mine keeps the rows whose author is the login, without case", () => {
+  assert.deepEqual(numbers({ mine: true }), [1, 3]);
   assert.deepEqual(
-    groupPrRows(rows, "author").map((g) => g.label),
-    ["You", "mchen", "octo"],
+    filterPrRows(filterRows, { ...NO_PR_FILTERS, mine: true }, null),
+    [],
   );
-  assert.deepEqual(
-    groupPrRows(rows, "type").map((g) => g.label),
-    ["Yours", "Mentioned", "Assigned", "Review requested"],
-  );
+});
+
+test("Review requested keeps the meta flag and the review category", () => {
+  assert.deepEqual(numbers({ reviewRequested: true }), [2, 3]);
+});
+
+test("the author and repository filters narrow by exact value", () => {
+  assert.deepEqual(numbers({ author: "mchen" }), [2, 4]);
+  assert.deepEqual(numbers({ repo: "acme/web" }), [3, 4]);
+});
+
+test("filters combine with and", () => {
+  assert.deepEqual(numbers({ mine: true, repo: "acme/web" }), [3]);
+  assert.deepEqual(numbers({ reviewRequested: true, author: "mchen" }), [2]);
+  assert.deepEqual(numbers({ mine: true, author: "mchen" }), []);
+});
+
+test("the filter options are the sorted distinct values", () => {
+  assert.deepEqual(prFilterOptions(filterRows, "author"), ["mchen", "yash"]);
+  assert.deepEqual(prFilterOptions(filterRows, "repo"), [
+    "acme/api",
+    "acme/web",
+  ]);
 });
 
 test("parsePrUrl reads github.com pull URLs only", () => {
@@ -202,4 +327,75 @@ test("parsePrKey reads a row key and refuses dot segments", () => {
   assert.equal(parsePrKey("github:acme/..#7"), null);
   assert.equal(parsePrKey("github:./.#7"), null);
   assert.equal(parsePrKey("acme/api#7"), null);
+});
+
+test("a review card whose item left the snapshot keeps a row with its card", () => {
+  const reviewPr = {
+    repo: "acme/api",
+    number: 9,
+    url: "https://github.com/acme/api/pull/9",
+    head: "feature",
+    base: "main",
+  };
+  const live = { ...card("LOCAL-9", []), title: "Fix the API", reviewPr };
+  const [row] = buildPrRows([], [live]);
+  assert.equal(row.key, "github:acme/api#9");
+  assert.equal(row.cardId, "LOCAL-9");
+  assert.equal(row.title, "Fix the API");
+  assert.equal(row.state, "Open");
+  const finished = { ...live, column: "done" as const };
+  assert.deepEqual(buildPrRows([], [finished]), []);
+  const withItem = buildPrRows(
+    [item(9, "acme/api", { cardId: "LOCAL-9" })],
+    [live],
+  );
+  assert.equal(withItem.length, 1);
+});
+
+test("a done item shows with its card while that card is not done", () => {
+  const held = item(4, "acme/api", { state: "done", cardId: "LOCAL-4" });
+  const live = card("LOCAL-4", []);
+  assert.equal(buildPrRows([held], [live])[0]?.cardId, "LOCAL-4");
+  assert.deepEqual(buildPrRows([held], [{ ...live, column: "done" }]), []);
+});
+
+test("a done item held by a card that is not in cards shows its live state", () => {
+  const held = item(
+    4,
+    "acme/api",
+    { state: "done", cardId: "GAMMA-1" },
+    { reviewDecision: "APPROVED", checks: "pass" },
+  );
+  const [row] = buildPrRows([held], [card("LOCAL-4", [])]);
+  assert.equal(row?.cardId, "GAMMA-1");
+  assert.equal(row?.checks, "pass");
+  assert.equal(buildPrRows([held], []).length, 1);
+});
+
+test("a done item with no cardId is hidden", () => {
+  assert.deepEqual(
+    buildPrRows(
+      [item(4, "acme/api", { state: "done" })],
+      [card("LOCAL-4", [])],
+    ),
+    [],
+  );
+});
+
+test("heldPrItems keeps only done GitHub items that a card holds", () => {
+  const held = item(1, "acme/api", { state: "done", cardId: "LOCAL-1" });
+  const loose = item(2, "acme/api", { state: "done" });
+  const open = item(3, "acme/api", { cardId: "LOCAL-3" });
+  const slack = { ...held, id: "slack:x", source: "slack" };
+  assert.deepEqual(heldPrItems([held, loose, open, slack]), [held]);
+});
+
+test("prUrl and reviewBranch build the URL and the local branch of a pull request", () => {
+  assert.equal(prUrl("acme", "api", 12), "https://github.com/acme/api/pull/12");
+  assert.deepEqual(parsePrUrl(prUrl("acme", "api", 12)), {
+    owner: "acme",
+    name: "api",
+    number: 12,
+  });
+  assert.equal(reviewBranch(12), "review/pr-12");
 });

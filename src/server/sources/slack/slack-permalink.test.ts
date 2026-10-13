@@ -49,6 +49,8 @@ test("an item carries the dedupe id, the permalink, the time and the meta Slack 
       conversation: "channel",
       threadTs: "1700000000.000100",
       replyCount: "3",
+      needsSession: "true",
+      relevanceReason: "Request with an action verb: can you",
     },
   });
 });

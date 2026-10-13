@@ -27,6 +27,7 @@ interface PrDetailProps {
   loading: boolean;
   loadError: string | null;
   busy: string | null;
+  reviewing: boolean;
   error: string | null;
   composer: PrComposer;
   draft: string;
@@ -49,6 +50,7 @@ export function PrDetail({
   loading,
   loadError,
   busy,
+  reviewing,
   error,
   composer,
   draft,
@@ -119,8 +121,12 @@ export function PrDetail({
             >
               Squash merge
             </LoadingButton>
-            <LoadingButton variant="secondary" onClick={onReviewWithAgent}>
-              Review with agent
+            <LoadingButton
+              variant="secondary"
+              loading={reviewing}
+              onClick={onReviewWithAgent}
+            >
+              Review
             </LoadingButton>
             <LoadingButton
               variant="secondary"

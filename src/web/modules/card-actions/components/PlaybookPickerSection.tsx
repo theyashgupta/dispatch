@@ -11,14 +11,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { noTaggedPlaybookText } from "@/modules/card-actions/domain/playbook-picker";
 import { ModalFieldLabel } from "./ModalFieldLabel";
 
 export interface PlaybookPickerModel {
   seedRows: Playbook[];
   restRows: Playbook[];
   invalidRows: InvalidPlaybook[];
+  loaded: boolean;
   selected: string | null;
   lastUsed: string | null;
+  tag?: string;
   onSelect: (name: string) => void;
 }
 
@@ -31,7 +34,8 @@ export function PlaybookPickerSection({
   playbook,
   onEditPlaybooks,
 }: PlaybookPickerSectionProps) {
-  const { seedRows, restRows, invalidRows, selected, lastUsed } = playbook;
+  const { seedRows, restRows, invalidRows, selected, lastUsed, tag, loaded } =
+    playbook;
   const renderRow = (row: Playbook) => (
     <SelectItem
       key={row.slug ?? row.name}
@@ -95,10 +99,12 @@ export function PlaybookPickerSection({
           ))}
         </SelectContent>
       </Select>
-      {seedRows.length === 0 && restRows.length === 0 && (
+      {loaded && seedRows.length === 0 && restRows.length === 0 && (
         <Alert variant="muted" role="status" className="mt-4">
           <AlertTitle className="leading-(--line-label)">
-            No playbooks available
+            {tag === undefined
+              ? "No playbooks available"
+              : noTaggedPlaybookText(tag)}
           </AlertTitle>
           <AlertDescription>
             Starting without one. Manage playbooks in Settings ▸ Playbooks.

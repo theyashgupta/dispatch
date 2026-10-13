@@ -385,3 +385,47 @@ test("a snooze on an auto-resolved row survives the next snapshot pull that list
   assert.equal(store.getItem("snz:a")?.state, "snoozed");
   assert.equal(store.getItem("snz:a")?.snoozedUntil, until);
 });
+
+test("the snapshot keeps a done GitHub item a card holds, and no other done item", async () => {
+  await store.upsertItems(
+    "github",
+    [
+      item("held", { source: "github" }),
+      item("closed", { source: "github", state: "done" }),
+    ],
+    { kind: "append" },
+  );
+  await store.upsertItems("fake", [item("other")], { kind: "append" });
+  await store.promoteItem(DEFAULT_BOARD_KEY, "github:held");
+  await store.promoteItem(DEFAULT_BOARD_KEY, "fake:other");
+  const ids = (store.snapshot(DEFAULT_BOARD_KEY).items ?? []).map((i) => i.id);
+  assert.ok(ids.includes("github:held"));
+  assert.ok(!ids.includes("github:closed"));
+  assert.ok(!ids.includes("fake:other"));
+});
+
+test("the snapshot sends a held done GitHub item only while its card exists and is not done", async () => {
+  await store.upsertItems(
+    "github",
+    [
+      item("h-open", { source: "github" }),
+      item("h-done", { source: "github" }),
+      item("h-gone", { source: "github" }),
+    ],
+    { kind: "append" },
+  );
+  const open = await store.promoteItem(DEFAULT_BOARD_KEY, "github:h-open");
+  const done = await store.promoteItem(DEFAULT_BOARD_KEY, "github:h-done");
+  const gone = await store.promoteItem(DEFAULT_BOARD_KEY, "github:h-gone");
+  assert.ok(open && done && gone);
+  const cards = (store as unknown as { cards: Map<string, { column: string }> })
+    .cards;
+  const doneCard = cards.get(done.card.id);
+  assert.ok(doneCard);
+  doneCard.column = "done";
+  cards.delete(gone.card.id);
+  const ids = (store.snapshot(DEFAULT_BOARD_KEY).items ?? []).map((i) => i.id);
+  assert.ok(ids.includes("github:h-open"));
+  assert.ok(!ids.includes("github:h-done"));
+  assert.ok(!ids.includes("github:h-gone"));
+});

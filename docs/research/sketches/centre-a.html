@@ -1,0 +1,1223 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Centre A hub and spoke sketch</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="sketch.css" />
+    <script>
+      (function () {
+        var root = document.documentElement;
+        var theme = new URLSearchParams(location.search).get("theme");
+        if (theme === "light") root.setAttribute("data-theme", "light");
+        else if (theme === "dark") root.removeAttribute("data-theme");
+        document.addEventListener("DOMContentLoaded", function () {
+          var button = document.getElementById("theme-toggle");
+          function sync() {
+            button.textContent =
+              root.getAttribute("data-theme") === "light"
+                ? "Dark theme"
+                : "Light theme";
+          }
+          sync();
+          button.addEventListener("click", function () {
+            if (root.getAttribute("data-theme") === "light")
+              root.removeAttribute("data-theme");
+            else root.setAttribute("data-theme", "light");
+            sync();
+          });
+        });
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="sketch-bar">
+      <p>Orchestrator centre A, hub and spoke</p>
+      <button type="button" id="theme-toggle" class="btn btn-outline">
+        Light theme
+      </button>
+    </div>
+
+    <section class="frame for-wide" aria-labelledby="f1">
+      <h2 class="frame-title" id="f1">
+        Frame 1: Hub and spoke, the orchestrator in the middle (1440 px)
+      </h2>
+      <div class="frame-box">
+        <div class="shell">
+          <aside class="sidebar" aria-label="Sidebar">
+            <div class="sidebar-head">
+              <div class="brand">
+                <span class="brand-glyph" aria-hidden="true">◆</span>
+                <span class="brand-word">DISPATCH</span>
+              </div>
+              <div class="switcher">
+                <button
+                  type="button"
+                  class="switch-trigger"
+                  aria-haspopup="menu"
+                  aria-expanded="false"
+                  aria-label="Switch board, current board Dispatch"
+                >
+                  <span>Dispatch</span>
+                  <span aria-hidden="true">▾</span>
+                </button>
+              </div>
+            </div>
+            <nav class="nav" aria-label="Main">
+              <div class="nav-label">Home</div>
+              <a class="nav-row" href="#">Today</a>
+              <a class="nav-row" href="#">Inbox</a>
+              <a class="nav-row" href="#">Ask</a>
+              <div class="nav-label">Work</div>
+              <a class="nav-row" href="#">Board</a>
+              <a class="nav-row" href="#" aria-current="page">Orchestrator</a>
+              <a class="nav-row" href="#">Dashboard</a>
+              <a class="nav-row" href="#">Sessions</a>
+              <a class="nav-row" href="#">Workspace</a>
+              <a class="nav-row" href="#">Activity</a>
+            </nav>
+          </aside>
+          <div class="main">
+            <header class="page-header cc-wrap">
+              <div class="page-title">
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-icon menu-btn"
+                  aria-label="Open menu"
+                >
+                  ☰
+                </button>
+                <h1>Orchestrator · Dispatch</h1>
+              </div>
+              <div class="page-actions">
+                <span class="badge badge-accent"
+                  ><span aria-hidden="true">▶</span> Working</span
+                >
+                <button type="button" class="btn btn-outline">
+                  <span aria-hidden="true">■</span> Stop
+                </button>
+                <button type="button" class="btn btn-outline">Settings</button>
+              </div>
+            </header>
+            <div class="cc-split cc-tnum">
+              <section
+                class="cc-canvas cc-dots"
+                aria-label="Orchestrator and its branches"
+              >
+                <div class="cc-stage">
+                  <svg
+                    class="cc-edges"
+                    viewBox="0 0 720 1000"
+                    aria-hidden="true"
+                    focusable="false"
+                  >
+                    <circle class="cc-orbit" cx="360" cy="500" r="250" />
+                    <path
+                      class="cc-edge"
+                      data-state="needs"
+                      d="M360 500 L120 235"
+                    />
+                    <path
+                      class="cc-edge"
+                      data-state="running"
+                      d="M360 500 L360 115"
+                    />
+                    <path
+                      class="cc-edge"
+                      data-state="running"
+                      d="M360 500 L620 200"
+                    />
+                    <path
+                      class="cc-edge"
+                      data-state="done"
+                      d="M360 500 L100 505"
+                    />
+                    <path
+                      class="cc-edge"
+                      data-state="limit"
+                      d="M360 500 L620 500"
+                    />
+                    <path
+                      class="cc-edge"
+                      data-state="shipped"
+                      d="M360 500 L100 690"
+                    />
+                    <path
+                      class="cc-edge"
+                      data-state="permission"
+                      d="M360 500 L620 705"
+                    />
+                    <path
+                      class="cc-edge"
+                      data-state="planned"
+                      d="M360 500 L210 905"
+                    />
+                    <path
+                      class="cc-edge"
+                      data-state="planned"
+                      d="M360 500 L510 905"
+                    />
+                  </svg>
+                  <section
+                    class="cc-node cc-hub cc-pos-hub"
+                    data-state="orchestrator"
+                    aria-label="Main orchestrator, Working"
+                  >
+                    <div class="cc-node-top">
+                      <span class="cc-eyebrow">Orchestrator</span
+                      ><span class="badge badge-accent"
+                        ><span aria-hidden="true">▶</span> Working</span
+                      >
+                    </div>
+                    <h2 class="cc-title">Main orchestrator</h2>
+                    <p class="cc-detail">9 branches, 3 need you</p>
+                    <div class="cc-facts">
+                      <span class="cc-ctx"
+                        ><span class="cc-bar cc-pct-42" aria-hidden="true"
+                          ><span class="cc-bar-fill"></span></span
+                        >Context 42%</span
+                      ><span class="cc-cost">$3.10 today</span>
+                    </div>
+                  </section>
+                  <article
+                    class="cc-node cc-pos-tl"
+                    data-state="needs"
+                    aria-label="CEN-12, Needs input"
+                  >
+                    <div class="cc-node-top">
+                      <span class="mono muted">CEN-12</span
+                      ><span class="badge badge-warn"
+                        ><span aria-hidden="true">?</span> Needs input</span
+                      >
+                    </div>
+                    <h3 class="cc-title">
+                      Fix the stale badge on the dashboard
+                    </h3>
+                    <p class="cc-detail">Asks: keep the old copy?</p>
+                    <p class="cc-playbook">
+                      <span class="cc-eyebrow">Playbook</span>
+                      <span>Write code directly</span>
+                    </p>
+                    <div class="cc-facts">
+                      <span class="cc-ctx"
+                        ><span class="cc-bar cc-pct-18" aria-hidden="true"
+                          ><span class="cc-bar-fill"></span></span
+                        >Context 18%</span
+                      ><span class="cc-cost">$0.40</span>
+                    </div>
+                    <div class="field cc-reply">
+                      <label class="sr-only" for="reply-12-w"
+                        >Reply to CEN-12</label
+                      ><textarea
+                        class="textarea"
+                        id="reply-12-w"
+                        placeholder="Reply to CEN-12"
+                      ></textarea
+                      ><button type="button" class="btn btn-outline">
+                        Send reply
+                      </button>
+                      <p class="help">
+                        0 of 500 characters. A longer reply goes as a file.
+                      </p>
+                    </div>
+                  </article>
+                  <article
+                    class="cc-node cc-pos-t"
+                    data-state="running"
+                    aria-label="CEN-9, Running"
+                  >
+                    <div class="cc-node-top">
+                      <span class="mono muted">CEN-9</span
+                      ><span class="badge badge-accent"
+                        ><span aria-hidden="true">▶</span> Running</span
+                      >
+                    </div>
+                    <h3 class="cc-title">Calendar sync</h3>
+                    <p class="cc-sub">Group of 3 tickets</p>
+                    <p class="cc-detail">Unit 2 of 3, phase 4 of 9</p>
+                    <p class="cc-playbook">
+                      <span class="cc-eyebrow">Playbook</span>
+                      <span>Roadmap Loop</span>
+                    </p>
+                    <div class="cc-facts">
+                      <span class="cc-ctx"
+                        ><span class="cc-bar cc-pct-61" aria-hidden="true"
+                          ><span class="cc-bar-fill"></span></span
+                        >Context 61%</span
+                      ><span class="cc-cost">$8.20</span>
+                    </div>
+                  </article>
+                  <article
+                    class="cc-node cc-pos-tr"
+                    data-state="running"
+                    aria-label="CEN-14, Running"
+                  >
+                    <div class="cc-node-top">
+                      <span class="mono muted">CEN-14</span
+                      ><span class="badge badge-accent"
+                        ><span aria-hidden="true">▶</span> Running</span
+                      >
+                    </div>
+                    <h3 class="cc-title">Slack thread import</h3>
+                    <p class="cc-detail">Phase 2 of 6</p>
+                    <p class="cc-playbook">
+                      <span class="cc-eyebrow">Playbook</span>
+                      <span>PRD + Ralph Loop</span>
+                    </p>
+                    <div class="cc-facts">
+                      <span class="cc-ctx"
+                        ><span class="cc-bar cc-pct-33" aria-hidden="true"
+                          ><span class="cc-bar-fill"></span></span
+                        >Context 33%</span
+                      ><span class="cc-cost">$2.75</span>
+                    </div>
+                  </article>
+                  <article
+                    class="cc-node cc-pos-l"
+                    data-state="done"
+                    aria-label="CEN-5, Agent done"
+                  >
+                    <div class="cc-node-top">
+                      <span class="mono muted">CEN-5</span
+                      ><span class="badge badge-ok"
+                        ><span aria-hidden="true">✓</span> Agent done</span
+                      >
+                    </div>
+                    <h3 class="cc-title">Rename the inbox filter</h3>
+                    <p class="cc-detail">
+                      Done <span class="mono">14:02</span>, awaiting ship
+                    </p>
+                  </article>
+                  <article
+                    class="cc-node cc-pos-r"
+                    data-state="limit"
+                    aria-label="CEN-7, Usage limit"
+                  >
+                    <div class="cc-node-top">
+                      <span class="mono muted">CEN-7</span
+                      ><span class="badge badge-danger"
+                        ><span aria-hidden="true">◴</span> Usage limit</span
+                      >
+                    </div>
+                    <h3 class="cc-title">Archive old boards</h3>
+                    <p class="cc-detail">
+                      Stopped at the usage limit. The limit resets at
+                      <span class="mono">18:00</span>.
+                    </p>
+                    <div class="cc-actions">
+                      <button type="button" class="btn btn-outline">
+                        Resume loop
+                      </button>
+                    </div>
+                  </article>
+                  <article
+                    class="cc-node cc-pos-bl"
+                    data-state="shipped"
+                    aria-label="CEN-3, Shipped"
+                  >
+                    <div class="cc-node-top">
+                      <span class="mono muted">CEN-3</span
+                      ><span class="badge"
+                        ><span aria-hidden="true">↑</span> Shipped</span
+                      >
+                    </div>
+                    <h3 class="cc-title">Dark theme contrast</h3>
+                    <p class="cc-detail">
+                      Shipped <span class="mono">11:40</span>, PR 231
+                    </p>
+                  </article>
+                  <article
+                    class="cc-node cc-pos-br"
+                    data-state="permission"
+                    aria-label="CEN-15, Permission prompt"
+                  >
+                    <div class="cc-node-top">
+                      <span class="mono muted">CEN-15</span
+                      ><span class="badge badge-warn"
+                        ><span aria-hidden="true">⊘</span> Permission
+                        prompt</span
+                      >
+                    </div>
+                    <h3 class="cc-title">Push notifications on iOS</h3>
+                    <p class="cc-detail">Waiting on a permission prompt</p>
+                    <div class="cc-actions">
+                      <a class="btn btn-link" href="#">Open terminal</a>
+                    </div>
+                  </article>
+                  <article
+                    class="cc-node cc-pos-b1"
+                    data-state="planned"
+                    aria-label="CEN-16, Planned"
+                  >
+                    <div class="cc-node-top">
+                      <span class="mono muted">CEN-16</span
+                      ><span class="badge"
+                        ><span aria-hidden="true">○</span> Planned</span
+                      >
+                    </div>
+                    <h3 class="cc-title">Board export to CSV</h3>
+                    <p class="cc-detail">Plan order 4, size small</p>
+                    <p class="cc-playbook">
+                      <span class="cc-eyebrow">Playbook</span>
+                      <span>Write code directly</span>
+                    </p>
+                    <p class="cc-idle">Not started</p>
+                  </article>
+                  <article
+                    class="cc-node cc-pos-b2"
+                    data-state="planned"
+                    aria-label="CEN-17, Planned"
+                  >
+                    <div class="cc-node-top">
+                      <span class="mono muted">CEN-17</span
+                      ><span class="badge"
+                        ><span aria-hidden="true">○</span> Planned</span
+                      >
+                    </div>
+                    <h3 class="cc-title">Search across boards</h3>
+                    <p class="cc-detail">Plan order 5, size medium</p>
+                    <p class="cc-playbook">
+                      <span class="cc-eyebrow">Playbook</span>
+                      <span>PRD + Ralph Loop</span>
+                    </p>
+                    <p class="cc-idle">Not started</p>
+                  </article>
+                  <div class="cc-pos-toggle">
+                    <button
+                      type="button"
+                      class="btn btn-ghost"
+                      aria-expanded="false"
+                    >
+                      <span aria-hidden="true">▸</span> Show 2 older shipped
+                    </button>
+                  </div>
+                </div>
+              </section>
+              <aside
+                class="cc-chat cc-chat-right"
+                aria-label="Orchestrator conversation"
+              >
+                <div
+                  class="tabs panel-tabs"
+                  role="tablist"
+                  aria-label="Conversation views"
+                >
+                  <button
+                    type="button"
+                    class="tab"
+                    role="tab"
+                    id="tab-conv-w"
+                    aria-selected="true"
+                  >
+                    Conversation
+                  </button>
+                  <button
+                    type="button"
+                    class="tab"
+                    role="tab"
+                    id="tab-term-w"
+                    aria-selected="false"
+                  >
+                    Terminal
+                  </button>
+                </div>
+                <div
+                  class="cc-chat-body"
+                  role="tabpanel"
+                  aria-labelledby="tab-conv-w"
+                >
+                  <div class="cc-msg" data-from="system">
+                    <div class="cc-msg-head">
+                      <span class="cc-eyebrow">Dispatch</span
+                      ><span class="mono">13:41</span>
+                    </div>
+                    <p>
+                      Dispatch wake: <span class="mono">CEN-12</span> needs
+                      input
+                    </p>
+                  </div>
+                  <div class="cc-msg" data-from="orchestrator">
+                    <div class="cc-msg-head">
+                      <span class="cc-eyebrow">Main orchestrator</span
+                      ><span class="mono muted">13:42</span>
+                    </div>
+                    <p>
+                      I triaged the intake: 5 tickets, 1 group. The plan is
+                      below.
+                    </p>
+                  </div>
+                  <article class="decision" aria-label="Plan decision">
+                    <div class="cc-msg-head">
+                      <span class="cc-eyebrow">Main orchestrator</span
+                      ><span class="mono muted">13:42</span
+                      ><span class="badge">Decision</span>
+                    </div>
+                    <h3 class="decision-q">Plan</h3>
+                    <div class="panel">
+                      <table class="cc-plan table">
+                        <caption class="sr-only">
+                          Plan order
+                        </caption>
+                        <thead>
+                          <tr>
+                            <th scope="col">Order</th>
+                            <th scope="col">Ticket</th>
+                            <th scope="col">Playbook</th>
+                            <th scope="col">Size</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          <tr>
+                            <td>1</td>
+                            <td><span class="mono">CEN-12</span></td>
+                            <td>Write code directly</td>
+                            <td>small</td>
+                          </tr>
+                          <tr>
+                            <td>2</td>
+                            <td><span class="mono">CEN-14</span></td>
+                            <td>PRD + Ralph Loop</td>
+                            <td>medium</td>
+                          </tr>
+                          <tr>
+                            <td>3</td>
+                            <td>
+                              <span class="mono">CEN-9</span> Calendar sync
+                              group
+                            </td>
+                            <td>Roadmap Loop</td>
+                            <td>large</td>
+                          </tr>
+                          <tr>
+                            <td>4</td>
+                            <td><span class="mono">CEN-16</span></td>
+                            <td>Write code directly</td>
+                            <td>small</td>
+                          </tr>
+                          <tr>
+                            <td>5</td>
+                            <td><span class="mono">CEN-17</span></td>
+                            <td>PRD + Ralph Loop</td>
+                            <td>medium</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+                    <div class="opt-list">
+                      <button type="button" class="btn btn-outline opt-btn">
+                        <span>Approve the plan</span
+                        ><span class="badge">Recommended</span>
+                      </button>
+                      <button type="button" class="btn btn-outline opt-btn">
+                        <span>Do not approve</span>
+                      </button>
+                    </div>
+                  </article>
+                  <div class="cc-msg" data-from="user">
+                    <div class="cc-msg-head">
+                      <span class="cc-eyebrow">You</span
+                      ><span class="mono muted">13:44</span>
+                    </div>
+                    <p>
+                      Start the calendar group first, it blocks the release.
+                    </p>
+                  </div>
+                  <div class="cc-msg" data-from="orchestrator">
+                    <div class="cc-msg-head">
+                      <span class="cc-eyebrow">Main orchestrator</span
+                      ><span class="mono muted">13:44</span>
+                    </div>
+                    <p>
+                      Understood. <span class="mono">CEN-9</span> starts next,
+                      then <span class="mono">CEN-14</span>.
+                    </p>
+                  </div>
+                  <article class="decision" aria-label="Question">
+                    <div class="cc-msg-head">
+                      <span class="cc-eyebrow">Main orchestrator</span
+                      ><span class="mono muted">14:06</span
+                      ><span class="badge">Question</span>
+                    </div>
+                    <h3 class="decision-q">
+                      <span class="mono">CEN-7</span> stopped at the usage
+                      limit. Resume now or wait for the reset?
+                    </h3>
+                    <div class="opt-list">
+                      <button type="button" class="btn btn-outline opt-btn">
+                        <span>Resume now</span>
+                      </button>
+                      <button type="button" class="btn btn-outline opt-btn">
+                        <span>Wait for the reset</span
+                        ><span class="badge">Recommended</span>
+                      </button>
+                    </div>
+                    <div class="field">
+                      <label class="sr-only" for="answer-7-w"
+                        >Your answer to CEN-7 stopped at the usage limit. Resume
+                        now or wait for the reset?</label
+                      >
+                      <textarea
+                        class="textarea"
+                        id="answer-7-w"
+                        placeholder="Or type an answer"
+                      ></textarea>
+                    </div>
+                    <div>
+                      <button type="button" class="btn btn-outline">
+                        Send answer
+                      </button>
+                    </div>
+                  </article>
+                </div>
+                <div class="cc-compose">
+                  <div class="field">
+                    <label class="sr-only" for="message-w"
+                      >Message the orchestrator</label
+                    >
+                    <textarea
+                      class="textarea"
+                      id="message-w"
+                      placeholder="Message the orchestrator"
+                    ></textarea>
+                  </div>
+                  <div class="cc-compose-foot">
+                    <p class="help">
+                      0 of 500 characters. A longer reply goes as a file.
+                    </p>
+                    <button type="button" class="btn btn-primary">Send</button>
+                  </div>
+                </div>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="frame for-narrow" aria-labelledby="f2">
+      <h2 class="frame-title" id="f2">
+        Frame 2: Branches and Conversation tabs, Conversation selected (390 px)
+      </h2>
+      <div class="frame-box">
+        <div class="shell">
+          <div class="main">
+            <header class="page-header cc-wrap">
+              <div class="page-title">
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-icon menu-btn"
+                  aria-label="Open menu"
+                >
+                  ☰
+                </button>
+                <h1>Orchestrator · Dispatch</h1>
+              </div>
+              <div class="page-actions">
+                <span class="badge badge-accent"
+                  ><span aria-hidden="true">▶</span> Working</span
+                >
+                <button type="button" class="btn btn-outline">
+                  <span aria-hidden="true">■</span> Stop
+                </button>
+                <button type="button" class="btn btn-outline">Settings</button>
+              </div>
+            </header>
+            <div class="cc-tnum">
+              <div class="cc-view">
+                <section
+                  class="cc-node cc-hub cc-strip"
+                  data-state="orchestrator"
+                  aria-label="Main orchestrator, Working"
+                >
+                  <div class="cc-strip-main">
+                    <span class="cc-eyebrow">Orchestrator</span>
+                    <h2 class="cc-title">Main orchestrator</h2>
+                    <span class="badge badge-accent"
+                      ><span aria-hidden="true">▶</span> Working</span
+                    >
+                  </div>
+                  <div class="cc-strip-facts">
+                    <span class="cc-ctx"
+                      ><span class="cc-bar cc-pct-42" aria-hidden="true"
+                        ><span class="cc-bar-fill"></span></span
+                      >Context 42%</span
+                    ><span class="cc-cost">$3.10 today</span
+                    ><span class="muted">9 branches, 3 need you</span>
+                  </div>
+                </section>
+              </div>
+              <div
+                class="tabs panel-tabs"
+                role="tablist"
+                aria-label="Orchestrator centre sections"
+              >
+                <button
+                  type="button"
+                  class="tab"
+                  role="tab"
+                  aria-selected="false"
+                >
+                  Branches
+                </button>
+                <button
+                  type="button"
+                  class="tab"
+                  role="tab"
+                  aria-selected="true"
+                >
+                  Conversation
+                </button>
+              </div>
+              <div role="tabpanel" aria-label="Conversation">
+                <aside class="cc-chat" aria-label="Orchestrator conversation">
+                  <div class="cc-view">
+                    <div
+                      class="toggle-group"
+                      role="group"
+                      aria-label="Conversation view"
+                    >
+                      <button
+                        type="button"
+                        class="btn btn-ghost"
+                        aria-pressed="true"
+                      >
+                        Conversation
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-ghost"
+                        aria-pressed="false"
+                      >
+                        Terminal
+                      </button>
+                    </div>
+                  </div>
+                  <div class="cc-chat-body">
+                    <div class="cc-msg" data-from="system">
+                      <div class="cc-msg-head">
+                        <span class="cc-eyebrow">Dispatch</span
+                        ><span class="mono">13:41</span>
+                      </div>
+                      <p>
+                        Dispatch wake: <span class="mono">CEN-12</span> needs
+                        input
+                      </p>
+                    </div>
+                    <div class="cc-msg" data-from="orchestrator">
+                      <div class="cc-msg-head">
+                        <span class="cc-eyebrow">Main orchestrator</span
+                        ><span class="mono muted">13:42</span>
+                      </div>
+                      <p>
+                        I triaged the intake: 5 tickets, 1 group. The plan is
+                        below.
+                      </p>
+                    </div>
+                    <article class="decision" aria-label="Plan decision">
+                      <div class="cc-msg-head">
+                        <span class="cc-eyebrow">Main orchestrator</span
+                        ><span class="mono muted">13:42</span
+                        ><span class="badge">Decision</span>
+                      </div>
+                      <h3 class="decision-q">Plan</h3>
+                      <div class="panel">
+                        <table class="cc-plan table">
+                          <caption class="sr-only">
+                            Plan order
+                          </caption>
+                          <thead>
+                            <tr>
+                              <th scope="col">Order</th>
+                              <th scope="col">Ticket</th>
+                              <th scope="col">Playbook</th>
+                              <th scope="col">Size</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            <tr>
+                              <td>1</td>
+                              <td><span class="mono">CEN-12</span></td>
+                              <td>Write code directly</td>
+                              <td>small</td>
+                            </tr>
+                            <tr>
+                              <td>2</td>
+                              <td><span class="mono">CEN-14</span></td>
+                              <td>PRD + Ralph Loop</td>
+                              <td>medium</td>
+                            </tr>
+                            <tr>
+                              <td>3</td>
+                              <td>
+                                <span class="mono">CEN-9</span> Calendar sync
+                                group
+                              </td>
+                              <td>Roadmap Loop</td>
+                              <td>large</td>
+                            </tr>
+                            <tr>
+                              <td>4</td>
+                              <td><span class="mono">CEN-16</span></td>
+                              <td>Write code directly</td>
+                              <td>small</td>
+                            </tr>
+                            <tr>
+                              <td>5</td>
+                              <td><span class="mono">CEN-17</span></td>
+                              <td>PRD + Ralph Loop</td>
+                              <td>medium</td>
+                            </tr>
+                          </tbody>
+                        </table>
+                      </div>
+                      <div class="opt-list">
+                        <button type="button" class="btn btn-outline opt-btn">
+                          <span>Approve the plan</span
+                          ><span class="badge">Recommended</span>
+                        </button>
+                        <button type="button" class="btn btn-outline opt-btn">
+                          <span>Do not approve</span>
+                        </button>
+                      </div>
+                    </article>
+                    <div class="cc-msg" data-from="user">
+                      <div class="cc-msg-head">
+                        <span class="cc-eyebrow">You</span
+                        ><span class="mono muted">13:44</span>
+                      </div>
+                      <p>
+                        Start the calendar group first, it blocks the release.
+                      </p>
+                    </div>
+                    <div class="cc-msg" data-from="orchestrator">
+                      <div class="cc-msg-head">
+                        <span class="cc-eyebrow">Main orchestrator</span
+                        ><span class="mono muted">13:44</span>
+                      </div>
+                      <p>
+                        Understood. <span class="mono">CEN-9</span> starts next,
+                        then <span class="mono">CEN-14</span>.
+                      </p>
+                    </div>
+                    <article class="decision" aria-label="Question">
+                      <div class="cc-msg-head">
+                        <span class="cc-eyebrow">Main orchestrator</span
+                        ><span class="mono muted">14:06</span
+                        ><span class="badge">Question</span>
+                      </div>
+                      <h3 class="decision-q">
+                        <span class="mono">CEN-7</span> stopped at the usage
+                        limit. Resume now or wait for the reset?
+                      </h3>
+                      <div class="opt-list">
+                        <button type="button" class="btn btn-outline opt-btn">
+                          <span>Resume now</span>
+                        </button>
+                        <button type="button" class="btn btn-outline opt-btn">
+                          <span>Wait for the reset</span
+                          ><span class="badge">Recommended</span>
+                        </button>
+                      </div>
+                      <div class="field">
+                        <label class="sr-only" for="answer-7-n"
+                          >Your answer to CEN-7 stopped at the usage limit.
+                          Resume now or wait for the reset?</label
+                        >
+                        <textarea
+                          class="textarea"
+                          id="answer-7-n"
+                          placeholder="Or type an answer"
+                        ></textarea>
+                      </div>
+                      <div>
+                        <button type="button" class="btn btn-outline">
+                          Send answer
+                        </button>
+                      </div>
+                    </article>
+                  </div>
+                  <div class="cc-compose">
+                    <div class="field">
+                      <label class="sr-only" for="message-n"
+                        >Message the orchestrator</label
+                      >
+                      <textarea
+                        class="textarea"
+                        id="message-n"
+                        placeholder="Message the orchestrator"
+                      ></textarea>
+                    </div>
+                    <div class="cc-compose-foot">
+                      <p class="help">
+                        0 of 500 characters. A longer reply goes as a file.
+                      </p>
+                      <button type="button" class="btn btn-primary">
+                        Send
+                      </button>
+                    </div>
+                  </div>
+                </aside>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <h3 class="frame-title cc-gap">Branches tab, one tap away</h3>
+      <div class="frame-box">
+        <div class="shell">
+          <div class="main">
+            <header class="page-header cc-wrap">
+              <div class="page-title">
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-icon menu-btn"
+                  aria-label="Open menu"
+                >
+                  ☰
+                </button>
+                <h1>Orchestrator · Dispatch</h1>
+              </div>
+              <div class="page-actions">
+                <span class="badge badge-accent"
+                  ><span aria-hidden="true">▶</span> Working</span
+                >
+                <button type="button" class="btn btn-outline">
+                  <span aria-hidden="true">■</span> Stop
+                </button>
+                <button type="button" class="btn btn-outline">Settings</button>
+              </div>
+            </header>
+            <div class="cc-tnum">
+              <div class="cc-view">
+                <section
+                  class="cc-node cc-hub cc-strip"
+                  data-state="orchestrator"
+                  aria-label="Main orchestrator, Working"
+                >
+                  <div class="cc-strip-main">
+                    <span class="cc-eyebrow">Orchestrator</span>
+                    <h2 class="cc-title">Main orchestrator</h2>
+                    <span class="badge badge-accent"
+                      ><span aria-hidden="true">▶</span> Working</span
+                    >
+                  </div>
+                  <div class="cc-strip-facts">
+                    <span class="cc-ctx"
+                      ><span class="cc-bar cc-pct-42" aria-hidden="true"
+                        ><span class="cc-bar-fill"></span></span
+                      >Context 42%</span
+                    ><span class="cc-cost">$3.10 today</span
+                    ><span class="muted">9 branches, 3 need you</span>
+                  </div>
+                </section>
+              </div>
+              <div
+                class="tabs panel-tabs"
+                role="tablist"
+                aria-label="Orchestrator centre sections"
+              >
+                <button
+                  type="button"
+                  class="tab"
+                  role="tab"
+                  aria-selected="true"
+                >
+                  Branches
+                </button>
+                <button
+                  type="button"
+                  class="tab"
+                  role="tab"
+                  aria-selected="false"
+                >
+                  Conversation
+                </button>
+              </div>
+              <div role="tabpanel" aria-label="Branches">
+                <div class="cc-bands cc-dots">
+                  <section aria-label="Needs you">
+                    <div class="cc-band-head">
+                      <h3 class="cc-eyebrow">Needs you</h3>
+                      <span class="badge" aria-label="3 branches">3</span>
+                    </div>
+                    <ul class="cc-band-list">
+                      <li>
+                        <article
+                          class="cc-node"
+                          data-state="needs"
+                          aria-label="CEN-12, Needs input"
+                        >
+                          <div class="cc-node-top">
+                            <span class="mono muted">CEN-12</span
+                            ><span class="badge badge-warn"
+                              ><span aria-hidden="true">?</span> Needs
+                              input</span
+                            >
+                          </div>
+                          <h4 class="cc-title">
+                            Fix the stale badge on the dashboard
+                          </h4>
+                          <p class="cc-detail">Asks: keep the old copy?</p>
+                          <p class="cc-playbook">
+                            <span class="cc-eyebrow">Playbook</span>
+                            <span>Write code directly</span>
+                          </p>
+                          <div class="cc-facts">
+                            <span class="cc-ctx"
+                              ><span class="cc-bar cc-pct-18" aria-hidden="true"
+                                ><span class="cc-bar-fill"></span></span
+                              >Context 18%</span
+                            ><span class="cc-cost">$0.40</span>
+                          </div>
+                          <div class="field cc-reply">
+                            <label class="sr-only" for="reply-12-n2"
+                              >Reply to CEN-12</label
+                            ><textarea
+                              class="textarea"
+                              id="reply-12-n2"
+                              placeholder="Reply to CEN-12"
+                            ></textarea
+                            ><button type="button" class="btn btn-outline">
+                              Send reply
+                            </button>
+                            <p class="help">
+                              0 of 500 characters. A longer reply goes as a
+                              file.
+                            </p>
+                          </div>
+                        </article>
+                      </li>
+                      <li>
+                        <article
+                          class="cc-node"
+                          data-state="limit"
+                          aria-label="CEN-7, Usage limit"
+                        >
+                          <div class="cc-node-top">
+                            <span class="mono muted">CEN-7</span
+                            ><span class="badge badge-danger"
+                              ><span aria-hidden="true">◴</span> Usage
+                              limit</span
+                            >
+                          </div>
+                          <h4 class="cc-title">Archive old boards</h4>
+                          <p class="cc-detail">
+                            Stopped at the usage limit. The limit resets at
+                            <span class="mono">18:00</span>.
+                          </p>
+                          <div class="cc-actions">
+                            <button type="button" class="btn btn-outline">
+                              Resume loop
+                            </button>
+                          </div>
+                        </article>
+                      </li>
+                      <li>
+                        <article
+                          class="cc-node"
+                          data-state="permission"
+                          aria-label="CEN-15, Permission prompt"
+                        >
+                          <div class="cc-node-top">
+                            <span class="mono muted">CEN-15</span
+                            ><span class="badge badge-warn"
+                              ><span aria-hidden="true">⊘</span> Permission
+                              prompt</span
+                            >
+                          </div>
+                          <h4 class="cc-title">Push notifications on iOS</h4>
+                          <p class="cc-detail">
+                            Waiting on a permission prompt
+                          </p>
+                          <div class="cc-actions">
+                            <a class="btn btn-link" href="#">Open terminal</a>
+                          </div>
+                        </article>
+                      </li>
+                    </ul>
+                  </section>
+                  <section aria-label="Running">
+                    <div class="cc-band-head">
+                      <h3 class="cc-eyebrow">Running</h3>
+                      <span class="badge" aria-label="2 branches">2</span>
+                    </div>
+                    <ul class="cc-band-list">
+                      <li>
+                        <article
+                          class="cc-node"
+                          data-state="running"
+                          aria-label="CEN-9, Running"
+                        >
+                          <div class="cc-node-top">
+                            <span class="mono muted">CEN-9</span
+                            ><span class="badge badge-accent"
+                              ><span aria-hidden="true">▶</span> Running</span
+                            >
+                          </div>
+                          <h4 class="cc-title">Calendar sync</h4>
+                          <p class="cc-sub">Group of 3 tickets</p>
+                          <p class="cc-detail">Unit 2 of 3, phase 4 of 9</p>
+                          <p class="cc-playbook">
+                            <span class="cc-eyebrow">Playbook</span>
+                            <span>Roadmap Loop</span>
+                          </p>
+                          <div class="cc-facts">
+                            <span class="cc-ctx"
+                              ><span class="cc-bar cc-pct-61" aria-hidden="true"
+                                ><span class="cc-bar-fill"></span></span
+                              >Context 61%</span
+                            ><span class="cc-cost">$8.20</span>
+                          </div>
+                        </article>
+                      </li>
+                      <li>
+                        <article
+                          class="cc-node"
+                          data-state="running"
+                          aria-label="CEN-14, Running"
+                        >
+                          <div class="cc-node-top">
+                            <span class="mono muted">CEN-14</span
+                            ><span class="badge badge-accent"
+                              ><span aria-hidden="true">▶</span> Running</span
+                            >
+                          </div>
+                          <h4 class="cc-title">Slack thread import</h4>
+                          <p class="cc-detail">Phase 2 of 6</p>
+                          <p class="cc-playbook">
+                            <span class="cc-eyebrow">Playbook</span>
+                            <span>PRD + Ralph Loop</span>
+                          </p>
+                          <div class="cc-facts">
+                            <span class="cc-ctx"
+                              ><span class="cc-bar cc-pct-33" aria-hidden="true"
+                                ><span class="cc-bar-fill"></span></span
+                              >Context 33%</span
+                            ><span class="cc-cost">$2.75</span>
+                          </div>
+                        </article>
+                      </li>
+                    </ul>
+                  </section>
+                  <section aria-label="Planned">
+                    <div class="cc-band-head">
+                      <h3 class="cc-eyebrow">Planned</h3>
+                      <span class="badge" aria-label="2 branches">2</span>
+                    </div>
+                    <ul class="cc-band-list">
+                      <li>
+                        <article
+                          class="cc-node"
+                          data-state="planned"
+                          aria-label="CEN-16, Planned"
+                        >
+                          <div class="cc-node-top">
+                            <span class="mono muted">CEN-16</span
+                            ><span class="badge"
+                              ><span aria-hidden="true">○</span> Planned</span
+                            >
+                          </div>
+                          <h4 class="cc-title">Board export to CSV</h4>
+                          <p class="cc-detail">Plan order 4, size small</p>
+                          <p class="cc-playbook">
+                            <span class="cc-eyebrow">Playbook</span>
+                            <span>Write code directly</span>
+                          </p>
+                          <p class="cc-idle">Not started</p>
+                        </article>
+                      </li>
+                      <li>
+                        <article
+                          class="cc-node"
+                          data-state="planned"
+                          aria-label="CEN-17, Planned"
+                        >
+                          <div class="cc-node-top">
+                            <span class="mono muted">CEN-17</span
+                            ><span class="badge"
+                              ><span aria-hidden="true">○</span> Planned</span
+                            >
+                          </div>
+                          <h4 class="cc-title">Search across boards</h4>
+                          <p class="cc-detail">Plan order 5, size medium</p>
+                          <p class="cc-playbook">
+                            <span class="cc-eyebrow">Playbook</span>
+                            <span>PRD + Ralph Loop</span>
+                          </p>
+                          <p class="cc-idle">Not started</p>
+                        </article>
+                      </li>
+                    </ul>
+                  </section>
+                  <section aria-label="Done">
+                    <div class="cc-band-head">
+                      <h3 class="cc-eyebrow">Done</h3>
+                      <span class="badge" aria-label="1 branch">1</span>
+                    </div>
+                    <ul class="cc-band-list">
+                      <li>
+                        <article
+                          class="cc-node"
+                          data-state="done"
+                          aria-label="CEN-5, Agent done"
+                        >
+                          <div class="cc-node-top">
+                            <span class="mono muted">CEN-5</span
+                            ><span class="badge badge-ok"
+                              ><span aria-hidden="true">✓</span> Agent
+                              done</span
+                            >
+                          </div>
+                          <h4 class="cc-title">Rename the inbox filter</h4>
+                          <p class="cc-detail">
+                            Done <span class="mono">14:02</span>, awaiting ship
+                          </p>
+                        </article>
+                      </li>
+                    </ul>
+                  </section>
+                  <section aria-label="Shipped">
+                    <div class="cc-band-head">
+                      <h3 class="cc-eyebrow">Shipped</h3>
+                      <span class="badge" aria-label="1 branch">1</span>
+                    </div>
+                    <ul class="cc-band-list">
+                      <li>
+                        <article
+                          class="cc-node"
+                          data-state="shipped"
+                          aria-label="CEN-3, Shipped"
+                        >
+                          <div class="cc-node-top">
+                            <span class="mono muted">CEN-3</span
+                            ><span class="badge"
+                              ><span aria-hidden="true">↑</span> Shipped</span
+                            >
+                          </div>
+                          <h4 class="cc-title">Dark theme contrast</h4>
+                          <p class="cc-detail">
+                            Shipped <span class="mono">11:40</span>, PR 231
+                          </p>
+                        </article>
+                      </li>
+                      <li>
+                        <button
+                          type="button"
+                          class="btn btn-ghost"
+                          aria-expanded="false"
+                        >
+                          <span aria-hidden="true">▸</span> Show 2 older shipped
+                        </button>
+                      </li>
+                    </ul>
+                  </section>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </body>
+</html>

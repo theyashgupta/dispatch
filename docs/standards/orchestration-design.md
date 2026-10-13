@@ -39,6 +39,8 @@ Term rule: in this codebase, "orchestration" also names the session start saga (
 
 **Decision:** A board is the project. No project level holds boards. A board row has these fields: `key` (also the board id, set at creation, never changed), `name`, `workspaceRoot`, `repositories` (each a path, a base branch and a check command, default `npm run check`, which the server runs with `NODE_ENV` unset as in SI:18), `linearTeamKeys` (optional), `lastUsedFolder`, `policy` (D-6), `orchestrators` (D-7), `createdAt`, `archived`. The default board takes its workspace root and repositories from the `Config` fields `workspaceRoot`, `repoPaths` and `baseBranches`, as today. So `Config` and `config.json` keep every field ("Do Not Change" contract items 1 and 4). An edit of the default board writes these `Config` fields. A new board stores these values on its own row. Cards, events and archive rows carry the board key. These stay global: Claude accounts, the vault, connections, the inbox sources and their items, playbooks, push subscriptions, and the settings that are not a board field. An inbox item has no board. When the user promotes an item, the new card goes to the selected board. The Inbox page shows the global items plus the Inbox-column cards of the selected board. The Linear poller puts a new card on the board whose `linearTeamKeys` holds the team key of the issue, else on the default board. The `Card` type and the `BoardSnapshot` gain the board key. That is a deliberate change of the "Do Not Change" contract item 1, and the ticket that makes it updates the contract text in the same change.
 
+**Amendment (LOCAL-102):** `name` is the only required field of a board create. The server derives the key from the name. The repository list is optional and can be empty. The default folder is `<workspaces root>/<key>`, and the server makes it on create. The MCP tool `create_board` creates a board from a name through the same service. `get_board_workspace` lists all boards.
+
 **Reason:** the manual run was one project per board in practice (each group payload had one `folder` and one `repos` entry, H25:96-104), and one level keeps every route, query key and URL to one scope parameter.
 
 **Rejected:**
@@ -121,6 +123,8 @@ New server code goes in the existing layers: supervisor files in `services/orche
 **Governs:** LOCAL-88, LOCAL-89, LOCAL-90, LOCAL-91, LOCAL-92
 
 **Evidence:** research section 3.1 (A8 to A14, A17, A18 (the engine file part; the Done move is in D-8) and A22 go to the supervisor; A15 becomes the dependency hold; A21 becomes the dashboard (D-5 progress, D-6 budget); A26 is not needed, because the policy (D-6) and the playbook hold the rulings; for A27, LOCAL-89 adds `crossSessionInbound: refuse` to the generated hook settings (`server/bootstrap/hook-setup.ts`, H30:26), and no `.roadmap` link is needed, because the link served the resume script (H30:33) and the reader reads `.roadmap` at the session root; A4 and A6 are deterministic too, but they stay with the orchestrator because they carry out its own calls A2, A3 and A5), section 3.2 (F1 to F25), section 2 (the marker watcher reads the pane at `server/adapters/markers/watcher.ts:150`; the start saga already answers dialogs at `server/services/orchestration/steps.ts:387-408`); research section 6 (Composio settle window, Operator silence threshold).
+
+Amendment, 2026-10-10 (LOCAL-98): `crossSessionInbound` is a setting now, not a fixed `refuse`. `Config.crossSessionInbound` is `accept`, `hold` or `refuse`, and the default is `accept`. The value applies to a session that a user starts from a ticket. A session that runs a playbook whose name starts with "Roadmap Loop", and a board orchestrator session, get `refuse`, unless the board policy field `crossSessionInbound` or the start request sets a value. The order for each launch is: the start request value, then for a Roadmap Loop or orchestrator launch the board policy value or `refuse`, then the config value. Reason: a held message from the claude-mem observer stopped an unattended loop and once removed a roadmap approval (research F9), but the user sends context to a ticket session from a main session. The server writes one settings file for each value, and each launch passes the file of its value. The supervisor still denies a held peer message dialog, which can occur only with `hold`.
 
 ### D-4: Control surface
 
@@ -314,11 +318,12 @@ The checks 1 to 3 use no git call. The check 4 reads one file and runs before an
 
 ## Tool reference
 
-This section is the reference for the 30 tools. Each tool calls one route under `/api/orchestrator/`. Each call is checked against the board scope and, for a write, the policy (D-6), and is recorded as a `tool_call` row in `orchestration_events`. A tool call on a card that another orchestrator owns (D-7) returns 403 `other-owner`.
+This section is the reference for the 31 tools. Each tool calls one route under `/api/orchestrator/`. Each call is checked against the board scope and, for a write, the policy (D-6), and is recorded as a `tool_call` row in `orchestration_events`. A tool call on a card that another orchestrator owns (D-7) returns 403 `other-owner`.
 
 | Family    | Tools                                                                                                                                                                                        | Notes                                                                                    |
 | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
 | Read      | `list_cards`, `get_card`, `list_sessions`, `get_group_progress`, `get_card_progress`, `read_pane_tail`, `list_events`, `get_policy`, `get_board_workspace`, `list_playbooks`, `get_rulebook` | `list_events` takes a `since` cursor                                                     |
+| Boards    | `create_board`                                                                                                                                                                               | any valid token may call it; the new board is not a board of the caller                  |
 | Tickets   | `create_ticket`, `update_ticket`, `move_card`, `add_comment`                                                                                                                                 | `update_ticket` closes F25                                                               |
 | Groups    | `create_base_branch`, `create_group`, `start_group`                                                                                                                                          | `create_group` takes members, optional repos, playbook, direction and `dependsOn`        |
 | Cards     | `start_card`                                                                                                                                                                                 | starts one ticket card with a playbook and a direction                                   |
@@ -400,9 +405,18 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 
 - Route: `GET /board-workspace`.
 - Input: none.
-- Description: "Read the board workspace: the folder, the repositories with their base branch and check command, the playbook names and the group playbook. This tool changes nothing."
-- Answer: `folder` (the workspace folder of the board, or null), `repos` (each repository of the board as `{ path, base, checkCommand }`, and `base` is null when the repository has no base branch), `playbooks` (the sorted names of the playbooks that exist) and `groupPlaybook` (from the policy of the caller, or null).
+- Description: "Read the board workspace: the folder, the repositories with their base branch and check command, the playbook names and the group playbook. It also lists all boards with their key, name, archived flag and link. This tool changes nothing."
+- Answer: `folder` (the workspace folder of the board, or null), `repos` (each repository of the board as `{ path, base, checkCommand }`, and `base` is null when the repository has no base branch), `playbooks` (the sorted names of the playbooks that exist), `groupPlaybook` (from the policy of the caller, or null) and `boards` (every board as `{ key, name, archived, link }`, where `link` is `/boards/<key>`).
 - Refusals: none beyond the rules above.
+
+### `create_board`
+
+- Route: `POST /boards`. It answers 201 with `{ board, link }`, where `link` is `/boards/<key>`. The key is in `board.key`.
+- Input: `name` (string, 1 to 100 characters, one line), `folder` (optional absolute path of an existing folder), `repositories` (optional array of absolute repository paths). The key is not an input: the server derives it from the name.
+- Description: "Create a board from a name. The key comes from the name. When you give no folder, the folder is made below the workspaces root. The answer holds the board, with its key, and the link. A blank name is refused."
+- Scope: any valid orchestrator token may call it, because the new board is not a board of the caller. The call is recorded under the board of the caller.
+- Service: the route calls the service of `POST /api/boards`, so one rule set applies. The tool refuses a folder or a repository that is not inside the home folder. Each repository takes base branch null and the default check command.
+- Refusals: 400 `missing-name`, `invalid-name`, `folder-missing`, `invalid-repository`, `no-free-key` and `no-workspaces-root`. 403 `outside-home`.
 
 ### `create_ticket`
 
@@ -445,7 +459,7 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 - Route: `POST /groups`.
 - Input: `title` (string, 1 to 300 characters after trimming), `memberIds` (array of 2 or more distinct card ids), `repos` (optional array of 1 or more `{ path, base }`, both strings of 1 character or more; when omitted, the group uses every repository of the board with its base branch, and `get_board_workspace` lists them), `playbook` (optional string, 1 character or more; when omitted, the `groupPlaybook` of the board policy applies when a playbook with that name exists, else the group has no playbook), `direction` (optional string, at most 10000 characters), `dependsOn` (optional array of at most 50 group card ids).
 - Description: "Create a group card from 2 or more cards. Omit repos to use the board repositories with their base branch; get_board_workspace lists them. A repository with no base branch is refused with missing-base; then pass repos with a base. Omit playbook to use the board group playbook; get_policy lists the playbook names. Text that holds the status marker is refused."
-- Refusals: 400 `invalid-title`, `invalid-member-ids`, `invalid-repos` (also for an omitted `repos` on a board with no repository), `missing-base` with `path` (an omitted `repos` and a board repository with no base branch), `invalid-playbook`, `invalid-direction`, `invalid-dependency` (a bad id, or a card that is not a group on your board), `unknown-repository` (a repo path that is not a repository of the board), and `content contains the DISPATCH_STATUS marker` for a title or a direction that holds the status marker. 400 with a text as `error`: `unknown playbook`, `invalid base branch` (a base that starts with `-`), `Can't start: a selected repo is missing`, `orchestration config is not loaded`. 403 `other-owner` (a member outside your scope, that another orchestrator owns). A group that an extra creates joins its scope. 404 `unknown-board`. 409 `some selected cards are no longer eligible to be grouped` with `ineligibleIds` (a card that is unknown, on another board, not in To Do, already grouped, itself a group or an orchestrator session card). 409 `board-archived`.
+- Refusals: 400 `invalid-title`, `invalid-member-ids`, `invalid-repos`, `no-repositories` (an omitted `repos` on a board with no repository), `missing-base` with `path` (an omitted `repos` and a board repository with no base branch), `invalid-playbook`, `invalid-direction`, `invalid-dependency` (a bad id, or a card that is not a group on your board), `unknown-repository` (a repo path that is not a repository of the board), and `content contains the DISPATCH_STATUS marker` for a title or a direction that holds the status marker. 400 with a text as `error`: `unknown playbook`, `invalid base branch` (a base that starts with `-`), `Can't start: a selected repo is missing`, `orchestration config is not loaded`. 403 `other-owner` (a member outside your scope, that another orchestrator owns). A group that an extra creates joins its scope. 404 `unknown-board`. 409 `some selected cards are no longer eligible to be grouped` with `ineligibleIds` (a card that is unknown, on another board, not in To Do, already grouped, itself a group or an orchestrator session card). 409 `board-archived`.
 
 ### `start_group`
 
@@ -510,9 +524,9 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 ### `create_decision_item`
 
 - Route: `POST /decisions`. It answers 201 with `{ item }`.
-- Input: `cardId` (optional, nullable card id), `kind` (one of `roadmap_approval`, `ruling`, `ship_failure`, `ticket_proposal`, `other`), `question` (string, 1 to 2000 characters), `options` (array of 2 to 8 `{ id, label }`: `id` matches `[a-z0-9_-]{1,40}` and is distinct, `label` is 1 to 200 characters), `recommendedOptionId` (optional, one of the option ids), `tickets` (array of 1 to 20 `{ title, description }`; required for kind `ticket_proposal` and refused for any other kind). A ticket `title` and `description` follow the bounds and the status marker rule of a ticket (title 1 to 300 characters, description 1 to 20000 characters).
-- Description: "Create a decision item for a person to answer. Give 2 to 8 options with distinct ids. For the kind ticket_proposal, give 1 to 20 tickets, each with a title and a description."
-- Refusals: 400 `invalid-kind`, `invalid-question`, `invalid-options`, `invalid-recommended-option` (also an id that is not in `options`), `invalid-tickets` (also `tickets` on a kind other than `ticket_proposal`, or a `ticket_proposal` with no `tickets`), `invalid-title`, `invalid-description`, and `content contains the DISPATCH_STATUS marker`. The `cardId` rules above apply when `cardId` is set.
+- Input: `cardId` (optional, nullable card id), `kind` (one of `roadmap_approval`, `ruling`, `ship_failure`, `ticket_proposal`, `other`, `plan`), `question` (string, 1 to 2000 characters), `options` (array of 2 to 8 `{ id, label }`: `id` matches `[a-z0-9_-]{1,40}` and is distinct, `label` is 1 to 200 characters), `recommendedOptionId` (optional, one of the option ids), `tickets` (array of 1 to 20 `{ title, description }`; required for kind `ticket_proposal` and refused for any other kind). A ticket `title` and `description` follow the bounds and the status marker rule of a ticket (title 1 to 300 characters, description 1 to 20000 characters). `plan` (object with `entries`: an array of 1 to 20 `{ ref, playbook, order, size }`; required for kind `plan` and refused for any other kind): `ref` is a card id or a group title, 1 to 300 characters; `playbook` is 1 to 200 characters; `order` is an integer from 1 to 20 and is distinct in the plan; `ref` is distinct in the plan; `size` is `small`, `medium` or `large`. A `plan` item gets the server options `approve` ("Approve the plan") and `reject` ("Do not approve"), with `approve` recommended.
+- Description: "Create a decision item for a person to answer. Give 2 to 8 options with distinct ids. For the kind ticket_proposal, give 1 to 20 tickets, each with a title and a description. For the kind plan, give plan.entries: 1 to 20 entries, each with ref (a card id or a group title, unique), playbook, order (1 to 20, unique) and size (small, medium or large). A plan gets the options approve and reject."
+- Refusals: 400 `invalid-kind`, `invalid-question`, `invalid-options`, `invalid-recommended-option` (also an id that is not in `options`), `invalid-tickets` (also `tickets` on a kind other than `ticket_proposal`, or a `ticket_proposal` with no `tickets`), `invalid-plan` (also `plan` on a kind other than `plan`, a `plan` item with no `plan`, or an entry out of bounds), `invalid-title`, `invalid-description`, and `content contains the DISPATCH_STATUS marker`. The `cardId` rules above apply when `cardId` is set.
 - For kind `roadmap_approval` the server sets the options (`approve` "Approve the roadmap", `reject` "Do not approve") and the recommended option `approve`, and ignores the caller options.
 - For kind `ticket_proposal` the server sets the options (`approve` "Create these tickets", `reject` "Do not create") and the recommended option `approve`, and ignores the caller options. The stored item holds `proposal: { tickets, usedIndexes: [] }`. `create_ticket` creates a ticket from an entry of an approved proposal only.
 - The item belongs to the owner orchestrator of its card (D-7), or to the caller when it has no card or the board has no owner rule. The `decision_raised` and `decision_answered` events carry that `orchestratorId`. The user answers in the panel (`POST /api/decisions/:id/answer`), and the answer returns as the `decision_answered` event.
@@ -566,8 +580,8 @@ When `handoffReady` is `true`, the supervisor reads the handoff as pending, as i
 
 - Route: `POST /cards/:cardId/start`. It answers 202 with `{ started: true, cardId, playbook }` when the session start began, not when the worktree exists. The cap check, the write of `launch` and the start run in one cap-locked step, so two calls at the same time cannot both take the last slot.
 - Input: `cardId` (card id), `playbook` (string, 1 to 200 characters), `direction` (optional string, with the same limit and marker rule as the `create_group` direction), `folder` (optional string, 1 character or more), `repos` (optional list of `{ path, base }`, 1 entry or more).
-- Description: "Start the session of one ticket card with a playbook and a direction, the way the start dialog does. Omit repos to use the stored workspace of the card, else the board repositories with their base branch. A group card, a running card, a card in Done or Inbox, the Board Orchestrator playbook and a start at the concurrency cap are refused."
-- Refusals: 400 `invalid-playbook`, `invalid-direction`, `invalid-folder`, `invalid-repos`, `not-ticket-card` (the card is a group card), `orchestrator-playbook` (the playbook is Board Orchestrator), `unknown-playbook`, and the marker reason of `create_group`. 403 `policy-refused` with `reason` `concurrency cap reached: <running> of <cap> loops running`. 409 `already-started` when the card runs or has a live session. 409 for a card in Done or Inbox. 409 `a session start is already in progress` when a start of the card is running. Every refusal comes before the first write, so a refused call leaves no `launch` and no session.
+- Description: "Start the session of one ticket card with a playbook and a direction, the way the start dialog does. Omit repos to use the stored workspace of the card, else the board repositories with their base branch. A stored workspace with no repository counts as none, and a board with no repository answers no-repositories. A group card, a running card, a card in Done or Inbox, the Board Orchestrator playbook and a start at the concurrency cap are refused."
+- Refusals: 400 `invalid-playbook`, `invalid-direction`, `invalid-folder`, `invalid-repos`, `no-repositories` (an omitted `repos` on a board with no repository), `missing-base` with `path`, `unknown-repository`, `not-ticket-card` (the card is a group card), `orchestrator-playbook` (the playbook is Board Orchestrator), `unknown-playbook`, and the marker reason of `create_group`. 403 `policy-refused` with `reason` `concurrency cap reached: <running> of <cap> loops running`. 409 `already-started` when the card runs or has a live session. 409 for a card in Done or Inbox. 409 `a session start is already in progress` when a start of the card is running. Every refusal comes before the first write, so a refused call leaves no `launch` and no session.
 - The tool writes `launch` on the card with the playbook and the direction, so the card counts as a running loop until it reaches Agent done or Done.
 
 ### Rules for the orchestrator session (Unit 4)
@@ -670,13 +684,33 @@ Change: a playbook can have a `when` line in its front matter, 300 characters or
 
 Reason: the G19 and G20 real runs, and the user note of 2026-10-10.
 
+### LOCAL-98
+
+Change: `crossSessionInbound` moves from a fixed `refuse` in the hook settings to a setting with the default `accept` (D-3 amendment, 2026-10-10). Roadmap Loop and board orchestrator sessions keep `refuse` unless the board policy or the start request sets a value. The board policy gains the nullable field `crossSessionInbound` (D-6). The start route gains the optional field `crossSessionInbound`, and the card keeps it with the start intent. Settings shows the value next to the Claude arguments.
+
+Reason: the user sends context from a main session to a ticket session with a cross-session message, and the fixed `refuse` blocked each of these messages on 2026-10-09.
+
+### LOCAL-104
+
+Date: 2026-10-11.
+
+Change: the decision kinds gain `plan`. The orchestrator raises its plan as one `plan` item with one structured entry for each ticket or group: the reference, the playbook, the order and the size. The server gives a `plan` item the options approve and reject, with approve recommended, and the user answers it as before. The rule book section 5 tells the orchestrator to use the kind `plan`. The tool count stays 29.
+
+Reason: the command centre (LOCAL-104) shows the planned tickets and groups as branches, and a free text plan cannot tell them apart.
+
+### LOCAL-98
+
+Change: `crossSessionInbound` moves from a fixed `refuse` in the hook settings to a setting with the default `accept` (D-3 amendment, 2026-10-10). Roadmap Loop and board orchestrator sessions keep `refuse` unless the board policy or the start request sets a value. The board policy gains the nullable field `crossSessionInbound` (D-6). The start route gains the optional field `crossSessionInbound`, and the card keeps it with the start intent. Settings shows the value next to the Claude arguments.
+
+Reason: the user sends context from a main session to a ticket session with a cross-session message, and the fixed `refuse` blocked each of these messages on 2026-10-09.
+
 ### LOCAL-109
 
 Date: 2026-10-11.
 
 Change: a loop card is a group card, or a ticket card that `start_card` started. The loop progress reader reads a single PRD loop of a loop card. It takes the PRD path and the slug from the engine file. It stores one unit with the phases of the PRD.
 
-Change: a new read tool, `get_card_progress`, gives that progress and the last status marker. The tool count is 30.
+Change: a new read tool, `get_card_progress`, gives that progress and the last status marker. The tool count is 31 with `create_board` of LOCAL-104.
 
 Change: the `group_state` events, the `loop_gate` reports and the wake cover every loop card. A failed start of a launched ticket card writes `group_state` `start_failed`. Held starts and the budget stop stay group only. This amends LOCAL-96.
 

@@ -4,6 +4,7 @@ import type {
   BoardKey,
   Card,
   Column,
+  ResumeTarget,
   UnwindDestination,
 } from "../../shared/types.js";
 import { http, httpError } from "@/lib/http";
@@ -23,6 +24,24 @@ export async function moveCard(id: string, column: Column): Promise<void> {
   });
   if (!result.ok) {
     throw httpError("moveCard", result);
+  }
+}
+
+/** Set or clear a card's Inbox dismissal: POST /api/cards/:id/inbox-dismiss. */
+export async function setCardInboxDismissed(
+  id: string,
+  dismissed: boolean,
+): Promise<void> {
+  const result = await http(
+    `/api/cards/${encodeURIComponent(id)}/inbox-dismiss`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ dismissed }),
+    },
+  );
+  if (!result.ok) {
+    throw httpError("setCardInboxDismissed", result);
   }
 }
 
@@ -349,6 +368,22 @@ export async function getCard(
   }
   if (!result.ok) {
     throw httpError("getCard", result);
+  }
+  return result.data;
+}
+
+/**
+ * Read which conversation Resume will open: GET /api/cards/:id/resume-target.
+ *
+ * @remarks
+ * A 404 (unknown card) or 409 (no session) throws, so the caller shows the error line.
+ */
+export async function getResumeTarget(id: string): Promise<ResumeTarget> {
+  const result = await http<ResumeTarget>(
+    `/api/cards/${encodeURIComponent(id)}/resume-target`,
+  );
+  if (!result.ok) {
+    throw httpError("getResumeTarget", result);
   }
   return result.data;
 }

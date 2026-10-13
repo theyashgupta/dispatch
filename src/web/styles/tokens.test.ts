@@ -152,3 +152,23 @@ void test("the contrast instrument passes on both themes", () => {
   }
   assert.equal((output.match(/-mark\(computed\) on /g) ?? []).length, 70);
 });
+
+void test("each soft tint mixes its state token over transparent in the root block", () => {
+  const root = new Map(rootBlock);
+  for (const [name, base] of [
+    ["--ok-soft", "--status-ok"],
+    ["--warn-soft", "--status-stale"],
+    ["--danger-soft", "--status-down"],
+    ["--dot-grid", "--text-muted"],
+  ]) {
+    assert.match(
+      root.get(name) ?? "",
+      new RegExp(
+        `^color-mix\\(\\s*in srgb,\\s*var\\(${base}\\) \\d+%,\\s*transparent\\s*\\)$`,
+      ),
+      name,
+    );
+  }
+  assert.match(root.get("--glow-current") ?? "", /var\(--accent-soft\)/);
+  assert.match(root.get("--motion-node-breathe") ?? "", /^2\.4s$/);
+});

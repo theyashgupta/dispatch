@@ -7,6 +7,7 @@ interface ListItemRowProps {
   leading: ReactNode;
   title: ReactNode;
   snippet?: string;
+  detail?: string;
   meta: ReactNode;
   metaClassName?: string;
   selected: boolean;
@@ -19,6 +20,7 @@ export function ListItemRow({
   leading,
   title,
   snippet,
+  detail,
   meta,
   metaClassName,
   selected,
@@ -57,6 +59,11 @@ export function ListItemRow({
         {snippet ? (
           <span className="line-clamp-2 text-sm break-words text-muted-foreground">
             {snippet}
+          </span>
+        ) : null}
+        {detail ? (
+          <span className="truncate text-xs text-muted-foreground">
+            {detail}
           </span>
         ) : null}
       </ItemContent>

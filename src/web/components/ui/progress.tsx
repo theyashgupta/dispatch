@@ -12,6 +12,7 @@ const progressIndicatorVariants = cva(
       tone: {
         default: "bg-foreground",
         ok: "bg-(--status-ok)",
+        accent: "bg-(--accent)",
         stale: "bg-(--status-stale)",
         down: "bg-(--status-down)",
         marker: "border-r-2 border-muted-foreground bg-transparent",

@@ -28,6 +28,9 @@ export interface InboxRowModel {
 }
 
 export type InboxActionId =
+  | "allow"
+  | "dismiss"
+  | "restore"
   | "promote"
   | "snooze"
   | "done"
@@ -42,6 +45,7 @@ export interface ActionApi {
   setItemState: (id: string, state: SettableItemState) => Promise<void>;
   snoozeItem: (id: string, until: string) => Promise<void>;
   moveCard: (id: string, column: Column) => Promise<void>;
+  setCardInboxDismissed: (id: string, dismissed: boolean) => Promise<void>;
   cleanupCard: (id: string, force?: boolean) => Promise<void>;
   switchSession: (cardId: string, sessionId: string) => Promise<void>;
   resumeCard: (
@@ -68,6 +72,7 @@ export interface ActionContext {
     extraDirection: string,
   ) => Promise<void>;
   askAbout: (question: string) => void;
+  openStart: (request: StartRequest) => void;
 }
 
 export type ActionServices = Omit<ActionContext, "openSnooze">;
@@ -84,6 +89,18 @@ export interface InboxAction {
 
 const isItem = (row: InboxRowModel) => row.kind === "item";
 const priorState = (row: RowRef) => (row.unread ? "unread" : "read");
+
+/** Whether a row is hidden under Dismissed, so the Inbox offers only Restore on it. */
+export const isDismissedRow = (row: InboxRowModel) =>
+  row.kind === "item"
+    ? row.item?.state === "dismissed"
+    : row.card?.inboxDismissedAt != null;
+
+const isLive = (row: InboxRowModel) => !isDismissedRow(row);
+
+const live =
+  (applies: (row: InboxRowModel) => boolean) => (row: InboxRowModel) =>
+    !isDismissedRow(row) && applies(row);
 
 const hasUrl = (row: InboxRowModel) => isWebUrl(row.url);
 
@@ -102,9 +119,40 @@ function askTarget(row: InboxRowModel): AskAboutTarget {
 
 export const INBOX_ACTIONS: readonly InboxAction[] = [
   {
+    id: "allow",
+    label: "Allow",
+    key: "y",
+    appliesTo: isLive,
+    run: async (ctx, row) => {
+      if (row.kind === "item") {
+        await ctx.startAgent({ itemId: row.id }, "");
+        return;
+      }
+      await ctx.api.moveCard(row.id, "todo");
+      ctx.openStart({ cardId: row.id });
+    },
+  },
+  {
+    id: "dismiss",
+    label: "Dismiss",
+    key: "d",
+    appliesTo: isLive,
+    run: dismissRow,
+  },
+  {
+    id: "restore",
+    label: "Restore",
+    key: "r",
+    appliesTo: isDismissedRow,
+    run: (ctx, row) =>
+      row.kind === "item"
+        ? ctx.api.setItemState(row.id, "read")
+        : ctx.api.setCardInboxDismissed(row.id, false),
+  },
+  {
     id: "promote",
     label: "Promote",
-    appliesTo: () => true,
+    appliesTo: isLive,
     run: async (ctx, row) => {
       if (row.kind === "item") await ctx.api.promoteItem(row.id);
       else await ctx.api.moveCard(row.id, "todo");
@@ -114,7 +162,7 @@ export const INBOX_ACTIONS: readonly InboxAction[] = [
     id: "snooze",
     label: "Snooze",
     key: "s",
-    appliesTo: isItem,
+    appliesTo: live(isItem),
     run: (ctx, row) => {
       ctx.openSnooze(row);
       return Promise.resolve();
@@ -124,14 +172,14 @@ export const INBOX_ACTIONS: readonly InboxAction[] = [
     id: "done",
     label: "Done",
     key: "e",
-    appliesTo: isItem,
+    appliesTo: live(isItem),
     run: markDone,
   },
   {
     id: "toggleRead",
     label: "Toggle read",
     key: "u",
-    appliesTo: isItem,
+    appliesTo: live(isItem),
     run: (ctx, row) =>
       ctx.api.setItemState(row.id, row.unread ? "read" : "unread"),
   },
@@ -139,7 +187,7 @@ export const INBOX_ACTIONS: readonly InboxAction[] = [
     id: "open",
     label: "Open link",
     key: "o",
-    appliesTo: hasUrl,
+    appliesTo: live(hasUrl),
     run: (ctx, row) => {
       if (isWebUrl(row.url)) ctx.openUrl(row.url);
       return Promise.resolve();
@@ -148,7 +196,7 @@ export const INBOX_ACTIONS: readonly InboxAction[] = [
   {
     id: "copyLink",
     label: "Copy link",
-    appliesTo: hasUrl,
+    appliesTo: live(hasUrl),
     run: async (ctx, row) => {
       if (!isWebUrl(row.url)) return;
       await ctx.copyText(row.url);
@@ -158,7 +206,7 @@ export const INBOX_ACTIONS: readonly InboxAction[] = [
   {
     id: "draftReply",
     label: "Draft reply",
-    appliesTo: isSlackItem,
+    appliesTo: live(isSlackItem),
     run: async (ctx, row) => {
       const item = row.item;
       if (!item) return;
@@ -174,7 +222,7 @@ export const INBOX_ACTIONS: readonly InboxAction[] = [
     id: "ask",
     label: "Ask about this",
     key: "a",
-    appliesTo: () => true,
+    appliesTo: isLive,
     run: (ctx, row) => {
       ctx.askAbout(askAboutQuestion(askTarget(row)));
       return Promise.resolve();
@@ -216,6 +264,19 @@ export async function markDone(
   ctx.showUndo(`${row.title} marked done`, () =>
     ctx.api.setItemState(row.id, priorState(row)),
   );
+}
+
+/** Dismiss an Inbox row and offer Undo back to its prior state. */
+export async function dismissRow(
+  ctx: ActionServices,
+  row: RowRef & { kind: InboxRowModel["kind"] },
+): Promise<void> {
+  const set = (on: boolean) =>
+    row.kind === "item"
+      ? ctx.api.setItemState(row.id, on ? "dismissed" : priorState(row))
+      : ctx.api.setCardInboxDismissed(row.id, on);
+  await set(true);
+  ctx.showUndo(`${row.title} dismissed`, () => set(false));
 }
 
 /** Snooze an item to a preset and offer Undo back to its prior read state. */

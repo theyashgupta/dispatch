@@ -11,7 +11,9 @@ import { openDecisionsQueryOptions } from "@/queries/attention-actions-queries";
 import { boardListKeys } from "@/queries/board-list-queries";
 import {
   addExtraMutationOptions,
+  answeredDecisionsQueryOptions,
   boardRecordQueryOptions,
+  conversationQueryOptions,
   lifecycleMutationOptions,
   moveGroupsMutationOptions,
   panelDecisionsQueryOptions,
@@ -93,6 +95,19 @@ test("Start on a board with a record only starts it", async () => {
   assert.deepEqual(
     calls.map((c) => c.url),
     ["/api/boards/LOCAL/orchestrators/main/start"],
+  );
+});
+
+test("Start on an extra orchestrator posts to its own id", async () => {
+  stubFetch({ status: 202, body: {} });
+  await runLifecycle(newClient(), {
+    kind: "start",
+    id: "extra-1",
+    hasRecord: true,
+  });
+  assert.deepEqual(
+    calls.map((c) => c.url),
+    ["/api/boards/LOCAL/orchestrators/extra-1/start"],
   );
 });
 
@@ -229,6 +244,7 @@ const policy: BoardPolicy = {
   budgetPerGroup: null,
   supervisor: "on",
   groupPlaybook: null,
+  crossSessionInbound: null,
   wakeMinutes: 15,
 };
 
@@ -247,7 +263,41 @@ test("the panel decisions query polls on the shared decisions key", async () => 
   assert.equal(calls[0]?.url, "/api/decisions?board=LOCAL&state=open");
 });
 
-test("Save policy puts the twelve fields and no credits value, then updates the board list", async () => {
+test("the answered decisions query reads the answered decisions of the board every 3 s", async () => {
+  const options = answeredDecisionsQueryOptions(LOCAL);
+  assert.deepEqual(options.queryKey, [
+    "orchestration",
+    "LOCAL",
+    "decisions",
+    "answered",
+  ]);
+  assert.equal(options.refetchInterval, PANEL_POLL_MS);
+  assert.equal(options.staleTime, 0);
+  stubFetch({ status: 200, body: { items: [{ id: "d2" }] } });
+  assert.deepEqual(await newClient().fetchQuery(options), [{ id: "d2" }]);
+  assert.equal(calls[0]?.url, "/api/decisions?board=LOCAL&state=answered");
+});
+
+test("the conversation query reads one orchestrator every 3 s", async () => {
+  const options = conversationQueryOptions(LOCAL, "main");
+  assert.deepEqual(options.queryKey, [
+    "orchestrators",
+    "conversation",
+    "LOCAL",
+    "main",
+  ]);
+  assert.equal(options.refetchInterval, PANEL_POLL_MS);
+  assert.equal(options.staleTime, 0);
+  const conversation = { status: "ok", messages: [], truncated: false };
+  stubFetch({ status: 200, body: conversation });
+  assert.deepEqual(await newClient().fetchQuery(options), conversation);
+  assert.equal(
+    calls[0]?.url,
+    "/api/boards/LOCAL/orchestrators/main/conversation",
+  );
+});
+
+test("Save policy puts the thirteen fields and no credits value, then updates the board list", async () => {
   const client = newClient();
   const stored = { key: LOCAL, policy: { ...policy, concurrencyCap: 4 } };
   client.setQueryData(boardListKeys.list, {
@@ -258,11 +308,12 @@ test("Save policy puts the twelve fields and no credits value, then updates the 
   const result = await new MutationObserver(
     client,
     savePolicyMutationOptions(client, LOCAL),
-  ).mutate({ ...policy, concurrencyCap: 4 });
+  ).mutate({ ...policy, concurrencyCap: 4, crossSessionInbound: "accept" });
   assert.equal(result.ok, true);
   assert.equal(calls[0]?.url, "/api/boards/LOCAL/policy");
   assert.equal(calls[0]?.init?.method, "PUT");
-  assert.equal(Object.keys(body(0) as object).length, 12);
+  assert.equal(Object.keys(body(0) as object).length, 13);
+  assert.equal((body(0) as BoardPolicy).crossSessionInbound, "accept");
   assert.equal(/credit/i.test(calls[0]?.init?.body as string), false);
   const list = client.getQueryData<{ boards: { policy: BoardPolicy }[] }>(
     boardListKeys.list,

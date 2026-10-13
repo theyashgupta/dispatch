@@ -93,6 +93,31 @@ test("GET /playbooks/picker answers valid, invalid and lastUsed", async () => {
   });
 });
 
+test("GET /playbooks/picker answers tags for a tagged playbook and none for an untagged one", async () => {
+  fs.mkdirSync(playbooksDir, { recursive: true });
+  const tagged = path.join(playbooksDir, "tagged-pb.md");
+  const plain = path.join(playbooksDir, "plain-pb.md");
+  fs.writeFileSync(tagged, "---\nname: Tagged\ntags: review\n---\nBody");
+  fs.writeFileSync(plain, "---\nname: Plain\n---\nBody");
+  try {
+    const res = await call("GET", "/playbooks/picker");
+    const json = JSON.parse(res.text) as {
+      valid: { slug: string; tags?: string[] }[];
+    };
+    assert.deepEqual(json.valid.find((p) => p.slug === "tagged-pb")?.tags, [
+      "review",
+    ]);
+    const plainRow = json.valid.find((p) => p.slug === "plain-pb");
+    assert.ok(plainRow);
+    assert.equal("tags" in plainRow, false);
+    const list = await call("GET", "/playbooks");
+    assert.ok(list.text.includes('"tags":["review"]'));
+  } finally {
+    fs.rmSync(tagged);
+    fs.rmSync(plain);
+  }
+});
+
 test("POST /playbooks creates a playbook and answers it", async () => {
   const res = await call("POST", "/playbooks", {
     name: "  Alpha  ",

@@ -185,6 +185,7 @@ async function begin(
     autoMove: true,
     thresholdPercent: 100,
     minDwellMinutes: 15,
+    hysteresisPercent: 0,
     ...settings,
   });
   stop = await startAccountChain({ ...fakeDeps, ...deps });
@@ -694,6 +695,22 @@ void test("continueAtLimit sends no key to a busy pane that still shows surface 
   assert.deepEqual(paneCalls("cl-busy"), []);
 });
 
+void test("continueAtLimit sends no key to the cancelled post-menu screen even with a hook limit (C-03b)", async () => {
+  await begin();
+  stop();
+  const pane = fs.readFileSync(
+    new URL(
+      "../../test-support/fixtures/panes/limit-cancelled.txt",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const s = await sessionCard("cl-cancelled", pane);
+  recordTurnEvent(s.cardId, s.sessionId, "StopFailure", "rate_limit");
+  assert.equal(await continueAtLimit(s.cardId, s.sessionId), "none");
+  assert.deepEqual(paneCalls("cl-cancelled"), []);
+});
+
 void test("pinning a queued session drops its queued move, and a chain-queued move checks the pin again before it runs (U2-15)", async () => {
   await begin();
   const busy = await sessionCard("pn-busy", BUSY_PANE);
@@ -936,6 +953,19 @@ void test("removing an account drops its chain entry and its return timer (F9)",
   assert.equal((await readChainState()).accounts[ACCOUNT_A], undefined);
 });
 
+void test("removing an account drops its login expiry notice", async () => {
+  await begin();
+  await handleUsageRead(ACCOUNT_A, {
+    ...usage(10),
+    loginExpiresAt: iso(BASE + 2 * 24 * 60 * MIN),
+  });
+  assert.deepEqual(Object.keys((await readChainState()).loginExpiryNotified), [
+    ACCOUNT_A,
+  ]);
+  await forgetChainAccount(ACCOUNT_A);
+  assert.deepEqual((await readChainState()).loginExpiryNotified, {});
+});
+
 void test("a second failover inside one busy turn re-targets the queued move, and the session runs on the new account after its Stop", async () => {
   await begin();
   const busy = await sessionCard("df-busy", BUSY_PANE);
@@ -951,7 +981,7 @@ void test("a second failover inside one busy turn re-targets the queued move, an
   assert.equal(sessionOf(busy)?.claudeAccountId, "default");
   assert.equal(sessionOf(busy)?.pendingClaudeAccountId, ACCOUNT_B);
   assert.deepEqual(
-    events.map((e) => (e.kind === "exhausted" ? null : e.sessions)),
+    events.map((e) => ("sessions" in e ? e.sessions : null)),
     [2, 2],
   );
 
@@ -1252,6 +1282,164 @@ void test("the 30 s scan leaves a timer that is not yet due alone", async () => 
   assert.equal(sessionOf(s)?.claudeAccountId, ACCOUNT_A);
 });
 
+const HYSTERESIS = { thresholdPercent: 90, hysteresisPercent: 10 };
+
+const failoverMoves = (): ChainEvent[] =>
+  events.filter((e) => e.kind === "failover" && e.moved);
+
+void test("hysteresis: ten usage reads at 92 across one dwell, with every other account at 92, make no move", async () => {
+  await begin(HYSTERESIS);
+  await sessionCard("hy-flat");
+  await handleUsageRead(ACCOUNT_A, usage(92));
+  await handleUsageRead(ACCOUNT_B, usage(92));
+  for (let i = 0; i < 10; i++) {
+    await handleUsageRead("default", usage(92));
+    await advance(MIN);
+  }
+  assert.equal(getActiveAccountId(), "default");
+  assert.deepEqual(failoverMoves(), []);
+  assert.deepEqual((await readChainState()).moves, []);
+});
+
+void test("hysteresis: a usage read at 92 moves once to a candidate at 75", async () => {
+  await begin(HYSTERESIS);
+  const s = await sessionCard("hy-below");
+  await handleUsageRead(ACCOUNT_A, usage(75));
+  await handleUsageRead("default", usage(92));
+  assert.equal(getActiveAccountId(), ACCOUNT_A);
+  assert.equal(sessionOf(s)?.claudeAccountId, ACCOUNT_A);
+  assert.equal(failoverMoves().length, 1);
+  assert.equal((await readChainState()).moves.length, 1);
+});
+
+void test("hysteresis: a usage read at 92 with the only candidate at 85 stays and does not mark the chain exhausted", async () => {
+  await begin(HYSTERESIS);
+  const s = await sessionCard("hy-stay");
+  await handleUsageRead(ACCOUNT_A, usage(85));
+  await handleUsageRead(ACCOUNT_B, usage(100));
+  await handleUsageRead("default", usage(92));
+  assert.equal(getActiveAccountId(), "default");
+  assert.equal(sessionOf(s)?.claudeAccountId, "default");
+  assert.deepEqual(events, []);
+  assert.equal((await readChainState()).exhausted, null);
+});
+
+void test("hysteresis: a usage read at 92 with every candidate limited marks the chain exhausted", async () => {
+  await begin(HYSTERESIS);
+  const s = await sessionCard("hy-exhausted");
+  await handleUsageRead(ACCOUNT_A, usage(100, iso(BASE + 90 * MIN)));
+  await handleUsageRead(ACCOUNT_B, usage(100, iso(BASE + 120 * MIN)));
+  await handleUsageRead("default", usage(92, iso(BASE + 30 * MIN)));
+  assert.equal(getActiveAccountId(), "default");
+  assert.equal(sessionOf(s)?.claudeAccountId, "default");
+  assert.notEqual((await readChainState()).exhausted, null);
+  assert.deepEqual(failoverMoves(), []);
+  assert.deepEqual(events, [
+    {
+      kind: "exhausted",
+      from: "default",
+      earliestResetAt: iso(BASE + 30 * MIN),
+    },
+  ]);
+});
+
+void test("hysteresis: a candidate that was never read does not pass the rule", async () => {
+  await begin(HYSTERESIS);
+  await sessionCard("hy-unread");
+  await handleUsageRead("default", usage(92));
+  assert.equal(getActiveAccountId(), "default");
+  assert.deepEqual(events, []);
+});
+
+void test("hysteresis: a limit surface moves to a candidate at 85", async () => {
+  await begin(HYSTERESIS);
+  const s = await sessionCard("hy-surface", surfaceAt(BASE + 60 * MIN));
+  await handleUsageRead(ACCOUNT_A, usage(85));
+  await handleUsageRead(ACCOUNT_B, usage(100));
+  reads.set("default", usage(92));
+  nextPane("hy-surface", IDLE_PANE);
+  await handleLimitSignal(s.cardId, s.sessionId, surfaceAt(BASE + 60 * MIN));
+  assert.equal(getActiveAccountId(), ACCOUNT_A);
+  assert.equal(failoverMoves().length, 1);
+});
+
+void test("hysteresis: a rate limit StopFailure moves to a candidate at 85", async () => {
+  await begin(HYSTERESIS);
+  const s = await sessionCard("hy-stop");
+  await handleUsageRead(ACCOUNT_A, usage(85));
+  await handleUsageRead(ACCOUNT_B, usage(100));
+  await handleLimitSignal(s.cardId, s.sessionId, null);
+  assert.equal(getActiveAccountId(), ACCOUNT_A);
+  assert.equal(failoverMoves().length, 1);
+});
+
+void test("hysteresis: a return to an account at 85 waits and checks again, and a return to an account at 70 runs", async () => {
+  await begin(HYSTERESIS);
+  const s = await sessionCard("hy-return");
+  await handleUsageRead(ACCOUNT_A, usage(75));
+  await handleUsageRead("default", usage(100, iso(BASE + 60 * MIN)));
+  assert.equal(getActiveAccountId(), ACCOUNT_A);
+
+  reads.set("default", usage(85));
+  await advance(62 * MIN);
+  assert.equal(getActiveAccountId(), ACCOUNT_A);
+  assert.equal(sessionOf(s)?.claudeAccountId, ACCOUNT_A);
+  assert.deepEqual(chainTimers(), [
+    { key: "return:default", at: iso(clock + 15 * MIN) },
+  ]);
+
+  reads.set("default", usage(70));
+  await advance(15 * MIN);
+  assert.equal(getActiveAccountId(), "default");
+  assert.equal(sessionOf(s)?.claudeAccountId, "default");
+});
+
+void test("hysteresis: a lower-ranked account at 85 after its reset schedules no return timer and is not read again", async () => {
+  await begin(HYSTERESIS);
+  await handleUsageRead(ACCOUNT_A, usage(100, iso(BASE + 60 * MIN)));
+  assert.equal(getActiveAccountId(), "default");
+  reads.set(ACCOUNT_A, usage(85));
+  await advance(62 * MIN);
+  assert.deepEqual(readLog, [ACCOUNT_A]);
+  assert.equal(
+    chainTimers().some((t) => t.key === `return:${ACCOUNT_A}`),
+    false,
+  );
+  await advance(30 * MIN);
+  assert.deepEqual(readLog, [ACCOUNT_A]);
+});
+
+void test("hysteresis: Switch now moves to a candidate at 85", async () => {
+  await begin(HYSTERESIS);
+  await sessionCard("hy-switch");
+  await handleUsageRead(ACCOUNT_A, usage(85));
+  const result = await requestFailover(SWITCH_NOW_REASON);
+  assert.equal(result.ok && result.to, ACCOUNT_A);
+});
+
+void test("hysteresis: the exhausted check selects a candidate at 85", async () => {
+  await begin(HYSTERESIS);
+  const idle = await sessionCard("hy-exhausted");
+  await handleUsageRead(ACCOUNT_A, usage(100, iso(BASE + 30 * MIN)));
+  await handleUsageRead(ACCOUNT_B, usage(100, iso(BASE + 90 * MIN)));
+  await handleUsageRead("default", usage(100, iso(BASE + 120 * MIN)));
+  reads.set("default", usage(100, iso(BASE + 120 * MIN)));
+  reads.set(ACCOUNT_A, usage(85));
+  reads.set(ACCOUNT_B, usage(100, iso(BASE + 90 * MIN)));
+  await advance(32 * MIN);
+  assert.equal(getActiveAccountId(), ACCOUNT_A);
+  assert.equal(sessionOf(idle)?.claudeAccountId, ACCOUNT_A);
+});
+
+void test("hysteresis 0 behaves as before: a usage read moves to a candidate at 85", async () => {
+  await begin({ thresholdPercent: 90, hysteresisPercent: 0 });
+  await sessionCard("hy-zero");
+  await handleUsageRead(ACCOUNT_A, usage(85));
+  await handleUsageRead("default", usage(92));
+  assert.equal(getActiveAccountId(), ACCOUNT_A);
+  assert.equal(failoverMoves().length, 1);
+});
+
 void test("a failover never picks a signed-out account", async () => {
   await begin({}, { loggedIn: () => Promise.resolve(false) });
   const s = await sessionCard("so-skip");
@@ -1264,4 +1452,67 @@ void test("a failover never picks a signed-out account", async () => {
   await handleUsageRead("default", usage(100, iso(BASE + 60 * MIN)));
   assert.equal(getActiveAccountId(), ACCOUNT_B);
   assert.equal(sessionOf(s)?.claudeAccountId, ACCOUNT_B);
+});
+
+void test("login expiry: one login-expiring event per expiry value, kept across a restart, new value warns again, 4 days out is silent", async () => {
+  await begin();
+  const DAY = 24 * 60 * 60 * 1000;
+  const expiring = (ms: number): ClaudeUsageSnapshot => ({
+    ...usage(10),
+    loginExpiresAt: iso(BASE + ms),
+  });
+  await handleUsageRead(ACCOUNT_A, expiring(4 * DAY));
+  assert.deepEqual(events, []);
+
+  await handleUsageRead(ACCOUNT_A, expiring(2 * DAY));
+  assert.deepEqual(events, [
+    {
+      kind: "login-expiring",
+      account: ACCOUNT_A,
+      expiresAt: iso(BASE + 2 * DAY),
+    },
+  ]);
+  assert.deepEqual((await readChainState()).loginExpiryNotified, {
+    [ACCOUNT_A]: iso(BASE + 2 * DAY),
+  });
+
+  await handleUsageRead(ACCOUNT_A, expiring(2 * DAY));
+  assert.equal(events.length, 1);
+
+  stop();
+  stop = await startAccountChain(fakeDeps);
+  await handleUsageRead(ACCOUNT_A, expiring(2 * DAY));
+  assert.equal(events.length, 1);
+
+  await handleUsageRead(ACCOUNT_A, expiring(2 * DAY + MIN));
+  assert.equal(events.length, 2);
+  assert.deepEqual(events[1], {
+    kind: "login-expiring",
+    account: ACCOUNT_A,
+    expiresAt: iso(BASE + 2 * DAY + MIN),
+  });
+});
+
+void test("login expiry: a past expiry sends one login-expiring event and none after a restart", async () => {
+  await begin();
+  const DAY = 24 * 60 * 60 * 1000;
+  const expired: ClaudeUsageSnapshot = {
+    ...usage(10),
+    loginExpiresAt: iso(BASE - DAY),
+  };
+  await handleUsageRead(ACCOUNT_A, expired);
+  const expiring = (): ChainEvent[] =>
+    events.filter((e) => e.kind === "login-expiring");
+  assert.deepEqual(expiring(), [
+    {
+      kind: "login-expiring",
+      account: ACCOUNT_A,
+      expiresAt: iso(BASE - DAY),
+    },
+  ]);
+
+  stop();
+  stop = await startAccountChain(fakeDeps);
+  await handleUsageRead(ACCOUNT_A, expired);
+  assert.equal(expiring().length, 1);
 });

@@ -178,6 +178,16 @@ void test("add refuses bad bodies before any write", async () => {
         id: "okid",
         name: "x",
         role: "extra",
+        policyOverride: { crossSessionInbound: "accept" },
+      },
+      400,
+      "unknown-field",
+    ],
+    [
+      {
+        id: "okid",
+        name: "x",
+        role: "extra",
         policyOverride: { concurrencyCap: -1 },
       },
       400,

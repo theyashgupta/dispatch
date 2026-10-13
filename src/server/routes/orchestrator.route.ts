@@ -19,6 +19,7 @@ import {
   addCommentHandler,
   approveRoadmapHandler,
   createBaseBranchHandler,
+  createBoardHandler,
   createDecisionItemHandler,
   createGroupHandler,
   createTicketHandler,
@@ -202,15 +203,16 @@ export const refuseOrchestratorTokenOnUserRoute: RequestHandler = (
   const userRoute =
     req.path !== "/orchestrator" && !req.path.startsWith("/orchestrator/");
   const readOnly = req.method === "GET" || req.method === "HEAD";
-  if (
-    userRoute &&
-    !readOnly &&
-    req.headers[ORCHESTRATOR_TOKEN_HEADER] !== undefined
-  ) {
-    throw new ForbiddenError("orchestrator-token-on-user-route");
-  }
+  if (userRoute && !readOnly) refuseOrchestratorToken(req);
   next();
 };
+
+/** Refuse a request that carries an orchestrator token with the typed 403. */
+export function refuseOrchestratorToken(req: Request): void {
+  if (req.headers[ORCHESTRATOR_TOKEN_HEADER] !== undefined) {
+    throw new ForbiddenError("orchestrator-token-on-user-route");
+  }
+}
 
 orchestratorRouter.get("/cards", tool("list_cards", listCardsHandler));
 orchestratorRouter.get("/cards/:id", tool("get_card", getCardHandler));
@@ -233,6 +235,7 @@ orchestratorRouter.get(
   "/board-workspace",
   tool("get_board_workspace", getBoardWorkspaceHandler),
 );
+orchestratorRouter.post("/boards", tool("create_board", createBoardHandler));
 orchestratorRouter.post("/tickets", tool("create_ticket", createTicketHandler));
 orchestratorRouter.patch(
   "/tickets/:id",

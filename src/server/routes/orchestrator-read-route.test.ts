@@ -470,7 +470,10 @@ void test("get_board_workspace answers the folder, the repositories, the sorted 
   try {
     const { reply, row } = await read("/orchestrator/board-workspace");
     assert.equal(reply.status, 200);
-    assertNoOth(reply);
+    assertNoOth({
+      ...reply,
+      text: JSON.stringify({ ...reply.body, boards: undefined }),
+    });
     assert.equal(reply.body.folder, "/sbx/sessions");
     assert.deepEqual(reply.body.repos, [
       { path: "/sbx/sessions/api", base: "base/a", checkCommand: "npm t" },
@@ -483,6 +486,15 @@ void test("get_board_workspace answers the folder, the repositories, the sorted 
       ["Workspace alpha", "Workspace mid", "Workspace zeta"],
     );
     assert.equal(reply.body.groupPlaybook, "Workspace alpha");
+    const boards = reply.body.boards as { key: string }[];
+    assert.deepEqual(
+      boards.sort((a, b) => a.key.localeCompare(b.key)),
+      [
+        { key: "LOCAL", name: "Local", archived: false, link: "/boards/LOCAL" },
+        { key: "OTH", name: "OTH", archived: false, link: "/boards/OTH" },
+        { key: "SBX", name: "SBX", archived: false, link: "/boards/SBX" },
+      ],
+    );
     assert.equal(row.data.tool, "get_board_workspace");
     assert.equal(row.data.result, "2 repos");
   } finally {

@@ -4,7 +4,7 @@ import remarkGfm from "remark-gfm";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ImageWithFallback } from "@/components/icons/ImageWithFallback";
 import { cn } from "@/lib/utils";
-import { isHttpSrc } from "@/components/markdown/web-src";
+import { isAppHref, isHttpSrc } from "@/components/markdown/web-src";
 import { markdownImageSource } from "../../../shared/markdown-image-source.js";
 import { isWebUrl } from "../../../shared/web-url.js";
 
@@ -98,7 +98,7 @@ const components: Components = {
     <li className="mb-1 text-base text-foreground">{children}</li>
   ),
   a: ({ href, children }) =>
-    href != null && /^mailto:/i.test(href) ? (
+    href != null && (/^mailto:/i.test(href) || isAppHref(href)) ? (
       <a href={href} className={ANCHOR}>
         {children}
       </a>

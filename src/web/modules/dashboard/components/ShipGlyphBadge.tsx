@@ -46,12 +46,18 @@ interface ShipGlyphBadgeProps {
   label: string;
   glyph: string;
   tone: "success" | "danger" | "neutral";
+  className?: string;
 }
 
-export function ShipGlyphBadge({ label, glyph, tone }: ShipGlyphBadgeProps) {
+export function ShipGlyphBadge({
+  label,
+  glyph,
+  tone,
+  className,
+}: ShipGlyphBadgeProps) {
   const Glyph = GLYPHS[glyph];
   return (
-    <Badge tone={tone}>
+    <Badge tone={tone} className={className}>
       {Glyph !== undefined && <Glyph aria-hidden="true" />}
       {label}
     </Badge>

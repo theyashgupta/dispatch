@@ -178,3 +178,47 @@ test("a valid transcript_path passes the route schema and lands on the session",
     transcript,
   );
 });
+
+test("a SessionStart body with source reaches the store and sets startedAt; a bad token changes no node", async () => {
+  const nodesNow = () =>
+    store.getCard(card.id)!.sessions!.find((s) => s.id === sessionId)!
+      .claudeSessions!;
+  const before = JSON.stringify(nodesNow());
+
+  const denied = await post("no-such-token", {
+    hook_event_name: "SessionStart",
+    session_id: "conv-denied",
+    source: "resume",
+  });
+  assert.equal(denied.status, 401);
+  assert.equal(JSON.stringify(nodesNow()), before);
+
+  const res = await post(TOKEN, {
+    hook_event_name: "SessionStart",
+    session_id: "conv-started",
+    source: "resume",
+  });
+  assert.equal(res.status, 204);
+  const started = nodesNow().find((n) => n.id === "conv-started");
+  assert.ok(started?.startedAt);
+  assert.equal(store.getCard(card.id)!.claudeSessionId, "conv-started");
+  assert.equal(
+    nodesNow().some((n) => n.id === "conv-denied"),
+    false,
+  );
+});
+
+test("a non-string or oversized source never fails the route", async () => {
+  const res = await post(TOKEN, {
+    hook_event_name: "SessionStart",
+    session_id: "conv-odd-source",
+    source: { a: 1 },
+  });
+  assert.equal(res.status, 204);
+  const long = await post(TOKEN, {
+    hook_event_name: "SessionStart",
+    session_id: "conv-long-source",
+    source: "x".repeat(100),
+  });
+  assert.equal(long.status, 204);
+});

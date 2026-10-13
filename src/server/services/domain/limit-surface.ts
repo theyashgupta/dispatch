@@ -11,8 +11,9 @@ export const CREDITS_OPTION =
 
 export const CONTINUE_PROMPT = "Continue.";
 
-const AUTO_CONTINUE = /continuing automatically/i;
-const ESC_TO_CANCEL = /esc to cancel/i;
+const INPUT_LINE = /^\s*❯(?!\s*\d+\.)(?!\s*Deny\b)/;
+export const AUTO_CONTINUE =
+  /continuing (?:automatically|shortly)\b.*esc to cancel/i;
 const MENU_TITLE = /what do you want to do\?/i;
 const MENU_ROW = /^\s*([❯›>])?\s*(\d+)\.\s+(.+?)\s*$/;
 const STOP_OPTION = /^stop(?: and wait\b|$)/i;
@@ -50,15 +51,26 @@ function lastMenu(lines: string[]): { options: string[]; cursor: number } {
   return menu;
 }
 
+/** The index of the last input line of a pane, or -1 when none is drawn. */
+export function inputLineAt(lines: readonly string[]): number {
+  let at = -1;
+  lines.forEach((l, i) => {
+    if (INPUT_LINE.test(l)) at = i;
+  });
+  return at;
+}
+
 /**
  * Recognise a usage limit surface in a captured Claude pane, or `null` for any other pane.
  *
  * @remarks The menu counts only with its title and a known limit row, or without the title when
  * a row carries the exact stop or wait text, so a pane that merely mentions usage credits is not
- * a surface. A menu with no pointer row gets cursor -1.
+ * a surface. A menu with no pointer row gets cursor -1. Only text below the last input line is
+ * read, because a surface above it is stale scrollback.
  */
 export function parseLimitSurface(pane: string): LimitSurface | null {
-  const lines = pane.split("\n");
+  const all = pane.split("\n");
+  const lines = all.slice(inputLineAt(all) + 1);
   let titleAt = -1;
   lines.forEach((l, i) => {
     if (MENU_TITLE.test(l)) titleAt = i;
@@ -69,8 +81,7 @@ export function parseLimitSurface(pane: string): LimitSurface | null {
       ? menu.options.some((o) => TITLED_LIMIT_OPTION.test(o))
       : menu.options.some((o) => UNTITLED_LIMIT_OPTION.test(o));
   if (isMenu) return { kind: "b", ...menu };
-  if (AUTO_CONTINUE.test(pane) && ESC_TO_CANCEL.test(pane))
-    return { kind: "a" };
+  if (lines.some((l) => AUTO_CONTINUE.test(l))) return { kind: "a" };
   return null;
 }
 

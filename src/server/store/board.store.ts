@@ -93,7 +93,11 @@ import {
   isStartingCard,
   reconcile,
 } from "./mapping.js";
-import { latestClaudeSession, touchClaudeSession } from "./claude-sessions.js";
+import {
+  latestClaudeSession,
+  startClaudeSession,
+  touchClaudeSession,
+} from "./claude-sessions.js";
 
 export const BOARD_PATH = path.join(DISPATCH_DATA_DIR, "board.json");
 
@@ -896,7 +900,10 @@ class BoardStore extends EventEmitter {
     if (!card.memberIds || card.memberIds.length === 0) return;
     for (const id of card.memberIds) {
       const member = this.cards.get(id);
-      if (member && boardOf(member) === boardOf(card)) member.column = column;
+      if (member && boardOf(member) === boardOf(card)) {
+        member.column = column;
+        delete member.inboxDismissedAt;
+      }
     }
   }
 
@@ -1298,7 +1305,14 @@ class BoardStore extends EventEmitter {
           : redactCard(c),
       ),
       doneCounts,
-      items: this.wireItems().filter((i) => i.state !== "done"),
+      items: this.wireItems().filter((i) => {
+        if (i.state !== "done") return true;
+        const held =
+          i.source === "github" && i.cardId !== undefined
+            ? this.cards.get(i.cardId)
+            : undefined;
+        return held !== undefined && held.column !== "done";
+      }),
       enabledSources: this.enabledSourceIds,
     };
   }
@@ -1819,12 +1833,41 @@ class BoardStore extends EventEmitter {
    * the original playbook choice instead of silently degrading to a playbook-less session.
    * No-op if the id is unknown.
    */
-  setStartIntent(id: string, intent: { playbook?: string }): Promise<void> {
+  setStartIntent(
+    id: string,
+    intent: NonNullable<Card["startIntent"]>,
+  ): Promise<void> {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) card.startIntent = intent;
       return [];
     });
+  }
+
+  /**
+   * Dismiss or restore a Linear Inbox card, stamping the dismissal time inside the queue.
+   *
+   * @remarks Setting checks the column inside the queue so a concurrent start cannot stamp a card that already left the Inbox. Clearing is allowed in any column.
+   */
+  setInboxDismissed(
+    id: string,
+    dismissed: boolean,
+  ): Promise<"ok" | "unknown" | "not-in-inbox"> {
+    let outcome: "ok" | "unknown" | "not-in-inbox" = "unknown";
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      if (!dismissed) {
+        delete card.inboxDismissedAt;
+      } else if (card.column !== "inbox") {
+        outcome = "not-in-inbox";
+        return [];
+      } else {
+        card.inboxDismissedAt = new Date().toISOString();
+      }
+      outcome = "ok";
+      return [];
+    }).then(() => outcome);
   }
 
   /**
@@ -1903,6 +1946,33 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (card) this.setActiveSession(card, { workspace });
+      return [];
+    });
+  }
+
+  /**
+   * Link a card to the pull request it reviews: the PR fields, the PR url and the workspace.
+   *
+   * @remarks
+   * The workspace is written only when the card has none, so a card that already started keeps its
+   * snapshot.
+   */
+  setCardReview(
+    id: string,
+    review: {
+      reviewPr: NonNullable<Card["reviewPr"]>;
+      url: string;
+      workspace: NonNullable<Card["workspace"]>;
+    },
+  ): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      card.reviewPr = review.reviewPr;
+      card.url = review.url;
+      if (!card.workspace) {
+        this.setActiveSession(card, { workspace: review.workspace });
+      }
       return [];
     });
   }
@@ -2023,6 +2093,37 @@ class BoardStore extends EventEmitter {
         new Date().toISOString(),
       );
       if (next === undefined) return [];
+      target.claudeSessions = next;
+      this.setActiveSession(
+        card,
+        { claudeSessionId: latestClaudeSession(next)?.id },
+        targetId,
+      );
+      return [];
+    });
+  }
+
+  /**
+   * Record a SessionStart for Claude conversation `sid` and re-derive the session's
+   * `claudeSessionId` mirror from the newest started non-missing node.
+   *
+   * @remarks Never throttled: a start moves the conversation to the front of the start order,
+   * and it clears a missing mark because the conversation provably exists.
+   * @see docs/ARCHITECTURE.md#hooks-status-channel
+   */
+  startClaudeSession(
+    id: string,
+    sessionId: string | undefined,
+    sid: string,
+    at: string,
+  ): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      const targetId = sessionId ?? card.activeSessionId;
+      const target = card.sessions?.find((s) => s.id === targetId);
+      if (!target) return [];
+      const next = startClaudeSession(target.claudeSessions, sid, at);
       target.claudeSessions = next;
       this.setActiveSession(
         card,
@@ -2742,6 +2843,7 @@ class BoardStore extends EventEmitter {
       for (const m of members) {
         m.groupId = undefined;
         m.column = destination;
+        delete m.inboxDismissedAt;
         m.statusReason = undefined;
         m.updatedAt = row.archivedAt;
       }
@@ -2807,6 +2909,7 @@ class BoardStore extends EventEmitter {
         if (!live) continue;
         live.groupId = card.id;
         live.column = card.column;
+        delete live.inboxDismissedAt;
         live.updatedAt = card.updatedAt;
       }
       result = { ok: true, card };
@@ -3519,6 +3622,9 @@ class BoardStore extends EventEmitter {
       if (from === "inbox" && column === "todo") {
         c.promotedAt = new Date().toISOString();
       }
+      if (from === "inbox" && column !== "inbox") {
+        delete c.inboxDismissedAt;
+      }
       if (column !== "needs_input" && column !== "agent_done") {
         c.statusReason = undefined;
       }
@@ -3890,6 +3996,7 @@ class BoardStore extends EventEmitter {
       card.lastMarker = undefined;
       card.statusReason = undefined;
       card.promotedAt = undefined;
+      delete card.inboxDismissedAt;
       card.outputChangedAt = undefined;
       card.provisioningStep = null;
       card.startError = null;

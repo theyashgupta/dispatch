@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useRouteContext, useRouter } from "@tanstack/react-router";
-import { routeHash } from "../../../../shared/route.js";
+import { pageLocation } from "../../../../shared/route.js";
 import type { Item } from "../../../../shared/types.js";
 import { DetailPlaceholder, DetailScroll } from "@/components/DetailPaneBody";
 import { PageHeaderActions } from "@/components/PageHeaderActions";
@@ -35,8 +35,9 @@ export function MeetingsContainer({
 }) {
   const { appStore } = useRouteContext({ from: "__root__" });
   const router = useRouter();
+  const boardKey = useAppStore(appStore, (s) => s.board);
   const board = useBoardSnapshot(
-    useAppStore(appStore, (s) => s.board),
+    boardKey,
     useAppStore(appStore, (s) => s.doneLimit),
   );
   const items = useItems(board);
@@ -50,7 +51,10 @@ export function MeetingsContainer({
       selectedId={selectedId}
       onSelect={(id) =>
         void router.navigate({
-          href: routeHash({ page: "meetings", id: id ?? undefined }).slice(1),
+          href: pageLocation(
+            { page: "meetings", id: id ?? undefined },
+            boardKey,
+          ),
         })
       }
       onOpenMeetingNotes={() =>

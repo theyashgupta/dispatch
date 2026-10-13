@@ -1,5 +1,10 @@
 import path from "node:path";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
+import {
+  HANDOFF_CANCEL_LINE,
+  HANDOFF_REQUEST_TITLE,
+  ORCHESTRATOR_RESUME_PREFIX,
+} from "../../../shared/dispatch-lines.js";
 import { isHiddenCard } from "../../../shared/hidden-card.js";
 import type { BoardPolicy, Card, Session } from "../../../shared/types.js";
 import { boardRepository as store } from "../../store/board-repository.js";
@@ -37,9 +42,9 @@ const HANDOFF_TIMING: HandoffTiming = {
   cancelWindowMs: 5 * 60_000,
   pollMs: 500,
 };
-const REQUEST_TITLE = "Context handoff request";
-const REQUEST_SIGN =
-  /Context handoff request|context-refresh request|-handoff(-hard)?\.md/;
+const REQUEST_SIGN = new RegExp(
+  `${HANDOFF_REQUEST_TITLE}|context-refresh request|-handoff(-hard)?\\.md`,
+);
 
 interface Resumed {
   at: number;
@@ -73,8 +78,8 @@ export function handoffRequestText(
   );
   return [
     hard
-      ? `${REQUEST_TITLE} (hard limit). Your context is at the hard limit. Hand off now: do not start or wait for more work. Record where you are, then:`
-      : `${REQUEST_TITLE}. Your context is high. Do not interrupt in-flight work. Let running background agents and shells finish and record the current phase gate first. Then, at that safe point:`,
+      ? `${HANDOFF_REQUEST_TITLE} (hard limit). Your context is at the hard limit. Hand off now: do not start or wait for more work. Record where you are, then:`
+      : `${HANDOFF_REQUEST_TITLE}. Your context is high. Do not interrupt in-flight work. Let running background agents and shells finish and record the current phase gate first. Then, at that safe point:`,
     ...steps.map((step, i) => `${i + 1}. ${step}`),
     "The resume prompt must restate the marker rule (end a stop for a human with its own line DISPATCH_STATUS: NEEDS_INPUT - <reason>, and the finished loop with DISPATCH_STATUS: DONE - <summary>) and the handoff rule (hand off only when asked, or when the status line passes 80 percent).",
   ].join("\n");
@@ -103,8 +108,8 @@ export function orchestratorHandoffRequestText(
 ): string {
   return [
     hard
-      ? `${REQUEST_TITLE} (hard limit). Your context is at the hard limit. Hand off now: do not start or wait for more work. Record where you are, then:`
-      : `${REQUEST_TITLE}. Your context is high. Do not interrupt in-flight work. Let running tool calls finish. Then, at that safe point:`,
+      ? `${HANDOFF_REQUEST_TITLE} (hard limit). Your context is at the hard limit. Hand off now: do not start or wait for more work. Record where you are, then:`
+      : `${HANDOFF_REQUEST_TITLE}. Your context is high. Do not interrupt in-flight work. Let running tool calls finish. Then, at that safe point:`,
     "1. Call write_state with the full current state (every group and its status, pending decisions, next steps) and handoffReady set to true.",
     `2. Print the line HANDOFF_READY ${orchestratorId} and end your turn without starting new work.`,
   ].join("\n");
@@ -115,11 +120,8 @@ export function orchestratorResumePromptText(
   orchestratorId: string,
   boardKey: string,
 ): string {
-  return `Resume as the ${orchestratorId} orchestrator of board ${boardKey}. Before any action call read_state, then list_cards, list_events and the open decision items; act only on what the tools return.`;
+  return `${ORCHESTRATOR_RESUME_PREFIX}${orchestratorId} orchestrator of board ${boardKey}. Before any action call read_state, then list_cards, list_events and the open decision items; act only on what the tools return.`;
 }
-
-const CANCEL_LINE =
-  "Ignore the context handoff request above: the handoff is already done and this is the fresh session. Continue the loop.";
 
 /**
  * The name the handoff request carries and whether the card is active and already pending.
@@ -234,7 +236,7 @@ export async function checkHandoffCancel(
   const result = await sendConfirmed(
     card,
     session,
-    CANCEL_LINE,
+    HANDOFF_CANCEL_LINE,
     "handoff-cancel",
     SEND_TIMING,
     () => Promise.resolve(after.transcript),

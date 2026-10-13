@@ -116,9 +116,9 @@ and roles only, it does not restate the layering policy.
 | Frontend entry      | `web/main.tsx`, `web/lib/app-store.ts`, `web/lib/query-client.ts`, `web/lib/http.ts`                                                                                                                                                                                                                                                            | The provider stack (QueryClientProvider, ThemeProvider, RouterProvider and the splash), the app store for cross-module UI state, the query client, and the HTTP client that returns 4xx and 5xx responses as typed data.                                                                                             |
 | Frontend routes     | `web/routes/__root.tsx`, `web/routes/board.{-$id}.lazy.tsx`, `web/modules/shell/containers/ShellContainer.tsx`                                                                                                                                                                                                                                  | Hash routes own the URL and its params. The router context gives the query client and the app store to every container. The root route renders the shell view with module views in its slots: the page, the detail panel and the card action dialogs.                                                                |
 | Frontend modules    | `web/modules/board/views/BoardView.tsx`, `web/modules/board/containers/BoardContainer.tsx`, `web/modules/detail/containers/DetailPanelContainer.tsx`, `web/modules/shell/components/AppSidebar.tsx`                                                                                                                                             | One folder per feature under `web/modules/`, with the layers views, containers, components, hooks, domain and queries. A module never imports a sibling module. [frontend-architecture.md](standards/frontend-architecture.md) has the layer rules.                                                                  |
-| Frontend boards     | `web/modules/boards/views/BoardsView.tsx`, `web/modules/boards/containers/BoardsContainer.tsx`, `web/modules/boards/containers/BoardFormContainer.tsx`, `web/modules/shell/components/BoardSwitcher.tsx`                                                                                                                                        | The boards page (list, create, edit, archive, restore) and the sidebar board switcher. The `board` search parameter selects the board.                                                                                                                                                                               |
+| Frontend boards     | `web/modules/boards/views/BoardsView.tsx`, `web/modules/boards/containers/BoardsContainer.tsx`, `web/modules/boards/containers/BoardFormContainer.tsx`, `web/modules/shell/components/SidebarBoards.tsx`                                                                                                                                        | The boards page (list, create, edit, archive, restore) and the sidebar Boards section. The path key selects the board on the keyed pages (`/boards/<key>`, `/boards/<key>/inbox` and so on). The `board` search parameter selects it on the other pages.                                                             |
 | Orchestrator panel  | `web/modules/orchestrator/views/OrchestratorEntryView.tsx`, `web/modules/orchestrator/containers/OrchestratorPanelContainer.tsx`, `web/modules/orchestrator/containers/PolicyContainer.tsx`, `web/modules/orchestrator/containers/OrchestratorsContainer.tsx`                                                                                   | The header entry button and the orchestrator panel with the tabs Terminal, Decisions, Policy and Orchestrators. The policy form is the only place where a user changes a board policy.                                                                                                                               |
-| Frontend dashboard  | `web/routes/dashboard.{-$id}.lazy.tsx`, `web/modules/dashboard/views/DashboardView.tsx`, `web/modules/dashboard/views/DashboardHeaderView.tsx`, `web/modules/dashboard/containers/use-dashboard-data.ts`                                                                                                                                        | The `/dashboard` page of the selected board. Each section container reads its inputs through `use-dashboard-data.ts` and shows its own loading, error and empty state. The shell page header shows the title and the stale badge.                                                                                    |
+| Frontend dashboard  | `web/routes/dashboard.{-$id}.lazy.tsx`, `web/modules/dashboard/views/DashboardView.tsx`, `web/modules/dashboard/containers/use-dashboard-data.ts`                                                                                                                                                                                               | The `/dashboard` page of the selected board. Each section container reads its inputs through `use-dashboard-data.ts` and shows its own loading, error and empty state. The header strip at the top of the page shows the title, the sync state and the stale text.                                                   |
 | Frontend shared     | `web/components/ui/button.tsx`, `web/components/ui/hooks/use-app-store.ts`, `web/components/ThemeProvider.tsx`, `web/queries/board-snapshot-queries.ts`                                                                                                                                                                                         | The shadcn primitives and app-wide hooks, the shared components, the queries that two or more modules read (the board snapshot and its SSE stream), and the design tokens in `web/styles/tokens.css`.                                                                                                                |
 
 ## API
@@ -149,6 +149,7 @@ Mount prefix: `/api/orchestrator`.
 | GET    | `/api/orchestrator/events`                         | Orchestrator token | Tool `list_events`: list the board events after a cursor, oldest first.                             |
 | GET    | `/api/orchestrator/policy`                         | Orchestrator token | Tool `get_policy`: read the policy of the caller with the running loop count and the group costs.   |
 | GET    | `/api/orchestrator/board-workspace`                | Orchestrator token | Tool `get_board_workspace`: read the board folder, repositories, playbook names and group playbook. |
+| POST   | `/api/orchestrator/boards`                         | Orchestrator token | Tool `create_board`: create a board from a name and answer the key and the link.                    |
 | POST   | `/api/orchestrator/tickets`                        | Orchestrator token | Tool `create_ticket`: create a local ticket marked as created by the caller.                        |
 | PATCH  | `/api/orchestrator/tickets/:id`                    | Orchestrator token | Tool `update_ticket`: change the title or description of a local ticket.                            |
 | POST   | `/api/orchestrator/tickets/:id/move`               | Orchestrator token | Tool `move_card`: move a card to a column under the manual move rules.                              |
@@ -211,6 +212,7 @@ Mount prefix: `/api`.
 | GET    | `/api/boards/:key/orchestration`           | User | Read the orchestration summary of a board.                                         |
 | GET    | `/api/boards/:key/orchestration/events`    | User | List the orchestration events of a board, the latest ones or those after a cursor. |
 | PATCH  | `/api/boards/:key`                         | User | Change the name, sessions folder, repositories or Linear team keys of a board.     |
+| POST   | `/api/boards/:key/repositories/init`       | User | Make a local repository in the folder of the board and add it to the board.        |
 | POST   | `/api/boards/:key/archive`                 | User | Archive a board.                                                                   |
 | POST   | `/api/boards/:key/restore`                 | User | Restore an archived board.                                                         |
 | POST   | `/api/boards/:key/orchestrators/:id/token` | User | Mint the token of an orchestrator.                                                 |
@@ -228,15 +230,16 @@ Mount prefix: `/api`.
 
 Mount prefix: `/api`.
 
-| Method | Path                                        | Auth | Purpose                                                           |
-| ------ | ------------------------------------------- | ---- | ----------------------------------------------------------------- |
-| GET    | `/api/boards/:key/orchestrators`            | User | List the orchestrators of a board with their session views.       |
-| POST   | `/api/boards/:key/orchestrators`            | User | Add an orchestrator record, main or extra.                        |
-| PATCH  | `/api/boards/:key/orchestrators/:id`        | User | Edit the name, scope or policy override of an orchestrator.       |
-| DELETE | `/api/boards/:key/orchestrators/:id`        | User | Remove a stopped orchestrator and revoke its token.               |
-| POST   | `/api/boards/:key/orchestrators/:id/start`  | User | Start the session of a stopped orchestrator.                      |
-| POST   | `/api/boards/:key/orchestrators/:id/stop`   | User | Stop a running orchestrator.                                      |
-| POST   | `/api/boards/:key/orchestrators/:id/resume` | User | Bring an orchestrator back after a lost session or a Claude exit. |
+| Method | Path                                              | Auth | Purpose                                                                                                                                                                                                  |
+| ------ | ------------------------------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/boards/:key/orchestrators`                  | User | List the orchestrators of a board with their session views.                                                                                                                                              |
+| POST   | `/api/boards/:key/orchestrators`                  | User | Add an orchestrator record, main or extra.                                                                                                                                                               |
+| PATCH  | `/api/boards/:key/orchestrators/:id`              | User | Edit the name, scope or policy override of an orchestrator.                                                                                                                                              |
+| DELETE | `/api/boards/:key/orchestrators/:id`              | User | Remove a stopped orchestrator and revoke its token.                                                                                                                                                      |
+| POST   | `/api/boards/:key/orchestrators/:id/start`        | User | Start the session of a stopped orchestrator.                                                                                                                                                             |
+| POST   | `/api/boards/:key/orchestrators/:id/stop`         | User | Stop a running orchestrator.                                                                                                                                                                             |
+| POST   | `/api/boards/:key/orchestrators/:id/resume`       | User | Bring an orchestrator back after a lost session or a Claude exit.                                                                                                                                        |
+| GET    | `/api/boards/:key/orchestrators/:id/conversation` | User | Read the conversation of an orchestrator from its transcript: user turns, text replies and the lines that Dispatch typed, in order, with no tool calls. `limit` 1 to 200. Refuses an orchestrator token. |
 
 ### `routes/intake.route.ts`
 
@@ -274,6 +277,7 @@ Mount prefix: `/api`.
 | POST   | `/api/cards/:id/run-claude`          | User | Start Claude in a live session whose terminal is at a shell prompt.                       |
 | POST   | `/api/cards/:id/session/account`     | User | Move a session to another Claude account, or queue the move.                              |
 | PUT    | `/api/cards/:id/session/account-pin` | User | Pin or unpin the Claude account of a session.                                             |
+| POST   | `/api/cards/:id/inbox-dismiss`       | User | Dismiss or restore an Inbox card.                                                         |
 | POST   | `/api/cards/:id/session`             | User | Switch the active session of a card.                                                      |
 | POST   | `/api/cards/:id/open-editor`         | User | Open the workspace of a card in an editor.                                                |
 | POST   | `/api/cards/:id/cleanup`             | User | Clean up all sessions of a Done card.                                                     |
@@ -474,11 +478,13 @@ Mount prefix: `/api`.
 
 Mount prefix: `/api`.
 
-| Method | Path                                         | Auth | Purpose                                 |
-| ------ | -------------------------------------------- | ---- | --------------------------------------- |
-| GET    | `/api/github/pr/:owner/:repo/:number`        | User | Read a pull request.                    |
-| POST   | `/api/github/pr/:owner/:repo/:number/review` | User | Submit a review on a pull request.      |
-| POST   | `/api/github/pr/:owner/:repo/:number/merge`  | User | Merge a pull request at a given commit. |
+| Method | Path                                          | Auth | Purpose                                                                                                       |
+| ------ | --------------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/github/repos`                           | User | List the GitHub repositories behind the board repositories.                                                   |
+| GET    | `/api/github/pr/:owner/:repo/:number`         | User | Read a pull request.                                                                                          |
+| POST   | `/api/github/pr/:owner/:repo/:number/reviews` | User | Submit a review on a pull request.                                                                            |
+| POST   | `/api/github/pr/:owner/:repo/:number/review`  | User | Create or reuse the card that reviews a pull request (201 new, 200 reused). The optional body is `{ board }`. |
+| POST   | `/api/github/pr/:owner/:repo/:number/merge`   | User | Merge a pull request at a given commit.                                                                       |
 
 ### `routes/profile.route.ts`
 
@@ -706,7 +712,12 @@ does not clash with `/api/boards/counts`.
 `knownLinearTeamKeys` holds the identifier prefixes of the Linear cards in the store, plus the
 Linear team keys when Linear is on. The server logs a failed Linear read once and does not read again for 60
 seconds. `POST /api/boards` creates a board and returns `201` with
-`{ board }`. `GET /api/boards/:key` and `PATCH /api/boards/:key` return `{ board }`. A patch accepts
+`{ board, link }`, where `link` is `/boards/<key>`. Only `name` is required. The server derives the
+key from the name. The default folder is `<workspaces root>/<key>`, and the server makes it on
+create. Repositories are optional. `POST /api/boards/:key/repositories/init` makes a local
+repository in `<board folder>/<lowercase key>` and adds it to the board. The MCP tool `create_board`
+calls the same service through `POST /api/orchestrator/boards`. The tool `get_board_workspace` lists
+all boards. `GET /api/boards/:key` and `PATCH /api/boards/:key` return `{ board }`. A patch accepts
 only `name`, `workspaceRoot`, `repositories` and `linearTeamKeys`, and the key never changes. A
 patch of `LOCAL` writes `workspaceRoot` to `config.json` and the repository paths to the workspace
 folders. `POST /api/boards/:key/archive` and `POST /api/boards/:key/restore` set and clear the
@@ -747,8 +758,9 @@ activity frame goes only to the clients of the board of the event.
 - `400` `team-key-taken`: "Board <name> lists Linear team <KEY>." Create and patch return it when
   another board lists the same team key. `LOCAL` and `GROUP` as a team key return `reserved-key`.
 - `400` `missing-name`: "Enter a name."
+- `400` `invalid-name`: "Use a name of at most 100 characters on one line."
 - `400` `folder-missing`: "This folder does not exist."
-- `400` `no-repositories`: "Add at least one repository."
+- `400` `no-repositories`: "This board has no repository. Add one in the board settings."
 - `409` `sessions-running`: "Stop the <n> running sessions first."
 - `409` `default-board`, `409` `board-archived`, `404` `unknown-board`, `400` `invalid-board`: the
   `error` string is the code.
@@ -769,7 +781,7 @@ viewer allows the folder of each board and the path of each live session.
 An `Item` (`shared/types.ts`) is the light row for things that are not tickets yet: a pull request
 asking for review, a mention, an error, a meeting action item. Its id is `<source>:<sourceKey>`; it
 carries `source`, `type`, `title`, `snippet`, `url`, `createdAt`, `priority` (0 to 100), `state`
-(`unread`, `read`, `snoozed`, `done`), `snoozedUntil`, a string `meta` map and `cardId` once
+(`unread`, `read`, `snoozed`, `dismissed`, `done`), `snoozedUntil`, a string `meta` map and `cardId` once
 promoted. Items live in the `items` table of `board.db` (`store/board-db.ts`), one JSON row per
 item with `source` and `state` columns for filtering, and they are written ONLY inside the store's
 mutation queue: an item mutator stages its changed rows and `persist` writes them in the same
@@ -790,15 +802,71 @@ source link and the meta pairs) and marks the item `done` with `cardId` in one m
 promote returns the existing card. It is the only item mutation that emits an activity event
 (`item_promoted`).
 
-On the wire, `BoardSnapshot.items` carries every item whose state is not `done`, redacted through
+On the wire, `BoardSnapshot.items` carries every item whose state is not `done`, plus each done GitHub item whose holding card exists and is not done (`source` is `github`, `cardId` is set, and `store.snapshot()` reads the card on any board). A done item of a done card therefore leaves the wire. Every item is redacted through
 `redactItem` (a field pick, so a future field stays off the wire until named), with an expired
 snooze presented as `unread` by the pure `wakeItem` on the read path; the next write to that row
 persists the wake. `GET /api/board` and the SSE `data` frame share the array through
 `store.snapshot()`; `GET /api/items` lists every item, done rows included, with `state` and `source`
 filters. The routes live in `routes/items.route.ts`: `POST /api/items/:id/state` (unread, read,
-done; a promoted item stays done and answers 409), `POST /api/items/:id/snooze` (the route
+dismissed, done; a promoted item stays done and answers 409), `POST /api/items/:id/snooze` (the route
 validates a future ISO time before any queue work; a promoted item answers 409 here too), `POST /api/items/:id/promote` (201 on the
 first call, 200 after).
+
+#### Dismissed items
+
+The item state `dismissed` hides an item from the Inbox without a final close.
+
+- `POST /api/items/:id/state` sets `dismissed`. The same route clears it. A restore sets the state `read`.
+- The upsert merge keeps `dismissed` on every poll.
+- A complete snapshot pull never marks a dismissed item `done`. A dismissed item therefore never returns to `unread`.
+- A promoted item answers `409`.
+
+#### Linear Inbox card dismiss
+
+A Linear Inbox card has its own dismiss field, `Card.inboxDismissedAt`.
+
+- `POST /api/cards/:id/inbox-dismiss` takes `{ dismissed: boolean }`. `true` sets the field to the current time. `false` clears it.
+- An unknown card answers `404`. A card outside the Inbox column answers `409` with the code `not-in-inbox`.
+- `isInboxWaiting` leaves a dismissed card out.
+- A Linear refresh keeps the field.
+- Known limit: when Linear drops an issue and returns it later, Dispatch creates a new card. The new card loses the dismiss.
+
+#### Inbox scope
+
+`src/shared/feed-items.ts` decides what the Inbox lists. `isInboxItem` accepts an item only when all these conditions are true:
+
+- The source is Slack.
+- `meta.needsSession` is `"true"`.
+- The state is not `done` and not `dismissed`.
+
+`inboxFeed` applies `isInboxItem`. The Inbox also lists the Linear Inbox cards. GitHub, Sentry, Calendar and Meeting items stay on their own pages. The Slack page lists every open Slack item through `slackRows`. An open Slack item is not `done` and not `dismissed`.
+
+#### Slack relevance
+
+`slackRelevance` in `src/server/sources/slack/slack-relevance.ts` decides if a Slack message needs a session. `slackItem` calls it once. Both write paths use `slackItem`. The result goes into two `meta` keys:
+
+- `needsSession`: `"true"` or `"false"`.
+- `relevanceReason`: the reason text.
+
+The rules run in order. The first match wins.
+
+| Order | Reason                                          | Match                                                                                                                                                       |
+| ----- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1     | "Bot or app message"                            | The message has a bot id, or its subtype starts with `bot`. No session.                                                                                     |
+| 2     | "Reaction or emoji only"                        | The text has only mentions, emoji, punctuation or symbols. No session.                                                                                      |
+| 3     | "Acknowledgement"                               | The text has 6 words or fewer, no `?` and no request. It starts with an acknowledgement word. No session.                                                   |
+| 4     | "Greeting"                                      | The text has 6 words or fewer, no `?` and no request. It starts with a greeting word. No session.                                                           |
+| 5     | "FYI or broadcast"                              | The text has no `?` and no request. It starts with `fyi`, `heads up`, `psa` or `announcement`, or it has a channel, here or everyone mention. No session.   |
+| 6     | "Digest"                                        | The text has no `?` and no request. It has 5 lines or more and 3 bullet lines or more, or it has `digest`, `daily summary` or `weekly summary`. No session. |
+| 7     | "Direct question"                               | The text has a `?`. Needs a session.                                                                                                                        |
+| 8     | "Request with an action verb: <verb or phrase>" | The text has a request phrase, or its first word is an action verb. Needs a session.                                                                        |
+| 9     | "No question or request"                        | No earlier rule matched. No session.                                                                                                                        |
+
+A request phrase is one of `can you`, `could you`, `would you`, `please`, `pls`, `need you to` and `can someone`. An action verb is one of `check`, `review`, `fix`, `look`, `investigate`, `deploy`, `update`, `merge`, `approve`, `test`, `debug`, `run`, `add` and `remove`. The check for a first word skips a leading acknowledgement word, greeting word, broadcast token (`<!here>`, `<!channel>`, `<!everyone>`, with or without a label) and broadcast word (`fyi`, `heads up`, `psa`, `announcement`). A leading word of this kind does not hide a request. For example, "hey look at this", "<!here> deploy the hotfix" and "heads up, deploy the thing" are requests.
+
+The classifier reads only the first 4000 characters of the text. A `?` inside a link (`<...>`) does not count as a question.
+
+An item stored before this change has no `relevanceReason`. The UI shows "Not classified" for it. The classifier uses no model pass.
 
 ### Meeting notes
 
@@ -1061,10 +1129,13 @@ do not move onto the session record and are not projected from it.
 
 **`claudeSessionId` is itself derived (LOCAL-13).** A session record holds `claudeSessions`, one
 node per Claude conversation id the hooks reported in its pane (`{ id, createdAt, lastActiveAt,
-missingAt? }`, oldest first, never removed). The record's `claudeSessionId` is always the newest
-node by `lastActiveAt` that carries no `missingAt`, re-derived through `setActiveSession` by the two
-node mutators `setClaudeSessionId` and `markClaudeSessionMissing` (`src/server/store/claude-sessions.ts`
-holds the pure resolution and upsert). The card's flat field then mirrors the active record as
+startedAt?, missingAt? }`, oldest first, never removed). The record's `claudeSessionId` is always the
+node with the newest start (`startedAt`, else `createdAt`) that carries no `missingAt`, re-derived
+through `setActiveSession` by the three node mutators `startClaudeSession`, `setClaudeSessionId` and
+`markClaudeSessionMissing` (`src/server/store/claude-sessions.ts` holds the pure resolution and
+upsert). A `SessionStart` hook sets `startedAt` for every source (`startup`, `resume`, `clear`,
+`compact`). Any other hook event changes only `lastActiveAt`, so a late event of an old conversation
+never changes which node Resume opens (LOCAL-99). The card's flat field then mirrors the active record as
 before, so every reader of `claudeSessionId` is unchanged. The tree a ticket forms is card, then
 session records (branches), then conversation nodes. `claudeSessions` never rides the wire:
 `redactCard` drops `sessions` wholesale and field-picks `SessionSummary`. Boot migration schema
@@ -1436,6 +1507,8 @@ legal source column(s), target, and owning code path:
 | Hook `UserPromptSubmit`                                      | `FLIP_BACK_SOURCES` (`needs_input`, `agent_done`, `in_review`)                   | `in_progress`                                    | `hook-events.ts#applyPromptSubmit` → `board.store.ts#flipBack`                            |
 | Hook `PreToolUse` (pause-class tool)                         | any except `APPLY_MARKER_EXCLUDED_SOURCES`                                       | `needs_input`                                    | `hook-events.ts#applyPreToolUseEvent` → `applyMarker`                                     |
 | Hook `PostToolUse` (pause-class tool)                        | `FLIP_BACK_SOURCES`                                                              | `in_progress`                                    | `applyHookEvent`'s `PostToolUse` branch → `flipBack`                                      |
+| Hook `PostToolUseFailure` (pause-class tool)                 | `FLIP_BACK_SOURCES`                                                              | `in_progress`                                    | same as above                                                                             |
+| Hook `PostToolUse` or `Stop` while a pause-tool marker holds | `needs_input` ONLY                                                               | `in_progress`                                    | `applyHookEvent` reading `heldByPauseTool` → `flipBack`                                   |
 | Watcher marker decision (pane-parsed)                        | any except `APPLY_MARKER_EXCLUDED_SOURCES`                                       | `needs_input` / `agent_done`                     | `watcher.ts#scanSession` reading pure `scan-decision.ts#decideScan` → `applyMarker`       |
 | Watcher flip-back decision                                   | `needs_input` ONLY                                                               | `in_progress`                                    | same path → `flipBack`                                                                    |
 | Manual drag / `POST /cards/:id/move`                         | any except `agent_done` as a target, and never `todo → in_progress` (`BOARD-07`) | any allowed pair                                 | `board.store.ts#moveCardManual`, gated by `routes/cards.route.ts`                         |
@@ -1838,6 +1911,18 @@ mutation sets `tmuxSession` and clears `sessionLost` but DELIBERATELY never writ
 `completeStart`/`attachExistingSession`, which force `in_progress`. This is how Resume coexists with
 the [Resilience and Reconcile](#resilience-and-reconcile) `IN-03` hazard: a column-preserving
 mutation performs no promotion and is therefore safe in every column.
+
+**Resume reads the conversation folder before each launch (LOCAL-99).** The relaunch path of
+`resumeSession` calls `resolveResumeTarget`, which lists the top level `.jsonl` files of the folder
+`<config dir>/projects/<cwd with each non alphanumeric character replaced by "-">` (the config dir of
+the session account, the cwd of the launch) and passes them with the stored node to the pure
+`chooseResumeTarget` (`services/domain/resume-target.ts`). A file born after the stored start wins,
+and the store records it with `startClaudeSession` before the launch. Else the stored id resumes when
+its file exists. Else Resume launches `--continue` and never passes an id that has no file. The
+"No conversation found" fallback stays as the last net. A launch with no hooks (pane mode, or `auto`
+below the hooks floor) records the newest file of the folder after the kickoff and after a Resume.
+`GET /api/cards/:id/resume-target` returns the same choice and writes nothing; the detail panel shows
+it beside the Resume button.
 
 In Review's opposite in-edge/out-edge asymmetry versus Agent Done, and the full trigger-by-trigger
 spec, are homed in [Column Transition Specification](#column-transition-specification) (`BOARD-06`).
@@ -2736,9 +2821,8 @@ the no-hooks branch of every launch site pass the same env: the builder is the s
 variable is added, so one branch cannot drift.
 
 **Usage is polled, never refreshed.** `services/orchestration/claude-usage.ts` reads each account's
-access token into memory only, calls the OAuth usage endpoint every 15 minutes (the cadence the
-reference implementation settled on because tighter polling 429s), and caches a status-tagged
-snapshot. A 401 or 403 keeps the last windows and marks them `stale`; Dispatch does not rotate the
+access token into memory only, calls the OAuth usage endpoint on the adaptive plan in Account Chain, Cadence,
+and caches a status-tagged snapshot. A 401 or 403 keeps the last windows and marks them `stale`; Dispatch does not rotate the
 refresh token, because a second rotator races the live REPL and logs both out. The manual refresh
 route is limited to one call per account per 30 seconds. Every window on the wire also carries a
 derived period (`periodStart`, `periodEnd`): the known window length back from the reset for
@@ -2796,11 +2880,13 @@ After a server restart the state is unknown until the next hook event, and the p
 A session is at a safe point when its state is idle or limit. The service treats an unknown state
 as busy.
 
-**A limit surface is cleared before the move.** `limit-surface.ts` holds the limit surface
-patterns. On the auto-continue line, the service sends Escape. On the options menu, it sends only the
-keys that select the stop option, or the wait option when no stop option shows. It never selects an
-option that matches `CREDITS_OPTION`. When the menu shows no stop option and no wait option, it sends
-no key and returns `limit-unknown`.
+**A limit surface is cleared before the move.** `limit-surface.ts` holds the limit surface patterns.
+It reads only the lines below the last input line, because limit text above it is scrollback that
+can never clear, and a move that waited on it returned `limit-unknown` (LOCAL-112). The server logs
+the last 15 pane lines with every `limit-unknown`. On the auto-continue line, the service sends
+Escape. On the options menu, it sends only the keys that select the stop option, or the wait option
+when no stop option shows. It never selects an option that matches `CREDITS_OPTION`. When the menu
+shows no stop option and no wait option, it sends no key and returns `limit-unknown`.
 
 **A busy session gets a pending move.** The service never interrupts a turn.
 `session-account-apply.ts#moveOrQueue` writes `pendingClaudeAccountId` on a busy session. The move
@@ -2834,9 +2920,10 @@ the user must turn them on.
 `defaultPosition`. The migration from version 1 puts Default first and the added accounts after it
 by creation time. The runtime state is in `chain-state.json` next to it
 (`account-chain-state.ts`): the state, buckets and `limitedUntil` of each account, `inUseSince`, the
-exhausted record and the last 50 moves. A corrupt file reads as empty and does not stop the boot.
-The settings are in `config.json` under `claudeAccounts`: `autoMove` (default false),
-`thresholdPercent` (default 100, range 50 to 100) and `minDwellMinutes` (default 15, range 0 to 240).
+exhausted record, the last 50 moves and `loginExpiryNotified`. A corrupt file reads as empty and does
+not stop the boot. The settings are in `config.json` under `claudeAccounts`: `autoMove` (default
+false), `thresholdPercent` (default 100, range 50 to 100), `minDwellMinutes` (default 15, range 0 to 240) and `hysteresisPercent` (default 10, range 0 to 50). The config reader clamps a stored value to
+its range.
 
 **States.** `account-state.ts#deriveAccountState` gives each account one state. The first
 rule that applies sets the state:
@@ -2853,6 +2940,15 @@ rule that applies sets the state:
 selects the first account whose state is `available`, `near-limit` or `unknown` and whose
 `limitedUntil` is not in the future. When no account qualifies, the chain is exhausted and the
 result is the earliest `limitedUntil`. The selection never takes a `login-expired` account.
+
+**Hysteresis.** `account-selection.ts#filterByHysteresis` limits the candidates of a usage trigger.
+The binding bucket of an account is its bucket with the highest percent. A candidate passes only
+when its binding bucket is below `thresholdPercent` minus `hysteresisPercent`. An `unknown` account
+or an account with no buckets does not pass. When `hysteresisPercent` is 0, the filter keeps every
+candidate. The filter applies to trigger 1 and to the return check only. A limit surface, a
+`StopFailure`, Switch now and the exhausted check do not use it. When no candidate passes on a usage
+trigger, the sessions stay on the account in use. If the chain without the filter is exhausted, the
+controller records the exhausted chain as before.
 
 **Triggers.** `account-chain.ts` is the controller. It runs one task at a time in a queue. A manual
 switch through `PUT /accounts/active` runs in the same queue, so it never overlaps a chain move. A
@@ -2871,9 +2967,45 @@ A limit surface whose printed time passed in the last 5 hours is a stale surface
 read shows every bucket below the threshold. The controller ignores it
 (`account-state.ts#isStaleSurface`).
 
-**Cadence.** `claude-usage.ts` reads each account at boot and each 15 minutes. While a bucket of the
-account in use is above 80 percent, it reads that account each 2 minutes. A 429 response uses the
-`Retry-After` backoff.
+**Cadence.** The usage endpoint `/api/oauth/usage` allows about 28 to 30 requests per rolling
+hour. At steady state the plan keeps each account at 20 reads per hour or fewer. An urgent climb
+to the threshold can reach about 30 reads in one rolling hour (see Known Residuals). `claude-usage.ts` reads each
+account at boot, through the same tick. Then a tick each 15 s reads each account whose planned time
+is past, and ticks never overlap. `usage-poll-plan.ts#planNextPoll` sets the next planned time after each read:
+
+- The first good read plans 300 s. Each read with no move multiplies the interval by 1.5.
+- The ceiling is 300 s for the account in use and 600 s for an idle account.
+- A move of 1 point or more halves the interval. The floor is 180 s and the ceiling above still
+  applies.
+- Urgent mode plans 60 s. It applies only to the account in use, when its binding bucket moved up 1
+  point or more and is 15 points or less below the threshold. Urgent mode stops at the threshold
+  and in the hour after a 429.
+- When an account becomes the account in use, its next read is planned within 300 s, unless it is
+  held or in the hour after a 429.
+- A limited account plans 600 s and waits at least 600 s, also after jitter. A 401 or 403 read, or
+  no token, plans 600 s.
+- Jitter changes each delay by up to 10 percent. Jitter never makes a delay longer than 600 s, or
+  longer than 1800 s in the hour after a 429.
+- The next read is never later than the next reset plus 60 s. This rule wins over the 600 s minimum
+  of a limited account. The floor wins over this rule.
+
+A 429 response holds the account for `Retry-After` plus 900 s. When `Retry-After` is missing or 0,
+the hold is 300 s plus 900 s. The hold is at most 24 hours plus 900 s. The hour after a 429
+starts when the hold ends. In that hour, the floor is 360 s for each delay, and each read multiplies
+the interval by 1.5 up to 1800 s.
+
+All usage reads go through `claude-usage.ts#refreshUsage`. The callers are the tick (`poll`), the
+manual refresh (`manual`), the limit surface check (`limit-surface`), the timer reads
+(`fresh-read`) and the login (`login`). Inside a hold, each caller gets the cached snapshot and the
+server sends no request. A call during a read of the same account shares that read. A manual
+refresh is limited to one call per account each 30 s. The planned times apply only to the tick.
+`DISPATCH_USAGE_TIME_SCALE` divides the tick and every planned time, for tests only.
+
+**Request log.** `usage-request-log.ts#appendUsageRequest` writes one JSON line for each request to
+`usage-requests.jsonl` in the data folder. A line has `ts`, `account`, `caller`, `status` (the HTTP
+status or `network`) and `nextInMs`. A line never holds a token or a header. Before the file goes
+past 1 MB, the writer renames it to `usage-requests.jsonl.1` and replaces the older copy. A write
+failure does not stop the read. A read without a token sends no request and writes no line.
 
 **Stability.** After a chain move, a usage trigger does not move the sessions again for
 `minDwellMinutes`. Triggers 2 and 3 are hard signals and override the dwell. A limited account stays
@@ -2900,8 +3032,9 @@ true to false, the controller removes each pending move that it queued.
 **Return.** Each limited account has a timer at `limitedUntil` plus 2 minutes, or 15 minutes from
 now when the time is unknown or past. The timer reads the usage again. The controller accepts only
 a good read that it took after the timer fired. If the read is not good, or the account is
-`unknown` or `login-expired`, the timer is set again 15 minutes on. If the account is no longer limited and ranks
-above the account in use, the sessions return to it with the failover policy. If it is still
+`unknown` or `login-expired`, the timer is set again 15 minutes on. If the account is no longer limited, passes the
+hysteresis rule and ranks above the account in use, the sessions return to it with the failover
+policy. If it does not pass the hysteresis rule, the timer is set again 15 minutes on. If it is still
 limited, the timer is set again. A usage read that clears the account does not cancel the timer,
 so a usage read never starts a return.
 
@@ -2924,6 +3057,16 @@ then `Continue.`; on the options menu it selects the stop option, or the wait op
 option shows, and then sends `Continue.`. A session with no limit surface on the screen gets no
 key. No key path selects a credits option.
 
+**Login expiry.** The usage read also reads `claudeAiOauth.refreshTokenExpiresAt` (epoch ms) from
+the same credential text as the token (`claude-usage.ts#readCredential`). The value stays in memory.
+The usage snapshot carries it as `loginExpiresAt`. A missing, non-number, zero or negative value
+gives no `loginExpiresAt`. The access token field `expiresAt` is not used. The server never writes,
+copies or refreshes a credential. When `loginExpiresAt` is 3 days away or less, or is in the past,
+the controller sends one `login-expiring` event (`login-expiry.ts#shouldWarnLoginExpiry`). It
+stores the value in `loginExpiryNotified` for that account, so a restart sends no second event. A
+new login gives a new value, so it sends a new event. The account row shows the expiry date, with
+the warning tone when the date is 3 days away or less.
+
 **Pin.** `accountPinned` on a session keeps it on its account. Automatic moves and "Switch now" skip
 it. A manual move still moves it: `POST /cards/:id/session/account`, and `PUT /accounts/active`
 with `applyToRunning`. `PUT /cards/:id/session/account-pin` sets the pin. Setting the pin removes
@@ -2931,7 +3074,7 @@ the pending move of the session, and a pending move that the chain queued checks
 before it runs.
 
 **Routes.** `GET /accounts` returns each account in chain order with `position`, `state`,
-`buckets`, `limitedUntil` and `inUse`, the sessions with `pinned`, and `chain` with the settings, the
+`buckets`, `limitedUntil`, `inUse` and `usage` (with `loginExpiresAt` when known), the sessions with `pinned`, and `chain` with the settings, the
 exhausted record, the history (newest first) and `inUseSince`. `PUT /accounts/chain/order` takes
 every account id once and returns 400 `invalid-order` otherwise. `PUT /accounts/chain/settings`
 returns 400 `invalid-settings` for a value out of range. `POST /accounts/chain/switch-now` returns
@@ -2943,10 +3086,13 @@ a new dwell and skips pinned sessions. It returns `{ ok: false, error: "no-eligi
 when no other account qualifies. "Switch now" calls it.
 
 **Records.** `account-chain-records.ts#recordChainEvent` writes one activity row and sends one push
-notification for each failover, return and exhausted chain. The kinds are `account_failover`,
-`account_return` and `account_chain_exhausted`. For a failover or a return, the row `reason` is the
-JSON text of `src/shared/account-chain.ts#buildChainReason`. It holds the trigger, the labels of the
-two accounts and the number of sessions. The trigger is `usage`, `surface`, `rate-limit`, `reset`,
+notification for each failover, return, exhausted chain and login warning. The kinds are
+`account_failover`, `account_return`, `account_chain_exhausted` and `account_login_expiring`. The
+reason of `account_login_expiring` is the JSON text of
+`src/shared/account-chain.ts#buildLoginExpiryReason`: the account label and the expiry time. For a
+failover or a return, the row `reason` is the JSON text of
+`src/shared/account-chain.ts#buildChainReason`. It holds the trigger, the labels of the two accounts
+and the number of sessions. The trigger is `usage`, `surface`, `rate-limit`, `reset`,
 `switch-now` or `held`. A `held` row is an offer that `autoMove` false holds back, and its number
 is 0. For a move, the number is the sessions moved plus the sessions queued. It is null when the
 move step failed. `parseChainReason` reads the row. It also reads an older row in the form
@@ -3354,6 +3500,27 @@ three searches in order, each one page of 100: `is:open is:pr review-requested:@
 category a PR appears in (types `pr_review` at priority 75, `pr_mention` and `pr_assigned` at 50)
 and marks the pull partial when a category has more than 100 results, reports incomplete results,
 or carries the `X-GitHub-SSO: partial-results` header; a partial pull never auto-resolves an item.
+**Open pull request search.** After the three `@me` searches, the poll runs one GraphQL search on the
+same token (`sources/github/github-open-prs.ts`). The query is `is:open is:pr repo:<a> repo:<b> ... sort:updated-desc`
+with `first: 100`. It runs only when the repository reader returns at least one repository. `mapOpenPrs` maps each node to an
+item of type `pr_open`, priority 25, category `open`, with these `meta` keys: `repo`, `number`, `author`, `draft`,
+`reviewDecision`, `reviewRequestedFromMe`, `checks` (`pass`, `fail`, `pending` or empty), `createdAt`, `headRef`,
+`baseRef` and `changedFiles`. `mergeSearchResults` merges these items with the `@me` items. When an item has the
+same id as an `@me` item, the `@me` item keeps its type, category and priority and takes only the other `meta` keys.
+The poll is truncated when the answer has an `errors` array or `issueCount` is above 100.
+When the answer has `errors` and `data`, `mapOpenPrs` keeps the nodes that GitHub returned.
+It also logs the error messages. Each message is cut at 200 characters. The log never holds the token or the body.
+A truncated pull never resolves an item that it did not see (the snapshot rule).
+If the open pull request search throws, `GitHubSource.fetch` logs the message and keeps the `@me` results.
+It also marks the pull truncated. A `RateLimited` error or a `GitHubAuthError` still fails the poll.
+
+**Repository reader.** `bootstrap/index.ts` calls `setGithubReposReader(githubReposReader)`, and
+`sources/registry.ts` gives the reader to `GitHubSource`. The reader (`services/orchestration/github-repos.ts`) skips archived boards. It reads the `origin` URL of every
+repository of every other board, keeps the `owner/name` of each github.com remote, and sorts the list.
+`githubRepoAt` reads one repository with `originUrl` (`adapters/git.ts`). It parses the URL with `repoOfRemote` (`services/domain/ship-checks.ts`). It caches a non-empty list for
+10 minutes. `GET /api/github/repos` reads the same reader, so the route and the source share one cache. Before bootstrap
+installs the reader, the registry default returns an empty list.
+
 Item ids are `github:<owner>/<name>#<number>` and `createdAt` is the PR's last update. A 401 fails
 the poll with last-known-good kept, an exhausted rate limit raises `RateLimited`, and a 403 with
 `X-GitHub-SSO: required` raises `GitHubSsoError` with the authorization URL.
@@ -3366,9 +3533,23 @@ sandbox server's PATH.
 source gateway. `GET /api/github/pr/:owner/:repo/:number` answers the PR with at most 50 files, each
 patch cut at 6000 characters (both cuts flagged), and one check list merged from check runs and
 legacy statuses, sorted fail, pending, pass (`github-pr.ts#classifyCheckRun` passes only success,
-skipped and neutral). `POST .../review` posts `APPROVE`, `REQUEST_CHANGES` or `COMMENT` (a body is
+skipped and neutral). `POST .../reviews` posts `APPROVE`, `REQUEST_CHANGES` or `COMMENT` (a body is
 required for the last two, at most 20000 characters). `POST .../merge` squash merges with the head
-SHA the client saw, so a head that moved answers 409 `not-mergeable`. Owner, repo, number and SHA are
+SHA the client saw, so a head that moved answers 409 `not-mergeable`. `POST .../review` makes or reuses the one local card that reviews the pull request. The body is optional. When present, it is `{ board }`.
+`openReviewSchema` rejects any other field, so a body with `event` answers 400. The route answers:
+
+- 404 `not-found` for an unknown item.
+- 401 `no-credential` for a known item when no GitHub credential exists.
+- 409 `no-workspace` when no open board holds the repository.
+- Otherwise `{ cardId, created, column, boardKey }` with 201 or 200. `boardKey` is the board of the card.
+
+`openReviewCard` (`services/orchestration/github.ts`) prefers the board in `{ board }` when that board holds the repository.
+Otherwise it takes the first open board that holds it. It compares the `origin` name with the pull request repository and ignores case.
+`openReviewCard` stores `reviewPr.repoPath`, the repository path that it matched, and writes the workspace snapshot of the card only when the card has none (`setCardReview`).
+The Start dialog of a review card passes `reviewPr.repoPath` to the workspace picker (`StartContainer.tsx`). `resolveFolder` (`card-actions/domain/workspace-picker.ts`) selects the longest registered folder that is that path or holds it, after the folder that the user chose and before the remembered folder.
+`initialPlaybook` (`card-actions/domain/playbook-picker.ts`) skips a remembered playbook that has the tag `review` (`REVIEW_PLAYBOOK_TAG`), so the Start dialog and the group dialog never preselect it. A Review start names "Review a pull request" in the `playbook` field of the start request, and the picker selects it first.
+`buildPrRows` (`shared/pr-rows.ts`) hides a done GitHub item only when it has no holding card or when the board snapshot holds that card as done. A review card on another board therefore keeps its row on every board that holds the repository.
+The web Review action switches the page to `boardKey` before it moves or opens the card (`pull-requests/domain/review-flow.ts`). The card keeps `source: "local"`, carries `reviewPr`, and its session starts on `review/pr-<n>`, fetched from `refs/pull/<n>/head`. Owner, repo, number and SHA are
 validated before any GitHub call; errors answer an error kind (`rejected`, `not-found`,
 `sso-required`, `rate-limited`, `unreachable`, `no-credential`) and only GitHub's own message text
 for its refusals, never the token or a raw body. A successful write calls `pollNow("github")`.
@@ -4051,9 +4232,26 @@ the resolved session record: an unseen id appends a node (this is how a `/clear`
 the new conversation started from a handoff prompt, become visible), a known id bumps that node's
 `lastActiveAt`. The store peeks with the pure `touchClaudeSession` before enqueueing, so a bump on
 the node that is already newest is dropped for 60 seconds and never persists or broadcasts; a
-switch to any other node persists at once because it changes what Resume opens. There is no
+bump on any other node persists at once. A `SessionStart` event (registered in the hook settings
+since LOCAL-99) goes to `store.startClaudeSession` instead and sets the start that ranks the nodes. There is no
 "session_id mismatch" log any more: a differing id is a new node, not an error. Nodes are never
 deleted; a conversation Claude refuses on `--resume` is stamped `missingAt` and skipped.
+
+**Messages from other sessions (LOCAL-98).** The boot writes four settings files through
+`services/infra/hook-settings.ts`: `hook-settings-accept.json`, `hook-settings-hold.json` and
+`hook-settings-refuse.json`, plus `hook-settings.json` with `Config.crossSessionInbound` (default
+`accept`). The files differ only in `crossSessionInbound`. `buildLaunch` in `steps.ts` is the one
+launch chokepoint: it calls the pure `resolveCrossSessionInbound`
+(`services/domain/cross-session-inbound.ts`) and passes the file of the result to `--settings`. The
+start intent value wins. A guarded launch (an orchestrator card, or a start intent playbook whose
+name starts with "Roadmap Loop") then takes the board policy value, or `refuse`. Every other launch
+takes the config value. `PUT /api/config/cross-session-inbound` writes `config.json` and the four
+files. The next launch reads the new config value from memory, so no restart is needed. The file
+rewrite keeps `hook-settings.json` in step with the config. A running session keeps its file.
+
+A launch without hooks passes no `--settings` flag: a pane status channel, a CLI below the hooks
+floor, or a card with no hook token. That session gets no settings file, so the config value does
+not apply to it, and `refuse` does not apply to a guarded one (`T-105-06`).
 
 **Edge-triggered vs level-triggered — how the two channels compose.** The hook channel is
 EDGE-triggered: one `Stop` = one event, delivered once, never re-observed. The pane watcher is
@@ -4195,17 +4393,18 @@ watcher's per-session maps.
 fires at the pause, so `applyStopEvent`'s marker-text parsing (the mechanism every other pause
 class relies on) never runs for it, and answering the question delivers the reply as a tool
 result, not a fresh prompt, so `UserPromptSubmit` never fires either. Both gaps were confirmed
-live (not inferred from docs) against the installed CLI before any fix landed. The fix is two
-layers, ordered lowest-risk first:
+live (not inferred from docs) against the installed CLI before any fix landed. The fix has three
+parts, ordered lowest-risk first:
 
 1. `kickoff.ts`'s `STATUS_PROTOCOL` carries a fourth instruction line asking the agent to print
    the `NEEDS_INPUT` marker as a standalone reply before calling a pausing tool. Live-measured
    INSUFFICIENT ALONE, even when followed: the printed text still lands mid-turn, so it is never
    carried by a `Stop` event and the hook channel never sees it (0/3 flips across live runs with
    only this layer present).
-2. A permanent `PreToolUse` hook is registered (`bootstrap/hook-setup.ts`, its matcher derived
-   from hook-events' exported `PAUSE_TOOL_NAMES` — the single source of truth for the pause-tool
-   set, so registration, enter, and flip-back can never drift apart) as the structural safety
+2. A permanent `PreToolUse` hook is registered (`hookSettingsJson` in `services/infra/hook-settings.ts`,
+   its matcher derived from the `PAUSE_TOOL_NAMES` set in that file, which hook-events imports; it is
+   the single source of truth for the pause-tool set, so registration, enter, and flip-back can
+   never drift apart) as the structural safety
    net: `applyHookEvent` synthesizes a marker with `kind: "NEEDS_INPUT"` and
    `` reason: `waiting on ${toolName} (${discriminator})` `` and applies it through the SAME
    `markerKey()`/`applyMarker` path `applyStopEvent` uses (never a hand-rolled key), so this
@@ -4234,6 +4433,14 @@ layers, ordered lowest-risk first:
    pause flips the card to Needs Input, answering flips it back, a plain `pane`-mode session stays
    structurally unable to detect the pause (unregressed, pre-existing, out of this fix's scope),
    and a manual drag still wins over any marker.
+3. A subagent cannot show a dialog. A hook payload with an `agent_id` comes from a subagent, so
+   `applyHookEvent` ignores its pause-tool `PreToolUse`, `PostToolUse` and `PostToolUseFailure`
+   events. A pause-tool call can also fail without a dialog. The hook settings register
+   `PostToolUseFailure`, and a pause-tool failure flips the card back. If a pause-tool marker still
+   holds the card in Needs Input when the main session runs a tool (`PostToolUse`) or ends a turn
+   (`Stop`), the main session is not blocked on a dialog, so the card flips back. A text
+   `DISPATCH_STATUS: NEEDS_INPUT` marker does not start with the pause-tool key, so this rule does
+   not release it.
 
 **Accepted residuals.** Under `auto`, the window between a card becoming watcher-visible and its
 first authenticated hook event has BOTH channels live and can double-stamp the same activity (two
@@ -4690,7 +4897,7 @@ in `docs/standards/design-contract.md`'s Deferred decisions rows 2 and 5.
 **Keyboard.** Every key binding goes through one hook, `useShortcuts(bindings, { menuOpen,
 scopeId })` in `src/web/components/ui/hooks/use-shortcuts.ts`, over the pure `resolveShortcut` and the binding
 tables in `src/shared/shortcuts.ts`: `GLOBAL_SHORTCUTS` (Cmd or Ctrl+K opens the command
-palette, n opens New ticket, ? opens the cheat sheet), mounted once in `ShellContainer.tsx`; `BOARD_SHORTCUTS`
+palette, n opens New ticket, ? opens the cheat sheet, b opens the palette with the Boards group only), mounted once in `ShellContainer.tsx`; `BOARD_SHORTCUTS`
 (j, k, h, l move the focused card, 1 to 7 move it to a column through the board's own move path;
 Enter stays with the focused card, a role button that opens itself, as the resolver leaves Enter
 to activatable targets);
@@ -4969,7 +5176,7 @@ table records the security invariants that ride on it, not the rule itself.
 | T-104-04 | Information Disclosure                            | `routes/remote-auth-gate.ts#remoteAuthMiddleware` (as it applies to `routes/vault.route.ts`)                                                                                                                     | The vault page and its routes add no auth code at all, deliberately; `remoteAuthRouter` is mounted first in `bootstrap/index.ts`, ahead of `/api`, so a non-loopback request without a valid session cookie receives the shared code-entry page. `node scripts/session-liveness-v3.mjs --check vault-remote-gate` asserts this with a real `node:http` request carrying a spoofed non-loopback `Host` (`fetch` silently drops the header and would pass vacuously), asserts the response is `200 text/html` carrying the `/__remote/verify` marker rather than a 401 the gate never emits, asserts the key list does not appear in the refusal body, and asserts a refused write never reached `values.env` on disk. Observed (104-04): three hand-run breaks each proved a real FAIL naming its own violation (the Host-spoof substrate, the leak assertion, the on-disk write-refusal check), each restored to a byte-identical file and re-passed. See Known Residuals, Phase 73 CR-01 (the pre-existing Host-classifier residual, closed in Phase 74) rather than restated here.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | T-105-01 | Information Disclosure                            | `bootstrap/hook-setup.ts` (`VAULT_RUN_SCRIPT`, the generated `~/.dispatch/vault-run` runner)                                                                                                                     | The generated runner sources `values.env` wholesale (`set -a; . "$VALUES"; set +a`), then walks the schema file line by line and unsets every name not present in the caller's own `--keys` list, so only the requested keys survive into the wrapped command's environment; the wrapped command is then `exec`'d as a replacing child process, so the invoking shell itself is never mutated. `vault-run-keys` proves the narrowing load-bearing via a relaxed scratch copy with the unset pass disabled: `leg 4: relaxed copy observed to leak RUN_KEY_TWO's sentinel, the narrowing assertion (leg 1/leg 3) is load-bearing`, with the real artifact's hash unchanged across the break (105-05-SUMMARY.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | T-105-02 | Information Disclosure                            | `bootstrap/hook-setup.ts` (`VAULT_RUN_SCRIPT`, the runner's refusal gate)                                                                                                                                        | Six dumper basenames (`env`/`printenv`/`set`/`export`/`declare`/`typeset`), a never-created or unfilled requested key, and malformed invocation shapes each refuse non-zero with a message naming Settings, Vault, and every decision is taken BEFORE `values.env` is ever sourced, so a refused invocation never had a value in its own process environment. Both the `--keys` list and the schema's own name column are matched against the same `[A-Z_][A-Z0-9_]*` shape the store validates on create, so the later unset loop can never act on an attacker-supplied token. `vault-run-refusals` proves two break legs falsifiable: `break A: relaxed copy exit 0 (dumped) vs real artifact exit 2 (refused)` and `break B: relaxed copy exit 0 (let it through, RUN_KEY_THREE unset) vs real artifact exit 3 (refused)` (105-05-SUMMARY.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| T-105-03 | Information Disclosure                            | the generated hook settings' `permissions.deny` Read rule (`hookSettingsJson()` in `bootstrap/hook-setup.ts`)                                                                                                    | ACCEPTED, best-effort defense-in-depth, not proven to hold alone on the currently installed CLI: one exact double-leading-slash `Read(//<abs values path>)` entry, no glob, covering the CLI's own Read tool and (per 105-01's spike) a Bash `cat` naming the literal path as an argument. 105-01's `claude -p` spike (CLI 2.1.241) observed this rule block both vectors alone; a real interactive `--dangerously-skip-permissions` session on CLI 2.1.245 (`vault-bypass-guards`, 105-07) observed the SAME deny-only rule LEAK the sentinel through the Read tool, a CLI permission-engine behavior change rather than a Dispatch regression (the rule's own generation and rendered text were unchanged and independently confirmed present in the derived variant). This rule ships as defense-in-depth alongside the load-bearing PreToolUse guard (`T-105-04`), never as an independently sufficient control on the current CLI. See Known Residuals.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| T-105-03 | Information Disclosure                            | the generated hook settings' `permissions.deny` Read rule (`hookSettingsJson()` in `services/infra/hook-settings.ts`)                                                                                            | ACCEPTED, best-effort defense-in-depth, not proven to hold alone on the currently installed CLI: one exact double-leading-slash `Read(//<abs values path>)` entry, no glob, covering the CLI's own Read tool and (per 105-01's spike) a Bash `cat` naming the literal path as an argument. 105-01's `claude -p` spike (CLI 2.1.241) observed this rule block both vectors alone; a real interactive `--dangerously-skip-permissions` session on CLI 2.1.245 (`vault-bypass-guards`, 105-07) observed the SAME deny-only rule LEAK the sentinel through the Read tool, a CLI permission-engine behavior change rather than a Dispatch regression (the rule's own generation and rendered text were unchanged and independently confirmed present in the derived variant). This rule ships as defense-in-depth alongside the load-bearing PreToolUse guard (`T-105-04`), never as an independently sufficient control on the current CLI. See Known Residuals.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | T-105-04 | Information Disclosure                            | the generated Bash `PreToolUse` guard, a Node ESM script written and cited by `bootstrap/hook-setup.ts` (never referenced by its generated filename, which lives under the user's home directory, not this repo) | Ports `env-vault-guard.py`'s deny classes (read-out, copy/exfiltration, raw source) plus a runner-mediated-dump check with no analog in the prototype, deny-broadly on any ambiguous `vault-run` invocation shape, and allows file management (`ls`/`stat`/`chmod`/`open`/`code`/`file`/`du`) plus the schema surface the kickoff block teaches sessions to read directly. `vault-guard-decisions` drives the guard's full 31-row deny/allow table with an in-run falsifiability leg: `falsifiability leg: relaxed copy observed to allow the read-out row, proving the READ_OUT deny class load-bearing` (105-06-SUMMARY.md). On a real interactive bypass-permissions session (`vault-bypass-guards`, 105-07), the SHIPPED configuration (this guard plus `T-105-03` together, exactly what boots) blocked both the Read-tool and Bash vectors with verbatim refusal evidence: `vault-guard: unrecognized operation ... Everything else on this file is blocked`. This guard is therefore the LOAD-BEARING enforcement layer for VLT-08 on the current CLI, since `T-105-03` alone was observed to leak. Plan 02's own one bounded `vault-audit` run (107-02, 2026-08-26) widened the live catalogue to 12 guard-and-deny-governed vectors (Read, cat, head, tail, interpreter `open()`, cp, curl, source, dot-source, chained `ls && cat`, case-varied basename, relative-path-after-cd) and observed all 12 BLOCKED under the shipped `both` configuration and all 12 LEAKED under `neither`, the falsifiability control now fully captured rather than proxied. Two mechanism-distinct both-only vectors (runner-mediated dump, the nonexistent HTTP read-back route) scored INCONCLUSIVE on Opus response latency exceeding the raised 180s settle budget, a named coverage residual, not a leak. The contract-follow leg's own two assertions (running a legitimate wrapped command that echoes its own injected env; a final direct-read probe) also scored non-blocked: the real session self-censored both, declining to run the reporter script or attempt the read at all, reasoning either action resembled exfiltration even though the runner's own denylist would have permitted the former (`T-105-05`'s own accepted residual) and the guard would have technically refused the latter; over-caution, never a leak, but a measurement gap the marker-based scorer could not resolve into a captured `blocked` state (`107-vault-audit-run.log`). The guard-ONLY isolation leg (guard active, deny rule removed) remains uncaptured for this widened catalogue, by design (Plan 02 cost-bound the live matrix to `both`/`neither` only, reusing 105's own already-characterized `deny-only`/`guard-only` legs for the original two-vector case); a future run that completes it for the full catalogue would close this residual rather than merely narrow it. |
 | T-105-05 | Information Disclosure                            | the wrapped command's own process environment                                                                                                                                                                    | ACCEPTED, not mitigated: a session that legitimately invokes the runner receives the injected values as that command's own environment, and any child it spawns can read its own environment; this is inherent to inject-into-the-process-being-run and is the same boundary every comparable run wrapper accepts. Bounded, not total: `vault-residual-demo` measures three bounds live, the invoking shell carries neither name before or after the wrapped command runs, the unrequested key is absent from the wrapped command's own output, and that output is process-environment-shaped, never the values file's own quoted line, so the file itself is never read. Quoted verbatim from the check's own output: `RESIDUAL: a command legitimately wrapped by vault-run can print its own injected environment to itself or a child it spawns; the invoking shell and any unrequested key never see it. Inherent to per-command injection, accepted, never closed.` (105-06-SUMMARY.md).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | T-105-06 | Information Disclosure                            | the launch condition in `orchestration/steps.ts` (`startClaude`) that decides whether the `--settings` flag carrying `T-105-03` and `T-105-04` is passed at all                                                  | ACCEPTED, inherited, not introduced here: a session launched below the hooks-capability floor (`checkHooksCapability`, `bootstrap/hook-setup.ts`), under a forced pane status channel (`runtime.statusChannel === "pane"`), or with hooks env-disabled (`DISPATCH_HOOKS_DISABLED=1`) receives no settings flag at all, so BOTH structural layers are absent and the runner's own refusal gate (`T-105-01`, `T-105-02`) is the only vault protection such a session has. This degrade path pre-dates this phase; VLT-08's guarantee is therefore conditional on hooks capability, not universal. Closest available proxy: 105-01's `claude -p` spike's `neither` cell (no Dispatch mechanism active) leaked both vectors, Read returned the raw sentinel line, Bash `cat` returned the same with no denial, the falsifiability control this row's absence-of-protection claim rests on. Plan 02's one bounded `vault-audit` run (107-02, 2026-08-26) captured the widened `neither` cell directly: all 12 guard-and-deny-governed vectors leaked the sentinel with neither mechanism active, closing the coverage gap 105-07 left open for the falsifiability control itself (`vault-bypass-guards` real evidence now corroborates, not merely proxies, 105-01's spike). This row's own below-hooks-floor structural gap is unaffected by that capture: a session launched below the hooks-capability floor still receives no `--settings` flag at all regardless, an inherited condition no live-session run can observe directly since no such session is ever spawned by this check. See Known Residuals.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
@@ -5109,6 +5316,21 @@ exactly — the restructure resolved that hazard by extracting the single canoni
 is unchanged and this section is its do-not-change home (cited by the `workspace-paths.ts`
 header): the worktree for a repo lives under the ticket workspace, named by the repo's final path
 segment, and the produced string must remain identical to the construction above.
+
+#### Review worktree
+
+A review card (`card.reviewPr`) starts one repository of its workspace with a different worktree step.
+`createWorktrees` calls `findReviewRepo` (`services/orchestration/steps.ts`).
+It returns the first workspace repository whose `origin` GitHub name equals `reviewPr.repo`, ignoring case. It reads the name with `githubRepoAt`.
+The match uses the remote name, not the position or the folder name, because the Start dialog can send the repositories in any order.
+When no repository matches, the step "creating worktrees" fails with a `StartStepError`.
+The saga keeps the match in `SagaContext.reviewRepo`. The kickoff names `review/pr-<n>` for that repository only (`kickoff.ts#workspaceOrientation`).
+Every other repository gets the normal card branch.
+For the matching repository, `createRepoWorktree` calls `fetchPullHead` (`adapters/git.ts`). It runs
+`git fetch origin +pull/<n>/head:review/pr-<n>` in the repository. Then `worktreeAddExistingBranch` adds the worktree on the branch
+`review/pr-<n>`. The leading `+` lets a new fetch move the branch when the head of the pull request was force-pushed.
+The fetch only reads from `origin` and never pushes. A worktree that is already registered at the path is reused and is not fetched again.
+A fetch or add failure raises a `StartStepError` in the step "creating worktrees".
 
 ### Unwired `StartupErrorScreen` (`BOARD-05`)
 
@@ -5261,6 +5483,22 @@ A slot file that is older than the last boot is dead. The gate calculates the bo
 system uptime and the wall clock. If the wall clock moves forward by a large step after a slot is
 taken, the gate can find a live slot to be dead. This can occur on Linux early in a boot. It does
 not occur on macOS.
+
+### Account chain follow-ups from claude-swap (LOCAL-107)
+
+LOCAL-107 adopted the claude-swap usage budget, 429 backoff, hysteresis and login warning. Two
+claude-swap items are not in the chain:
+
+- Consume-first order: select the account whose weekly bucket resets first, so the allowance that
+  expires first is used first. The chain uses position order only.
+- Weekly pace and projection in the chain: use the weekly pace to predict when an account becomes
+  limited. The chain uses the threshold only.
+
+The urgent mode reads the account in use each 60 s while it climbs 1 point or more per read and is
+15 points or less below the threshold. A climb of 1 point per read from 70 to the threshold can
+give about 30 reads in one rolling hour, which is the endpoint limit. The ticket sets the 60 s value.
+A 429 in that case holds the account, and a hard signal still moves the sessions. A cap on urgent
+reads per hour is a follow-up.
 
 ## Verification Gates
 
@@ -5955,7 +6193,7 @@ reads the identity or writes, `assertAheadAndClean` resolves the base once. The 
 `branch-not-ahead`) and the worktree must be clean (409 `worktree-dirty`). A failed git call of
 these two checks answers 409 `no-workspace`. A group with loop progress keeps the D-8 rules.
 
-**MCP server.** `dispatch mcp` serves the 30 tools over stdio. `bootstrap/cli.ts` reads and checks
+**MCP server.** `dispatch mcp` serves the 31 tools over stdio. `bootstrap/cli.ts` reads and checks
 `DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and
 `bootstrap/mcp-tools.ts` holds the zod input and the description of each tool. The dependency
 cruiser rule `mcp-server-isolated` refuses an import of `routes`, `services`, `store`, `adapters`

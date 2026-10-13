@@ -18,9 +18,10 @@ import {
 import { toast } from "sonner";
 import {
   boardSearch,
-  shouldPollCounts,
+  boardSwitchTarget,
   staleCountsLabel,
 } from "../../../../shared/board-select.js";
+import { createdBoardText } from "../../../../shared/board-create.js";
 import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import { inboxFeed, isListedError } from "../../../../shared/feed-items.js";
 import { nowMs } from "../../../../shared/format-age.js";
@@ -33,18 +34,20 @@ import {
 } from "../../../../shared/pinned-card.js";
 import { buildPrRows } from "../../../../shared/pr-rows.js";
 import {
+  pageLocation,
   routeFromMatch,
-  routeHash,
   type Page,
   type Route,
 } from "../../../../shared/route.js";
 import { flattenSessions } from "../../../../shared/sessions.js";
 import {
   BOARD_SHORTCUTS,
+  GLOBAL_SHORTCUTS,
   INBOX_SHORTCUTS,
   SESSIONS_SHORTCUTS,
   bindShortcuts,
 } from "../../../../shared/shortcuts.js";
+import { hideDisabledSlack } from "../../../../shared/hide-disabled-slack.js";
 import { slackRows } from "../../../../shared/slack-rows.js";
 import { startTarget } from "../../../../shared/start-request.js";
 import type {
@@ -70,16 +73,11 @@ import { useShortcuts } from "@/components/ui/hooks/use-shortcuts";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 import { ActivityDrawer } from "@/modules/shell/components/ActivityDrawer";
-import type { BoardSwitcherData } from "@/modules/shell/components/BoardSwitcher";
 import { CheatSheet } from "@/modules/shell/components/CheatSheet";
 import { ShellFrame } from "@/modules/shell/components/ShellFrame";
-import {
-  showSwitcher,
-  switcherItems,
-  switcherShortcuts,
-} from "@/modules/shell/domain/board-switcher";
+import { switcherItems } from "@/modules/shell/domain/board-switcher";
 import { boardPageTitle } from "@/modules/shell/domain/board-title";
-import { buildCommands } from "@/modules/shell/domain/commands";
+import { BOARDS_GROUP, buildCommands } from "@/modules/shell/domain/commands";
 import { NAV_ITEMS, visibleNavItems } from "../../../../shared/nav-items.js";
 import { sidebarOpen } from "@/modules/shell/domain/nav-open";
 import { useNavPreference } from "@/modules/shell/hooks/use-nav-preference";
@@ -88,6 +86,7 @@ import { useUndoToast } from "@/modules/shell/hooks/use-undo-toast";
 import { useViewportNav } from "@/modules/shell/hooks/use-viewport-nav";
 import { CommandPaletteContainer } from "@/modules/shell/containers/CommandPaletteContainer";
 import { UpdateBannerContainer } from "@/modules/shell/containers/UpdateBannerContainer";
+import { useCreateBoardMutation } from "@/queries/board-create-queries";
 import {
   useBoardCountsQuery,
   useBoardListQuery,
@@ -126,6 +125,7 @@ const PANEL_FREE_PAGES: ReadonlySet<Page> = new Set([
   "ask",
   "flow",
   "boards",
+  "board-settings",
 ]);
 
 const PAGE_TITLES: Record<Page, string> = {
@@ -151,6 +151,8 @@ const PAGE_TITLES: Record<Page, string> = {
   flow: "Flow",
   boards: "Boards",
   dashboard: "Dashboard",
+  orchestrator: "Orchestrator",
+  "board-settings": "Board settings",
 };
 
 const NO_EVENTS: ActivityEvent[] = [];
@@ -172,13 +174,13 @@ export function ShellContainer({
   const { appStore } = useRouteContext({ from: "__root__" });
   const router = useRouter();
   const route = useCommittedRoute();
+  const routePage = route.page;
   const { theme } = useThemeState();
   const { preference, setPreference } = useNavPreference();
   const { carousel } = useViewportNav();
   const boardKey = useAppStore(appStore, (s) => s.board);
   const doneLimit = useAppStore(appStore, (s) => s.doneLimit);
   const soundEnabled = useAppStore(appStore, (s) => s.soundEnabled);
-  const errorsInFeeds = useAppStore(appStore, (s) => s.errorsInFeeds);
   const activityOpen = useAppStore(appStore, (s) => s.activityOpen);
   const setupWizardOpen = useAppStore(appStore, (s) => s.setupWizard != null);
   const selectedCardId = useAppStore(appStore, (s) => s.selectedCardId);
@@ -188,46 +190,62 @@ export function ShellContainer({
   const boardList = list.data;
   const listFailed =
     list.isError || (boardList === undefined && list.errorUpdateCount > 0);
-  const showBoards = showSwitcher(boardList?.boards, listFailed, boardKey);
-  const counts = useBoardCountsQuery(
-    shouldPollCounts(boardList?.boards ?? [], route.page === "boards"),
-  );
+  const counts = useBoardCountsQuery(boardList !== undefined);
   const boardItems =
-    showBoards && boardList !== undefined
+    boardList !== undefined
       ? switcherItems(boardList.boards, counts.data?.counts, boardKey)
       : null;
-  const boardName = boardItems?.find((item) => item.selected)?.name ?? null;
-  const [switcherOpen, setSwitcherOpen] = useState(false);
+  const boardName =
+    boardItems !== null && boardItems.length > 1
+      ? (boardItems.find((item) => item.selected)?.name ?? null)
+      : null;
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [paletteGroup, setPaletteGroup] = useState<string | undefined>();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
 
   const navigate = useCallback(
     (page: Page, id?: string, options?: { replace?: boolean }) => {
       void router.navigate({
-        href: routeHash({ page, id }).slice(1),
+        href: pageLocation({ page, id }, boardKey),
         replace: options?.replace,
       });
     },
-    [router],
+    [router, boardKey],
   );
 
-  const switchBoard = useCallback(
+  const openBoard = useCallback(
     (key: BoardKey) => {
-      void router.navigate({
-        to: ".",
-        search: (prev) => ({ ...prev, ...boardSearch(key) }),
-      });
+      void router.navigate({ href: pageLocation({ page: "board" }, key) });
     },
     [router],
   );
 
-  const newBoard = useCallback(() => {
+  const openCreateBoard = useCallback(() => {
     void router.navigate({
-      to: "/boards/{-$id}",
-      search: { ...boardSearch(boardKey), dialog: "new" as const },
+      to: "/boards",
+      search: { dialog: "new", ...boardSearch(boardKey) },
     });
   }, [router, boardKey]);
+
+  const switchBoard = useCallback(
+    (key: BoardKey) => {
+      void router.navigate(boardSwitchTarget(routePage, key));
+    },
+    [router, routePage],
+  );
+
+  const createBoardMutation = useCreateBoardMutation();
+  const createBoard = async (name: string) => {
+    const result = await createBoardMutation.mutateAsync({ name });
+    if (!result.ok) {
+      toast.error(result.error);
+      return;
+    }
+    toast.success(createdBoardText(result.board));
+    closeOverlay(appStore, () => setPaletteOpen(false), true);
+    openBoard(result.board.key);
+  };
 
   const [liveBoard, setLiveBoard] = useState<BoardSnapshot | null>(null);
   const { connection } = useBoardLiveUpdates(boardKey, doneLimit, {
@@ -266,8 +284,7 @@ export function ShellContainer({
         action: { label: "Try again", onClick: () => switchBoard(failed) },
       });
       void router.navigate({
-        to: ".",
-        search: (prev) => ({ ...prev, ...boardSearch(DEFAULT_BOARD_KEY) }),
+        ...boardSwitchTarget(routePage, DEFAULT_BOARD_KEY),
         replace: true,
       });
       return;
@@ -281,6 +298,7 @@ export function ShellContainer({
     refetchBoard,
     neverLoaded,
     router,
+    routePage,
     switchBoard,
   ]);
 
@@ -327,10 +345,13 @@ export function ShellContainer({
   const items = useItems(board);
   const enabledSources = board?.enabledSources;
   const inboxItems = useMemo(
-    () => inboxFeed(items, errorsInFeeds, enabledSources ?? []),
-    [items, errorsInFeeds, enabledSources],
+    () => inboxFeed(items, enabledSources ?? []),
+    [items, enabledSources],
   );
-  const slack = useMemo(() => slackRows(inboxItems), [inboxItems]);
+  const slack = useMemo(
+    () => slackRows(hideDisabledSlack(items, enabledSources ?? [])),
+    [items, enabledSources],
+  );
   const hasMainOrchestrator =
     boardList?.boards
       .find((b) => b.key === boardKey)
@@ -339,25 +360,24 @@ export function ShellContainer({
     () => visibleNavItems(NAV_ITEMS, enabledSources ?? [], hasMainOrchestrator),
     [enabledSources, hasMainOrchestrator],
   );
-  const inboxRows = useMemo(
-    () => inboxItems.filter((item) => item.source !== "calendar"),
-    [inboxItems],
-  );
 
   useShortcuts(
-    bindShortcuts(switcherShortcuts(showBoards), {
-      "meta+k": () => openOverlay(appStore, () => setPaletteOpen(true)),
+    bindShortcuts(GLOBAL_SHORTCUTS, {
+      "meta+k": () =>
+        openOverlay(appStore, () => {
+          setPaletteGroup(undefined);
+          setPaletteOpen(true);
+        }),
       n: () => openOverlay(appStore, appStore.openCreateTicket),
       "?": () => openOverlay(appStore, () => setShortcutsOpen(true)),
-      b: () => setSwitcherOpen(true),
+      b: () =>
+        openOverlay(appStore, () => {
+          setPaletteGroup(BOARDS_GROUP);
+          setPaletteOpen(true);
+        }),
     }),
     {
-      menuOpen:
-        activityOpen ||
-        sheetOpen ||
-        switcherOpen ||
-        board === null ||
-        setupWizardOpen,
+      menuOpen: activityOpen || sheetOpen || board === null || setupWizardOpen,
       scopeId: "root",
     },
   );
@@ -367,7 +387,7 @@ export function ShellContainer({
   }
 
   const meetingItems = items.filter((item) => item.source === "meeting");
-  const inboxCount = inboxWaitingCount(board.cards, inboxRows);
+  const inboxCount = inboxWaitingCount(board.cards, inboxItems);
   const sessionRows = flattenSessions(board.cards, nowMs());
   const liveSessionCount = sessionRows.filter((row) => row.running).length;
   const githubEnabled = board.enabledSources?.includes("github") === true;
@@ -417,26 +437,12 @@ export function ShellContainer({
           appStore.notice,
         ),
       switchBoard,
-      newBoard,
+      createBoard,
     },
     navItems,
     selectedCardOf(board.cards, selectedCardId, pinned),
     boardItems,
   );
-  const switcher: BoardSwitcherData | undefined = showBoards
-    ? {
-        selected: boardKey,
-        items: boardItems ?? [],
-        failed: boardList === undefined,
-        staleLabel: staleCountsLabel(counts),
-        open: switcherOpen,
-        onOpenChange: setSwitcherOpen,
-        onSelect: switchBoard,
-        onManage: () => navigate("boards"),
-        onRetry: () => void list.refetch(),
-      }
-    : undefined;
-
   return (
     <SidebarProvider
       open={sidebarOpen(preference, carousel)}
@@ -477,7 +483,14 @@ export function ShellContainer({
         activityUnseen={isUnseen(events[0]?.ts, lastOpened["__feed__"])}
         activityOpen={activityOpen}
         carousel={carousel}
-        switcher={switcher}
+        boards={{
+          items: boardItems,
+          failed: boardList === undefined && listFailed,
+          staleLabel: staleCountsLabel(counts),
+          onOpenBoard: openBoard,
+          onCreate: openCreateBoard,
+          onRetry: () => void list.refetch(),
+        }}
         pageTitle={boardPageTitle(
           route.page,
           PAGE_TITLES[route.page],
@@ -510,7 +523,7 @@ export function ShellContainer({
         {shortcutsOpen && (
           <CheatSheet
             groups={[
-              { title: "Global", rows: switcherShortcuts(showBoards) },
+              { title: "Global", rows: GLOBAL_SHORTCUTS },
               ...SHORTCUT_GROUPS_AFTER_GLOBAL,
             ]}
             onClose={() =>
@@ -521,6 +534,7 @@ export function ShellContainer({
         {paletteOpen && (
           <CommandPaletteContainer
             commands={paletteCommands}
+            initialGroup={paletteGroup}
             onClose={(ran) =>
               closeOverlay(appStore, () => setPaletteOpen(false), ran)
             }

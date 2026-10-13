@@ -1,4 +1,5 @@
 import fsp from "node:fs/promises";
+import { reviewBranch } from "../../shared/pr-rows.js";
 import { run } from "./exec.js";
 
 /**
@@ -62,6 +63,28 @@ export async function fetchBase(repoPath: string, base: string): Promise<void> {
 }
 
 /**
+ * Fetch the head of pull request `number` from `origin` into the local branch `review/pr-<number>`.
+ *
+ * @remarks
+ * The leading `+` lets a re-fetch move the branch when the PR head was force-pushed. Throws before
+ * any git call when `number` is not a positive safe integer, because the value comes from the
+ * persisted card and reaches the refspec.
+ */
+export async function fetchPullHead(
+  repoPath: string,
+  number: number,
+): Promise<void> {
+  if (!Number.isSafeInteger(number) || number <= 0) {
+    throw new Error(`Invalid pull request number: ${String(number)}`);
+  }
+  await run(
+    "git",
+    ["fetch", "origin", `+pull/${number}/head:${reviewBranch(number)}`],
+    { cwd: repoPath, timeout: 60_000, killEscalationMs: 5_000 },
+  );
+}
+
+/**
  * True if a LOCAL branch named `branch` exists. Uses `rev-parse --verify refs/heads/<branch>`;
  * swallows the failure into `false` (never rethrows) — this is a probe, not an operation.
  */
@@ -110,6 +133,28 @@ export async function originHeadRef(repoPath: string): Promise<string | null> {
     const ref = stdout.trim();
     const name = ref.slice(ref.lastIndexOf("/") + 1);
     return name || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The `origin` remote URL of a repository, or null when there is no origin or git fails.
+ *
+ * @remarks Reads the configured URL, not `git remote get-url`, which applies `insteadOf` rewrites and
+ * would hide the GitHub name of a mirrored remote. Any failure swallows into null so a broken
+ * repository is skipped instead of failing the poll.
+ */
+export async function originUrl(repoPath: string): Promise<string | null> {
+  try {
+    const { stdout } = await run(
+      "git",
+      ["config", "--get", "remote.origin.url"],
+      {
+        cwd: repoPath,
+      },
+    );
+    return stdout.trim() || null;
   } catch {
     return null;
   }
@@ -295,4 +340,49 @@ export async function isMainCheckout(dir: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+/**
+ * True when `dir` is the top folder of a git working tree.
+ *
+ * @remarks A folder inside another repository answers false, so a board subfolder under a parent
+ * repository still gets its own repository. `--show-cdup` is empty at the top, so no path compare
+ * is needed.
+ */
+export async function isRepositoryTop(dir: string): Promise<boolean> {
+  try {
+    const { stdout } = await run("git", ["rev-parse", "--show-cdup"], {
+      cwd: dir,
+    });
+    return stdout.trim() === "";
+  } catch {
+    return false;
+  }
+}
+
+export async function initMainRepository(dir: string): Promise<void> {
+  await run("git", ["init", "-b", "main"], { cwd: dir });
+}
+
+/**
+ * Add one empty commit in `dir`.
+ *
+ * @remarks A new repository needs a commit before a worktree can be cut from its branch. The commit
+ * uses the git identity of the user, and git fails when none is set. Signing and hooks are off,
+ * so a signing prompt or a hook cannot fail this local init commit.
+ */
+export async function commitEmpty(dir: string): Promise<void> {
+  await run(
+    "git",
+    [
+      "-c",
+      "commit.gpgsign=false",
+      "commit",
+      "--allow-empty",
+      "--no-verify",
+      "-m",
+      "Initial commit",
+    ],
+    { cwd: dir },
+  );
 }

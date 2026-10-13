@@ -1,10 +1,21 @@
-import type { PrDetail, PrReviewEvent } from "../../../shared/types.js";
+import path from "node:path";
+import { prKey, prUrl } from "../../../shared/pr-rows.js";
+import type {
+  BoardKey,
+  PrDetail,
+  PrReviewEvent,
+  ReviewCardAnswer,
+} from "../../../shared/types.js";
 import {
   fetchGithubPr,
   mergeGithubPr,
   reviewGithubPr,
 } from "../../adapters/source-gateway.js";
+import { boardRepository as store } from "../../store/board-repository.js";
+import { ConflictError, NotFoundError } from "../domain/errors.js";
 import { getOrchestrationConfig } from "../infra/config-holder.js";
+import { listBoards } from "./boards.js";
+import { githubRepoAt } from "./github-repos.js";
 import { resolveGithubToken } from "./github-token.js";
 
 export class GithubNotConnected extends Error {
@@ -56,4 +67,89 @@ export async function mergePullRequest(
   sha: string,
 ): Promise<void> {
   await mergeGithubPr(await token(), owner, repo, number, sha);
+}
+
+/**
+ * The open board and repository path whose `origin` is the GitHub repository `repo`.
+ *
+ * @remarks
+ * The comparison ignores case because GitHub names are case-insensitive. The preferred board wins
+ * when it holds the repository; otherwise the first open board in list order does.
+ */
+async function matchBoardRepo(
+  repo: string,
+  preferred?: BoardKey,
+): Promise<{ boardKey: BoardKey; repoPath: string } | null> {
+  const { boards } = await listBoards(() => Promise.resolve(null));
+  const ordered = [
+    ...boards.filter((board) => board.key === preferred),
+    ...boards.filter((board) => board.key !== preferred),
+  ];
+  for (const board of ordered) {
+    if (board.archived) continue;
+    for (const { path: repoPath } of board.repositories) {
+      const found = await githubRepoAt(repoPath);
+      if (found?.toLowerCase() === repo.toLowerCase()) {
+        return { boardKey: board.key, repoPath };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Create or reuse the one local card that reviews a pull request.
+ *
+ * @remarks
+ * The card comes from `promoteItem`, so a second call finds the same card. A card that already has
+ * a `reviewPr` is left as it is. The item lookup runs before the credential check so an unknown
+ * pull request answers 404 whatever the connection state.
+ */
+export async function openReviewCard(
+  owner: string,
+  repo: string,
+  number: number,
+  preferredBoard?: BoardKey,
+): Promise<ReviewCardAnswer> {
+  const item = store.getItem(prKey(owner, repo, number));
+  if (!item || item.source !== "github") throw new NotFoundError("not-found");
+  await token();
+  const match = await matchBoardRepo(`${owner}/${repo}`, preferredBoard);
+  if (!match) throw new ConflictError("no-workspace");
+
+  let head = item.meta.headRef ?? "";
+  let base = item.meta.baseRef ?? "";
+  if (head === "" || base === "") {
+    const detail = await getPullRequest(owner, repo, number);
+    head = detail.head;
+    base = detail.base;
+  }
+
+  const promoted = await store.promoteItem(match.boardKey, item.id);
+  if (!promoted) throw new NotFoundError("not-found");
+  const { card, created } = promoted;
+  if (!card.reviewPr) {
+    const url = item.url ?? prUrl(owner, repo, number);
+    await store.setCardReview(card.id, {
+      reviewPr: {
+        repo: `${owner}/${repo}`,
+        number,
+        url,
+        head,
+        base,
+        repoPath: match.repoPath,
+      },
+      url,
+      workspace: {
+        folder: path.dirname(match.repoPath),
+        repos: [{ path: match.repoPath, base }],
+      },
+    });
+  }
+  return {
+    cardId: card.id,
+    created,
+    column: card.column,
+    boardKey: card.boardKey,
+  };
 }

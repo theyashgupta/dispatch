@@ -5,16 +5,20 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import type { PrReviewEvent } from "../../../../shared/types.js";
+import type { BoardKey, PrReviewEvent } from "../../../../shared/types.js";
 import {
+  getGithubRepos,
   getPullRequest,
   mergePullRequest,
+  openReviewCard,
   reviewPullRequest,
 } from "./pull-requests-api.js";
+import { boardSnapshotKeys } from "@/queries/board-snapshot-queries";
 import type { ProviderResult } from "@/queries/provider-api";
 
 export const pullRequestsKeys = {
   all: ["pull-requests"] as const,
+  repos: ["pull-requests", "repos"] as const,
   detail: (owner: string, repo: string, number: number) =>
     ["pull-requests", owner, repo, number] as const,
 };
@@ -114,4 +118,43 @@ export function useMergePullRequestMutation(
       await refreshPullRequestAfterMerge(client, vars);
     },
   });
+}
+
+export function githubReposQueryOptions() {
+  return queryOptions({
+    queryKey: pullRequestsKeys.repos,
+    queryFn: getGithubRepos,
+    staleTime: 60_000,
+  });
+}
+
+export function useGithubReposQuery() {
+  return useQuery(githubReposQueryOptions());
+}
+
+export const reviewCardMutationOptions = {
+  mutationFn: (vars: PullRequestRef & { board: BoardKey }) =>
+    openReviewCard(vars.owner, vars.repo, vars.number, vars.board),
+};
+
+/**
+ * Run the review card mutation, then refetch the board snapshot.
+ *
+ * @remarks
+ * The route emits no stream event for the link between the card and the pull request, so the
+ * snapshot is read again. The mutation stays pending until it ends, so the Start dialog finds the card.
+ */
+export function useOpenReviewCardMutation() {
+  const client = useQueryClient();
+  return useMutation({
+    ...reviewCardMutationOptions,
+    onSuccess: () =>
+      client.invalidateQueries({ queryKey: boardSnapshotKeys.all }),
+  });
+}
+
+export function usePullRequestLoader() {
+  const client = useQueryClient();
+  return (ref: PullRequestRef) =>
+    client.fetchQuery(pullRequestQueryOptions(ref.owner, ref.repo, ref.number));
 }

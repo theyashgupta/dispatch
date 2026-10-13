@@ -1,6 +1,6 @@
 {
   "name": "@theyashgupta/dispatch",
-  "version": "4.5.0",
+  "version": "4.5.2",
   "description": "A local kanban board that turns Linear tickets into live Claude Code agent sessions - one git worktree per ticket, real terminals in the browser.",
   "keywords": [
     "kanban",
@@ -42,7 +42,7 @@
     "typecheck": "node scripts/with-check-slot.mjs npm run typecheck:tsgo",
     "typecheck:tsgo": "tsgo --noEmit --tsBuildInfoFile node_modules/.cache/tsgo/root.tsbuildinfo && tsgo --noEmit -p src/web/tsconfig.json --tsBuildInfoFile node_modules/.cache/tsgo/web.tsbuildinfo",
     "typecheck:tsc": "tsc --noEmit && tsc --noEmit -p src/web/tsconfig.json",
-    "test": "node --import tsx --test 'src/server/**/*.test.ts' 'src/shared/**/*.test.ts' && TSX_TSCONFIG_PATH=src/web/tsconfig.json node --import tsx --test 'src/web/**/*.test.ts' && node --import tsx --test 'eslint-local/**/*.test.ts'",
+    "test": "node --import tsx --test 'src/server/**/*.test.ts' 'src/shared/**/*.test.ts' && TSX_TSCONFIG_PATH=src/web/tsconfig.json node --import tsx --test 'src/web/**/*.test.ts' && node --import tsx --test 'eslint-local/**/*.test.ts' && node --test 'scripts/**/*.test.mjs'",
     "terminal-e2e": "node scripts/terminal-appearance-e2e.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",

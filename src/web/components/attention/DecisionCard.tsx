@@ -9,16 +9,56 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Field } from "@/components/ui/field";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import type { DecisionView } from "../../../shared/decision-view.js";
 
 interface DecisionCardProps {
   view: DecisionView;
   disabled: boolean;
+  boldRecommended?: boolean;
   onAnswer: (optionId: string, note: string | null) => Promise<boolean>;
 }
 
-export function DecisionCard({ view, disabled, onAnswer }: DecisionCardProps) {
+export function PlanTable({ rows }: { rows: DecisionView["planRows"] }) {
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Order</TableHead>
+          <TableHead>Ticket</TableHead>
+          <TableHead>Playbook</TableHead>
+          <TableHead>Size</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((row) => (
+          <TableRow key={`${row.order}:${row.ref}`}>
+            <TableCell>{row.order}</TableCell>
+            <TableCell className="font-mono">{row.ref}</TableCell>
+            <TableCell>{row.playbook}</TableCell>
+            <TableCell>{row.size}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
+}
+
+export function DecisionCard({
+  view,
+  disabled,
+  boldRecommended = false,
+  onAnswer,
+}: DecisionCardProps) {
   const [text, setText] = useState("");
   const typed = text.trim();
   const canSend = !disabled && typed !== "" && view.otherOptionId !== null;
@@ -42,16 +82,25 @@ export function DecisionCard({ view, disabled, onAnswer }: DecisionCardProps) {
             ))}
           </ul>
         )}
+        {view.planRows.length > 0 && <PlanTable rows={view.planRows} />}
         {view.options.map((option) => (
           <Button
             key={option.id}
             type="button"
             variant="outline"
+            size="wrap"
             disabled={disabled}
             className="w-full justify-between"
             onClick={() => void onAnswer(option.id, null)}
           >
-            <span className="min-w-0 truncate">{option.label}</span>
+            <span
+              className={cn(
+                "min-w-0 text-left",
+                boldRecommended && option.recommended && "font-semibold",
+              )}
+            >
+              {option.label}
+            </span>
             {option.recommended && <Badge tone="neutral">Recommended</Badge>}
           </Button>
         ))}

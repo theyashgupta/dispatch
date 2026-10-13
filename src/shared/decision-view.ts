@@ -1,4 +1,5 @@
-import type { DecisionItem } from "./types.js";
+import { SESSION_STATES } from "./session-states.js";
+import type { DecisionItem, PlanEntry, SupervisorState } from "./types.js";
 
 export interface DecisionOptionView {
   id: string;
@@ -12,6 +13,7 @@ export interface DecisionView {
   meta: string;
   options: DecisionOptionView[];
   proposalTitles: string[];
+  planRows: PlanEntry[];
   otherOptionId: string | null;
 }
 
@@ -21,6 +23,11 @@ export const REPLY_COPY: Record<ReplyResult, string> = {
   confirmed: "Delivered",
   unconfirmed: "Not confirmed. Check the terminal.",
 };
+
+export const ACTION_LABELS = {
+  resume: "Resume loop",
+  retry_resume: "Try resume again",
+} as const;
 
 export interface StoredReply<T = ReplyResult> {
   result: T;
@@ -34,7 +41,11 @@ export interface ReplyRow {
   stateSince: string | null;
 }
 
-const GATE_KINDS: readonly string[] = ["roadmap_approval", "ticket_proposal"];
+export const GATE_KINDS: readonly DecisionItem["kind"][] = [
+  "roadmap_approval",
+  "ticket_proposal",
+  "plan",
+];
 
 /** Format how long ago a decision item was asked, for example "6 min ago". */
 export function askedAgo(iso: string, now: number): string {
@@ -49,11 +60,42 @@ export function askedAgo(iso: string, now: number): string {
 }
 
 /**
- * Build the view model of each open decision item.
+ * Build the view model of one decision item.
  *
  * @remarks
- * Options keep their written order and the recommended mark never moves one. The typed answer of "Other answer" rides on the recommended option, else the first option, because the answer route needs an option id of the item. A `roadmap_approval` or `ticket_proposal` item is a binary gate, so it has no other answer.
+ * Options keep their written order and the recommended mark never moves one. The typed answer
+ * of "Other answer" rides on the recommended option, else the first option, because the answer
+ * route needs an option id of the item. A `roadmap_approval`, `ticket_proposal` or `plan` item
+ * is a binary gate, so it has no other answer.
  */
+export function decisionView(
+  item: DecisionItem,
+  orchestratorNames: ReadonlyMap<string, string>,
+  now: number,
+): DecisionView {
+  const name =
+    orchestratorNames.get(item.orchestratorId) ?? item.orchestratorId;
+  return {
+    id: item.id,
+    question: item.question,
+    meta: `${item.cardId ?? "Board"}, asked by ${name} ${askedAgo(item.createdAt, now)}`,
+    options: item.options.map((option) => ({
+      id: option.id,
+      label: option.label,
+      recommended: option.id === item.recommendedOptionId,
+    })),
+    proposalTitles:
+      item.kind === "ticket_proposal"
+        ? (item.proposal?.tickets.map((t) => t.title) ?? [])
+        : [],
+    planRows: [...(item.plan?.entries ?? [])].sort((a, b) => a.order - b.order),
+    otherOptionId: GATE_KINDS.includes(item.kind)
+      ? null
+      : (item.recommendedOptionId ?? item.options[0]?.id ?? null),
+  };
+}
+
+/** Build the view model of each open decision item. */
 export function decisionViews(
   items: readonly DecisionItem[],
   orchestratorNames: ReadonlyMap<string, string>,
@@ -61,27 +103,7 @@ export function decisionViews(
 ): DecisionView[] {
   return items
     .filter((item) => item.state === "open")
-    .map((item) => {
-      const name =
-        orchestratorNames.get(item.orchestratorId) ?? item.orchestratorId;
-      return {
-        id: item.id,
-        question: item.question,
-        meta: `${item.cardId ?? "Board"}, asked by ${name} ${askedAgo(item.createdAt, now)}`,
-        options: item.options.map((option) => ({
-          id: option.id,
-          label: option.label,
-          recommended: option.id === item.recommendedOptionId,
-        })),
-        proposalTitles:
-          item.kind === "ticket_proposal"
-            ? (item.proposal?.tickets.map((t) => t.title) ?? [])
-            : [],
-        otherOptionId: GATE_KINDS.includes(item.kind)
-          ? null
-          : (item.recommendedOptionId ?? item.options[0]?.id ?? null),
-      };
-    });
+    .map((item) => decisionView(item, orchestratorNames, now));
 }
 
 /**
@@ -115,6 +137,45 @@ export function liveReplyResults<T>(
     }
   }
   return live;
+}
+
+type ReplyOutcome =
+  | { ok: true; result: ReplyResult | null }
+  | { ok: false; error: string; reason: string | null };
+
+/** Build the line under a reply after the send, for a confirmed or unconfirmed send or a refusal. */
+export function replyOutcomeText(
+  outcome: ReplyOutcome,
+  title: string,
+  state: SupervisorState | undefined,
+): string | null {
+  if (outcome.ok) return REPLY_COPY[outcome.result ?? "unconfirmed"];
+  if (outcome.error !== "session-state-refused") return null;
+  const label =
+    state === undefined ? "another state" : SESSION_STATES[state].label;
+  return `Not sent. ${title} is now at ${label}. Open the terminal.`;
+}
+
+/**
+ * Map a reply outcome to the result line and the failure line of the reply.
+ *
+ * @remarks
+ * A refusal that has its own result line, such as a changed session state, shows no failure line.
+ */
+export function replyFeedback(
+  outcome: ReplyOutcome,
+  title: string,
+  state: SupervisorState | undefined,
+  action: string,
+): { result: string | null; failure: string | null } {
+  const result = replyOutcomeText(outcome, title, state);
+  return {
+    result,
+    failure:
+      outcome.ok || result !== null
+        ? null
+        : actionFailedText(action, refusalText(outcome.error, outcome.reason)),
+  };
 }
 
 /** The toast or error line of a failed action, for example "Resume loop failed: there is no open session.". */

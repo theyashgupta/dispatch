@@ -1,4 +1,4 @@
-import { useReducer, useRef } from "react";
+import { useEffect, useReducer, useRef, useState } from "react";
 import type { CardSearchResult } from "../../../../shared/search.js";
 import { SEARCH_QUERY_MAX } from "../../../../shared/search.js";
 import { COLUMN_LABELS } from "../../../../shared/column-labels.js";
@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { Kbd } from "@/components/ui/kbd";
 import {
+  commandsInGroup,
   filterCommands,
   groupCommands,
   type Command as PaletteCommand,
@@ -31,6 +32,7 @@ import { useReturnFocus } from "@/modules/shell/hooks/use-return-focus";
 
 interface CommandPaletteProps {
   commands: readonly PaletteCommand[];
+  initialGroup?: string;
   results: readonly CardSearchResult[];
   searchFailed: boolean;
   onQueryChange: (query: string) => void;
@@ -40,27 +42,68 @@ interface CommandPaletteProps {
 
 export function CommandPalette({
   commands,
+  initialGroup,
   results,
   searchFailed,
   onQueryChange,
   onClose,
   onOpenCard,
 }: CommandPaletteProps) {
-  const [state, dispatch] = useReducer(paletteReducer, INITIAL_PALETTE);
+  const [state, dispatch] = useReducer(paletteReducer, initialGroup, (group) =>
+    group === undefined
+      ? INITIAL_PALETTE
+      : paletteReducer(INITIAL_PALETTE, { type: "open-group", group }),
+  );
   const ranRef = useRef<"command" | "card" | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [submitting, setSubmitting] = useState(false);
   const returnFocus = useReturnFocus();
+  const prompt =
+    commands.find((command) => command.id === state.promptId)?.prompt ?? null;
 
-  const shown = filterCommands(commands, state.query);
-  const values = [
-    ...shown.map((command) => `command:${command.id}`),
-    ...results.map((result) => `card:${result.id}`),
-  ];
+  useEffect(() => {
+    if (prompt !== null && !submitting) inputRef.current?.focus();
+  }, [prompt, submitting]);
+
+  const shown =
+    prompt === null
+      ? filterCommands(commandsInGroup(commands, state.group), state.query)
+      : [];
+  const shownResults = prompt === null && state.group === null ? results : [];
+  const values =
+    prompt === null
+      ? [
+          ...shown.map((command) => `command:${command.id}`),
+          ...shownResults.map((result) => `card:${result.id}`),
+        ]
+      : ["prompt:submit"];
   const count = values.length;
   const highlight = Math.min(state.highlight, count - 1);
 
+  async function submitPrompt() {
+    const text = state.query.trim();
+    if (text === "" || prompt === null || submitting) return;
+    setSubmitting(true);
+    try {
+      await prompt.submit(text);
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function enterPrompt(command: PaletteCommand) {
+    if (command.prompt === undefined) return;
+    dispatch({ type: "enter-prompt", commandId: command.id });
+    onQueryChange("");
+  }
+
   function runAt(index: number) {
-    const row = rowAt(shown, results, index);
+    const row = rowAt(shown, shownResults, index);
     if (row == null || ranRef.current != null) return;
+    if (row.kind === "command" && row.command.prompt !== undefined) {
+      enterPrompt(row.command);
+      return;
+    }
     ranRef.current = row.kind;
     onClose(row.kind === "command");
     if (row.kind === "command") void row.command.run();
@@ -71,12 +114,17 @@ export function CommandPalette({
     <Dialog
       open
       onOpenChange={(open) => {
-        if (!open) onClose(ranRef.current === "command");
+        if (!open && !submitting) onClose(ranRef.current === "command");
       }}
     >
       <DialogContent
         aria-describedby={undefined}
         className="top-[15vh] translate-y-0 sm:max-w-[560px]"
+        onEscapeKeyDown={(event) => {
+          if (prompt === null) return;
+          event.preventDefault();
+          if (!submitting) dispatch({ type: "leave-prompt" });
+        }}
         onCloseAutoFocus={(event) => {
           if (ranRef.current === "command") event.preventDefault();
           else returnFocus(event);
@@ -96,23 +144,37 @@ export function CommandPalette({
           }}
         >
           <CommandInput
+            ref={inputRef}
             className="px-2"
-            aria-label="Search commands and tickets"
-            placeholder="Type a command or a ticket…"
+            aria-label={prompt?.placeholder ?? "Search commands and tickets"}
+            placeholder={prompt?.placeholder ?? "Type a command or a ticket…"}
             maxLength={SEARCH_QUERY_MAX}
             value={state.query}
+            disabled={submitting}
             onValueChange={(query) => {
               dispatch({ type: "query", query });
-              onQueryChange(query);
+              if (prompt === null && state.group === null) onQueryChange(query);
             }}
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.nativeEvent.isComposing) {
                 event.preventDefault();
-                runAt(highlight);
+                if (prompt === null) runAt(highlight);
+                else void submitPrompt();
               }
             }}
           />
           <CommandList className="max-h-[50vh]">
+            {prompt !== null && state.query.trim() !== "" && (
+              <CommandGroup>
+                <CommandItem
+                  value="prompt:submit"
+                  onSelect={() => void submitPrompt()}
+                  className="min-h-8 text-base"
+                >
+                  {prompt.hint}
+                </CommandItem>
+              </CommandGroup>
+            )}
             {groupCommands(shown).map((section) => (
               <CommandGroup
                 key={section.heading ?? ""}
@@ -131,9 +193,9 @@ export function CommandPalette({
                 ))}
               </CommandGroup>
             ))}
-            {results.length > 0 && (
+            {shownResults.length > 0 && (
               <CommandGroup heading="Tickets">
-                {results.map((result, i) => {
+                {shownResults.map((result, i) => {
                   const index = shown.length + i;
                   return (
                     <CommandItem
@@ -156,14 +218,14 @@ export function CommandPalette({
                 })}
               </CommandGroup>
             )}
-            {searchFailed ? (
+            {prompt !== null ? null : searchFailed ? (
               <p
                 role="status"
                 className="px-4 py-2 text-xs text-muted-foreground"
               >
                 Ticket search failed
               </p>
-            ) : (
+            ) : shown.length + shownResults.length > 0 ? null : (
               <CommandEmpty>
                 <p role="status" className="m-0">
                   No matching commands or tickets

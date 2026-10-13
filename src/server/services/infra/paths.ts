@@ -1,6 +1,7 @@
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { CrossSessionInbound } from "../../../shared/types.js";
 import { DISPATCH_DATA_DIR } from "../../store/data-dir.js";
 
 /**
@@ -51,6 +52,11 @@ export const HOOK_SCRIPT_PATH = path.join(DISPATCH_DIR, "hook.sh");
  * script so both regenerate together at boot; never merged into `~/.claude/settings.json`.
  */
 export const HOOK_SETTINGS_PATH = path.join(DISPATCH_DIR, "hook-settings.json");
+
+/** The settings layer a launch passes for one resolved cross-session inbound value. */
+export function hookSettingsPath(value: CrossSessionInbound): string {
+  return path.join(DISPATCH_DIR, `hook-settings-${value}.json`);
+}
 
 /**
  * The pty shim every Dispatch tmux pane runs `claude` under (TERM-05). Regenerated at boot beside

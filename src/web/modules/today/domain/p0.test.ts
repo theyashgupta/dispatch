@@ -48,6 +48,25 @@ function item(id: string, over: Partial<Item> = {}): Item {
 
 const keys = (entries: { key: string }[]) => entries.map((e) => e.key);
 
+test("a dismissed Inbox card is not a pick even when urgent", () => {
+  const dismissed = {
+    ...card("DIS", "inbox", 1, TODAY),
+    inboxDismissedAt: TODAY,
+  };
+  assert.deepEqual(keys(rankToday([dismissed], [], "today", NOW)), []);
+  assert.deepEqual(
+    keys(
+      rankToday(
+        [{ ...dismissed, inboxDismissedAt: undefined }],
+        [],
+        "today",
+        NOW,
+      ),
+    ),
+    ["DIS"],
+  );
+});
+
 test("a needs_input card from 3 days ago ranks before an urgent card updated today (U3-05)", () => {
   const cards = [
     card("URG", "todo", 1, TODAY),

@@ -15,6 +15,12 @@ import {
   type RepoChoice,
 } from "@/modules/card-actions/domain/start-request";
 
+interface Picked {
+  folder: string | null;
+  chosen: RepoChoice[];
+  noRepositoryBoard: boolean;
+}
+
 type StartOutcome = { ok: true } | ({ ok: false } & Refusal);
 
 interface StartFlowInput {
@@ -23,6 +29,10 @@ interface StartFlowInput {
   requestClose: () => void;
   pending: boolean;
   titled?: boolean;
+  allowNoRepository?: boolean;
+  playbookTag?: string;
+  playbook?: string;
+  preferredFolder?: string | null;
   focusRef: RefObject<HTMLElement | null>;
   send: (picks: {
     folder: string | null;
@@ -54,6 +64,10 @@ export function useStartFlow(input: StartFlowInput): StartFlow {
     requestClose,
     pending,
     titled,
+    allowNoRepository,
+    playbookTag,
+    playbook: preferredPlaybook,
+    preferredFolder,
     focusRef,
     send,
     toFailure,
@@ -63,29 +77,32 @@ export function useStartFlow(input: StartFlowInput): StartFlow {
   const submittingRef = useRef(false);
 
   const clearFailure = useCallback(() => setFailure(null), []);
-  const workspace = useWorkspacePicker(board, clearFailure);
-  const playbook = usePlaybookPicker(clearFailure);
+  const playbook = usePlaybookPicker(clearFailure, {
+    tag: playbookTag,
+    preferred: preferredPlaybook,
+  });
 
-  const startable =
+  const startableWith = (picked: Picked) =>
     open &&
     canStart({
       pending,
       configError: failure?.variant === "config",
-      folder: workspace.selectedFolder,
-      repoCount: workspace.chosen.length,
       titled,
+      folder: picked.folder,
+      repoCount: picked.chosen.length,
+      noRepositoryBoard: picked.noRepositoryBoard,
     });
 
-  const start = async () => {
-    if (!startable || submittingRef.current) return;
+  const startWith = async (picked: Picked) => {
+    if (!startableWith(picked) || submittingRef.current) return;
     submittingRef.current = true;
     focusRef.current?.focus();
     setFailure(null);
     let result: StartOutcome;
     try {
       result = await send({
-        folder: workspace.selectedFolder,
-        repos: workspace.chosen,
+        folder: picked.folder,
+        repos: picked.chosen,
         playbook: playbook.selected,
       });
     } catch (err) {
@@ -105,5 +122,34 @@ export function useStartFlow(input: StartFlowInput): StartFlow {
     if (refusal.variant === "playbook") playbook.reload();
   };
 
-  return { workspace, playbook, failure, canStart: startable, start };
+  const workspace = useWorkspacePicker(
+    board,
+    clearFailure,
+    allowNoRepository
+      ? (picked) => {
+          const noRepository = { ...picked, noRepositoryBoard: true };
+          return {
+            disabled: !startableWith(noRepository),
+            pending,
+            run: () => void startWith(noRepository),
+          };
+        }
+      : undefined,
+    preferredFolder ?? null,
+  );
+  const here = {
+    folder: workspace.selectedFolder,
+    chosen: workspace.chosen,
+    noRepositoryBoard: workspace.noRepositoryBoard,
+  };
+
+  const creating = workspace.view.noRepository?.creating === true;
+
+  return {
+    workspace,
+    playbook,
+    failure,
+    canStart: startableWith(here) && !creating,
+    start: () => (creating ? Promise.resolve() : startWith(here)),
+  };
 }

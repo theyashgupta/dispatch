@@ -82,10 +82,10 @@ test("nothing fires while a modal or a row menu is open", () => {
   );
 });
 
-test("the Inbox shortcut table lists j, k, Enter, e, s, o, u and a once each", () => {
+test("the Inbox shortcut table lists j, k, Enter, e, s, o, u, a, y, d and r once each", () => {
   assert.deepEqual(
     INBOX_SHORTCUTS.map((s) => s.key),
-    ["j", "k", "Enter", "e", "s", "o", "u", "a"],
+    ["j", "k", "Enter", "e", "s", "o", "u", "a", "y", "d", "r"],
   );
 });
 
@@ -178,7 +178,7 @@ test("a plain binding never resolves with Cmd held, and ? resolves as typed with
 test("the global and board tables list each key once, board keys 1 to 7 follow the columns, and ? is global only", () => {
   const global = GLOBAL_SHORTCUTS.map((b) => b.key);
   const board = BOARD_SHORTCUTS.map((b) => b.key);
-  assert.deepEqual(global, ["k", "n", "?"]);
+  assert.deepEqual(global, ["k", "n", "?", "b"]);
   assert.deepEqual(board, [
     "j",
     "k",
@@ -235,5 +235,50 @@ test("a is bound in the Inbox table with its label", () => {
   assert.deepEqual(
     INBOX_SHORTCUTS.find((s) => s.key === "a"),
     { key: "a", label: "Ask about this" },
+  );
+});
+
+const switchBoard = bindShortcuts(GLOBAL_SHORTCUTS, { b: () => {} });
+
+test("b is always bound and labelled Switch board", () => {
+  assert.deepEqual(
+    GLOBAL_SHORTCUTS.filter((row) => row.key === "b"),
+    [{ key: "b", label: "Switch board" }],
+  );
+  assert.equal(
+    resolveShortcut(key("b"), switchBoard, idle)?.label,
+    "Switch board",
+  );
+  assert.equal(
+    resolveShortcut(key("b", { target: null }), switchBoard, idle)?.key,
+    "b",
+  );
+});
+
+test("b is inert in a text field, with a modifier, in a dialog and in a menu", () => {
+  for (const tagName of ["INPUT", "TEXTAREA"]) {
+    assert.equal(
+      resolveShortcut(key("b", { target: { tagName } }), switchBoard, idle),
+      null,
+    );
+  }
+  assert.equal(
+    resolveShortcut(
+      key("b", { target: { tagName: "DIV", isContentEditable: true } }),
+      switchBoard,
+      idle,
+    ),
+    null,
+  );
+  for (const extra of [{ metaKey: true }, { ctrlKey: true }]) {
+    assert.equal(resolveShortcut(key("b", extra), switchBoard, idle), null);
+  }
+  assert.equal(
+    resolveShortcut(key("b"), switchBoard, { ...idle, modalOpen: true }),
+    null,
+  );
+  assert.equal(
+    resolveShortcut(key("b"), switchBoard, { ...idle, menuOpen: true }),
+    null,
   );
 });

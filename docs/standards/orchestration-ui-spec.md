@@ -32,8 +32,9 @@ Table rules:
 ### Routes
 
 - The routes of today stay. Each URL of today shows the default board `LOCAL`, as today.
-- Each board-scoped route takes the search parameter `board` with the board key. When the parameter is absent, the route shows the default board (D-4). The board-scoped routes are the pages that read the board snapshot today: `/board`, `/inbox`, `/today`, `/tickets`, `/sessions`, `/workspace`, `/workspaces`, `/flow`, `/activity`, `/archive`, and the new `/dashboard`. The source pages (`/pull-requests`, `/errors`, `/slack`, `/meetings`, `/calendar`) read only the global source data or look up cards. They keep the `board` parameter in their links and open the cards of the selected board.
-- The selected board is the `board` parameter of the current URL. A link inside the app keeps the `board` parameter of the current URL.
+- The pages `/boards/<KEY>` (board), `/boards/<KEY>/dashboard`, `/boards/<KEY>/inbox`, `/boards/<KEY>/sessions` and `/boards/<KEY>/settings` carry the board key in the path. The old addresses `/board`, `/dashboard`, `/inbox` and `/sessions` still open and go to the keyed address.
+- Each other board-scoped route takes the search parameter `board` with the board key. When the parameter is absent, the route shows the default board (D-4). The board-scoped routes are the pages that read the board snapshot today: `/board`, `/inbox`, `/today`, `/tickets`, `/sessions`, `/workspace`, `/workspaces`, `/flow`, `/activity`, `/archive`, and the new `/dashboard`. The source pages (`/pull-requests`, `/errors`, `/slack`, `/meetings`, `/calendar`) read only the global source data or look up cards. They keep the `board` parameter in their links and open the cards of the selected board.
+- The selected board is the path key on a keyed page, else the `board` parameter of the current URL. A link inside the app keeps the board of the current URL.
 - An unknown or archived `board` key shows the default board `LOCAL` and the toast "Board <KEY> is not available." When the user archives the selected board, the app goes to the same page on the default board.
 - New route `/boards`: the boards page (Screen 1). It is not board-scoped.
 - New route `/dashboard`: the dashboard of the selected board (Screen 4).
@@ -44,15 +45,15 @@ Table rules:
 
 | Screen                        | Route or place                                       | How the user gets to it                                                                                                                                                                   |
 | ----------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1. Boards page                | `/boards`                                            | The command palette entry "Manage boards". The switcher menu item "Manage boards" when the switcher shows.                                                                                |
-| 2. Board switcher             | The sidebar header, below the wordmark               | It shows only when more than one board exists (not archived). The shortcut `b`. The command palette entries "Switch to board <name>".                                                     |
+| 1. Boards page                | `/boards`                                            | The command palette entry "Manage boards". The icon of the Boards section in the collapsed sidebar.                                                                                       |
+| 2. Sidebar Boards section     | The sidebar content, after the System group          | It always shows. The shortcut `b` opens the command palette with the Boards group only. The command palette entries "Switch to board <name>".                                             |
 | 3. Orchestrator panel         | The right panel of `/board?panel=orchestrator`       | The board header button "Orchestrator" when the board has a main orchestrator, else "Add orchestrator" (Screen 5).                                                                        |
 | 4. Dashboard                  | `/dashboard?board=<KEY>`                             | The sidebar row "Dashboard" in the Work group. The row shows only when the selected board has a main orchestrator. The command palette entry "Go to Dashboard" shows under the same rule. |
 | 5. Board with no orchestrator | `/board` when the selected board has no orchestrator | The sidebar row "Board", as today.                                                                                                                                                        |
 
 Navigation rules:
 
-- With one board and no orchestrator, the shell is the shell of today. It shows no switcher and no "Dashboard" row. The only new visible part is the "Add orchestrator" button in the board header (Screen 5).
+- With one board and no orchestrator, the shell is the shell of today. It shows the Boards section with one board and the "Create board" row, and no "Dashboard" row. The only other new visible part is the "Add orchestrator" button in the board header (Screen 5).
 - The command palette entries "Manage boards" and "Go to Dashboard" are not visible chrome. They show only when the user opens the palette.
 - The page title of a board-scoped page is the page name. When more than one board exists, the title is "<page name> · <board name>", for example "Board · Dispatch". With one board, the title stays "Board", as today.
 
@@ -77,26 +78,26 @@ The user sees all boards in one list, adds a board, edits a board and archives a
 
 ### Parts
 
-| Part                          | Primitive                  | Copy                                                                                                                                                                                                                                                                                                    |
-| ----------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| New board button              | `button`                   | "New board"                                                                                                                                                                                                                                                                                             |
-| Board list (1440 px, 1024 px) | `table`                    | Column heads: "Name", "Key", "Repositories", "Running", "Open groups", "Attention"                                                                                                                                                                                                                      |
-| Board list (390 px)           | `item`                     | "<name>" and "<KEY>" on line 1                                                                                                                                                                                                                                                                          |
-| Default board mark            | `badge`                    | "Default" beside the name of `LOCAL`                                                                                                                                                                                                                                                                    |
-| Count cells                   | `badge`                    | "<n> running", "<n> open groups" ("1 open group"), "<n> need attention" ("1 needs attention"). A zero shows "0" with no badge.                                                                                                                                                                          |
-| Row menu                      | `dropdown-menu`            | Trigger label "Board actions". Items: "Open board", "Edit", "Archive". The default board has no "Archive" item.                                                                                                                                                                                         |
-| Create and edit form          | `dialog`                   | Title "New board" or "Edit board <name>". Buttons "Create board" or "Save", and "Cancel".                                                                                                                                                                                                               |
-| Key field                     | `field`, `label`, `input`  | Label "Key". Help "2 to 6 capital letters or digits. It starts with a letter. You cannot change it later." Read-only in the edit form.                                                                                                                                                                  |
-| Key errors                    | `field`                    | "Use 2 to 6 capital letters or digits, starting with a letter." "LOCAL and GROUP are reserved." "Board <name> uses this key." "Linear team <KEY> uses this key."                                                                                                                                        |
-| Name field                    | `field`, `label`, `input`  | Label "Name". Error "Enter a name."                                                                                                                                                                                                                                                                     |
-| Workspace root field          | `field`, `label`, `input`  | Label "Sessions folder". Help "Dispatch makes one folder for each session in this folder." Error "This folder does not exist."                                                                                                                                                                          |
-| Repository rows               | `field`, `input`, `button` | Labels "Repository path", "Base branch", "Check command". Placeholder of the check command "npm run check". Buttons "Add repository" and "Remove". Error "Add at least one repository."                                                                                                                 |
-| Linear team keys field        | `field`, `label`, `input`  | Label "Linear team keys". Help "New Linear issues of these teams go to this board. Separate keys with a comma."                                                                                                                                                                                         |
-| Linear key warning            | `alert`, `badge`           | "Linear team <KEY> has the same key as this board. Dispatch skips each Linear issue whose id is already a card id." It shows on the edit form, and a `badge` "Key clash" shows on the board row, when the warning of D-2 applies.                                                                       |
-| Default board note            | `alert`                    | "The default board reads its repositories from Settings, Workspaces. A change here also changes that list. It picks the base branch at each start and runs `npm run check`." It shows in the edit form of `LOCAL`. That form shows the path of each repository row only.                                |
-| Archive confirm               | `alert-dialog`             | Title "Archive board <name>?" Body "The board leaves the switcher. Its cards and sessions stay. You can restore it from Archived boards." Buttons "Archive board" and "Cancel". The "Archive" menu item is disabled when sessions run, with the reason below it: "Stop the <n> running sessions first." |
-| Archived boards section       | `collapsible`, `table`     | Trigger "Archived boards (<n>)". Row action "Restore".                                                                                                                                                                                                                                                  |
-| Save result                   | `sonner`                   | "Board <name> created." "Board <name> saved." "Board <name> archived." "Board <name> restored."                                                                                                                                                                                                         |
+| Part                          | Primitive                  | Copy                                                                                                                                                                                                                                                                                                          |
+| ----------------------------- | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| New board button              | `button`                   | "New board"                                                                                                                                                                                                                                                                                                   |
+| Board list (1440 px, 1024 px) | `table`                    | Column heads: "Name", "Key", "Repositories", "Running", "Open groups", "Attention"                                                                                                                                                                                                                            |
+| Board list (390 px)           | `item`                     | "<name>" and "<KEY>" on line 1                                                                                                                                                                                                                                                                                |
+| Default board mark            | `badge`                    | "Default" beside the name of `LOCAL`                                                                                                                                                                                                                                                                          |
+| Count cells                   | `badge`                    | "<n> running", "<n> open groups" ("1 open group"), "<n> need attention" ("1 needs attention"). A zero shows "0" with no badge.                                                                                                                                                                                |
+| Row menu                      | `dropdown-menu`            | Trigger label "Board actions". Items: "Open board", "Edit", "Archive". The default board has no "Archive" item.                                                                                                                                                                                               |
+| Create and edit form          | `dialog`                   | Title "New board" or "Edit board <name>". Buttons "Create board" or "Save", and "Cancel".                                                                                                                                                                                                                     |
+| Key field                     | `field`, `label`, `input`  | Label "Key". Help "2 to 6 capital letters or digits. It starts with a letter. You cannot change it later." Read-only in the edit form.                                                                                                                                                                        |
+| Key errors                    | `field`                    | "Use 2 to 6 capital letters or digits, starting with a letter." "LOCAL and GROUP are reserved." "Board <name> uses this key." "Linear team <KEY> uses this key."                                                                                                                                              |
+| Name field                    | `field`, `label`, `input`  | Label "Name". Error "Enter a name."                                                                                                                                                                                                                                                                           |
+| Workspace root field          | `field`, `label`, `input`  | Label "Sessions folder". Help "Dispatch makes one folder for each session in this folder." Error "This folder does not exist."                                                                                                                                                                                |
+| Repository rows               | `field`, `input`, `button` | Labels "Repository path", "Base branch", "Check command". Placeholder of the check command "npm run check". Buttons "Add repository" and "Remove". Error "Add at least one repository."                                                                                                                       |
+| Linear team keys field        | `field`, `label`, `input`  | Label "Linear team keys". Help "New Linear issues of these teams go to this board. Separate keys with a comma."                                                                                                                                                                                               |
+| Linear key warning            | `alert`, `badge`           | "Linear team <KEY> has the same key as this board. Dispatch skips each Linear issue whose id is already a card id." It shows on the edit form, and a `badge` "Key clash" shows on the board row, when the warning of D-2 applies.                                                                             |
+| Default board note            | `alert`                    | "The default board reads its repositories from Settings, Workspaces. A change here also changes that list. It picks the base branch at each start and runs `npm run check`." It shows in the edit form of `LOCAL`. That form shows the path of each repository row only.                                      |
+| Archive confirm               | `alert-dialog`             | Title "Archive board <name>?" Body "The board leaves the Boards section. Its cards and sessions stay. You can restore it from Archived boards." Buttons "Archive board" and "Cancel". The "Archive" menu item is disabled when sessions run, with the reason below it: "Stop the <n> running sessions first." |
+| Archived boards section       | `collapsible`, `table`     | Trigger "Archived boards (<n>)". Row action "Restore".                                                                                                                                                                                                                                                        |
+| Save result                   | `sonner`                   | "Board <name> created." "Board <name> saved." "Board <name> archived." "Board <name> restored."                                                                                                                                                                                                               |
 
 ### States
 
@@ -108,51 +109,52 @@ The user sees all boards in one list, adds a board, edits a board and archives a
 | Stale        | The last rows stay. A `badge` beside the title shows the time of the last update. The count cells keep their last values.                                                       | "Counts from <time>". The shell shows "Disconnected, reconnecting…" as today.                                 |
 | Action error | A failed create, save, archive or restore. In the dialog, an `alert` above the buttons; the dialog stays open with the values. For archive and restore, a `sonner` error toast. | "<Action> failed: <error message>." Button "Try again". For example "Create board failed: the key is in use." |
 
-## Screen 2: Board switcher
+## Screen 2: Sidebar Boards section
 
 ### Purpose
 
-The user moves between boards from any page. The switcher shows the attention count of each board, so the user sees which board needs them. LOCAL-87 builds this screen.
+The user moves between boards from any page. The section lists every active board with its attention count and its running loops, so the user sees which board needs them. LOCAL-102 replaces the header switcher of LOCAL-87 with this section.
 
 ### Data
 
 - The board rows of D-1 that are not archived: `key` and `name`.
-- The attention count of each board, as in Screen 1.
-- The selected board: the `board` parameter of the current URL, else `LOCAL`.
+- The attention count and the number of running loops of each board, as in Screen 1.
+- The selected board: the path key on a keyed page, else the `board` parameter of the current URL, else `LOCAL`.
 
 ### Layout
 
-- **1440 px:** the sidebar header keeps the glyph and the wordmark. Below them, inside the header, one trigger button shows the name of the selected board and a chevron. The menu opens below the trigger, 240 px wide (`--nav-width`). The sidebar header grows by one row of 32 px when the switcher shows.
-- **1024 px:** the same as 1440 px. When the sidebar is collapsed (56 px), the trigger shows the first two letters of the board key, and the menu opens to the right of the sidebar.
-- **390 px:** the sidebar is a `sheet` as today. The trigger is the row below the wordmark in the sidebar header inside the sheet, full width. The menu opens below it, full width of the sheet.
+- **1440 px:** the section is the last group in the sidebar content, after the System group, so a long board list never pushes the pages out of view. The label "Boards" is a button with a chevron. Below it, one row per board, then the row "Create board". The sidebar header keeps the glyph and the wordmark only.
+- **1024 px:** the same as 1440 px. When the sidebar is collapsed (56 px), the section is one icon row labeled "Boards" (tooltip on hover) that opens `/boards`.
+- **390 px:** the sidebar is a `sheet` as today. The section shows as at 1440 px. The sheet closes after the user selects a board or "Create board". A long board name truncates and the row does not scroll sideways.
 
 ### Parts
 
-| Part                     | Primitive                 | Copy                                                                                                                                                   |
-| ------------------------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Switcher trigger         | `dropdown-menu`, `button` | "<board name>". Accessible name "Switch board, current board <board name>". Collapsed sidebar: "<first two letters of the key>".                       |
-| Board items              | `dropdown-menu`           | One item per board: "<board name>" and "<KEY>" in mono type. The selected board has a check glyph.                                                     |
-| Attention count per item | `badge`                   | "<n>" when the count is above 0. Accessible name "<n> items need attention". No badge at 0.                                                            |
-| Manage boards item       | `dropdown-menu`           | "Manage boards" after a separator. It opens `/boards`.                                                                                                 |
-| Shortcut hint            | `kbd`                     | "B" beside the trigger tooltip, and in the cheat sheet row "Switch board" in the Global group. The cheat sheet row shows only when the switcher shows. |
-| Trigger tooltip          | `tooltip`                 | "Switch board (B)"                                                                                                                                     |
-| Palette entries          | `command`                 | One entry per board: "Switch to board <name>". The selected board has no entry. Group heading "Boards".                                                |
+| Part                    | Primitive               | Copy                                                                                                                                |
+| ----------------------- | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Section label           | `collapsible`, `button` | "Boards". `aria-expanded` is set. Enter and Space fold and unfold the section. The section is open by default and is not stored.    |
+| Board row               | `sidebar` menu button   | "<board name>", truncated, with the full name in the `title` attribute. The selected board is marked active and has `aria-current`. |
+| Attention count per row | `badge`                 | "<n>" when the count is above 0. Accessible name "<n> items need attention". No badge at 0.                                         |
+| Running loops per row   | muted text              | "<n>" when the number is above 0. Accessible name "<n> running loops".                                                              |
+| Create board row        | `sidebar` menu button   | "Create board". It opens `/boards?dialog=new`.                                                                                      |
+| Shortcut hint           | `kbd`                   | The cheat sheet row "Switch board" with the key "B" in the Global group. The row always shows.                                      |
+| Palette entries         | `command`               | One entry per board: "Switch to board <name>". The selected board has no entry. Group heading "Boards".                             |
 
 Rules:
 
-- The switcher shows only when more than one board is not archived. With one board, the sidebar header is the header of today: the glyph and the wordmark.
-- The shortcut is `b` with no modifier. No binding of today uses it. Mod+B toggles the sidebar (`src/web/components/ui/sidebar.tsx`), and Mod+Shift+B opens the bookmarks bar in Chrome, so the switcher uses no modifier. It is a global binding like `n`. It opens the switcher menu. It does nothing when the switcher does not show, when a text field has focus, or when a dialog or a menu is open.
-- A board item goes to the same page on the other board: the route stays, and the `board` parameter changes. On `/boards` the route stays `/boards`.
-- The palette entries show only when the switcher shows.
+- The section always shows, also with one board. The list holds active boards only.
+- A board row opens the kanban board of that board (`/boards/<KEY>`).
+- The shortcut is `b` with no modifier. No binding of today uses it. Mod+B toggles the sidebar (`src/web/components/ui/sidebar.tsx`), and Mod+Shift+B opens the bookmarks bar in Chrome, so the shortcut uses no modifier. It is a global binding like `n`. It opens the command palette with the Boards group only: the entries "Switch to board <name>", "Manage boards" and "Create board". Typing filters inside the group, and the palette shows no ticket results. It does nothing when a text field has focus or when a dialog or a menu is open.
+- An entry "Switch to board <name>" goes to the same page on the other board. A keyed page changes its path key. Another page changes its `board` parameter. On `/boards` the route stays `/boards`.
+- The board counts refresh every 15 seconds while the board list is loaded.
 
 ### States
 
-| State   | What shows                                                                                                                                                 | Copy                                          |
-| ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
-| Empty   | One board only: no switcher, no palette entries, the header of today. A board list with no other board does not open.                                      | No copy. The switcher does not render.        |
-| Loading | The switcher does not render until the board list loads, so a one-board user never sees it. The sidebar header shows the glyph and the wordmark, as today. | No copy.                                      |
-| Error   | The switcher renders only when the URL `board` is not `LOCAL`. Then the trigger shows that key, and the menu holds one disabled item and a retry item.     | Item "Boards did not load." Item "Try again". |
-| Stale   | The menu shows the last board list and the last counts. The attention badges are muted with the text style of muted text.                                  | Menu footer "Counts from <time>".             |
+| State   | What shows                                                                                        | Copy                                            |
+| ------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| Empty   | One board only: one row for it and the row "Create board". The palette group has no switch entry. | No copy.                                        |
+| Loading | Two `skeleton` rows under the label until the board list loads.                                   | No copy.                                        |
+| Error   | The board list failed with nothing cached. The section shows muted text and a retry button.       | Text "Boards did not load." Button "Try again". |
+| Stale   | The rows show the last board list and the last counts. One muted line shows under the rows.       | "Counts from <time>".                           |
 
 ## Screen 3: Orchestrator panel
 
@@ -372,7 +374,7 @@ A user with no orchestrator sees the board of today. The new feature adds one en
 
 - The board snapshot of today for the selected board (D-1, D-4): the cards, the columns and the sessions.
 - The `orchestrators` list of the board, which is empty on this screen.
-- The count of boards that are not archived, which decides if the switcher shows (Screen 2).
+- The count of boards that are not archived, which the Boards section lists (Screen 2).
 
 ### Layout
 
@@ -380,7 +382,7 @@ A user with no orchestrator sees the board of today. The new feature adds one en
 - **1024 px:** the board of today at this width, with the same button in the page header.
 - **390 px:** the board of today at this width: the carousel columns with the status pills. The button shows the short label "+ Orchestrator" so the page header keeps one line at 44 px.
 
-This view matches the board of today. The only added part is the "Add orchestrator" button in the board header. With one board and no orchestrator, the shell shows no switcher and no "Dashboard" row.
+This view matches the board of today. The only added part is the "Add orchestrator" button in the board header. With one board and no orchestrator, the shell shows no "Dashboard" row.
 
 ### Parts
 
@@ -413,12 +415,72 @@ Updated 2026-10-07 (LOCAL-77): the source paths above moved to the board and she
 | Error   | The page error state of today, with the reload button.                                                                                                | As today: "This page failed to load." Button "Reload".                                                                                                                                           |
 | Stale   | The last cards stay. The shell shows the disconnected line of today. The "Add orchestrator" button stays enabled; the panel opens in its Stale state. | As today: "Disconnected, reconnecting…"                                                                                                                                                          |
 
+## Screen 6: Command centre
+
+### Purpose
+
+The user sees the orchestrator of a board as one centre: the orchestrator node, a branch to each ticket and group that it runs, and a conversation where the user comments and the orchestrator answers. The layout is the orchestrator tree (Layout B of `docs/research/orchestration-centre-research.md`, section "Chosen layout"). LOCAL-104 Part 1b builds this screen. Part 2 moves the Policy and Orchestrators tabs into a settings sheet of this screen.
+
+### Data
+
+- The route `/orchestrator` with the `board` search parameter and an optional `orchestrator` search parameter (the orchestrator id; the default is the main orchestrator).
+- The orchestrator records of the board (D-7): name, role, state, card id, the session meters `contextPercent` and `cost` of its active session.
+- The board snapshot (cards with `state`, `stateReason`, `stateSince`, `activeSessionId`, `contextPercent`, `cost`, `launch.playbook`, `startIntent.playbook`, `loopProgress`, `shipFlow`, `memberIds`, `groupId`). The branches come from the cards whose owner resolves to the selected orchestrator (D-7). Hidden cards and group members are not branches.
+- The decision items of the board, open and answered (D-3). The newest approved `plan` item of the selected orchestrator gives the planned branches and their order. A newer open plan adds only the refs that the approved plan does not have, after them, as a preview. A rejected plan adds nothing.
+- The conversation of the selected orchestrator: `GET /api/boards/<KEY>/orchestrators/<id>/conversation`. The user turns, the orchestrator text replies and the lines that Dispatch typed, in transcript order, with no tool calls.
+- Polling: conversation and decision items every 3 s while the screen is open. The branches follow the board stream.
+
+### Layout
+
+- **1440 px:** two regions under the page header. Left: the canvas with the faint dot grid. The orchestrator node is at the top left of the canvas. The branches are one vertical stack to the right of it, joined to it by elbow edges. The stack is in bands, in this order: Needs you, Running, Planned, Done, Shipped. Each band has an uppercase eyebrow heading with a count. Right: the conversation pane, 420 px wide, with the tabs Conversation and Terminal. Conversation is the default tab.
+- **1024 px:** the same two regions. The conversation pane is 360 px wide. The node tiles take the full width of the stack.
+- **390 px:** a compact orchestrator header (name, state badge, context, cost, "<n> branches, <m> need you"), then the tabs Branches and Conversation. Branches is the default tab. The Branches tab shows the bands as a grouped list with the same tiles and actions and no edges. The Conversation tab holds the pane with its Conversation and Terminal tabs.
+- The canvas draws the edges in one SVG layer behind the tiles. The tiles are focusable buttons in the band order. A new branch goes into its band after the branches of the same plan rank; the other tiles keep their place.
+
+### Parts
+
+| Part                  | Primitive                              | Copy                                                                                                                                                                                                                                                   |
+| --------------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Page title            | page header                            | "Orchestrator", or "Orchestrator · <board name>" when more than one board exists                                                                                                                                                                       |
+| Orchestrator controls | `button`, `badge`                      | The state badge of "Cross-screen rules". "Start", "Stop", "Resume" with the rules of Screen 3 (`outline` variant). "Settings" (`outline` variant).                                                                                                     |
+| Orchestrator switcher | `select`                               | Label "Orchestrator" (sr-only). One option per orchestrator: "<name>" with "Main" or "Extra". Shows only when the board has more than one orchestrator.                                                                                                |
+| Orchestrator node     | module component                       | Eyebrow "Orchestrator", the name, the state badge, "Context <n>%", "$<cost> today", "<n> branches, <m> need you"                                                                                                                                       |
+| Band heading          | `badge`                                | "Needs you", "Running", "Planned", "Done", "Shipped", each with its count                                                                                                                                                                              |
+| Branch tile           | module component                       | The card id (mono), the title, the state badge, the detail line, "Playbook <name>", "Context <n>%", "$<cost>". A planned branch with no session shows "Not started" in place of the meters.                                                            |
+| Branch state badge    | `badge`                                | "Planned", "Running", "Needs input", "Usage limit", "Agent done", "Shipped", or the label of "Cross-screen rules" for the other session states. Each with its glyph.                                                                                   |
+| Detail line           | text                                   | Running: "Unit <n> of <m>, phase <p> of <q>" or "Phase <p> of <q>". Group: "Group of <n> tickets". Planned: "Plan order <n>, size <size>". Done: "Done <time>, awaiting ship". Shipped: "Shipped <time>, PR <number>".                                 |
+| Inline reply          | `field`, `label`, `textarea`, `button` | The copy of the Screen 4 inline reply, with the card id                                                                                                                                                                                                |
+| Branch actions        | `button`                               | "Resume loop", "Try resume again", "Open terminal" with the rules of Screen 4 Section 1                                                                                                                                                                |
+| Older shipped         | `button`                               | "Show <n> older shipped", "Hide older shipped" (link variant)                                                                                                                                                                                          |
+| Pane tabs             | `tabs`                                 | "Conversation", "Terminal"                                                                                                                                                                                                                             |
+| Message               | `item`                                 | Eyebrow "You", "<orchestrator name>" or "Dispatch", and the time (mono). The text.                                                                                                                                                                     |
+| Decision message      | `item`, `button`, `badge`, `table`     | Badge "Decision" or "Question". The question. A plan shows a table with the heads "Order", "Ticket", "Playbook", "Size". The option buttons, the recommended mark and the other answer of Screen 3. An answered item shows "Answered: <option label>". |
+| Comment box           | `field`, `label`, `textarea`, `button` | Label "Message the orchestrator" (sr-only). Placeholder "Message the orchestrator". Button "Send". The count "<n> of 500 characters. A longer reply goes as a file." Results "Delivered", "Not confirmed. Check the terminal."                         |
+| Terminal              | terminal frame                         | The live ttyd terminal of the orchestrator session, fully interactive. The frame stays mounted when the user changes tabs.                                                                                                                             |
+
+### Keyboard
+
+- Tab order: page header, the orchestrator node, the tiles in band order, then the pane.
+- In the canvas, the up and down arrow keys move focus from tile to tile in band order, Home goes to the orchestrator node and End to the last tile.
+- Enter on a tile opens the card (the detail panel of the card). Enter on the orchestrator node moves focus to the comment box.
+- The inline controls of a tile are reachable with Tab inside the tile.
+
+### States
+
+| State        | What shows                                                                                                                                                                                   | Copy                                                                                                                       |
+| ------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Empty        | The board has no orchestrator: the empty block of Screen 3 with "Start". The orchestrator has no branch: the orchestrator node and one line in the canvas. No message: one line in the pane. | "This board has no orchestrator." "No tickets or groups yet. Ask the orchestrator in the conversation." "No messages yet." |
+| Loading      | `skeleton` tiles in the canvas and `skeleton` rows in the pane.                                                                                                                              | Screen reader text "Loading command centre"                                                                                |
+| Error        | An `alert` in the region that did not load. The other region stays. A conversation status `no-transcript` or `unreadable` shows one line and the link to the Terminal tab.                   | "<region> did not load: <error message>." Button "Try again". "The conversation is not available. Open the terminal."      |
+| Stale        | The last data stays. A `badge` beside the page title shows the time of the last update. The reply, resume, decision and send buttons are disabled until the stream is back.                  | Badge "Data from <time>". Disabled reason "Reconnecting. Actions are off until the board stream is back."                  |
+| Action error | A failed reply, decision answer, resume or comment. The control stays and shows an `alert` under it.                                                                                         | "<Action> failed: <error message>." Button "Try again". "Not sent. <id> is now at <state label>. Open the terminal."       |
+
 ## Cross-screen rules
 
 ### Keyboard
 
 - Each control on the five screens is reachable with Tab, in the visual order: page header, then the content top to bottom, then the panel.
-- `b` opens the board switcher when it shows (Screen 2). The cheat sheet lists it in the Global group as "Switch board".
+- `b` opens the command palette with the Boards group only (Screen 2). The cheat sheet always lists it in the Global group as "Switch board".
 - Escape closes the top layer first: a menu, then a dialog, then the detail panel, then the orchestrator panel (at every width, when focus is in the panel).
 - In a decision item, the option buttons are in their written order. The recommended mark does not move the option.
 - The board keys of today (`j`, `k`, `h`, `l`, Enter and the digits) stay off while the orchestrator panel has focus, as they stay off while the detail panel is open.
@@ -460,13 +522,14 @@ The tone maps to the `badge` tones of `src/web/components/ui/badge.tsx`: attenti
 
 Static sketches of the populated state of each screen. Each sketch is one HTML file with the shared `sketch.css`. Open a sketch with `?theme=light` or `?theme=dark`. The sketches are throwaway: they are not product code. The 1024 px layout and the empty, loading, error and stale states are in this spec only.
 
-| Screen                               | Sketch                                                                        | 1440 px light                                                                                                 | 1440 px dark                                                                                                | 390 px light                                                                                                | 390 px dark                                                                                               |
-| ------------------------------------ | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
-| Screen 1: Boards page                | [boards.html](../research/sketches/boards.html)                               | [boards-1440-light.png](../research/sketches/screenshots/boards-1440-light.png)                               | [boards-1440-dark.png](../research/sketches/screenshots/boards-1440-dark.png)                               | [boards-390-light.png](../research/sketches/screenshots/boards-390-light.png)                               | [boards-390-dark.png](../research/sketches/screenshots/boards-390-dark.png)                               |
-| Screen 2: Board switcher             | [switcher.html](../research/sketches/switcher.html)                           | [switcher-1440-light.png](../research/sketches/screenshots/switcher-1440-light.png)                           | [switcher-1440-dark.png](../research/sketches/screenshots/switcher-1440-dark.png)                           | [switcher-390-light.png](../research/sketches/screenshots/switcher-390-light.png)                           | [switcher-390-dark.png](../research/sketches/screenshots/switcher-390-dark.png)                           |
-| Screen 3: Orchestrator panel         | [orchestrator-panel.html](../research/sketches/orchestrator-panel.html)       | [orchestrator-panel-1440-light.png](../research/sketches/screenshots/orchestrator-panel-1440-light.png)       | [orchestrator-panel-1440-dark.png](../research/sketches/screenshots/orchestrator-panel-1440-dark.png)       | [orchestrator-panel-390-light.png](../research/sketches/screenshots/orchestrator-panel-390-light.png)       | [orchestrator-panel-390-dark.png](../research/sketches/screenshots/orchestrator-panel-390-dark.png)       |
-| Screen 4: Dashboard                  | [dashboard.html](../research/sketches/dashboard.html)                         | [dashboard-1440-light.png](../research/sketches/screenshots/dashboard-1440-light.png)                         | [dashboard-1440-dark.png](../research/sketches/screenshots/dashboard-1440-dark.png)                         | [dashboard-390-light.png](../research/sketches/screenshots/dashboard-390-light.png)                         | [dashboard-390-dark.png](../research/sketches/screenshots/dashboard-390-dark.png)                         |
-| Screen 5: Board with no orchestrator | [board-no-orchestrator.html](../research/sketches/board-no-orchestrator.html) | [board-no-orchestrator-1440-light.png](../research/sketches/screenshots/board-no-orchestrator-1440-light.png) | [board-no-orchestrator-1440-dark.png](../research/sketches/screenshots/board-no-orchestrator-1440-dark.png) | [board-no-orchestrator-390-light.png](../research/sketches/screenshots/board-no-orchestrator-390-light.png) | [board-no-orchestrator-390-dark.png](../research/sketches/screenshots/board-no-orchestrator-390-dark.png) |
+| Screen                                                              | Sketch                                                                        | 1440 px light                                                                                                 | 1440 px dark                                                                                                | 390 px light                                                                                                | 390 px dark                                                                                               |
+| ------------------------------------------------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Screen 1: Boards page                                               | [boards.html](../research/sketches/boards.html)                               | [boards-1440-light.png](../research/sketches/screenshots/boards-1440-light.png)                               | [boards-1440-dark.png](../research/sketches/screenshots/boards-1440-dark.png)                               | [boards-390-light.png](../research/sketches/screenshots/boards-390-light.png)                               | [boards-390-dark.png](../research/sketches/screenshots/boards-390-dark.png)                               |
+| Screen 2: Board switcher (superseded by the sidebar Boards section) | [switcher.html](../research/sketches/switcher.html)                           | [switcher-1440-light.png](../research/sketches/screenshots/switcher-1440-light.png)                           | [switcher-1440-dark.png](../research/sketches/screenshots/switcher-1440-dark.png)                           | [switcher-390-light.png](../research/sketches/screenshots/switcher-390-light.png)                           | [switcher-390-dark.png](../research/sketches/screenshots/switcher-390-dark.png)                           |
+| Screen 3: Orchestrator panel                                        | [orchestrator-panel.html](../research/sketches/orchestrator-panel.html)       | [orchestrator-panel-1440-light.png](../research/sketches/screenshots/orchestrator-panel-1440-light.png)       | [orchestrator-panel-1440-dark.png](../research/sketches/screenshots/orchestrator-panel-1440-dark.png)       | [orchestrator-panel-390-light.png](../research/sketches/screenshots/orchestrator-panel-390-light.png)       | [orchestrator-panel-390-dark.png](../research/sketches/screenshots/orchestrator-panel-390-dark.png)       |
+| Screen 4: Dashboard                                                 | [dashboard.html](../research/sketches/dashboard.html)                         | [dashboard-1440-light.png](../research/sketches/screenshots/dashboard-1440-light.png)                         | [dashboard-1440-dark.png](../research/sketches/screenshots/dashboard-1440-dark.png)                         | [dashboard-390-light.png](../research/sketches/screenshots/dashboard-390-light.png)                         | [dashboard-390-dark.png](../research/sketches/screenshots/dashboard-390-dark.png)                         |
+| Screen 5: Board with no orchestrator                                | [board-no-orchestrator.html](../research/sketches/board-no-orchestrator.html) | [board-no-orchestrator-1440-light.png](../research/sketches/screenshots/board-no-orchestrator-1440-light.png) | [board-no-orchestrator-1440-dark.png](../research/sketches/screenshots/board-no-orchestrator-1440-dark.png) | [board-no-orchestrator-390-light.png](../research/sketches/screenshots/board-no-orchestrator-390-light.png) | [board-no-orchestrator-390-dark.png](../research/sketches/screenshots/board-no-orchestrator-390-dark.png) |
+| Screen 6: Command centre                                            | [centre-b.html](../research/sketches/centre-b.html)                           | [centre-b-1440-light.png](../research/sketches/screenshots/centre-b-1440-light.png)                           | [centre-b-1440-dark.png](../research/sketches/screenshots/centre-b-1440-dark.png)                           | [centre-b-390-light.png](../research/sketches/screenshots/centre-b-390-light.png)                           | [centre-b-390-dark.png](../research/sketches/screenshots/centre-b-390-dark.png)                           |
 
 ## Changes
 
@@ -488,3 +551,73 @@ This entry adds to the screens above. It does not change the text of an earlier 
 - **Policy form, Wake timer (U2-09).** The form gains a text input "Wake timer (minutes)" after "Hard handoff at context percent". It accepts a whole number from 0 to 1440. Any other text shows the error "Enter a whole number from 0 to 1440." and "Save policy" saves nothing. The helper text reads "Wakes an idle orchestrator after this many quiet minutes. 0 turns it off." The override form of an extra orchestrator has no such field.
 - **Orchestrators tab, Last wake column (U2-10).** The table gains a "Last wake" column after "Policy". The value is "<reasons> at <HH:MM>", with the reasons joined by ", " and the time in local 24-hour format, or "None" when the orchestrator has not woken. The cell wraps its text like the other text columns, so the table keeps its columns at 390 px.
 - **Activity, wake row (U2-12).** A `supervisor_action` with `action` `orchestrator_wake` reads "Woke <orchestrator name>: <reasons joined with ', '>". When the event has no orchestrator name, it shows the identifier of the orchestrator card in place of the name. An unconfirmed send reads "Could not wake <orchestrator name>: <reasons>". A `group_state` event reads "<group id> <label>" with the actor "Supervisor"; the labels are "reached Agent done", "needs input", "failed to start", "shipped", "ship stopped", "loop error" and "hit a usage limit".
+
+### 2026-10-11 (LOCAL-104)
+
+This entry adds to the screens above. It does not change the text of an earlier section.
+
+- **Screen 6, Command centre.** A new screen at `/orchestrator?board=<KEY>`. The layout is the orchestrator tree, chosen in `docs/research/orchestration-centre-research.md`, section "Chosen layout". The candidate sketches are `centre-a.html`, `centre-b.html` and `centre-c.html`.
+- **Entry point.** In Part 1b, the board header button "Orchestrator" opens Screen 6 in place of the panel. Until Part 2, the "Settings" button of Screen 6 opens the Policy tab of the panel (Screen 3).
+- **Screen 3.** In Part 2, a settings sheet of Screen 6 takes the Policy and Orchestrators tabs, and the panel goes away. The Terminal and Decisions tabs of Screen 3 are covered by the Terminal tab and the decision messages of Screen 6.
+- **Screen 4.** The attention queue and the progress rows stay. In Part 1b, the dashboard gets a link "Open command centre" to Screen 6.
+- **Decision kind `plan`.** A plan decision shows its entries as a table (Order, Ticket, Playbook, Size) and the options "Approve the plan" and "Do not approve". It has no other answer.
+
+### 2026-10-13 (LOCAL-104)
+
+This entry adds to the screens above. It does not change the text of an earlier section.
+
+- **Screen 6, route (Data list, entry of 2026-10-11).** The keyed route `/boards/<KEY>/orchestrator` replaces `/orchestrator?board=<KEY>`. The optional path part `/<orchestrator id>` replaces the `orchestrator` search parameter. The default is the main orchestrator.
+- **Screen 6, flat route.** `/orchestrator` and `/orchestrator/<orchestrator id>` only redirect. They take the board from the `board` search parameter, then replace the history entry with the keyed route and drop `board` from the search. They render no page.
+- **Entry point.** The board header button reads "Orchestrator" when the board has an orchestrator. With none, it reads "Add orchestrator" from 768 px and "Orchestrator" below 768 px. Both open Screen 6. The dashboard link "Open command centre" sits in the dashboard page header. The sidebar has no row for Screen 6.
+- **Screen 6, controls from 768 px.** The controls sit in the page header: the stale badge, the switcher, "Start", "Stop" or "Resume", and "Settings". A control alert shows under them.
+- **Screen 6, controls below 768 px.** The page header holds no controls. The same controls sit inline at the top of the page body, above the compact node. The compact node has no eyebrow "Orchestrator". A control alert shows under the controls.
+- **Screen 6, narrow tabs.** The tabs "Branches" and "Conversation" follow the compact node. The Conversation tab is 480 px high. It holds the pane with its own tabs "Conversation" and "Terminal". The terminal frame stays mounted across both tab levels.
+- **Screen 6, tab reset.** The page tab, the pane tab and the focus request live in one store. They return to "Branches" and "Conversation" when the user leaves the page.
+- **Screen 6, state badge.** The state badge sits in the orchestrator node, not with the controls. It reads "Starting", "Stopping", "Stopped" or the label of the session state.
+- **Screen 6, node count.** One branch reads "1 branch, 0 need you". The branch count includes the older shipped branches that the page hides. The need-you count covers only the visible branches.
+- **Screen 6, tile states and details.** Two more badges show: "Budget reached" and "Resume failed". The stuck session states show their own labels. The detail lines "Needs your answer", "Stopped at the usage limit" and "Budget reached" are new. A done branch with no time reads "Awaiting ship".
+- **Screen 6, tile times.** A time reads "HH:MM" on the current day and "<day> <month> HH:MM" on another day. The clock has 24 hours.
+- **Screen 6, older shipped.** The page hides a shipped branch when it shipped more than 24 hours ago. The count in "Show <n> older shipped" is the number of hidden branches.
+- **Screen 6, planned tile.** A planned branch with no card is not a button. It takes focus with Tab and the arrow keys. It has no open action.
+- **Screen 6, Open terminal.** On a tile, "Open terminal" goes to the board page. It does not select the card.
+- **Screen 6, message time.** A message shows its age, for example "5m ago". It does not show a clock time.
+- **Screen 6, answered decisions.** The conversation shows every open decision of the orchestrator. It shows only the 20 newest answered decisions, by answer time, then by creation time.
+- **Screen 6, "Not sent" line.** A refused send because of the session state shows as the result line next to the button, with no alert and no "Try again". In the comment box it reads "Not sent. <orchestrator name> is now at <state label>. Open the terminal." The same applies to the inline reply of a tile, with the card id.
+- **Screen 6, Enter on the node.** Enter selects the Conversation page tab and the Conversation pane tab, then moves focus to the comment box. Only a plain Enter on the node itself does this. With no orchestrator record, Enter does nothing.
+- **Screen 6, unknown orchestrator.** A path with an orchestrator id that the board does not have shows "Canvas did not load: no orchestrator <id> on this board." with "Try again".
+
+### 2026-10-13 (LOCAL-106)
+
+This entry adds to the screens above. It does not change the text of an earlier section.
+
+This entry replaces the Layout, the section order rule and the Section 2 segmented bar of Screen 4 for the dashboard look. It changes no data, action or state.
+
+- **Layout.** The page title is "Project map", on a dot-grid background. At 1024 px and wider, the order is: the status line, Progress per group (full width), Left on this board (full width), then two columns. The main column holds Tickets by column and then PRs and merge order. The rail holds Next step, Needs your call, Changed since, and Cost and usage. Below 1024 px, the order is: the status line, Needs your call, Progress per group, Left on this board, Tickets by column, PRs and merge order, Next step, Changed since, and Cost and usage. Each section has one copy in the DOM. The section headings are small uppercase labels. The screen reader names stay: "Attention queue", "Progress per group", "Left on this board", "Tickets by column", "PRs and merge order", "Next step", "Activity log" and "Cost and usage".
+- **Command centre link.** The link "Open command centre" sits at the end of the title row. It replaces the dashboard page header link of the LOCAL-104 entry. The dashboard has no page header actions.
+- **Status line.** One line under the title. It shows "Synced HH:MM" (or "Data from <time>" when the stream is down), "<n> of <cap> loops running", "<n> gates passed today" (loop phases whose gate passed on the local calendar day), "$<amount> spent" (a running total of the group costs, not a daily figure) and the link "<n> need a call". With zero rows the link reads "nothing needs you" and its dot is muted. The link moves focus to the Needs your call card.
+- **Section 2, milestone track.** Each loop is a track with one node for each unit. A loop with no units shows "No loop progress". The session badges and the last gate text stay on the track header. A node has a glyph and a state line, so it reads without color.
+
+  | State       | Glyph                                                | State line                                                     |
+  | ----------- | ---------------------------------------------------- | -------------------------------------------------------------- |
+  | Done        | Check                                                | "Done HH:MM", or "Done" with no time                           |
+  | Current     | Accent ring with a glow, and the pill "You are here" | "Phase n of m", with a phase sub-bar                           |
+  | Failed gate | X                                                    | "Gate failed"                                                  |
+  | Pending     | Outline                                              | "Next" for the first pending node, "Later" for the other nodes |
+
+- **Left on this board.** The count of open cards (cards not in Agent done, In review or Done) and one pill for each open card. A pill shows the card id and a glyph. The order is stuck, needs input, current, not started. With no open card it shows "Nothing open."
+- **Section 3, tiles.** The filters Group and Column are above the tiles and stay visible. One tile shows for each card that the filters select. With no match it shows "No cards match." A tile shows the mono id, the title, a state pill and a footer line when there is data. The pill shows a glyph and the column label, or "Stuck: <reason>". The footer shows the last gate text, "Depends on <ids>" or "Shipped HH:MM". The collapsible "Show column counts" replaces "Show cards" and holds the column count table (and a list below 768 px). The link "Open board" stays on the section header. Tiles sort by state, then by id.
+
+  | Tile state  | Source                                                           | Look           |
+  | ----------- | ---------------------------------------------------------------- | -------------- |
+  | Stuck       | Start error, lost session or failed last gate (wins over column) | Red hatch      |
+  | Needs input | The card needs input                                             | Amber tint     |
+  | Current     | In Progress                                                      | Accent ring    |
+  | Not started | To Do or Parked                                                  | Dashed outline |
+  | Done        | Agent Done, In Review or Done                                    | Plain          |
+
+- **Next step.** For the first running loop with a current unit, it shows "<group id> unit <n>: <unit title>" and "Phase <n> of <m>: <phase name>". With no such loop it shows "No loop running" and "Start a group from the board."
+- **Section 1, Needs your call.** The card was "Attention queue". The items, the actions, the disabled reason text and the empty text "Nothing needs you." stay. The card has a red tint only when it holds at least one item. The recommended decision option is bold.
+- **Section 4, Changed since.** The section was "Activity log". The heading reads "Changed since <time>", where the time is the time of the oldest row on the shown page. A row has a dot, the change text with the card id in bold, and the time on the right. The dot is red for a failed gate, a loop error, a failed start or a stopped ship. It is amber for needs input and a usage limit. It is green for a passed gate, agent done and shipped. It is grey for the other rows. The Actor and Group filters, "Show more" (20 rows for each page), "No activity matches." and "No activity on this board yet." stay.
+- **Section 6, Cost and usage.** The same rows and meters, as compact rows. "No cost yet." stays.
+- **Motion.** The glow of the current node breathes only when the system allows motion (`motion-safe`).
+- **Colour-free reading.** Each node, each tile and each pill has a glyph and a text. Colour is an extra signal, never the only one.

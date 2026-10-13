@@ -120,3 +120,37 @@ test("a return and a held offer read from the encoded reason", () => {
     "a@x.com is at its usage limit; sessions can move to b@x.com",
   );
 });
+
+void test("a login expiring event names the account and the expiry date, or reads soon without one", () => {
+  const expiry = "2026-10-13T00:00:00.000Z";
+  assert.equal(
+    describeEvent(
+      at(
+        "account_login_expiring",
+        `{"label":"work@example.com","expiresAt":"${expiry}"}`,
+      ),
+    ),
+    `work@example.com login expires on ${new Date(expiry).toLocaleString()}`,
+  );
+  assert.equal(
+    describeEvent(at("account_login_expiring", expiry)),
+    `Claude login expires on ${new Date(expiry).toLocaleString()}`,
+  );
+  assert.equal(
+    describeEvent(at("account_login_expiring", null)),
+    "Claude login expires soon",
+  );
+});
+
+void test("a login expiry already past when recorded reads expired", () => {
+  const expiry = "2026-10-05T00:00:00.000Z";
+  assert.equal(
+    describeEvent(
+      at(
+        "account_login_expiring",
+        `{"label":"work@example.com","expiresAt":"${expiry}"}`,
+      ),
+    ),
+    `work@example.com login expired on ${new Date(expiry).toLocaleString()}`,
+  );
+});

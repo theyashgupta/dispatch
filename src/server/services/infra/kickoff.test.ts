@@ -110,3 +110,32 @@ test("a hidden orchestrator card with no playbook gets its direction alone", () 
   );
   assert.equal(out, "Direction.");
 });
+
+test("a review card names the review branch for the PR repository only", () => {
+  const reviewPr = {
+    repo: "acme/web",
+    number: 7,
+    url: "https://github.com/acme/web/pull/7",
+    head: "feature",
+    base: "main",
+  };
+  const single = buildKickoff(card({ reviewPr }), "", ["web"], {
+    reviewRepoName: "web",
+  });
+  assert.ok(single.includes("on branch review/pr-7"));
+  assert.ok(!single.includes("on branch LOCAL-3"));
+
+  const multi = buildKickoff(card({ reviewPr }), "", ["api", "web"], {
+    reviewRepoName: "web",
+  });
+  assert.ok(
+    multi.includes(
+      "each on branch LOCAL-3, except web/ which is on branch review/pr-7",
+    ),
+  );
+
+  const otherSingle = buildKickoff(card({ reviewPr }), "", ["api"], {
+    reviewRepoName: "web",
+  });
+  assert.ok(otherSingle.includes("on branch LOCAL-3"));
+});

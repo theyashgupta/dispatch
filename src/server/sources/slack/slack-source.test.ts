@@ -198,6 +198,15 @@ test("a full poll turns mentions and DMs into items and drops everything else", 
   );
   assert.equal(threaded?.meta.threadTs, "1700000017.000100");
   assert.equal(threaded?.meta.replyCount, "2");
+  const mentioned = result.items.find((i) => i.id.endsWith("10.000100"));
+  assert.equal(mentioned?.meta.needsSession, "true");
+  assert.equal(
+    mentioned?.meta.relevanceReason,
+    "Request with an action verb: look",
+  );
+  const direct = result.items.find((i) => i.id.endsWith("20.000100"));
+  assert.equal(direct?.meta.needsSession, "false");
+  assert.equal(direct?.meta.relevanceReason, "No question or request");
   assert.deepEqual(result.issues, []);
   assert.equal(result.truncated, false);
   const polledAt = new Date(NOW).toISOString();

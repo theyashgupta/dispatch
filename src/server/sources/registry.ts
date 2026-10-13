@@ -44,6 +44,12 @@ export function setCredentialResolver(
   resolvers.set(id, resolve);
 }
 
+let githubReposReader: () => Promise<string[]> = () => Promise.resolve([]);
+
+export function setGithubReposReader(read: () => Promise<string[]>): void {
+  githubReposReader = read;
+}
+
 let macCalendarReader: MacCalendarReader | undefined;
 
 /** Register the macOS Calendar reader (the osascript adapter); boot calls this before buildRegistry. */
@@ -80,6 +86,7 @@ export function buildRegistry(config: Config): void {
     githubConfig?.pollIntervalMs ??
       config.pollIntervalMs ??
       DEFAULT_POLL_INTERVAL_MS,
+    () => githubReposReader(),
   );
   sources.set(github.id, github);
   if (githubConfig?.enabled === true) enabled.add(github.id);

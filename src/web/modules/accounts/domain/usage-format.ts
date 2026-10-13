@@ -1,3 +1,4 @@
+import { LOGIN_EXPIRY_WARN_MS } from "../../../../shared/account-chain.js";
 import type {
   ClaudeUsageSnapshot,
   ClaudeUsageWindow,
@@ -270,5 +271,30 @@ export function chipState(
     tone: toneFor(tightest.percent),
     summary: `${tightest.percent}% used${reset ? `, resets ${reset}` : ""}`,
     label: `${tightest.percent}%`,
+  };
+}
+
+interface LoginExpiryView {
+  text: string;
+  tone: "warning" | "neutral";
+}
+
+/**
+ * Describe when an account's login expires, warning once it is 3 days away or past.
+ *
+ * @returns Null when the expiry is absent or not a date.
+ */
+export function loginExpiryView(
+  loginExpiresAt: string | undefined,
+  now: number,
+): LoginExpiryView | null {
+  if (!loginExpiresAt) return null;
+  const at = Date.parse(loginExpiresAt);
+  if (Number.isNaN(at)) return null;
+  const date = new Date(at).toLocaleDateString();
+  if (at < now) return { text: `Login expired ${date}`, tone: "warning" };
+  return {
+    text: `Login expires ${date}`,
+    tone: at - now <= LOGIN_EXPIRY_WARN_MS ? "warning" : "neutral",
   };
 }

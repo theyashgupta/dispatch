@@ -3,6 +3,10 @@ import type { DiscoveredRepo } from "../../../../shared/types.js";
 import type { WorkspaceAdd } from "@/components/WorkspaceAdd";
 import { Field } from "@/components/ui/field";
 import { FolderPicker } from "./FolderPicker";
+import {
+  NoRepositoryNotice,
+  type NoRepositoryModel,
+} from "./NoRepositoryNotice";
 import { RepoRow } from "./RepoRow";
 import { ModalFieldLabel } from "./ModalFieldLabel";
 import { isRepoChecked } from "@/modules/card-actions/domain/workspace-picker";
@@ -10,6 +14,7 @@ import { isRepoChecked } from "@/modules/card-actions/domain/workspace-picker";
 export interface WorkspacePickerModel {
   folders: string[];
   selectedFolder: string | null;
+  noRepository: NoRepositoryModel | null;
   repos: DiscoveredRepo[] | null;
   toggles: Record<string, boolean>;
   bases: Record<string, string>;
@@ -31,14 +36,22 @@ export function WorkspacePickerSection({
   const { selectedFolder, repos, toggles, bases } = workspace;
   return (
     <div className="flex flex-none flex-col gap-4">
-      <FolderPicker
-        folders={workspace.folders}
-        selected={selectedFolder}
-        onSelect={workspace.onSelectFolder}
-        onRemove={workspace.onRemoveFolder}
-        onAdd={workspace.onAddFolder}
-        browser={workspace.browser}
-      />
+      {workspace.noRepository !== null ? (
+        <NoRepositoryNotice
+          model={workspace.noRepository}
+          onAdd={workspace.onAddFolder}
+          browser={workspace.browser}
+        />
+      ) : (
+        <FolderPicker
+          folders={workspace.folders}
+          selected={selectedFolder}
+          onSelect={workspace.onSelectFolder}
+          onRemove={workspace.onRemoveFolder}
+          onAdd={workspace.onAddFolder}
+          browser={workspace.browser}
+        />
+      )}
       {selectedFolder !== null && repos !== null && (
         <Field className="gap-1">
           <ModalFieldLabel>Repositories</ModalFieldLabel>

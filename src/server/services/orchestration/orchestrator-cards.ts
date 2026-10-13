@@ -54,7 +54,7 @@ export async function startOrchestratorCard(
   }
   const board = getBoard(caller.boardKey);
   let workspace: NonNullable<Card["workspace"]> | undefined;
-  if (input.repos !== undefined || !card.workspace) {
+  if (input.repos !== undefined || !card.workspace?.repos.length) {
     const repos = resolveRepos(board, input.repos);
     for (const repo of repos) assertBoardRepository(board, repo.path);
     workspace = {

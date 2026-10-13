@@ -46,7 +46,7 @@ Options:
   --print      service install: print the plist and exit, no side effects
 
 Uninstall never deletes git worktrees, it lists them for you to remove.
-Bare uninstall removes: hook.sh, hook-settings.json, pty-shim.py, vault-run, vault-guard.mjs, com.dispatch.app.plist.
+Bare uninstall removes: hook.sh, hook-settings.json, hook-settings-accept.json, hook-settings-hold.json, hook-settings-refuse.json, pty-shim.py, vault-run, vault-guard.mjs, com.dispatch.app.plist.
 Bare uninstall keeps: config.json, the vault store, playbooks, board data, and any running dsp- sessions.`;
 
 /**

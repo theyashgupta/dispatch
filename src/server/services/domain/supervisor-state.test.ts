@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import {
   detectState,
   initialMemory,
+  limitSurfaceOf,
   paneReady,
   type DetectInput,
   type Detection,
@@ -92,6 +93,8 @@ const FIXTURE_STATES: [
   ["limit-menu.txt", 2, {}, "usage_limit_dialog"],
   ["limit-menu-2.txt", 2, {}, "usage_limit_dialog"],
   ["auto-continue.txt", 2, {}, "usage_limit_wait"],
+  ["auto-continue-3.txt", 2, {}, "usage_limit_wait"],
+  ["limit-cancelled.txt", 3, {}, "idle"],
   ["api-error.txt", 1, {}, "api_error"],
   ["api-error-2.txt", 1, {}, "api_error"],
   ["shell-prompt.txt", 1, { atShellPrompt: true }, "shell_prompt"],
@@ -108,6 +111,11 @@ void test("every one of the 12 states comes from a recorded pane", () => {
   const seen = new Set(FIXTURE_STATES.map(([, , , s]) => s));
   seen.add(last(feed(pane("working.txt"), 16, {}, () => 100)));
   assert.equal(seen.size, 12);
+});
+
+void test("the shortly notice is the usage limit wait evidence", () => {
+  const wait = feed(pane("auto-continue-3.txt"), 2).at(-1);
+  assert.match(String(wait?.evidence), /Continuing shortly · esc to cancel/);
 });
 
 void test("the permission prompt kinds name the delete, the peer message and the rest", () => {
@@ -411,6 +419,7 @@ const READY_FIXTURES: [string, boolean][] = [
   ["api-error.txt", true],
   ["handoff-ready.txt", true],
   ["auto-continue-2.txt", true],
+  ["limit-cancelled.txt", true],
 ];
 
 for (const [file, ready] of READY_FIXTURES) {
@@ -418,6 +427,10 @@ for (const [file, ready] of READY_FIXTURES) {
     assert.equal(paneReady(pane(file)), ready);
   });
 }
+
+void test("limitSurfaceOf is null for the cancelled post-menu screen", () => {
+  assert.equal(limitSurfaceOf(pane("limit-cancelled.txt")), null);
+});
 
 for (const file of DIALOG_FIXTURES) {
   void test(`paneReady is false for ${file} below a user prompt`, () => {

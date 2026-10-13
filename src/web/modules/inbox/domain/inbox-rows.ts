@@ -1,6 +1,7 @@
 import type { Card, FilterOption, Item } from "../../../../shared/types.js";
 import type { InboxRowModel } from "../../../../shared/item-actions.js";
 import { capitalize, itemRow } from "../../../../shared/inbox-row.js";
+import { isInboxDismissed } from "../../../../shared/inbox-count.js";
 import { cardPriorityScore } from "../../../../shared/card-priority.js";
 import { stateTypeRank } from "../../../../shared/linear-state.js";
 
@@ -38,7 +39,7 @@ function cardRow(card: Card, opened: boolean): InboxRowModel {
     snippet: card.description ?? "",
     priority: cardPriorityScore(card.priority),
     time: card.updatedAt,
-    unread: !opened,
+    unread: !opened && !isInboxDismissed(card),
     url: card.url,
     typeLabel: "Ticket",
     project: card.project?.name,

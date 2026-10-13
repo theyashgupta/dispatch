@@ -1,14 +1,14 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { z } from "zod";
-
-const searchSchema = z.looseObject({
-  panel: z.literal("orchestrator").optional().catch(undefined),
-  tab: z
-    .enum(["terminal", "decisions", "policy", "orchestrators"])
-    .optional()
-    .catch(undefined),
-});
+import { createFileRoute, redirect } from "@tanstack/react-router";
 
 export const Route = createFileRoute("/board/{-$id}")({
-  validateSearch: (search) => searchSchema.parse(search),
+  pendingMs: Infinity,
+  beforeLoad: ({ context, search }) => {
+    // eslint-disable-next-line @typescript-eslint/only-throw-error
+    throw redirect({
+      to: "/boards/$key",
+      params: { key: context.board },
+      search: { ...search, board: undefined },
+      replace: true,
+    });
+  },
 });

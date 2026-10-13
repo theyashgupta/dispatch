@@ -1,16 +1,9 @@
-import {
-  queryOptions,
-  useMutation,
-  useQuery,
-  useQueryClient,
-  type QueryClient,
-} from "@tanstack/react-query";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 import type { BoardKey } from "../../../../shared/types.js";
 import { orchestrationKey } from "@/queries/attention-actions-queries";
 import {
   fetchOrchestrationEvents,
   fetchOrchestrationSummary,
-  retryResume,
   type OrchestrationEventsParams,
 } from "./orchestration-api.js";
 
@@ -48,20 +41,4 @@ export function useOrchestrationEventsQuery(
   params: OrchestrationEventsParams = {},
 ) {
   return useQuery(orchestrationEventsQueryOptions(board, params));
-}
-
-/** The mutation options of "Try resume again", which refresh the orchestration reads of the board after it settles. */
-export function retryResumeMutationOptions(
-  queryClient: QueryClient,
-  board: BoardKey,
-) {
-  return {
-    mutationFn: (cardId: string) => retryResume(cardId),
-    onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: orchestrationKeys.all(board) }),
-  };
-}
-
-export function useRetryResumeMutation(board: BoardKey) {
-  return useMutation(retryResumeMutationOptions(useQueryClient(), board));
 }

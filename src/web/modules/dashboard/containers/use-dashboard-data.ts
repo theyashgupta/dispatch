@@ -32,10 +32,10 @@ export function useDashboardData() {
   const events = useOrchestrationEventsQuery(boardKey, EVENTS_PAGE);
   const decisions = useOpenDecisionsQuery(boardKey);
   const accounts = useAccountsQuery();
-  const orchestrators =
-    useBoardListQuery(
-      (list) => list.boards.find((b) => b.key === boardKey)?.orchestrators,
-    ).data ?? NO_ORCHESTRATORS;
+  const board = useBoardListQuery((list) =>
+    list.boards.find((b) => b.key === boardKey),
+  ).data;
+  const orchestrators = board?.orchestrators ?? NO_ORCHESTRATORS;
   const now = useSyncExternalStore(subscribeClock, readClock);
   return {
     boardKey,
@@ -45,6 +45,7 @@ export function useDashboardData() {
     decisions,
     accounts,
     orchestrators,
+    boardName: board?.name ?? null,
     now,
     connection,
   };

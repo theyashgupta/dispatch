@@ -1,4 +1,8 @@
-import type { BoardPolicy } from "../../../../shared/types.js";
+import {
+  CROSS_SESSION_INBOUND_VALUES,
+  type BoardPolicy,
+  type CrossSessionInbound,
+} from "../../../../shared/types.js";
 import {
   DEFAULT_ORCHESTRATOR_MODEL,
   isLoopModel,
@@ -24,6 +28,7 @@ export interface PolicyFormValues {
   budgetPerGroup: string;
   supervisor: BoardPolicy["supervisor"];
   groupPlaybook: string | null;
+  crossSessionInbound: CrossSessionInbound | null;
   wakeMinutes: string;
 }
 
@@ -77,6 +82,28 @@ export const MAX_BUDGET_PER_GROUP = 100_000;
 
 export const NO_GROUP_PLAYBOOK = "__none__";
 
+export const POLICY_INBOUND_UNSET = "__default__";
+
+export const crossSessionInboundOptions: SelectOption[] = [
+  { value: POLICY_INBOUND_UNSET, label: "Refuse (default)" },
+  { value: "accept", label: "Accept" },
+  { value: "hold", label: "Hold for review" },
+];
+
+/** Show a stored `refuse` and an unset value as the same Refuse (default) item. */
+export function crossSessionInboundSelectValue(
+  stored: CrossSessionInbound | null,
+): string {
+  return stored === null || stored === "refuse" ? POLICY_INBOUND_UNSET : stored;
+}
+
+/** Map the Refuse (default) item back to null, so a policy never stores `refuse`. */
+export function crossSessionInboundFromSelect(
+  value: string,
+): CrossSessionInbound | null {
+  return CROSS_SESSION_INBOUND_VALUES.find((v) => v === value) ?? null;
+}
+
 /**
  * Build the Group playbook options: None, each playbook name, then the stored name if unlisted.
  *
@@ -126,6 +153,7 @@ export function policyFormValues(policy: BoardPolicy): PolicyFormValues {
       policy.budgetPerGroup === null ? "" : String(policy.budgetPerGroup),
     supervisor: policy.supervisor,
     groupPlaybook: policy.groupPlaybook,
+    crossSessionInbound: policy.crossSessionInbound,
     wakeMinutes: String(policy.wakeMinutes),
   };
 }
@@ -206,7 +234,7 @@ export function isPolicyDirty(
 }
 
 /**
- * Build the body of the policy save: the twelve policy fields and nothing else.
+ * Build the body of the policy save: the thirteen policy fields and nothing else.
  *
  * @remarks
  * `usageLimit` is `wait` or `stop`, so the body never holds a usage credits value.
@@ -224,6 +252,7 @@ export function policyPayload(values: PolicyFormValues): BoardPolicy {
     budgetPerGroup: budgetAmount(values.budgetPerGroup),
     supervisor: values.supervisor,
     groupPlaybook: values.groupPlaybook,
+    crossSessionInbound: values.crossSessionInbound,
     wakeMinutes: Number(values.wakeMinutes),
   };
 }

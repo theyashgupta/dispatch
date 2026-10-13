@@ -1,13 +1,22 @@
 import { hideDisabledSlack } from "./hide-disabled-slack.js";
 import type { Item } from "./types.js";
 
-/** The items the Inbox and Today show: Sentry items only when the errors preference is on. */
-export function feedItems(
-  items: readonly Item[],
-  includeErrors: boolean,
-): Item[] {
-  if (includeErrors) return [...items];
-  return items.filter((item) => item.source !== "sentry");
+/** Whether an item is still open: neither done nor dismissed. */
+export function isOpenItem(item: Item): boolean {
+  return item.state !== "done" && item.state !== "dismissed";
+}
+
+/**
+ * Whether an item is an open Slack item that needs a session.
+ *
+ * @remarks Linear reaches the Inbox as cards; GitHub, Sentry, Calendar and Meeting items stay on their own pages.
+ */
+export function isInboxItem(item: Item): boolean {
+  return (
+    item.source === "slack" &&
+    item.meta.needsSession === "true" &&
+    isOpenItem(item)
+  );
 }
 
 /** Whether a Sentry item belongs on the Errors page: neither done nor snoozed. */
@@ -29,11 +38,21 @@ export function isSentryIssueId(issueId: string): boolean {
   return /^\d+$/.test(issueId);
 }
 
-/** The feed every page lists: the errors preference applied, then Slack hidden while it is off. */
+/** The items the Inbox, its badge and Today list: Slack items that need a session, Slack hidden while it is off. */
 export function inboxFeed(
   items: readonly Item[],
-  includeErrors: boolean,
   enabledSources: readonly string[],
 ): Item[] {
-  return hideDisabledSlack(feedItems(items, includeErrors), enabledSources);
+  return hideDisabledSlack(items.filter(isInboxItem), enabledSources);
+}
+
+/** The items the Inbox lists under Dismissed: items with state dismissed, Slack hidden while it is off. */
+export function dismissedFeed(
+  items: readonly Item[],
+  enabledSources: readonly string[],
+): Item[] {
+  return hideDisabledSlack(
+    items.filter((item) => item.state === "dismissed"),
+    enabledSources,
+  );
 }

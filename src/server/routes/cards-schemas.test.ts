@@ -10,6 +10,7 @@ import {
   groupTitleBodySchema,
   linearStateBodySchema,
   moveBodySchema,
+  resumeTargetParamsSchema,
   openEditorBodySchema,
   sessionBodySchema,
   startBodySchema,
@@ -97,7 +98,7 @@ test("startBodySchema reads every field leniently and forms the workspace", () =
         repos: [],
       }),
     ),
-    empty,
+    { ...empty, workspace: { folder: "/f", repos: [] } },
   );
   assert.deepEqual(
     startBodySchema.parse({
@@ -299,6 +300,15 @@ test("attachmentParamsSchema checks the card id and the file name", () => {
       firstCode(attachmentParamsSchema, params),
       "invalid-attachment",
     );
+  }
+});
+
+test("resumeTargetParamsSchema accepts a card id and rejects a bad one", () => {
+  assert.deepEqual(resumeTargetParamsSchema.parse({ id: "LOCAL-1" }), {
+    id: "LOCAL-1",
+  });
+  for (const params of [{ id: "a.b" }, { id: "../x" }, { id: 5 }, {}]) {
+    assert.equal(firstCode(resumeTargetParamsSchema, params), "invalid-id");
   }
 });
 

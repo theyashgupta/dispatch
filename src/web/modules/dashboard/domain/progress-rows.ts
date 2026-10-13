@@ -11,6 +11,7 @@ import type {
 } from "../../../../shared/types.js";
 import { sessionTime } from "./session-time.js";
 import { timeLeft } from "./time-left.js";
+import { trackNodes, type TrackNode } from "./track-nodes.js";
 
 export interface ProgressRow {
   cardId: string;
@@ -21,6 +22,7 @@ export interface ProgressRow {
   sessionTime: string | null;
   timeLeft: string | null;
   view: LoopView | null;
+  track: TrackNode[] | null;
 }
 
 /**
@@ -64,6 +66,7 @@ export function progressRows(
         timeLeft:
           progress === null ? null : (timeLeft(progress, now)?.text ?? null),
         view: progress === null ? null : loopView(progress, { timeZone }),
+        track: progress === null ? null : trackNodes(progress, { timeZone }),
       };
     });
 }

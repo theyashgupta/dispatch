@@ -6,6 +6,7 @@ import { AccountRow } from "./AccountRow";
 interface AccountsListProps {
   accounts: ClaudeAccountSummary[];
   activeId: string;
+  now: number;
   loaded: boolean;
   failed: boolean;
   addDisabled: boolean;
@@ -19,6 +20,7 @@ interface AccountsListProps {
 export function AccountsList({
   accounts,
   activeId,
+  now,
   loaded,
   failed,
   addDisabled,
@@ -71,6 +73,7 @@ export function AccountsList({
               key={account.id}
               account={account}
               active={account.id === activeId}
+              now={now}
               reloginDisabled={reloginDisabled}
               onSwitch={() => onSwitch(account)}
               onRelogin={() => onRelogin(account)}

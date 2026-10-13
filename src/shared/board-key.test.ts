@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   DEFAULT_BOARD_KEY,
   defaultBoardPolicy,
+  deriveBoardKey,
   identifierPrefix,
   isReservedBoardKey,
   parseBoardKey,
@@ -52,8 +53,45 @@ void test("the default policy has the D-6 values and the supervisor off only on 
     supervisor: "off",
     groupPlaybook: null,
     wakeMinutes: 15,
+    crossSessionInbound: null,
   });
   const acme = parseBoardKey("ACME");
   assert.ok(acme);
   assert.equal(defaultBoardPolicy(acme).supervisor, "on");
+  assert.equal(defaultBoardPolicy(acme).crossSessionInbound, null);
+});
+
+void test("deriveBoardKey follows the truth table", () => {
+  const none = new Set<string>();
+  const cases: [string, string, string[]][] = [
+    ["Payments", "PAYMEN", []],
+    ["Équipe café", "EQUIPE", []],
+    ["Payments", "PAYME2", ["PAYMEN"]],
+    ["Local", "LOCAL2", []],
+    ["x", "X1", []],
+    ["3D Printing", "DPRINT", []],
+    ["!!!", "BOARD", []],
+    ["123", "BOARD", []],
+    ["My App", "MYAPP", []],
+    ["ab", "AB", []],
+    ["Group", "GROUP2", []],
+    ["!!!", "BOARD2", ["BOARD"]],
+  ];
+  for (const [name, expected, taken] of cases) {
+    assert.equal(
+      deriveBoardKey(name, taken.length === 0 ? none : new Set(taken)),
+      expected,
+      name,
+    );
+  }
+});
+
+void test("deriveBoardKey walks the digit variants up to the 4 plus 2 form", () => {
+  const taken = new Set(["PAYMEN"]);
+  for (let d = 2; d <= 9; d++) taken.add(`PAYME${d}`);
+  assert.equal(deriveBoardKey("Payments", taken), "PAYM10");
+  for (let n = 10; n <= 98; n++) taken.add(`PAYM${n}`);
+  assert.equal(deriveBoardKey("Payments", taken), "PAYM99");
+  taken.add("PAYM99");
+  assert.equal(deriveBoardKey("Payments", taken), null);
 });

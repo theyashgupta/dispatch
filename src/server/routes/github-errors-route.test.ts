@@ -89,7 +89,7 @@ async function expectError(
 
 const PR = "/github/pr/acme/api/12";
 const get = () => call("GET", PR);
-const review = (body?: unknown) => call("POST", `${PR}/review`, body);
+const review = (body?: unknown) => call("POST", `${PR}/reviews`, body);
 const merge = (body?: unknown) => call("POST", `${PR}/merge`, body);
 
 beforeEach(() => {
@@ -139,7 +139,7 @@ test("a malformed owner, repo or number answers 400 invalid pull request on all 
   for (const tail of bad) {
     await expectError(call("GET", `/github/pr/${tail}`), 400, INVALID_PR);
     await expectError(
-      call("POST", `/github/pr/${tail}/review`, { event: "APPROVE" }),
+      call("POST", `/github/pr/${tail}/reviews`, { event: "APPROVE" }),
       400,
       INVALID_PR,
     );
@@ -164,7 +164,7 @@ test("an owner or repo made only of dots answers 400 invalid pull request", asyn
 
 test("a bad pull request answers before the body is checked", async () => {
   await expectError(
-    call("POST", "/github/pr/acme/api/abc/review", {}),
+    call("POST", "/github/pr/acme/api/abc/reviews", {}),
     400,
     INVALID_PR,
   );

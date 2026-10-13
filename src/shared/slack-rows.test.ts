@@ -6,6 +6,7 @@ import {
   slackAuthor,
   slackPills,
   slackPlace,
+  slackReason,
   slackRows,
 } from "./slack-rows.js";
 
@@ -162,4 +163,31 @@ test("slackPlace names a DM, a group DM and a channel", () => {
   assert.equal(slackPlace("mpim", "x"), "in a group DM");
   assert.equal(slackPlace("channel", "eng"), "in #eng");
   assert.equal(slackPlace(undefined, ""), "in #");
+});
+
+test("slackRows lists noise and unclassified items but not done or dismissed ones", () => {
+  const rows = slackRows([
+    slack("noise", {}, { needsSession: "false" }),
+    slack("unclassified"),
+    slack("needs", {}, { needsSession: "true" }),
+    slack("done", { state: "done" }),
+    slack("dismissed", { state: "dismissed" }),
+  ]);
+  assert.deepEqual(rows.map((r) => r.id).sort(), [
+    "slack:needs",
+    "slack:noise",
+    "slack:unclassified",
+  ]);
+});
+
+test("slackReason returns the stored reason, else Not classified", () => {
+  assert.equal(
+    slackReason(slack("a", {}, { relevanceReason: "Asks you to review" })),
+    "Asks you to review",
+  );
+  assert.equal(slackReason(slack("b")), "Not classified");
+  assert.equal(
+    slackReason(slack("c", {}, { relevanceReason: "" })),
+    "Not classified",
+  );
 });

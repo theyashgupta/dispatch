@@ -162,7 +162,13 @@ export interface ProbeUnknown {
   checkedAt?: string;
 }
 
-export const ITEM_STATES = ["unread", "read", "snoozed", "done"] as const;
+export const ITEM_STATES = [
+  "unread",
+  "read",
+  "snoozed",
+  "done",
+  "dismissed",
+] as const;
 export type ItemState = (typeof ITEM_STATES)[number];
 export type SettableItemState = Exclude<ItemState, "snoozed">;
 
@@ -249,6 +255,14 @@ export interface Card {
   workspacePath?: string;
   /** Chosen workspace snapshot at start — absolute repo paths so resume/restart/cleanup never re-read the folder registry. */
   workspace?: { folder: string; repos: { path: string; base: string }[] };
+  reviewPr?: {
+    repo: string;
+    number: number;
+    url: string;
+    head: string;
+    base: string;
+    repoPath?: string;
+  };
   /** Branch name used for the ticket's worktrees. Mirrors the ACTIVE session's own `branch`. */
   branch?: string;
   /**
@@ -502,13 +516,15 @@ export interface Card {
    */
   source?: string;
   /**
-   * The playbook name captured when a start request carries one, persisted BEFORE the saga runs
-   * (the extraDirection precedent) so Retry after a failed start and a bare Restart reproduce the
-   * original start — playbook body included — instead of degrading to a playbook-less start.
+   * The playbook name and inbound value a primary start request carries, saved once the start
+   * is sure to launch so Retry after a failed start and a bare Restart reproduce the original
+   * start instead of degrading to a playbook-less one.
    */
   startIntent?: {
     playbook?: string;
+    crossSessionInbound?: CrossSessionInbound;
   };
+  inboxDismissedAt?: string;
 
   /**
    * Group-card-only: ids of member cards, in selection order. Presence (non-empty) is what
@@ -688,6 +704,20 @@ export interface Session {
   transcriptPath?: string;
 }
 
+export type ResumeTarget =
+  | {
+      mode: "resume";
+      sessionId: string;
+      startedAt: string;
+      replaced?: ResumeReplaced;
+    }
+  | { mode: "continue"; replaced?: ResumeReplaced };
+
+export interface ResumeReplaced {
+  storedId: string;
+  reason: "newer-on-disk" | "no-conversation";
+}
+
 export interface ClaudeSession {
   /** The Claude CLI `session_id` from the hook payload. */
   id: string;
@@ -697,6 +727,7 @@ export interface ClaudeSession {
   lastActiveAt: string;
   /** ISO timestamp of the resume attempt that found this conversation's file gone. */
   missingAt?: string;
+  startedAt?: string;
 }
 
 /**
@@ -973,6 +1004,7 @@ export interface Playbook {
   /** On-disk filename stem (no `.md`), used ONLY for CRUD addressing — kickoff/picker resolution stays name-keyed. */
   slug?: string;
   when?: string;
+  tags?: string[];
 }
 
 /** A playbook file that failed to load, paired with a fixed-vocabulary reason safe to render client-side. */
@@ -1008,6 +1040,14 @@ export interface PlaybookPickerResponse {
  * sessions). Boot-static — changing it requires a backend restart.
  */
 export type StatusChannel = "hooks" | "pane" | "auto";
+
+export const CROSS_SESSION_INBOUND_VALUES = [
+  "accept",
+  "hold",
+  "refuse",
+] as const;
+export type CrossSessionInbound = (typeof CROSS_SESSION_INBOUND_VALUES)[number];
+export const DEFAULT_CROSS_SESSION_INBOUND: CrossSessionInbound = "accept";
 
 /**
  * Per-binary presence result surfaced by the boot probe and the setup wizard. Shared here
@@ -1297,6 +1337,7 @@ export interface Config {
   workspaceRoot?: string;
   /** Status-source selection (`hooks | pane | auto`); absent resolves to `auto` at load. */
   statusChannel?: StatusChannel;
+  crossSessionInbound?: CrossSessionInbound;
   sources?: {
     linear?: SourceConfig;
     github?: ItemSourceConfig;
@@ -1373,6 +1414,7 @@ export interface ClaudeUsageSnapshot {
   windows: ClaudeUsageWindow[];
   fetchedAt: string | null;
   error?: string;
+  loginExpiresAt?: string;
 }
 
 export interface ClaudeAccountSummary {
@@ -1433,17 +1475,20 @@ export interface ClaudeAccountsSettings {
   autoMove: boolean;
   thresholdPercent: number;
   minDwellMinutes: number;
+  hysteresisPercent: number;
 }
 
 export const DEFAULT_CLAUDE_ACCOUNTS_SETTINGS: ClaudeAccountsSettings = {
   autoMove: false,
   thresholdPercent: 100,
   minDwellMinutes: 15,
+  hysteresisPercent: 10,
 };
 
 export const CLAUDE_ACCOUNTS_BOUNDS = {
   thresholdPercent: { min: 50, max: 100 },
   minDwellMinutes: { min: 0, max: 240 },
+  hysteresisPercent: { min: 0, max: 50 },
 } as const;
 
 export type ChainAccountState =
@@ -1485,6 +1530,7 @@ export interface ChainStateFile {
   inUseSince: string | null;
   exhausted: ChainExhaustedRecord | null;
   moves: ChainMove[];
+  loginExpiryNotified: Record<string, string>;
 }
 
 /**
@@ -1736,6 +1782,17 @@ export type BoardKey = string & { readonly __brand: "BoardKey" };
 
 export type BoardScope = BoardKey | "*";
 
+export interface ReviewCardAnswer {
+  cardId: string;
+  created: boolean;
+  column: Column;
+  boardKey: BoardKey;
+}
+
+export type ProviderResult<T> =
+  | ({ ok: true } & T)
+  | { ok: false; error: string; message?: string; ssoUrl?: string };
+
 export interface BoardWorkspaceRepo {
   path: string;
   baseBranch: string | null;
@@ -1755,6 +1812,7 @@ export interface BoardPolicy {
   supervisor: "on" | "off";
   groupPlaybook: string | null;
   wakeMinutes: number;
+  crossSessionInbound: CrossSessionInbound | null;
 }
 
 export type OrchestratorPolicyOverride = Partial<
@@ -1793,6 +1851,7 @@ export interface OrchestratorSessionView {
   state: SupervisorState | null;
   stateReason: string | null;
   contextPercent: number | null;
+  cost: number | null;
   model: string | null;
   hasTmuxSession: boolean;
   activeSessionId: string | null;
@@ -1861,7 +1920,8 @@ export type AccountEventType =
   | "account_login_failed"
   | "account_failover"
   | "account_return"
-  | "account_chain_exhausted";
+  | "account_chain_exhausted"
+  | "account_login_expiring";
 
 export type AccountActivityEvent = Omit<ActivityEvent, "type"> & {
   type: AccountEventType;
@@ -2039,7 +2099,17 @@ export const DECISION_KINDS = [
   "ship_failure",
   "ticket_proposal",
   "other",
+  "plan",
 ] as const;
+
+export const PLAN_SIZES = ["small", "medium", "large"] as const;
+
+export interface PlanEntry {
+  ref: string;
+  playbook: string;
+  order: number;
+  size: (typeof PLAN_SIZES)[number];
+}
 
 export interface DecisionItem {
   id: string;
@@ -2059,6 +2129,20 @@ export interface DecisionItem {
     tickets: { title: string; description: string }[];
     usedIndexes: number[];
   };
+  plan?: { entries: PlanEntry[] };
+}
+
+export interface ConversationMessage {
+  id: string;
+  at: string | null;
+  role: "user" | "orchestrator" | "system";
+  text: string;
+}
+
+export interface OrchestratorConversation {
+  status: "ok" | "no-session" | "no-transcript" | "unreadable";
+  messages: ConversationMessage[];
+  truncated: boolean;
 }
 
 export interface SessionMeters {

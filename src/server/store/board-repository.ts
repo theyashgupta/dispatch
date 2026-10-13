@@ -153,13 +153,28 @@ export interface BoardRepository {
   endSync(id: string): void;
   setProvisioning(id: string, step: string): Promise<void>;
   setExtraDirection(id: string, text: string): Promise<void>;
-  setStartIntent(id: string, intent: { playbook?: string }): Promise<void>;
+  setStartIntent(
+    id: string,
+    intent: NonNullable<Card["startIntent"]>,
+  ): Promise<void>;
+  setInboxDismissed(
+    id: string,
+    dismissed: boolean,
+  ): Promise<"ok" | "unknown" | "not-in-inbox">;
   addWorkspaceFolder(board: BoardKey, path: string): Promise<void>;
   removeWorkspaceFolder(board: BoardKey, path: string): Promise<void>;
   setLastUsedFolder(board: BoardKey, path: string): Promise<void>;
   setCardWorkspace(
     id: string,
     workspace: { folder: string; repos: { path: string; base: string }[] },
+  ): Promise<void>;
+  setCardReview(
+    id: string,
+    review: {
+      reviewPr: NonNullable<Card["reviewPr"]>;
+      url: string;
+      workspace: NonNullable<Card["workspace"]>;
+    },
   ): Promise<void>;
   setStatusReason(id: string, reason: string | null): Promise<void>;
   setSyncing(id: string, syncing: boolean): Promise<void>;
@@ -172,6 +187,12 @@ export interface BoardRepository {
     id: string,
     sessionId: string | undefined,
     sid: string,
+  ): Promise<void>;
+  startClaudeSession(
+    id: string,
+    sessionId: string | undefined,
+    sid: string,
+    at: string,
   ): Promise<void>;
   markClaudeSessionMissing(
     id: string,

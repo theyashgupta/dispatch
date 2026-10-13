@@ -8,6 +8,10 @@ import {
   snoozeItem,
 } from "@/queries/item-actions-api";
 import {
+  setCardInboxDismissedMutationOptions,
+  setItemStateMutationOptions as inboxSetItemStateMutationOptions,
+} from "@/modules/inbox/queries/inbox-queries";
+import {
   promoteItemMutationOptions,
   setItemStateMutationOptions,
   snoozeItemMutationOptions,
@@ -138,4 +142,39 @@ test("the promote mutation rejects with the server reason on a 409", async () =>
     }),
     new Error("already promoted"),
   );
+});
+
+test("the card dismissal mutation posts the flag to the encoded card route", async () => {
+  reply(200, {});
+  await setCardInboxDismissedMutationOptions().mutationFn({
+    id: "LOCAL/1",
+    dismissed: true,
+  });
+  assert.equal(calls[0]?.url, "/api/cards/LOCAL%2F1/inbox-dismiss");
+  assert.equal(calls[0]?.init?.method, "POST");
+  assert.equal(calls[0]?.init?.body, JSON.stringify({ dismissed: true }));
+});
+
+test("the card dismissal mutation rejects with a status message on a 409", async () => {
+  reply(409, { error: "not-in-inbox" }, "Conflict");
+  await assert.rejects(
+    setCardInboxDismissedMutationOptions().mutationFn({
+      id: "c1",
+      dismissed: false,
+    }),
+    new Error("setCardInboxDismissed failed: 409 Conflict"),
+  );
+});
+
+test("the inbox item state mutation caches nothing, like the card dismissal one", async () => {
+  reply(200, {});
+  await inboxSetItemStateMutationOptions().mutationFn({
+    id: "i1",
+    state: "dismissed",
+  });
+  assert.equal(calls[0]?.url, "/api/items/i1/state");
+  assert.equal(calls[0]?.init?.body, JSON.stringify({ state: "dismissed" }));
+  assert.deepEqual(Object.keys(setCardInboxDismissedMutationOptions()), [
+    "mutationFn",
+  ]);
 });

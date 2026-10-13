@@ -12,6 +12,7 @@ import { sleep } from "../../adapters/exec.js";
 import {
   branchExists,
   fetchBase,
+  fetchPullHead,
   gitCommonDir,
   revParseVerify,
   worktreeAddExistingBranch,
@@ -46,15 +47,23 @@ import { boardRepository as store } from "../../store/board-repository.js";
 import { buildKickoff } from "../infra/kickoff.js";
 import { parseClaudeArgs } from "../domain/claude-args.js";
 import {
+  getCrossSessionInbound,
   getHooksRuntime,
   getOrchestrationConfig,
 } from "../infra/config-holder.js";
+import { recordNewestConversation } from "./resume-target.js";
 import { newHookTokenValue, registerHookToken } from "./hook-tokens.js";
-import { HOOK_SETTINGS_PATH } from "../infra/paths.js";
+import { hookSettingsPath } from "../infra/paths.js";
+import { githubRepoAt } from "./github-repos.js";
+import {
+  isGuardedLaunch,
+  resolveCrossSessionInbound,
+} from "../domain/cross-session-inbound.js";
 import { worktreePath as buildWorktreePath } from "../domain/workspace-paths.js";
 import { boardWorkspace } from "../domain/board-workspace.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { isHiddenCard } from "../../../shared/hidden-card.js";
+import { reviewBranch } from "../../../shared/pr-rows.js";
 import { DISPATCH_DATA_DIR } from "../../store/data-dir.js";
 import {
   orchestratorLaunchArgs,
@@ -107,6 +116,7 @@ const POLL_INTERVAL_MS = 500;
 const LAUNCH_CLEAR_MS = 3_000;
 const LAUNCH_CLEAR_POLL_MS = 150;
 const PASTE_SETTLE_MS = 500;
+const NEWEST_CONVERSATION_DELAY_MS = 5_000;
 
 /**
  * Mutable saga bookkeeping. `run` records creations here; `undo` compensates against these
@@ -139,6 +149,7 @@ export interface SagaContext {
   tmuxSessionCreated: boolean;
   /** The Claude account the REPL launched on, set by the start-claude step for `completeStart`. */
   claudeAccountId?: string;
+  hookSilent?: boolean;
   /**
    * True when this saga run is a RESTART of a previously-lost session (card.sessionLost). Threads
    * into the kickoff so the agent is told to `git status` first; also the condition under which an
@@ -162,6 +173,9 @@ export interface SagaContext {
    * not exist — a consumer must not attempt to fetch it.
    */
   inheritBaseRef?: string;
+  /** A new-session request's merged start intent; the card's stored intent is not written for it. */
+  launchIntent?: NonNullable<Card["startIntent"]>;
+  reviewRepo?: string;
 }
 
 type StartVariant = NonNullable<StartError["variant"]>;
@@ -285,12 +299,28 @@ async function createRepoWorktree(
   ctx: SagaContext,
   repoPath: string,
   base: string,
+  reviewNumber?: number,
 ): Promise<void> {
   await worktreePrune(repoPath);
 
   const worktreePath = buildWorktreePath(ctx.workspacePath, repoPath);
 
   if (await worktreeRegistered(repoPath, worktreePath)) {
+    return;
+  }
+
+  if (reviewNumber !== undefined) {
+    try {
+      await fetchPullHead(repoPath, reviewNumber);
+      await worktreeAddExistingBranch(
+        repoPath,
+        worktreePath,
+        reviewBranch(reviewNumber),
+      );
+    } catch (err) {
+      throw new StartStepError("creating worktrees", stderrOf(err), "generic");
+    }
+    ctx.createdWorktrees.push({ repoPath, worktreePath });
     return;
   }
 
@@ -353,6 +383,25 @@ async function createRepoWorktree(
 }
 
 /**
+ * The path of the workspace repository whose `origin` is the GitHub repository `prRepo`, or null.
+ *
+ * @remarks Matches by remote name, not by position or folder name: the Start dialog may send any
+ * repo order, and a checkout folder need not carry the GitHub repository name.
+ */
+async function findReviewRepo(
+  repos: { path: string }[],
+  prRepo: string,
+): Promise<string | null> {
+  for (const { path: repoPath } of repos) {
+    const name = await githubRepoAt(repoPath);
+    if (name !== null && name.toLowerCase() === prRepo.toLowerCase()) {
+      return repoPath;
+    }
+  }
+  return null;
+}
+
+/**
  * Saga Step 2: create the per-repo worktrees, recording each creation onto `ctx` so undo can
  * compensate in reverse.
  * @remarks Runs the restart-idempotency check (`worktreeRegistered`) BEFORE the base-ref fetch, so
@@ -389,7 +438,20 @@ const createWorktrees: SagaStep = {
       );
     }
     const seenCommonDirs = new Set<string>();
-    for (const { path: repoPath, base } of ctx.card.workspace?.repos ?? []) {
+    const repos = ctx.card.workspace?.repos ?? [];
+    const reviewPr = ctx.card.reviewPr;
+    const reviewRepo = reviewPr
+      ? await findReviewRepo(repos, reviewPr.repo)
+      : null;
+    if (reviewRepo !== null) ctx.reviewRepo = reviewRepo;
+    if (reviewPr && reviewRepo === null) {
+      throw new StartStepError(
+        "creating worktrees",
+        `No repository of this workspace has ${reviewPr.repo} as its origin`,
+        "generic",
+      );
+    }
+    for (const { path: repoPath, base } of repos) {
       if (base.startsWith("-")) {
         throw new StartStepError(
           "creating worktrees",
@@ -408,7 +470,12 @@ const createWorktrees: SagaStep = {
         seenCommonDirs.add(commonDir);
       }
       await withRepoLock(commonDir ?? path.resolve(repoPath), () =>
-        createRepoWorktree(ctx, repoPath, base),
+        createRepoWorktree(
+          ctx,
+          repoPath,
+          base,
+          repoPath === reviewRepo ? reviewPr?.number : undefined,
+        ),
       );
     }
   },
@@ -507,6 +574,8 @@ export interface LaunchClaudeInput {
   leadingArgs: string[];
   account: LaunchAccount;
   onCreated?: () => void;
+  onHookSilent?: () => void;
+  launchIntent?: NonNullable<Card["startIntent"]>;
 }
 
 /** Marks a tmux session whose pane root is the login shell, so a relaunch may type into it. */
@@ -532,8 +601,15 @@ export async function launchClaude(input: LaunchClaudeInput): Promise<boolean> {
   const hooks = created
     ? await mintHooks(cardId, sessionId)
     : existingHooks(store.getCard(cardId));
+  if (hooks === null) input.onHookSilent?.();
   const card = store.getCard(cardId);
-  const launch = await buildLaunch(account, leadingArgs, hooks, card);
+  const launch = await buildLaunch(
+    account,
+    leadingArgs,
+    hooks,
+    card,
+    input.launchIntent,
+  );
   if (created) {
     await newSession(tmuxSession, cwd, [], {
       ...launch.env,
@@ -700,22 +776,42 @@ function cardPolicyArgs(
 /**
  * Build the claude argv and env every launch site shares: the resolved binary, the Settings
  * arguments, the hooks settings layer, and the account config dir.
+ *
+ * @remarks The cross-session inbound value comes from the card as stored now, not from the
+ * caller's copy, because a start saga saves the start intent after it read the card. A given
+ * `launchIntent` replaces the card's stored intent, for a new session whose request fields are
+ * never written to the card.
  */
 export async function buildLaunch(
   account: LaunchAccount,
   leadingArgs: string[],
   hooks: LaunchHooks,
   card?: Card,
+  launchIntent?: NonNullable<Card["startIntent"]>,
 ): Promise<{ argv: string[]; env: Record<string, string> }> {
   const configured = parseClaudeArgs(
     getOrchestrationConfig()?.claudeArgs ?? DEFAULT_CLAUDE_ARGS,
   );
   const policy = card ? cardPolicyArgs(card, configured) : null;
+  const current = card ? (store.getCard(card.id) ?? card) : undefined;
+  const effective = current
+    ? { ...current, startIntent: launchIntent ?? current.startIntent }
+    : undefined;
+  const guarded = effective ? isGuardedLaunch(effective) : false;
+  const inbound = resolveCrossSessionInbound({
+    intent: effective?.startIntent?.crossSessionInbound,
+    guarded,
+    policy: guarded
+      ? store.getBoard(current?.boardKey ?? DEFAULT_BOARD_KEY)?.policy
+          .crossSessionInbound
+      : null,
+    config: getCrossSessionInbound(),
+  });
   return buildClaudeLaunch({
     claudePath: (await resolveBinaryPath("claude")) ?? "claude",
     claudeArgs: policy?.claudeArgs ?? configured,
     leadingArgs: [...(policy?.leadingArgs ?? []), ...leadingArgs],
-    settingsPath: HOOK_SETTINGS_PATH,
+    settingsPath: hookSettingsPath(inbound),
     hooks,
     configDir: account.configDir,
   });
@@ -781,8 +877,12 @@ const startClaude: SagaStep = {
       cwd: ctx.workspacePath,
       leadingArgs: [],
       account,
+      launchIntent: ctx.launchIntent,
       onCreated: () => {
         ctx.tmuxSessionCreated = true;
+      },
+      onHookSilent: () => {
+        ctx.hookSilent = true;
       },
     });
   },
@@ -805,6 +905,10 @@ const sendKickoff: SagaStep = {
       .map((id) => store.getCard(id))
       .filter((c): c is Card => c != null);
     const kickoff = buildKickoff(ctx.card, ctx.extraDirection, repoNames, {
+      reviewRepoName:
+        ctx.reviewRepo === undefined
+          ? undefined
+          : path.basename(ctx.reviewRepo),
       restarted: ctx.restarted,
       playbookBody: ctx.playbookBody,
       members,
@@ -823,6 +927,14 @@ const sendKickoff: SagaStep = {
       await sendKeys(paneTarget, ["Enter"]);
     } finally {
       await fsp.unlink(tmpFile).catch(() => {});
+    }
+    if (ctx.hookSilent === true) {
+      const launchedSessionId =
+        ctx.sessionId ?? store.getCard(ctx.card.id)?.activeSessionId;
+      setTimeout(
+        () => void recordNewestConversation(ctx.card.id, launchedSessionId),
+        NEWEST_CONVERSATION_DELAY_MS,
+      ).unref();
     }
   },
   async undo() {},

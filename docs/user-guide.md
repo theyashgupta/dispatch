@@ -18,31 +18,48 @@ A group is one session that works on several tickets. A loop is a roadmap that a
 ### Create a board
 
 1. Press `Cmd+K` (or `Ctrl+K`) to open the command palette.
-2. Choose **New board**. The dialog **New board** opens.
-3. Fill the fields.
+2. Choose **Manage boards**. On the boards page, choose **New board**. The dialog **New board** opens.
+3. Fill the fields. Only **Name** is required. The repository rows and **Advanced** are optional. **Advanced** is closed at first. It holds **Key**, **Folder** and **Linear team keys**.
 
 | Field                | What to enter                                                                                                                      |
 | -------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | **Key**              | 2 to 6 capital letters or digits. The key starts with a letter. You cannot change the key later. `LOCAL` and `GROUP` are reserved. |
 | **Name**             | The name of the board.                                                                                                             |
-| **Sessions folder**  | The folder in which Dispatch makes one folder for each session.                                                                    |
+| **Folder**           | The folder in which Dispatch makes one folder for each session.                                                                    |
 | **Repository path**  | The path of a git repository. Choose **Add repository** to add more rows.                                                          |
 | **Base branch**      | The base branch of that repository.                                                                                                |
 | **Check command**    | The command that the ship flow runs as the check of that repository. The row shows the placeholder `npm run check`.                |
 | **Linear team keys** | Linear team keys, separated by commas. New Linear issues of these teams go to this board.                                          |
 
-4. Choose **Create board**. The dialog closes and the message "Board <name> created." shows. You stay on the boards page. The board switcher still shows the old board.
-5. Open the new board. In its row, choose **Board actions**, then **Open board**. Or choose the new board in the board switcher.
+4. Choose **Create**. The dialog closes, the message "Created board <name> (<KEY>)" shows and Dispatch opens the new board.
 
-These fields are required: **Key**, **Name**, **Sessions folder** and the path of one repository. The form shows an error under a field that is empty or wrong. **Base branch**, **Check command** and **Linear team keys** are optional. An empty **Check command** becomes `npm run check`. Enter the sessions folder and the repository path as absolute paths.
+Dispatch derives the key from the name when you give no key. When you give no folder, Dispatch makes the folder `<workspaces root>/<key>`. The form shows an error under a field that is empty or wrong. **Key**, **Folder**, **Repository path**, **Base branch**, **Check command** and **Linear team keys** are optional. An empty **Check command** becomes `npm run check`. Enter the folder and the repository path as absolute paths.
 
-The key must be new. Dispatch refuses a key that another board or a Linear team already uses. A board needs at least one repository.
+In the dialog, **Browse** next to **Repository path** opens the folder browser. Choose a git folder to fill the path. In **Advanced**, **Key** and **Folder** have placeholders that show the values Dispatch uses when you leave them empty.
+
+The key must be new. Dispatch refuses a key that another board or a Linear team already uses. A board can have no repository. Add a repository later in the board settings. The server can also make a local repository in `<board folder>/<lowercase key>`.
 
 ### Switch boards
 
-The sidebar shows the board switcher when more than one board is active. Choose the switcher, or press `B`, and select a board. The switcher shows the number of items that need attention for each board.
+The sidebar has a **Boards** section at its end, after the System group. It lists every active board, in list order. The board you are on is marked. Each row shows the number of items that need attention and the number of running loops. Select a row to open the kanban board of that board. The last row, **Create board**, opens the create dialog.
 
-The palette also has **Switch to board** commands, **Manage boards** and **New board**.
+Select the label **Boards** to fold or unfold the section. Press `Enter` or `Space` on the label to do the same. When the sidebar is narrow, the section is one icon that opens the boards page. On a phone, the section shows in the sidebar sheet, and the sheet closes when you select a board.
+
+Press `B` to open the command palette with the boards only. Type to filter the boards. The palette lists **Switch to board** for each active board except the current one, then **Manage boards** and **Create board**. `B` does nothing while you type in a text field or while a dialog is open. Select a board in the palette to show the same page on that board.
+
+The address of a board page holds the board key. The pages with a keyed address are the board (`/boards/<key>`), the dashboard (`/boards/<key>/dashboard`), the inbox (`/boards/<key>/inbox`), the sessions (`/boards/<key>/sessions`) and the board settings (`/boards/<key>/settings`). The other pages keep the `board` search parameter, for example `/tickets?board=<key>`. The old addresses, such as `/board`, `/inbox` and `/dashboard?board=<key>`, still open the same pages.
+
+### Create a board from the palette
+
+1. Press `Cmd+K` (or `Ctrl+K`). Choose **Create board**.
+2. Type the board name in the field **Board name**. Press `Enter`.
+3. Dispatch shows the message "Created board <name> (<KEY>)" and opens the board.
+
+An empty name does nothing. Press `Escape` to go back to the command list. If Dispatch refuses the name, it shows the reason and keeps the palette open.
+
+### Create a board from the Ask page
+
+Write "create a board called <name>" on the **Ask** page. Dispatch creates the board with the default values. The answer gives the key and the link **Open <name>**. If you write "create a board" with no name, Dispatch asks "What should the board be called?". Write the name, or write "cancel".
 
 ### Manage boards
 
@@ -51,15 +68,27 @@ The palette also has **Switch to board** commands, **Manage boards** and **New b
 The row menu **Board actions** has three items.
 
 - **Open board** opens the board.
-- **Edit** opens the dialog **Edit board**. You can change everything except the key.
-- **Archive** hides the board from the switcher. The cards and sessions stay. The item is off while sessions run on the board. Restore the board from **Archived boards** with **Restore**.
+- **Edit** opens the board settings page (see "Board settings"). You can change the name, the team keys and the repositories. The key and the folder do not change.
+- **Archive** hides the board from the **Boards** section. The cards and sessions stay. The item is off while sessions run on the board. Restore the board from **Archived boards** with **Restore**.
+
+### Board settings
+
+Choose **Edit** in the row menu **Board actions**, or open `/boards/<key>/settings`. The page changes the name, the repositories and the Linear team keys of the board. The key does not change. An active board shows **Create a repository here**. It makes the repository `<folder>/<lowercase key>`.
+
+### Start a card on a board with no repository
+
+If the board has no repository, **Start** shows "This board has no repository." and three actions.
+
+- **Start without a repository** runs the session in the board folder.
+- **Create a repository here** makes the repository and selects it. Then choose **Start**.
+- **Add a repository** opens **Browse**. Choose a git folder. Dispatch adds it to the board and selects it.
 
 ### The default board
 
 `LOCAL` is the default board. It is the board that Dispatch shows when no other board is selected.
 
 - You cannot archive it.
-- Its repositories come from **Settings**, **Workspaces**. A change in its **Edit board** dialog also changes that list. The dialog shows the repository path only.
+- Its repositories come from **Settings**, **Workspaces**. A change on its board settings page also changes that list. The page shows the repository path only.
 - Its supervisor starts **Off**. A new board starts with the supervisor **On**.
 
 ## Orchestrated board setup
@@ -75,27 +104,28 @@ Add the repositories when you create the board, or choose **Edit** later. Each r
 To open the policy form of a board:
 
 1. If the board does not exist, create it (see "Create a board").
-2. Select the board in the board switcher (see "Switch boards").
+2. Select the board in the **Boards** section (see "Switch boards").
 3. Open the board page.
-4. Choose **Orchestrator**, or **Add orchestrator** when the board has none. The panel has four tabs: **Terminal**, **Decisions**, **Policy** and **Orchestrators**.
+4. Choose **Orchestrator**, or **Add orchestrator** when the board has none. The command centre opens. Choose **Settings** to open the orchestrator panel. The panel has four tabs: **Terminal**, **Decisions**, **Policy** and **Orchestrators**.
 5. Open **Policy**. The form is called **Policy for** and the board name.
 
 Only you can change the policy. The orchestrator reads it. No tool can change it.
 
-| Label                               | Allowed values                                                                                   | Default                     |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------- |
-| **Roadmap approval**                | **Ask me for each roadmap**, **Approve when the rules pass, else ask**, **Approve each roadmap** | **Ask me for each roadmap** |
-| **Loops at once**                   | A whole number from 1 to 10                                                                      | 3                           |
-| **Loop model**                      | **Session settings**, or a model with the effort `high` or `max`                                 | **Session settings**        |
-| **Group playbook**                  | **None**, or a playbook name                                                                     | **None**                    |
-| **Orchestrator model**              | **Opus 5.5**, **Sonnet 5.5**, **Fable 5.1**                                                      | **Opus 5.5**                |
-| **Handoff at context percent**      | A whole number from 10 to 95                                                                     | 50                          |
-| **Hard handoff at context percent** | A whole number above the handoff percent, up to 100                                              | 80                          |
-| **Wake timer (minutes)**            | A whole number from 0 to 1440                                                                    | 15                          |
-| **At a usage limit**                | **Wait for the reset**, **Stop and ask me**                                                      | **Wait for the reset**      |
-| **Ship rights**                     | **None, I ship**, **Open PRs**, **Open and merge PRs**                                           | **None, I ship**            |
-| **Budget per group (USD)**          | An amount above 0 and at most 100000, or empty for **No limit**                                  | Empty (**No limit**)        |
-| **Supervisor**                      | **On**, **Off**                                                                                  | **On** (**Off** on `LOCAL`) |
+| Label                                                     | Allowed values                                                                                   | Default                     |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------- |
+| **Roadmap approval**                                      | **Ask me for each roadmap**, **Approve when the rules pass, else ask**, **Approve each roadmap** | **Ask me for each roadmap** |
+| **Loops at once**                                         | A whole number from 1 to 10                                                                      | 3                           |
+| **Loop model**                                            | **Session settings**, or a model with the effort `high` or `max`                                 | **Session settings**        |
+| **Group playbook**                                        | **None**, or a playbook name                                                                     | **None**                    |
+| **Messages from other sessions (loops and orchestrator)** | **Refuse (default)**, **Accept**, **Hold for review**                                            | **Refuse (default)**        |
+| **Orchestrator model**                                    | **Opus 5.5**, **Sonnet 5.5**, **Fable 5.1**                                                      | **Opus 5.5**                |
+| **Handoff at context percent**                            | A whole number from 10 to 95                                                                     | 50                          |
+| **Hard handoff at context percent**                       | A whole number above the handoff percent, up to 100                                              | 80                          |
+| **Wake timer (minutes)**                                  | A whole number from 0 to 1440                                                                    | 15                          |
+| **At a usage limit**                                      | **Wait for the reset**, **Stop and ask me**                                                      | **Wait for the reset**      |
+| **Ship rights**                                           | **None, I ship**, **Open PRs**, **Open and merge PRs**                                           | **None, I ship**            |
+| **Budget per group (USD)**                                | An amount above 0 and at most 100000, or empty for **No limit**                                  | Empty (**No limit**)        |
+| **Supervisor**                                            | **On**, **Off**                                                                                  | **On** (**Off** on `LOCAL`) |
 
 Notes on the fields:
 
@@ -103,6 +133,7 @@ Notes on the fields:
 - **Loops at once** is the concurrency cap. It covers groups and the ticket cards that the orchestrator starts. Dispatch refuses the orchestrator tools that start a group or a card above the cap. A card or group in Agent done frees its slot. A group that waits for its dependencies stays queued. The supervisor starts it when the dependencies are done and a slot is free.
 - **Loop model**: The model and effort of the sessions of a group. When you choose a model, Dispatch starts each group session with that model and effort, and it ignores any model or effort in the Settings Claude arguments. When you choose **Session settings**, Dispatch uses the Settings.
 - **Group playbook**: the playbook of a group that the orchestrator creates without one. When the playbook no longer exists, the group starts with no playbook. When the stored name is not in the list of playbooks, the select shows it as "<name> (not found)", and **Save policy** keeps the name.
+- **Messages from other sessions (loops and orchestrator)**: how a Roadmap Loop session and the orchestrator session of this board treat a message from another Claude session on this computer. **Refuse (default)** blocks the message. **Accept** delivers it. **Hold for review** shows a dialog in the session. The supervisor denies that dialog only when the board supervisor is **On**. When it is **Off**, you answer the dialog in the terminal. The value applies at the next session start. An extra orchestrator cannot override it.
 - **Wake timer (minutes)**: Wakes an idle orchestrator after this many quiet minutes. 0 turns it off. An extra orchestrator cannot override it.
 - **Supervisor** must be **On** to start an orchestrator. The form says: "The supervisor watches the loops of this board. An orchestrator needs it."
 - Choose **Save policy** to save. The button is off until a field changes. The message "Policy saved." confirms the save.
@@ -110,14 +141,31 @@ Notes on the fields:
 
 The server accepts wider number ranges than the form does. The form ranges in the table are the ones to use.
 
+### Messages from other Claude sessions
+
+Another Claude session on this computer can send a message to a session that Dispatch started. To set how a session that you start from a ticket treats these messages:
+
+1. Open **Settings**.
+2. Open **Board**.
+3. In **Messages from other Claude sessions**, choose **Accept**, **Hold for review** or **Refuse**. The default is **Accept**.
+4. Choose **Save**.
+
+The page says: "Applies to sessions that you start from a ticket. Roadmap Loop and orchestrator sessions refuse these messages unless the board policy or the start request sets a value. A running session keeps its value until it restarts."
+
+A session that runs a playbook whose name starts with "Roadmap Loop", and an orchestrator session, use the board policy value (see "Board policy"). The start route also accepts the field `crossSessionInbound` for one card; the card keeps that value for each later launch only when the request starts the session of the card itself. A "start another session" request applies the value to the first launch of that new session only.
+
+A session that starts without hooks gets no settings file, so this value does not apply to it. A session starts without hooks when the status channel is the pane, when the Claude CLI is below the hooks version, or when hooks are off.
+
 ## Add and start an orchestrator
 
-1. Select the board in the board switcher. Open the board page. Every board has its own button. `LOCAL` has one too, and its supervisor starts **Off**.
-2. Choose **Add orchestrator** in the page header. When the board already has an orchestrator, the button reads **Orchestrator**. The orchestrator panel opens as a side panel over the board. Its header shows the board name.
+1. Select the board in the **Boards** section. Open the board page. Every board has its own button. `LOCAL` has one too, and its supervisor starts **Off**.
+2. Choose **Add orchestrator** in the page header. When the board already has an orchestrator, the button reads **Orchestrator**. The command centre opens (see "The command centre"). Choose **Settings** to open the orchestrator panel as a side panel over the board. Its header shows the board name.
 3. Make sure the supervisor is **On** in the **Policy** tab. With the supervisor **Off**, the panel shows: "Turn on the supervisor in Policy to start an orchestrator."
 4. Choose **Start orchestrator**.
 
 When the board has no orchestrator record, **Start orchestrator** first adds the main orchestrator. The record has the id `main` and the name "Main orchestrator". Then it starts the orchestrator.
+
+The orchestrator can create a board with the tool `create_board`. It gives a name, and the tool answers the key and the link. The tool `get_board_workspace` lists all boards.
 
 The orchestrator reads the folder and the repositories of the board by itself. It does not ask you for a repository path or a base branch. Set the base branch of each repository in the board settings.
 
@@ -145,7 +193,7 @@ The hidden card and the MCP configuration file do not show in the UI. To confirm
 
 1. The badge reads **Working** and the **Stop** button shows.
 2. The **Terminal** tab shows the live terminal.
-3. The **Activity log** of the dashboard shows a row such as "Supervisor: a card is now Working".
+3. The **Changed since** card of the dashboard shows a row such as "Supervisor: a card is now Working".
 
 The start can fail. The panel then shows the line "The orchestrator did not start: <reason>." The reason names the step and the last text of the Claude pane. Dispatch waits about 30 seconds for Claude to be ready, so the badge can read **Starting** for some time before the line shows. Choose **Try again** beside the line to start again. The board now has a main orchestrator, so the page header button reads **Orchestrator**.
 
@@ -218,34 +266,221 @@ The loop also reports each phase gate and unit gate to Dispatch. The report uses
 
 - The boards page **Loops** column shows each running loop as a group id and a percent.
 - The dashboard section **Progress per group** shows one row for each group that has a loop. It also shows each single card that the orchestrator started, with the phases of its PRD.
-- The dashboard section **Activity log** shows the gate events.
+- The dashboard section **Changed since** shows the gate events.
 
 ## The dashboard
 
-Open the dashboard from the sidebar row **Dashboard** (group **Work**), or from the palette command **Go to Dashboard**. The sidebar row and the palette command show only when the board has a main orchestrator. The dashboard shows the board that is selected in the switcher.
+Open the dashboard from the sidebar row **Dashboard** (group **Work**), or from the palette command **Go to Dashboard**. The sidebar row and the palette command show only when the board has a main orchestrator. The dashboard shows the board that is selected in the **Boards** section.
 
-The page has six sections in a fixed order. Each section shows its own loading state and its own error. A section error has the button **Try again**. The other sections stay.
+The page has the title "Project map" on a dot-grid background. Each section shows its own loading state and its own error. A section error has the button **Try again**. The other sections stay.
 
-1. **Attention queue.** Each item that needs you, oldest wait first. With no item it shows "Nothing needs you."
-2. **Progress per group.** One row for each group that has a loop. With no loop it shows "No loops on this board yet. Start a group from the board to see its progress here." The count of the section reads "<n> of <cap> loops running". A row shows these items:
-   - The group id, the loop slug and the session state badge.
-   - The context percent, for example "Context 38%".
-   - The session age and an estimate of the time left. The estimate reads "Estimate after 2 gates" until two gates passed.
-   - A text label such as "Unit 2 of 3, phase 4 of 9". A complete loop shows "3 of 3 units built, awaiting ship".
-   - A bar with one segment for each unit.
-   - The last gate line: "Phase 3 gate passed 12:41" or "Phase 4 gate failed 13:05, attempt 1 of 2".
-3. **Tickets by column.** The cards of the board for each column, with the count of cards that an orchestrator created (**By orchestrator**). The link **Open board** goes to the board. Choose **Show cards** to list the cards. The filters **Group** and **Column** limit them.
-4. **Activity log.** One row for each recorded event, newest first. The orchestrator rows are tool calls and raised decisions. The supervisor rows are actions, session state changes, loop gates, PR changes and a wake of the machine. Your rows are the decisions that you answer and the goals that you submit. A policy save, a board change and a press of **Start orchestrator** write no row of their own. The filters **Actor** (**All**, **Orchestrator**, **Supervisor**, **You**) and **Group** limit the rows. The log shows 20 rows. Choose **Show more** for 20 more. With no event it shows "No activity on this board yet."
-5. **PRs and merge order.** One block for each group in ship order. See the section "Ship flow". With no PR it shows "No PRs yet."
-6. **Cost and usage.** The cost of each group against its budget, and the usage meters of the Claude account. With no cost it shows "No cost yet." See the section "Budgets and usage limits".
+Under the title, one status line shows these items:
 
-Each segment of the progress bar has a glyph and a text name (done, current, pending or failed gate). The bar reads without color.
+- "Synced HH:MM". When the stream is down, it reads "Data from <time>".
+- "<n> of <cap> loops running".
+- "<n> gates passed today". The count is the number of loop phases whose gate passed on the local calendar day.
+- "$<amount> spent". This is a running total of the group costs. It is not a daily figure.
+- The link "<n> need a call". With zero rows it reads "nothing needs you" and its dot is muted. The link moves focus to the **Needs your call** card.
 
-When the connection to the server drops, the dashboard keeps the last data. A badge beside the title reads "Data from <time>". The reply, resume and decision buttons are off, with the reason "Reconnecting. Actions are off until the board stream is back."
+At 1024 px and wider, the sections show in this order:
+
+1. The status line.
+2. **Progress per group**, full width.
+3. **Left on this board**, full width.
+4. Two columns. The main column holds **Tickets by column** and then **PRs and merge order**. The rail holds **Next step**, **Needs your call**, **Changed since** and **Cost and usage**.
+
+Below 1024 px, the sections show in this order: the status line, **Needs your call**, **Progress per group**, **Left on this board**, **Tickets by column**, **PRs and merge order**, **Next step**, **Changed since** and **Cost and usage**. Each section shows once in the page. The section headings are small uppercase labels. A screen reader still reads the names "Attention queue", "Progress per group", "Left on this board", "Tickets by column", "PRs and merge order", "Next step", "Activity log" and "Cost and usage".
+
+- **Progress per group.** Each loop is a milestone track with one node for each unit. With no units it shows "No loop progress". The session badges and the last gate text stay on the track header. A node has one of these states:
+  - Done. The node has a check glyph and the state line "Done HH:MM" or "Done".
+  - Current. The node has an accent ring, a glow, the pill "You are here" and a phase sub-bar. The state line reads "Phase n of m". The glow moves only when the system allows motion.
+  - Failed gate. The node has an X glyph and the state line "Gate failed".
+  - Pending. The node is an outline. The state line reads "Next" for the first pending node and "Later" for the other nodes.
+- **Left on this board.** The count of open cards and one pill for each open card. An open card is a card that is not in **Agent done**, **In review** or **Done**. A pill shows the card id and a glyph. The order is stuck, needs input, current, not started. With no open card it shows "Nothing open."
+- **Tickets by column.** The filters **Group** and **Column** are above the tiles and stay visible. The section shows one tile for each card that the filters select. With no match it shows "No cards match." The link **Open board** stays on the section header. The collapsible **Show column counts** holds the table of column counts, with the count of cards that an orchestrator created (**By orchestrator**). Below 768 px, it holds a list. A tile shows these items:
+  - The card id in a mono font and the title.
+  - A state pill with a glyph and the column label, or "Stuck: <reason>".
+  - A footer line when there is data: the last gate text, "Depends on <ids>" or "Shipped HH:MM".
+- **Next step.** For the first running loop that has a current unit, it shows "<group id> unit <n>: <unit title>" and "Phase <n> of <m>: <phase name>". With no such loop it shows "No loop running" and "Start a group from the board."
+- **Needs your call.** Each item that needs you, oldest wait first. With no item it shows "Nothing needs you." The card has a red tint only when it holds at least one item. The recommended decision option is bold. See the section "The attention queue".
+- **Changed since <time>.** The time is the time of the oldest row on the shown page. A row has a dot, the change text with the card id in bold, and the time on the right. The dot colors are red, amber, green and grey:
+  - Red is for a failed gate, a loop error, a failed start or a stopped ship.
+  - Amber is for needs input and a usage limit.
+  - Green is for a passed gate, agent done and shipped.
+  - Grey is for the other rows.
+- **PRs and merge order.** One block for each group in ship order. See the section "Ship flow". With no PR it shows "No PRs yet."
+- **Cost and usage.** The cost of each group against its budget, and the usage meters of the Claude account, as compact rows. With no cost it shows "No cost yet." See the section "Budgets and usage limits".
+
+**Changed since** shows one row for each recorded event, newest first. The orchestrator rows are tool calls and raised decisions. The supervisor rows are actions, session state changes, loop gates, PR changes and a wake of the machine. Your rows are the decisions that you answer and the goals that you submit. A policy save, a board change and a press of **Start orchestrator** write no row of their own. The filters **Actor** (**All**, **Orchestrator**, **Supervisor**, **You**) and **Group** limit the rows. The log shows 20 rows. Choose **Show more** for 20 more. With no match it shows "No activity matches." With no event it shows "No activity on this board yet."
+
+Each node and each tile state has a glyph and a text. The page reads without color.
+
+When the connection to the server drops, the dashboard keeps the last data. The status line reads "Data from <time>". The reply, resume and decision buttons are off, with the reason "Reconnecting. Actions are off until the board stream is back."
+
+## The command centre
+
+The command centre shows one orchestrator of a board as one page. It has the orchestrator, one branch for each ticket and group that it runs, and a conversation with it. The page reads the conversation and the decision items every 3 seconds. The branches follow the board stream.
+
+### Open the command centre
+
+- Choose **Orchestrator** in the page header of the board. When the board has no orchestrator, the button reads **Add orchestrator** from 768 px wide. On a narrower screen it reads **Orchestrator**. Both buttons open the command centre.
+- Choose **Open command centre** next to the **Project map** title of the dashboard.
+- Open `/boards/<key>/orchestrator` for the main orchestrator. Open `/boards/<key>/orchestrator/<orchestrator id>` for another orchestrator.
+- The address `/orchestrator?board=<key>` only redirects to `/boards/<key>/orchestrator`. The same applies to `/orchestrator/<orchestrator id>?board=<key>`.
+
+The sidebar has no row for the command centre.
+
+### The orchestrator node
+
+The node is the card at the top left of the canvas. It shows these items:
+
+- The heading "Orchestrator", the name and the state badge. The badge reads **Starting**, **Stopping**, **Stopped** or the label of the session state.
+- "Context <n>%" and "$<cost> today". Each shows only when Dispatch has the value.
+- The count line "<n> branches, <m> need you". One branch reads "1 branch, 0 need you".
+
+The count <n> includes the older shipped branches that the page hides. The count <m> is the size of the band **Needs you**.
+
+### The bands and the tiles
+
+The branches stand in five bands, in this order: **Needs you**, **Running**, **Planned**, **Done** and **Shipped**. Each band heading shows its count. A band with no branch shows only the heading. A branch belongs to the orchestrator that owns its card. A hidden card and a group member are not branches.
+
+- **Needs you** holds a branch at Needs input, Usage limit, Budget reached or Resume failed. It also holds a branch in a stuck session state.
+- **Running** holds a branch with a session that works.
+- **Planned** holds a branch with no session. It comes from the plan, also when its card does not exist yet.
+- **Done** holds a branch at Agent done.
+- **Shipped** holds a shipped branch.
+
+The stuck session states are **No progress**, **Permission prompt**, **API error**, **Session lost** and **Claude exited**.
+
+The newest approved plan of the orchestrator sets the planned branches and their order. A newer open plan adds only the tickets that the approved plan lacks, after them. A rejected plan adds nothing.
+
+A tile shows these items:
+
+- The card id, the state badge and the title.
+- A detail line. See the list below.
+- "Playbook <name>", "Context <n>%" and "$<cost>". A planned branch with no session shows "Not started" in place of the meters.
+
+The detail line reads as follows:
+
+- Running: "Unit <n> of <m>, phase <p> of <q>", or "Phase <p> of <q>". A group with no phase reads "Group of <n> tickets".
+- Planned: "Plan order <n>, size <size>".
+- Needs input: "Needs your answer". Usage limit: "Stopped at the usage limit". Budget reached: "Budget reached".
+- Done: "Done <time>, awaiting ship".
+- Shipped: "Shipped <time>, PR <number>".
+
+A time reads "HH:MM" on the current day. On another day it reads "<day> <month> HH:MM". The clock has 24 hours.
+
+At 768 px wide and more, the canvas draws a line from the node to each tile. The line is dashed for a planned branch. Choose a tile to open its card. A planned branch with no card has nothing to open.
+
+### Tile actions
+
+A tile shows only the actions that fit its state. The actions are the same as in the attention queue.
+
+| Action               | When it shows                                                                               |
+| -------------------- | ------------------------------------------------------------------------------------------- |
+| Inline reply         | The field "Reply to <card id>" and **Send reply**. The state is Needs input or No progress. |
+| **Resume loop**      | The loop stopped at the usage limit or at the budget.                                       |
+| **Try resume again** | The state is Resume failed.                                                                 |
+| **Open terminal**    | A stuck session state, or Resume failed.                                                    |
+
+How the actions work:
+
+- A reply shows the count "<n> of 500 characters. A longer reply goes as a file." The result shows next to the buttons: "Delivered" or "Not confirmed. Check the terminal."
+- When the session changed state, a reply shows "Not sent. <card id> is now at <state label>. Open the terminal."
+- A failed action shows an alert, for example "Reply failed: <message>." The alert has the button **Try again**.
+- A result and an alert hide when the branch changes state. A reply draft stays when you change a tab.
+- **Open terminal** goes to the board page.
+- The page hides a branch that shipped more than 24 hours ago. Choose **Show <n> older shipped** under the bands to show it. The link then reads **Hide older shipped**.
+
+### Orchestrator controls
+
+From 768 px wide, the controls sit in the page header. Below 768 px, they sit above the node in the page. The controls are:
+
+- A badge "Data from <time>". It shows only while the connection is down.
+- The switcher. It has the hidden label "Orchestrator". It shows only when the board has more than one orchestrator. Each option reads "<name> (Main)" or "<name> (Extra)". Choose an option to open that orchestrator.
+- **Start**, **Stop** or **Resume**. One of them shows at a time. The state badge is part of the node and not of the controls.
+- **Settings**. It opens the orchestrator panel of the board at the **Policy** tab.
+
+The rules of the buttons follow the orchestrator panel:
+
+- **Start** shows for a stopped orchestrator. It is off when the supervisor is **Off**. Then the reason reads "Turn on the supervisor in Policy to start an orchestrator."
+- **Stop** shows for a running orchestrator. It interrupts the current turn. The session stays open. It is off at a permission prompt, at a usage limit and at a shell prompt.
+- **Resume** shows when the session is lost or Claude exited.
+- No button shows while the orchestrator starts or stops.
+- A failed button shows an alert with the reason and the button **Try again**.
+
+### The pane
+
+From 768 px wide, the pane stands at the right of the canvas. It is 360 px wide, and 420 px wide from 1280 px. It has two tabs:
+
+- **Conversation**. This tab opens first.
+- **Terminal**. It shows the live terminal of the orchestrator session. The terminal stays open when you change tabs.
+
+### The conversation
+
+The tab lists the messages and the decisions of the orchestrator in time order. Tool calls do not show. The list scrolls to the newest entry when a new entry comes.
+
+A message shows an author, an age and the text. The author reads "You", the name of the orchestrator or "Dispatch". The age reads, for example, "5m ago". The text keeps its line breaks. It has no markdown.
+
+A decision message shows the badge **Decision** or **Question**. A roadmap approval, a ticket proposal and a plan are a **Decision**. All other kinds are a **Question**.
+
+- An open decision shows the same card as the attention queue. It has the question, the option buttons and the badge **Recommended**. A question also has the field "Or type an answer" and **Send answer**.
+- A plan shows a table before the options. The table heads are **Order**, **Ticket**, **Playbook** and **Size**. The options are "Approve the plan" and "Do not approve".
+- An answered decision shows the question, the plan table and the line "Answered: <option label>". A typed answer shows below the line.
+- A failed answer shows "Decision answer failed: <message>." with the button **Try again**.
+
+The tab shows every open decision of the orchestrator. It shows only the 20 newest answered decisions.
+
+### The comment box
+
+The comment box sits under the messages. It sends text to the orchestrator session.
+
+- The field has the hidden label and the placeholder "Message the orchestrator".
+- The line under the field reads "<n> of 500 characters. A longer reply goes as a file."
+- The button **Send** is off when the field is empty or has only spaces. It is also off while Dispatch sends and while the connection is down.
+- The result shows next to **Send**: "Delivered" or "Not confirmed. Check the terminal." After "Delivered" the field clears. After any other result the text stays.
+- When the session changed state, the result reads "Not sent. <orchestrator name> is now at <state label>. Open the terminal."
+- A failed send shows the alert "Message failed: <message>." with the button **Try again**. The text stays.
+- Dispatch refuses a text that starts with a mode character of Claude (`/`, `!`, `#`, `&` or `@`) or that has only control characters. The alert reads "Message failed: the text is empty or starts with a mode character." Change the first character and send again.
+- When the orchestrator has no session, **Send** sends no message. The alert "Message failed: <orchestrator name> has no session. Start it first." shows under the field. The text stays.
+
+### Narrow screens
+
+Below 768 px, the page has one column:
+
+1. The controls: the switcher, **Start**, **Stop** or **Resume**, and **Settings**.
+2. The node in a compact form. It has no heading "Orchestrator".
+3. Two tabs: **Branches** and **Conversation**. **Branches** opens first.
+
+The tab **Branches** shows the bands as a list, with the same tiles and actions. It has no lines between the node and the tiles. The tab **Conversation** is 480 px high. It holds the pane with its own tabs **Conversation** and **Terminal**.
+
+Enter on the node selects the tab **Conversation** and the pane tab **Conversation**. Then it moves focus to the comment box. When you leave the page, the tabs return to their first values.
+
+### States
+
+| State   | What shows                                                                                                                                                                                 |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Empty   | "This board has no orchestrator." and **Start**. A board with no branch shows "No tickets or groups yet. Ask the orchestrator in the conversation." An empty pane shows "No messages yet." |
+| Loading | Three grey blocks. The hidden text reads "Loading command centre".                                                                                                                         |
+| Error   | An alert in the region that did not load, for example "Canvas did not load: <message>." The other region stays. The alert has the button **Try again**.                                    |
+| Stale   | The last data stays. The badge "Data from <time>" shows. The line "Reconnecting. Actions are off until the board stream is back." shows above the canvas and above the comment box.        |
+
+- A path with an unknown orchestrator id shows "Canvas did not load: no orchestrator <id> on this board."
+- When Dispatch cannot read the transcript, the pane shows "The conversation is not available." and the link **Open the terminal.** The link opens the **Terminal** tab. The decision messages still show.
+- While the connection is down, these controls are off: **Reply**, **Resume loop**, **Try resume again**, **Start**, **Stop**, **Resume**, the decision buttons and **Send**. **Settings**, **Open terminal** and the tiles stay on.
+
+### Keyboard
+
+- Tab goes through the page header, the node, the tiles in band order, and then the pane.
+- The down arrow and the up arrow move focus to the next tile and to the previous tile. The node is the first stop.
+- Home moves focus to the node. End moves focus to the last tile.
+- Enter on a tile opens its card.
+- Enter on the node moves focus to the comment box. With no orchestrator, Enter does nothing.
+- The reply field and the buttons inside a tile take Tab. The arrow keys do not move focus away from them.
 
 ## The attention queue
 
-The attention queue is the first section of the dashboard. Dispatch builds it from the sessions, the last gate of each group and the open decision items. An item leaves the queue when its cause ends.
+The attention queue is the card **Needs your call** on the dashboard. Dispatch builds it from the sessions, the last gate of each group and the open decision items. An item leaves the queue when its cause ends.
 
 Each item shows the group id, a badge, the wait time ("waiting 34 min", "waiting 5 h" or "waiting 3 d") and the actions of its kind.
 
@@ -270,6 +505,143 @@ How each action works:
 - **Permission prompt.** The queue has no approve button and no deny button. Answer the prompt in the terminal. The supervisor itself declines only two prompts: a dangerous delete, and a held message from a peer session.
 
 A board with the supervisor **Off** still lists a card at **Needs input**, with a reply field when the card has a session.
+
+## Inbox
+
+The Inbox lists the things that wait for your decision. It shows two kinds of row:
+
+- Slack messages that need a session.
+- Linear Inbox cards.
+
+GitHub, Sentry, Calendar and Meeting items do not show in the Inbox. They stay on their own pages.
+
+### Needs a session
+
+A Slack row has the badge **Needs a session** and a short reason beside it. The reason tells you why Dispatch kept the message. Two examples are "Direct question" and "Request with an action verb: review".
+
+### Act on a row
+
+Select a row, then press a key. Each key acts on the selected row only. You can also choose the button on the row.
+
+| Action      | Key | What it does                                                                                        |
+| ----------- | --- | --------------------------------------------------------------------------------------------------- |
+| **Allow**   | `y` | Opens the Start dialog. The dialog has the playbook picker. Choose a playbook to start the session. |
+| **Dismiss** | `d` | Hides the row. A toast shows **Undo**. Choose **Undo** to bring the row back.                       |
+| **Restore** | `r` | Brings a dismissed row back. It works on a dismissed row only.                                      |
+
+### Dismissed rows
+
+The toggle **Dismissed (n)** shows the rows that you dismissed. The number n is the count of dismissed rows. Choose the toggle again to hide them. With no dismissed row the list shows "No dismissed items."
+
+### Messages that are noise
+
+Dispatch does not list a noise message in the Inbox. The message stays on the **Slack** page. The Slack page shows every open Slack message with its reason.
+
+Slack messages that Dispatch stored before this change have no reason. They show "Not classified" on the **Slack** page and are not in the Inbox.
+
+These reasons mean the message is noise:
+
+- "Bot or app message"
+- "Reaction or emoji only"
+- "Acknowledgement"
+- "Greeting"
+- "FYI or broadcast"
+- "Digest"
+- "No question or request"
+
+These reasons mean the message needs a session:
+
+- "Direct question"
+- "Request with an action verb: <verb or phrase>"
+
+A message that starts with an acknowledgement, a greeting or a broadcast word, and then asks for something, still needs a session.
+
+## Pull requests
+
+The **Pull requests** page lists every open pull request of the board repositories. It also lists the pull requests that wait on you and the pull requests that your sessions opened.
+
+A board repository is a repository that a board holds. Dispatch reads the `origin` remote of each board repository. It uses the remote only when the remote is on github.com. Dispatch skips a repository that has no GitHub remote. Dispatch also skips every repository of an archived board. Dispatch reads the list of remotes again every 10 minutes.
+
+### The table
+
+The table has these columns:
+
+- The number of the pull request. It links to the pull request on GitHub.
+- The title.
+- The author.
+- The repository.
+- The state.
+- The checks.
+- The age.
+- The linked card.
+
+At a narrow width the table shows only the number, the title and the state. The wide table also has a **Review** button on each row.
+
+The state is one of these texts. Dispatch shows the first text that applies, in this order:
+
+1. "Draft"
+2. "Review requested from me"
+3. "Changes requested"
+4. "Approved"
+5. "Open"
+
+### Filters
+
+The filter bar has four controls. A row must pass every control that you set.
+
+- **Mine** shows only the pull requests that you wrote. Dispatch compares the author with your GitHub login and ignores case.
+- **Review requested** shows only the pull requests with the state "Review requested from me".
+- The **Author** select shows the pull requests of one author.
+- The **Repository** select shows the pull requests of one repository.
+
+### Empty table
+
+The table shows one of these texts when it has no row:
+
+- "No open pull requests in the board repositories."
+- "No board repository has a GitHub remote."
+- "No pull requests match the filters."
+
+The page shows the third text when pull requests exist but the filters hide all of them.
+
+### More than 100 pull requests
+
+Dispatch reads the first 100 open pull requests of the board repositories. If GitHub has more, Dispatch cuts the list. The page then shows this note: "Some pull requests may be missing: GitHub returned more than 100 results in a search, or an organization needs SAML single sign-on."
+
+The page shows the same note in two more cases. In the first case, GitHub answers the open pull request search with an error and with some pull requests. Dispatch keeps the pull requests that GitHub returned and writes the error messages to the server log. In the second case, the open pull request search fails. Dispatch then keeps the pull requests that wait on you and the pull requests that your sessions opened. A rate limit or an authentication error still fails the whole poll.
+
+### Review a pull request
+
+Choose **Review** on a row or in the detail pane. Dispatch does these steps:
+
+1. It makes one card for the pull request. If you choose **Review** again, Dispatch opens the same card. The card goes on the board that you are on, if that board has a repository for the pull request. If not, the card goes on the first open board that has one.
+2. It switches the page to the board of the card, if that board is not the board that you are on.
+3. It moves the card to To Do.
+4. It opens the Start dialog. The dialog lists only the playbooks that have the tag `review`. The playbook "Review a pull request" is selected.
+
+The Start dialog has the review prompt as the extra direction. Start the session from the dialog.
+
+Dispatch matches the pull request to a repository by the GitHub name of the `origin` remote. It ignores case. The session starts in the worktree of that repository on the local branch `review/pr-<number>`. The branch is at the head of the pull request. The other repositories of the workspace stay on the normal card branch. The first prompt of the session names the branch `review/pr-<number>` for the matching repository only. The prompt tells the session to post nothing to GitHub until you approve it in the session.
+
+The card stores the path of the repository that Dispatch matched. The Start dialog of a review card selects the registered folder that is this path or holds this path. If more than one folder holds the path, the dialog selects the longest folder. You can select another folder.
+
+If you tick the repositories in the Start dialog and none of them has the pull request repository as its `origin`, the start fails at the step "creating worktrees".
+
+The **Pull requests** page hides a pull request when the card of the pull request is in Done. A review card that is not in Done keeps the row of its pull request on every board that holds the repository, also when the card is on another board.
+
+If the card is already past To Do, Dispatch opens the card. It does not start a second session.
+
+If no open board has a repository that matches the pull request, the page shows the notice "No board repository matches this pull request." If GitHub is not connected, the page shows the notice "GitHub is not connected. Connect it in Settings."
+
+### The header of a review card
+
+A review card shows a header block for its pull request. The block has these parts:
+
+- The link "PR #<number>". It opens the pull request on GitHub.
+- The checks state: "Checks passing", "Checks failing" or "Checks pending".
+- The verdict. It is the text after "Review verdict: " in the last DONE line of the session.
+
+The block shows no verdict until the session writes a DONE line with "Review verdict: ".
 
 ## Budgets and usage limits
 
@@ -307,6 +679,14 @@ Claude shows a usage limit dialog when the account reaches its limit. The field 
 4. Choose **Resume loop** after the limit resets.
 
 Only you resume a loop that stopped at a usage limit or a budget.
+
+## Resume a lost session
+
+When the tmux session of a card ends, for example after a shutdown, the card shows **Resume**. Resume starts Claude again in the card workspace and opens the newest conversation of the card.
+
+- Dispatch reads the conversation folder of the card before each Resume. When a newer conversation is on disk than the stored one, Resume opens the newer conversation.
+- When the stored conversation has no file on disk, Resume continues the newest conversation of the workspace.
+- The detail panel shows the line "Resume: <id>, started <time>" beside **Resume**, or "Resume: newest conversation in the workspace". When Dispatch replaced the stored conversation, a tooltip on the line gives the stored id and the reason.
 
 ## Handoff
 
@@ -373,7 +753,7 @@ When a branch fails, the flow stops. The block shows "Stopped at <step>: <reason
 
 ## Playbook reference
 
-A playbook is a markdown file with a name. Dispatch gives its text to Claude when a session starts. Dispatch seeds six playbooks on the first boot of a machine. Each seeded playbook is a file in the `playbooks` folder of the Dispatch data folder. Dispatch seeds a name once. If you delete a seeded playbook, it stays deleted. Open **Playbooks** in the sidebar, group **System**, to edit, copy or delete playbooks.
+A playbook is a markdown file with a name. Dispatch gives its text to Claude when a session starts. Dispatch seeds seven playbooks on the first boot of a machine. Each seeded playbook is a file in the `playbooks` folder of the Dispatch data folder. Dispatch seeds a name once. If you delete a seeded playbook, it stays deleted. Open **Playbooks** in the sidebar, group **System**, to edit, copy or delete playbooks.
 
 Every seeded playbook has one input: the extra direction. It is the optional text that you type in the start dialog. The token `{extra}` in the playbook marks where the text goes. When you type nothing, Dispatch removes the block that holds the token.
 
@@ -412,6 +792,14 @@ Every seeded playbook has one input: the extra direction. It is the optional tex
 - **Inputs:** the extra direction.
 - **What it does:** it tells Claude to read every ticket of the group first. In part 1, Claude uses the write-roadmap skill on the whole group and stops for roadmap approval. After the approval, Claude uses the grill-me skill and then the write-prd skill for each unit in order. In part 2, Claude uses the roadmap-loop skill to run every unit. Claude commits each unit to a stacked local branch. Claude never pushes, tags, opens a PR or merges.
 
+### Review a pull request
+
+- **File:** `review-pull-request.md`
+- **When to use:** one pull request to review before it merges. Dispatch selects it when you choose **Review** on the **Pull requests** page.
+- **Inputs:** the extra direction. The Review action fills it with the review prompt.
+- **What it does:** it tells Claude to read the pull request first with `gh pr view` and `gh pr diff`. Then it tells Claude to review the pull request with subagents from three perspectives: correctness, edge cases and security. Claude verifies each finding against the code and drops a finding that the code does not support. Claude shows the comments to you in the session. Claude posts a comment with `gh` only after you approve it in the session. Claude ends with the DONE status line. The summary of that line starts with "Review verdict: ", then approve, request changes or comment, then one line of reason.
+- **Tag:** the playbook has the tag `review`.
+
 ### Board Orchestrator
 
 - **File:** `board-orchestrator.md`
@@ -438,6 +826,16 @@ Every seeded playbook has one input: the extra direction. It is the optional tex
   - Act on another board.
   - Answer its own decision item or approve a permission prompt.
   - Delete a branch, a worktree or a card that it did not create.
+
+### The tags key
+
+A playbook can have a `tags:` line in its front matter. The value is a comma separated list. Dispatch makes each tag lower case and removes a repeated tag.
+
+The Review action of the **Pull requests** page lists only the playbooks that have the tag `review`. To use your own review playbook, add `tags: review` to its front matter. The playbook then shows in the Start dialog of the Review action.
+
+When no playbook has the tag, the Start dialog shows "No playbook has the tag review.".
+
+The Start dialog and the group dialog select the playbook that you used for the last start. They skip this playbook when it has the tag `review`. A start that is not a Review start therefore does not select the review playbook. The Review action still selects "Review a pull request".
 
 ## Replaced manual scripts
 

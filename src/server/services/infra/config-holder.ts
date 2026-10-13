@@ -3,8 +3,10 @@ import writeFileAtomic from "write-file-atomic";
 import {
   DEFAULT_CLAUDE_ACCOUNT_ID,
   DEFAULT_CLAUDE_ACCOUNTS_SETTINGS,
+  DEFAULT_CROSS_SESSION_INBOUND,
   type ClaudeAccountsSettings,
   type Config,
+  type CrossSessionInbound,
   type ItemSourceId,
   type LinearStateMap,
   type SourceConfig,
@@ -16,6 +18,7 @@ import {
   type UserProfile,
 } from "../../../shared/types.js";
 import { resolveSlackMode } from "../../../shared/slack-mode.js";
+import { writeHookSettings } from "./hook-settings.js";
 import { CONFIG_PATH } from "./paths.js";
 import { resolveSlackToken } from "./slack-token.js";
 
@@ -30,6 +33,13 @@ export function setOrchestrationConfig(config: Config): void {
 /** The start route reads the loaded config through this (never calls loadConfig itself). */
 export function getOrchestrationConfig(): Config | null {
   return orchestrationConfig;
+}
+
+/** The default cross-session inbound value, `accept` while the config is unset or lacks the key. */
+export function getCrossSessionInbound(): CrossSessionInbound {
+  return (
+    orchestrationConfig?.crossSessionInbound ?? DEFAULT_CROSS_SESSION_INBOUND
+  );
 }
 
 /**
@@ -334,6 +344,20 @@ export function updateArchiveRetentionDays(days: number): void {
  */
 export function updateClaudeArgs(args: string): void {
   patchConfig({ claudeArgs: args });
+}
+
+/**
+ * Persist the default cross-session inbound value to `~/.dispatch/config.json` and rewrite the
+ * hook settings files.
+ *
+ * @remarks The next launch reads the in-memory config value that the patch updates, so no restart
+ * is needed. The file rewrite keeps the default `hook-settings.json` in step with the config.
+ */
+export async function updateCrossSessionInbound(
+  value: CrossSessionInbound,
+): Promise<void> {
+  patchConfig({ crossSessionInbound: value });
+  await writeHookSettings(value);
 }
 
 /**

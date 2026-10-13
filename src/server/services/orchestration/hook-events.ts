@@ -5,23 +5,11 @@ import {
 } from "../../adapters/markers/parse.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import { isTranscriptPath } from "../../adapters/transcript.js";
+import { CLAUDE_SESSION_ID } from "../../../shared/claude-session-id.js";
 import { getHooksRuntime } from "../infra/config-holder.js";
+import { PAUSE_TOOL_NAMES } from "../infra/hook-settings.js";
 import { runPendingMove } from "./session-account-apply.js";
 import { forgetTurnState, recordTurnEvent } from "./session-turn.js";
-
-/**
- * Tool names whose `PreToolUse` fires the structural Needs-Input safety net (HOOK-03) and whose
- * matching `PostToolUse` fires the symmetric flip-back — the single source of truth for the pause
- * class: both event branches here read it AND `bootstrap/hook-setup.ts` derives the registered
- * `PreToolUse` matcher from it, so the "enters on tool X", "leaves on tool X", and "matcher
- * delivers tool X" contracts can never drift apart (a set edited without the matcher would
- * half-wire: catch-all PostToolUse flips back on a tool the enter side never covered).
- * Live-verified (48-DIAGNOSIS.md) for `AskUserQuestion`; `ExitPlanMode` (48-IN-03, allow-list #8)
- * is live-verified in Phase 57 — see 57-01-SUMMARY.md for the sandbox probe evidence (PreToolUse
- * synthesizes the needs_input marker with a clean display reason, PostToolUse flips it back).
- * @see docs/ARCHITECTURE.md#hooks-status-channel
- */
-export const PAUSE_TOOL_NAMES = new Set(["AskUserQuestion", "ExitPlanMode"]);
 
 /**
  * Composite key for every per-session throttle/dedup map below (Phase 91, HOOK-01): a card owns
@@ -185,6 +173,24 @@ async function applyPreToolUseEvent(
 }
 
 /**
+ * Tell whether a card sits in Needs Input only because this session's last marker is a
+ * synthesized pause-tool marker.
+ *
+ * @remarks A text marker from the agent never matches, so new output after a real
+ * `DISPATCH_STATUS: NEEDS_INPUT` line does not move the card.
+ */
+function heldByPauseTool(cardId: string, sessionId: string): boolean {
+  const card = store.getCard(cardId);
+  if (card?.column !== "needs_input") return false;
+  const key = card.sessions?.find((s) => s.id === sessionId)?.lastMarker;
+  return [...PAUSE_TOOL_NAMES].some((name) =>
+    key?.startsWith(
+      markerKey({ kind: "NEEDS_INPUT", reason: `waiting on ${name} (` }),
+    ),
+  );
+}
+
+/**
  * Resolve the per-invocation discriminator a synthesized `PreToolUse` marker's `reason` folds in
  * (HOOK-03 follow-up): the payload's own `tool_use_id` when present and well-formed — validated
  * with the same string-plus-bounded-charset shape as `session_id` below, never trusted blindly —
@@ -234,8 +240,12 @@ function resolvePreToolUseDiscriminator(
  * that already routed can never suppress this session's own first-event evidence.
  * @remarks Every valid `session_id` is handed to `store.setClaudeSessionId`, which keeps one
  * conversation node per id on the resolved session (LOCAL-13): a `/clear` in the pane starts a new
- * conversation whose first hook event appends a node, so Resume follows the user to it. The
- * store's own throttle keeps the per-event call cheap.
+ * conversation whose first hook event appends a node, so Resume follows the user to it. A
+ * SessionStart event goes to `store.startClaudeSession`, which sets the start order that ranks the
+ * nodes; every other event only touches the node.
+ * @remarks A payload with an `agent_id` comes from a subagent, which cannot show a dialog, so its
+ * pause-tool events never move the card. A pause also ends on a pause-tool `PostToolUseFailure`,
+ * or when the main session runs a tool or stops while a pause-tool marker holds the card.
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  */
 export async function applyHookEvent(
@@ -250,6 +260,8 @@ export async function applyHookEvent(
         tool_use_id?: unknown;
         error?: unknown;
         transcript_path?: unknown;
+        source?: unknown;
+        agent_id?: unknown;
       }
     | undefined,
 ): Promise<void> {
@@ -265,16 +277,27 @@ export async function applyHookEvent(
 
   const key = throttleKey(cardId, sessionId);
   const sid = body?.session_id;
-  if (typeof sid === "string" && /^\w[\w-]{0,255}$/.test(sid)) {
-    await store.setClaudeSessionId(cardId, sessionId, sid);
+  if (typeof sid === "string" && CLAUDE_SESSION_ID.test(sid)) {
+    if (body?.hook_event_name === "SessionStart")
+      await store.startClaudeSession(
+        cardId,
+        sessionId,
+        sid,
+        new Date().toISOString(),
+      );
+    else await store.setClaudeSessionId(cardId, sessionId, sid);
   }
   if (isTranscriptPath(body?.transcript_path)) {
     await store.setTranscriptPath(cardId, sessionId, body.transcript_path);
   }
 
   const event = body?.hook_event_name;
+  const fromSubagent =
+    typeof body?.agent_id === "string" && body.agent_id !== "";
   const toolName =
-    typeof body?.tool_name === "string" && PAUSE_TOOL_NAMES.has(body.tool_name)
+    !fromSubagent &&
+    typeof body?.tool_name === "string" &&
+    PAUSE_TOOL_NAMES.has(body.tool_name)
       ? body.tool_name
       : undefined;
 
@@ -291,6 +314,17 @@ export async function applyHookEvent(
     }
   }
 
+  const pauseEnded =
+    toolName !== undefined &&
+    (event === "PostToolUse" || event === "PostToolUseFailure");
+  const mainRanOn =
+    !fromSubagent &&
+    (event === "PostToolUse" || event === "Stop") &&
+    heldByPauseTool(cardId, sessionId);
+  if (pauseEnded || mainRanOn) {
+    await store.flipBack(cardId, sessionId);
+  }
+
   if (event === "Stop" && typeof body?.last_assistant_message === "string") {
     await applyStopEvent(cardId, sessionId, body.last_assistant_message);
   } else if (event === "UserPromptSubmit") {
@@ -301,10 +335,6 @@ export async function applyHookEvent(
       body?.tool_use_id,
     );
     await applyPreToolUseEvent(cardId, sessionId, toolName, discriminator);
-  }
-
-  if (event === "PostToolUse" && toolName !== undefined) {
-    await store.flipBack(cardId, sessionId);
   }
 
   if (event === "Stop") {

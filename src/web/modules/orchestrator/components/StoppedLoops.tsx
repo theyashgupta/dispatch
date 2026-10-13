@@ -6,6 +6,7 @@ import {
   ItemGroup,
   ItemTitle,
 } from "@/components/ui/item";
+import { Eyebrow } from "@/modules/orchestrator/components/Eyebrow";
 
 export interface StoppedLoopRow {
   cardId: string;
@@ -25,12 +26,9 @@ export function StoppedLoops({ rows, disabled, onResume }: StoppedLoopsProps) {
       aria-labelledby="stopped-loops-heading"
       className="flex flex-col gap-(--space-xs)"
     >
-      <h3
-        id="stopped-loops-heading"
-        className="m-0 text-xs font-semibold tracking-wide text-muted-foreground uppercase"
-      >
+      <Eyebrow as="h3" id="stopped-loops-heading">
         Stopped loops
-      </h3>
+      </Eyebrow>
       <ItemGroup className="gap-(--space-xs)">
         {rows.map((row) => (
           <Item key={row.cardId} variant="muted" size="sm">

@@ -1,3 +1,4 @@
+import { boardLink } from "../../../shared/board-key.js";
 import type {
   BoardKey,
   BoardPolicy,
@@ -161,6 +162,7 @@ export async function workspaceSummary(caller: OrchestratorIdentity): Promise<{
   repos: { path: string; base: string | null; checkCommand: string }[];
   playbooks: string[];
   groupPlaybook: string | null;
+  boards: { key: string; name: string; archived: boolean; link: string }[];
 }> {
   const board = getBoard(caller.boardKey);
   return {
@@ -172,6 +174,12 @@ export async function workspaceSummary(caller: OrchestratorIdentity): Promise<{
     })),
     playbooks: (await loadPlaybooks()).map((p) => p.name),
     groupPlaybook: callerPolicy(caller).groupPlaybook,
+    boards: store.listBoards().map((b) => ({
+      key: b.key,
+      name: b.name,
+      archived: b.archived,
+      link: boardLink(b.key),
+    })),
   };
 }
 

@@ -1,4 +1,5 @@
 import { DEFAULT_BOARD_KEY, parseBoardKey } from "./board-key.js";
+import { parseRoute, switchBoardLocation, type Page } from "./route.js";
 import type { Board, BoardKey } from "./types.js";
 
 export type BoardEntry = Pick<Board, "key" | "archived">;
@@ -60,6 +61,26 @@ export function boardSearch(board: BoardKey): { board: BoardKey | undefined } {
   return { board: board === DEFAULT_BOARD_KEY ? undefined : board };
 }
 
+/**
+ * The `router.navigate` options that move a page to another board.
+ *
+ * @remarks A keyed page gets the board in its path. Any other page keeps its other search parameters and sets `board`.
+ */
+export function boardSwitchTarget(
+  page: Page,
+  board: BoardKey,
+):
+  | { href: string }
+  | {
+      to: ".";
+      search: (prev: Record<string, unknown>) => Record<string, unknown>;
+    } {
+  const href = switchBoardLocation({ page }, board);
+  return href !== null
+    ? { href }
+    : { to: ".", search: (prev) => ({ ...prev, ...boardSearch(board) }) };
+}
+
 /** Add the `board` query parameter to an API path, or return it unchanged for `LOCAL` (U3-03). */
 export function withBoard(path: string, board: BoardKey): string {
   if (board === DEFAULT_BOARD_KEY) return path;
@@ -84,19 +105,6 @@ export function entryBoard(
   return boards === undefined ? null : activeBoard(remembered, boards);
 }
 
-/** True when more than one board is active, which shows the switcher and the board names (U3-09, U3-12). */
-export function hasManyBoards(boards: readonly BoardEntry[]): boolean {
-  return boards.filter((board) => !board.archived).length > 1;
-}
-
-/** True when the board counts poll runs: more than one active board, or the boards page is open (U3-05). */
-export function shouldPollCounts(
-  boards: readonly BoardEntry[],
-  onBoardsPage: boolean,
-): boolean {
-  return onBoardsPage || hasManyBoards(boards);
-}
-
 /** The "Counts from <time>" text when the latest counts refetch failed and older counts stay on screen, else null (U3-07). */
 export function staleCountsLabel(counts: {
   isError: boolean;
@@ -107,4 +115,44 @@ export function staleCountsLabel(counts: {
     hour: "numeric",
     minute: "2-digit",
   })}`;
+}
+
+/**
+ * The raw board key in a `/boards/<key>` path, or null for any other path.
+ *
+ * @remarks The key is not validated here; callers run it through `parseBoardKey`.
+ */
+export function boardKeyFromPath(pathname: string): string | null {
+  return parseRoute(`#${pathname}`).board ?? null;
+}
+
+/**
+ * Pick the board parameter the root resolves, and whether a `board` search parameter must be stripped.
+ *
+ * @remarks A key in a `/boards/<key>` path wins, and a keyed path must not carry a `board` search parameter.
+ */
+export function resolveBoardParam(
+  pathname: string,
+  searchBoard: unknown,
+): { param: unknown; stripSearchBoard: boolean } {
+  const pathKey = boardKeyFromPath(pathname);
+  if (pathKey === null) return { param: searchBoard, stripSearchBoard: false };
+  return { param: pathKey, stripSearchBoard: searchBoard !== undefined };
+}
+
+/**
+ * Whether a path is the settings page of an archived board in the loaded list.
+ *
+ * @remarks That page is the one place an archived board is shown, read only, so the root keeps the selected board instead of rejecting the key.
+ */
+export function isArchivedSettingsPath(
+  pathname: string,
+  boards: readonly BoardEntry[] | undefined,
+): boolean {
+  const route = parseRoute(`#${pathname}`);
+  return (
+    route.page === "board-settings" &&
+    boards?.some((board) => board.key === route.board && board.archived) ===
+      true
+  );
 }

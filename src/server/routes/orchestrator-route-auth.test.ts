@@ -317,6 +317,7 @@ const TOOL_ROUTES: [method: string, route: string, tool: string][] = [
   ["POST", "/tickets/:id/move", "move_card"],
   ["POST", "/tickets/:id/comments", "add_comment"],
   ["POST", "/base-branches", "create_base_branch"],
+  ["POST", "/boards", "create_board"],
   ["POST", "/groups", "create_group"],
   ["POST", "/groups/:id/start", "start_group"],
   ["POST", "/sessions/:cardId/input", "send_input"],
@@ -347,7 +348,7 @@ void test("every one of the 30 orchestrator routes answers 401 with no token and
         )
       : [],
   );
-  assert.equal(TOOL_ROUTES.length, 30);
+  assert.equal(TOOL_ROUTES.length, 31);
   assert.deepEqual(
     TOOL_ROUTES.map(([method, route]) => `${method} ${route}`).sort(),
     mounted.sort(),

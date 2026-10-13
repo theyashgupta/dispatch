@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CROSS_SESSION_INBOUND_VALUES } from "../../shared/types.js";
 import { MOVABLE_COLUMNS } from "../../shared/orchestrator-limits.js";
 import { validateCommentBody } from "../../shared/comment-body.js";
 import { hasDispatchMarker } from "../services/infra/playbooks.js";
@@ -58,10 +59,10 @@ const imagesSchema = z
     return images;
   });
 
-/** A workspace payload: a folder and at least one repo, each with a string path and base. */
+/** A workspace payload: a folder and zero or more repos, each with a string path and base. */
 const workspaceSchema = z.object({
   folder: z.string(),
-  repos: z.array(z.object({ path: z.string(), base: z.string() })).min(1),
+  repos: z.array(z.object({ path: z.string(), base: z.string() })),
 });
 
 /** Replace the raw `folder` and `repos` fields with the workspace they form, or undefined. */
@@ -110,7 +111,11 @@ export const moveBodySchema = z.object(
   COLUMN_CODE,
 );
 
-/** The `POST /cards/:id/start` body; every field is optional and a wrong type reads as absent. */
+/**
+ * The `POST /cards/:id/start` body; every field is optional and a wrong type reads as absent.
+ *
+ * @remarks The one exception is `crossSessionInbound`: a value outside the known list answers 400.
+ */
 export const startBodySchema = z
   .preprocess(
     fieldsOf,
@@ -119,6 +124,9 @@ export const startBodySchema = z
       folder: z.unknown().optional(),
       repos: z.unknown().optional(),
       playbook: optionalString,
+      crossSessionInbound: z
+        .enum(CROSS_SESSION_INBOUND_VALUES, "invalid crossSessionInbound")
+        .optional(),
       newSession: z
         .unknown()
         .optional()
@@ -146,6 +154,12 @@ export const sessionAccountBodySchema = z.object(
       .optional(),
   },
   "invalid-id",
+);
+
+/** Validates the Inbox dismiss or restore body. */
+export const inboxDismissBodySchema = z.object(
+  { dismissed: z.boolean("invalid-dismissed") },
+  "invalid-dismissed",
 );
 
 export const sessionPinBodySchema = sessionBodySchema.extend({
@@ -234,6 +248,12 @@ export const createCardBodySchema = z
     }
     return { title, fullDescription, images: images.data };
   });
+
+/** The `GET /cards/:id/resume-target` params. */
+export const resumeTargetParamsSchema = z.object(
+  { id: z.string("invalid-id").regex(CARD_ID_RE, "invalid-id") },
+  "invalid-id",
+);
 
 /** The `GET /cards/:id/attachments/:name` params. */
 export const attachmentParamsSchema = z.object(

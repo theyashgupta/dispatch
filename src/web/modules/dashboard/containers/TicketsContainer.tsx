@@ -1,8 +1,9 @@
 import { useMemo, useState } from "react";
-import { withBoard } from "../../../../shared/board-select.js";
+import { routeHash } from "../../../../shared/route.js";
 import type { Column } from "../../../../shared/types.js";
 import { TicketsSection } from "@/modules/dashboard/components/TicketsSection";
 import { sectionState } from "@/modules/dashboard/domain/section-state";
+import { ticketTiles } from "@/modules/dashboard/domain/ticket-tiles";
 import {
   filterCards,
   groupOptions,
@@ -19,26 +20,28 @@ export function TicketsContainer() {
   const allCards = snapshot.data?.cards;
   const rows = useMemo(() => ticketsByColumn(allCards ?? []), [allCards]);
   const groups = useMemo(() => groupOptions(allCards ?? []), [allCards]);
-  const cards = useMemo(
-    () =>
+  const allTiles = useMemo(() => ticketTiles(allCards ?? [], {}), [allCards]);
+  const tiles = useMemo(() => {
+    const shown = new Set(
       filterCards(allCards ?? [], {
         groupId: groupValue === ALL ? undefined : groupValue,
         column: columnValue === ALL ? undefined : (columnValue as Column),
-      }),
-    [allCards, groupValue, columnValue],
-  );
+      }).map((card) => card.id),
+    );
+    return allTiles.filter((tile) => shown.has(tile.cardId));
+  }, [allCards, allTiles, groupValue, columnValue]);
   return (
     <TicketsSection
       state={sectionState([snapshot])}
       rows={rows}
       total={rows.reduce((sum, row) => sum + row.cards.length, 0)}
-      openBoardHref={withBoard("#/board", boardKey)}
+      openBoardHref={routeHash({ page: "board", board: boardKey })}
       groups={groups}
       groupValue={groupValue}
       columnValue={columnValue}
       onGroupChange={setGroupValue}
       onColumnChange={setColumnValue}
-      cards={cards}
+      tiles={tiles}
       onRetry={() => retryFailed([snapshot])}
     />
   );

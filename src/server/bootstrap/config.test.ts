@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { after, test } from "node:test";
+import { after, mock, test } from "node:test";
 import { DEFAULT_TERMINAL_APPEARANCE } from "../../shared/terminal-appearance.js";
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "dispatch-config-test-"));
@@ -303,6 +303,23 @@ test("a calendar block reads tolerantly: unknown mode is macos, bad titles drop,
   assert.deepEqual(loadConfig().sources?.calendar, { mode: "macos" });
 });
 
+test("a stored hysteresis at or above the stored threshold is clamped to one below it", () => {
+  writeConfig({
+    claudeAccounts: { thresholdPercent: 50, hysteresisPercent: 50 },
+  });
+  assert.deepEqual(loadConfig().claudeAccounts, {
+    thresholdPercent: 50,
+    hysteresisPercent: 49,
+  });
+  writeConfig({
+    claudeAccounts: { thresholdPercent: 60, hysteresisPercent: 49 },
+  });
+  assert.deepEqual(loadConfig().claudeAccounts, {
+    thresholdPercent: 60,
+    hysteresisPercent: 49,
+  });
+});
+
 test("claudeAccounts settings out of range are clamped to the route bounds at load (F12)", () => {
   writeConfig({
     claudeAccounts: { thresholdPercent: 0, minDwellMinutes: -5 },
@@ -318,4 +335,37 @@ test("claudeAccounts settings out of range are clamped to the route bounds at lo
     thresholdPercent: 100,
     minDwellMinutes: 240,
   });
+});
+
+test("an absent crossSessionInbound resolves to accept", () => {
+  writeConfig({});
+  assert.equal(loadConfig().crossSessionInbound, "accept");
+});
+
+test("a valid crossSessionInbound is kept", () => {
+  writeConfig({ crossSessionInbound: "hold" });
+  assert.equal(loadConfig().crossSessionInbound, "hold");
+});
+
+test("an unknown crossSessionInbound resolves to accept with one warning", () => {
+  writeConfig({ crossSessionInbound: "bogus" });
+  const warn = mock.method(console, "warn", () => undefined);
+  try {
+    assert.equal(loadConfig().crossSessionInbound, "accept");
+    const calls = warn.mock.calls.filter((c) =>
+      String(c.arguments[0]).includes("crossSessionInbound"),
+    );
+    assert.equal(calls.length, 1);
+  } finally {
+    warn.mock.restore();
+  }
+});
+
+test("claudeAccounts hysteresisPercent is clamped at load and a missing key resolves to the default", () => {
+  writeConfig({ claudeAccounts: { hysteresisPercent: 99 } });
+  assert.deepEqual(loadConfig().claudeAccounts, { hysteresisPercent: 50 });
+  writeConfig({ claudeAccounts: { hysteresisPercent: -3 } });
+  assert.deepEqual(loadConfig().claudeAccounts, { hysteresisPercent: 0 });
+  writeConfig({ claudeAccounts: { thresholdPercent: 90 } });
+  assert.equal(loadConfig().claudeAccounts?.hysteresisPercent, undefined);
 });

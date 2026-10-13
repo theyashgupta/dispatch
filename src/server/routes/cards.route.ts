@@ -21,6 +21,7 @@ import {
   reconnectTerminal,
   resumeSession,
 } from "../services/orchestration/resume-session.js";
+import { resolveResumeTarget } from "../services/orchestration/resume-target.js";
 import { cleanupWorkspace } from "../services/orchestration/cleanup.js";
 import {
   actionableCard,
@@ -66,6 +67,7 @@ import {
   draftBodySchema,
   groupTitleBodySchema,
   linearStateBodySchema,
+  inboxDismissBodySchema,
   moveBodySchema,
   openEditorBodySchema,
   sessionAccountBodySchema,
@@ -73,6 +75,7 @@ import {
   sessionPinBodySchema,
   startBodySchema,
   syncBodySchema,
+  resumeTargetParamsSchema,
   unwindBodySchema,
 } from "./cards-schemas.js";
 import { httpErrorHandler } from "./error-handler.js";
@@ -156,6 +159,25 @@ cardsRouter.post("/cards/:id/start", async (req, res) => {
   await startCardFromDialog(id, input);
   res.status(202).json({ started: true });
 });
+
+/**
+ * `GET /api/cards/:id/resume-target` - report which conversation Resume would launch.
+ *
+ * @remarks Read-only: the board is not written.
+ */
+async function getResumeTarget(
+  req: Request<{ id: string }>,
+  res: Response,
+): Promise<void> {
+  const { id } = parseOrThrow(resumeTargetParamsSchema, req.params);
+  const card = store.getCard(id);
+  if (!card) throw new NotFoundError(`unknown card id: ${id}`);
+  const session = card.sessions?.find((s) => s.id === card.activeSessionId);
+  if (!session) throw new ConflictError("no-session");
+  res.status(200).json(await resolveResumeTarget(card, session));
+}
+
+cardsRouter.get("/cards/:id/resume-target", getResumeTarget);
 
 cardsRouter.post("/cards/:id/resume", (req, res) => {
   const { id } = req.params;
@@ -261,6 +283,14 @@ cardsRouter.put("/cards/:id/session/account-pin", async (req, res) => {
   }
   await store.setAccountPinned(card.id, sessionId, pinned);
   res.status(200).json({ pinned });
+});
+
+cardsRouter.post("/cards/:id/inbox-dismiss", async (req, res) => {
+  const { dismissed } = parseOrThrow(inboxDismissBodySchema, req.body);
+  const outcome = await store.setInboxDismissed(req.params.id, dismissed);
+  if (outcome === "unknown") throw new NotFoundError("not-found");
+  if (outcome === "not-in-inbox") throw new ConflictError("not-in-inbox");
+  res.status(204).end();
 });
 
 cardsRouter.post("/cards/:id/session", async (req, res) => {

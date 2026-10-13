@@ -175,6 +175,37 @@ void test("a UserPromptSubmit hook moves a parked card to in_progress", async ()
   assert.equal(store.getCard(cardId)?.column, "in_progress");
 });
 
+void test("SessionStart ranks conversations by start: a late Stop of an older one keeps the newer, a resume start brings the older back", async () => {
+  const { cardId, sessionId } = await cardWithSession("hook-start-order");
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "SessionStart",
+    session_id: "conv-a",
+    source: "startup",
+  });
+  await new Promise((r) => setTimeout(r, 2));
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "SessionStart",
+    session_id: "conv-b",
+    source: "clear",
+  });
+  await new Promise((r) => setTimeout(r, 2));
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "Stop",
+    session_id: "conv-a",
+    last_assistant_message: "late",
+  });
+  assert.equal(store.getCard(cardId)?.claudeSessionId, "conv-b");
+  assert.ok(nodesOf(cardId, sessionId)?.every((n) => n.startedAt != null));
+
+  await new Promise((r) => setTimeout(r, 2));
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "SessionStart",
+    session_id: "conv-a",
+    source: "resume",
+  });
+  assert.equal(store.getCard(cardId)?.claudeSessionId, "conv-a");
+});
+
 void test("UserPromptSubmit, Stop and StopFailure set the turn state; the pane channel records none", async () => {
   const { recordedTurnState } = await import("./session-turn.js");
   const { cardId, sessionId } = await cardWithSession("hook-turn");
@@ -200,7 +231,140 @@ void test("UserPromptSubmit, Stop and StopFailure set the turn state; the pane c
       hook_event_name: "UserPromptSubmit",
     });
     assert.equal(recordedTurnState(cardId, sessionId), "limit");
+    await applyHookEvent(cardId, sessionId, {
+      hook_event_name: "SessionStart",
+      session_id: "conv-pane",
+    });
+    assert.equal(nodesOf(cardId, sessionId)?.length ?? 0, 0);
   } finally {
     setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
   }
+});
+
+void test("the first SessionStart latches hook routing for its own session only, so the pane watcher yields at startup", async () => {
+  const { cardId, sessionId } = await cardWithSession("hook-latch");
+  const reserved = await store.reserveNewSession(
+    cardId,
+    store.getCard(cardId)!.identifier,
+  );
+  await store.mintHookChannel(
+    cardId,
+    "latch-token-primary-0123456789",
+    sessionId,
+  );
+  await store.mintHookChannel(
+    cardId,
+    "latch-token-reserved-0123456789",
+    reserved!.sessionId,
+  );
+  const latchOf = (id: string) =>
+    store.getCard(cardId)?.sessions?.find((s) => s.id === id)?.hookRoutedAt;
+  assert.equal(latchOf(sessionId), undefined);
+
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "SessionStart",
+    session_id: "conv-latch",
+    source: "startup",
+  });
+  const stamped = latchOf(sessionId);
+  assert.equal(typeof stamped, "string");
+  assert.equal(latchOf(reserved!.sessionId), undefined);
+
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "Stop",
+    session_id: "conv-latch",
+  });
+  assert.equal(latchOf(sessionId), stamped, "the latch is written once");
+});
+
+void test("a SessionStart under the pane channel latches nothing", async () => {
+  const { cardId, sessionId } = await cardWithSession("hook-latch-pane");
+  await store.mintHookChannel(cardId, "latch-token-pane-0123456789", sessionId);
+  try {
+    setHooksRuntime({ capable: true, port: 1, statusChannel: "pane" });
+    await applyHookEvent(cardId, sessionId, {
+      hook_event_name: "SessionStart",
+      session_id: "conv-latch-pane",
+      source: "startup",
+    });
+    assert.equal(
+      store.getCard(cardId)?.sessions?.find((s) => s.id === sessionId)
+        ?.hookRoutedAt,
+      undefined,
+    );
+  } finally {
+    setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
+  }
+});
+
+const columnOf = (cardId: string) => store.getCard(cardId)?.column;
+
+void test("a subagent AskUserQuestion leaves the card in progress", async () => {
+  const { cardId, sessionId } = await cardWithSession("hook-subagent-pause");
+  assert.equal(columnOf(cardId), "in_progress");
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "PreToolUse",
+    tool_name: "AskUserQuestion",
+    tool_use_id: "toolu_subagent",
+    agent_id: "a0473ff8813982962",
+    agent_type: "review-edge-cases",
+  } as Parameters<typeof applyHookEvent>[2]);
+  assert.equal(columnOf(cardId), "in_progress");
+  assert.equal(store.getCard(cardId)?.lastMarker, undefined);
+});
+
+void test("a main-session AskUserQuestion that fails flips the card back", async () => {
+  const { cardId, sessionId } = await cardWithSession("hook-pause-failure");
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "PreToolUse",
+    tool_name: "AskUserQuestion",
+    tool_use_id: "toolu_failed",
+  });
+  assert.equal(columnOf(cardId), "needs_input");
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "PostToolUseFailure",
+    tool_name: "AskUserQuestion",
+    tool_use_id: "toolu_failed",
+    error: "no dialog",
+  });
+  assert.equal(columnOf(cardId), "in_progress");
+});
+
+void test("main-session output after a pause-tool marker flips the card back", async () => {
+  for (const next of [
+    { hook_event_name: "PostToolUse", tool_name: "Bash" },
+    { hook_event_name: "Stop", last_assistant_message: "still working" },
+  ]) {
+    const { cardId, sessionId } = await cardWithSession(
+      `hook-ran-on-${next.hook_event_name}`,
+    );
+    await applyHookEvent(cardId, sessionId, {
+      hook_event_name: "PreToolUse",
+      tool_name: "AskUserQuestion",
+      tool_use_id: `toolu_${next.hook_event_name}`,
+    });
+    assert.equal(columnOf(cardId), "needs_input");
+    await applyHookEvent(cardId, sessionId, {
+      hook_event_name: "PostToolUse",
+      tool_name: "Bash",
+      agent_id: "a-subagent",
+    });
+    assert.equal(columnOf(cardId), "needs_input", "subagent output is ignored");
+    await applyHookEvent(cardId, sessionId, next);
+    assert.equal(columnOf(cardId), "in_progress", next.hook_event_name);
+  }
+});
+
+void test("main-session output after a text NEEDS_INPUT marker keeps the card waiting", async () => {
+  const { cardId, sessionId } = await cardWithSession("hook-text-pause");
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "Stop",
+    last_assistant_message: "DISPATCH_STATUS: NEEDS_INPUT - pick a name",
+  });
+  assert.equal(columnOf(cardId), "needs_input");
+  await applyHookEvent(cardId, sessionId, {
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+  });
+  assert.equal(columnOf(cardId), "needs_input");
 });

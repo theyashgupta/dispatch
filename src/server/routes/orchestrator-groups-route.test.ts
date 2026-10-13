@@ -374,7 +374,11 @@ void test("create_group with no repos refuses a repository with no base and writ
 void test("create_group with no repos refuses a board with no repository and writes nothing", async () => {
   const { reply, written } = await createWithBoardRepositories([]);
   assert.equal(reply.status, 400);
-  assert.equal(reply.body.error, "invalid-repos");
+  assert.equal(
+    reply.body.error,
+    "This board has no repository. Add one in the board settings.",
+  );
+  assert.equal(reply.body.code, "no-repositories");
   assert.equal(written, 0);
 });
 

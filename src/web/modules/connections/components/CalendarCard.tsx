@@ -1,5 +1,4 @@
 import { CALENDAR_CONNECTION } from "../../../../shared/connection-meta.js";
-import { routeHash } from "../../../../shared/route.js";
 import type {
   CalendarChoice,
   CalendarMode,
@@ -36,6 +35,7 @@ interface CalendarCardProps {
   enabled: boolean;
   statusKnown: boolean;
   access: CalendarAccessView | null;
+  vaultHref: string;
   checkingAccess: boolean;
   onModeChange: (mode: CalendarMode) => void;
   onCheckAccess: () => void;
@@ -57,6 +57,7 @@ export function CalendarCard({
   enabled,
   statusKnown,
   access,
+  vaultHref,
   checkingAccess,
   onModeChange,
   onCheckAccess,
@@ -195,7 +196,7 @@ export function CalendarCard({
               {icalFilled ? "Filled" : "Empty"}
             </Badge>
             <a
-              href={routeHash({ page: "vault" })}
+              href={vaultHref}
               className="text-sm text-foreground underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
             >
               Open Vault

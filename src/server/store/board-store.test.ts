@@ -149,8 +149,21 @@ void test("setClaudeSessionId appends a node per new conversation id and mirrors
   assert.equal(session().claudeSessions?.length, 2, "no duplicate node");
   assert.equal(
     store.getCard(created.id)?.claudeSessionId,
+    "conv-b",
+    "a late event of an older conversation never changes the latest",
+  );
+
+  await new Promise((r) => setTimeout(r, 2));
+  await store.startClaudeSession(
+    created.id,
+    undefined,
     "conv-a",
-    "a revisited older conversation becomes latest by lastActiveAt",
+    new Date().toISOString(),
+  );
+  assert.equal(
+    store.getCard(created.id)?.claudeSessionId,
+    "conv-a",
+    "a SessionStart of an older conversation makes it latest again",
   );
 });
 

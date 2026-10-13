@@ -1,9 +1,15 @@
-import { useMutation } from "@tanstack/react-query";
+import {
+  queryOptions,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type { BoardKey } from "../../shared/types.js";
 import {
   createLocalTicket,
   generateGroupTitle,
   generateTicketDraft,
+  getResumeTarget,
   resumeCard,
   startCard,
   startGroup,
@@ -179,7 +185,35 @@ export function resumeCardMutationOptions() {
   };
 }
 
-/** Resume a dead In Review session. */
+export const cardsKeys = {
+  resumeTarget: (id: string) => ["cards", id, "resume-target"] as const,
+};
+
+/**
+ * Build the query options that read which conversation Resume will open.
+ *
+ * @remarks
+ * `enabled` is false while the Resume button is hidden, so the folder is read only when needed.
+ */
+export function resumeTargetQueryOptions(id: string, enabled = true) {
+  return queryOptions({
+    queryKey: cardsKeys.resumeTarget(id),
+    queryFn: () => getResumeTarget(id),
+    enabled,
+  });
+}
+
+/** Read which conversation Resume will open for a card, only while `enabled`. */
+export function useResumeTargetQuery(id: string, enabled: boolean) {
+  return useQuery(resumeTargetQueryOptions(id, enabled));
+}
+
+/** Resume a dead In Review session, then drop the cached resume target. */
 export function useResumeCardMutation() {
-  return useMutation(resumeCardMutationOptions());
+  const queryClient = useQueryClient();
+  return useMutation({
+    ...resumeCardMutationOptions(),
+    onSuccess: (_result, { id }) =>
+      queryClient.invalidateQueries({ queryKey: cardsKeys.resumeTarget(id) }),
+  });
 }

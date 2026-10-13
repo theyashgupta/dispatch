@@ -1,8 +1,21 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
+import { CLAUDE_SESSION_ID } from "../../shared/claude-session-id.js";
 
 const TAIL_BYTES = 256 * 1024;
 const SESSION_ID = /^[\w-]{1,256}$/;
+
+export interface TranscriptEntry {
+  id: string;
+  at: string | null;
+  type: "user" | "assistant";
+  text: string;
+}
+
+export interface TranscriptConversation {
+  entries: TranscriptEntry[];
+  truncated: boolean;
+}
 
 export interface TranscriptTail {
   size: number;
@@ -46,6 +59,51 @@ export async function newestJsonl(dir: string): Promise<string | null> {
   return best?.file ?? null;
 }
 
+/** The folder Claude Code keeps the conversation files of one working directory in. */
+export function projectsDirOf(configDir: string, cwd: string): string {
+  return path.join(configDir, "projects", cwd.replace(/[^a-zA-Z0-9]/g, "-"));
+}
+
+/**
+ * List the conversations in a project folder: the top level `.jsonl` files, each with the time
+ * its file was born.
+ *
+ * @remarks
+ * The birth time stands for the start of a conversation because a resumed conversation keeps its
+ * file and only moves its modified time. A file system with no birth time reports 0, and the
+ * modified time is used instead. Top level `agent-*.jsonl` files are Claude subagent transcripts and
+ * are left out because `--resume` refuses them.
+ */
+export async function listConversations(
+  dir: string,
+): Promise<{ id: string; bornAtMs: number }[]> {
+  const names = await fsp.readdir(dir).catch(() => []);
+  const found = await Promise.all(
+    names
+      .filter(
+        (name) =>
+          name.endsWith(".jsonl") &&
+          !name.startsWith("agent-") &&
+          CLAUDE_SESSION_ID.test(name.slice(0, -".jsonl".length)),
+      )
+      .map(async (name) => {
+        try {
+          const stat = await fsp.stat(path.join(dir, name));
+          return stat.isFile()
+            ? {
+                id: name.slice(0, -".jsonl".length),
+                bornAtMs:
+                  stat.birthtimeMs > 0 ? stat.birthtimeMs : stat.mtimeMs,
+              }
+            : undefined;
+        } catch {
+          return undefined;
+        }
+      }),
+  );
+  return found.filter((entry) => entry !== undefined);
+}
+
 /**
  * Find the transcript file of one session: the stored hook path, else the file named by the
  * Claude session id in the project folder of `cwd`, else the newest `.jsonl` in that folder.
@@ -58,11 +116,7 @@ export async function resolveTranscriptPath(input: {
 }): Promise<string | null> {
   if (input.stored !== undefined && (await isFile(input.stored)))
     return input.stored;
-  const dir = path.join(
-    input.configDir,
-    "projects",
-    input.cwd.replace(/[^a-zA-Z0-9]/g, "-"),
-  );
+  const dir = projectsDirOf(input.configDir, input.cwd);
   const sid = input.claudeSessionId;
   if (sid !== undefined && SESSION_ID.test(sid)) {
     const named = path.join(dir, `${sid}.jsonl`);
@@ -71,20 +125,20 @@ export async function resolveTranscriptPath(input: {
   return newestJsonl(dir);
 }
 
-function entryText(
-  line: string,
-): { type: "user" | "assistant"; text: string } | null {
-  let entry: { type?: unknown; message?: { content?: unknown } } | null;
-  try {
-    entry = JSON.parse(line) as typeof entry;
-  } catch {
-    return null;
-  }
-  const type = entry?.type;
-  if (type !== "assistant" && type !== "user") return null;
-  const text = contentText(entry?.message?.content);
-  return text === null ? null : { type, text };
+interface ParsedEntry {
+  type: "user" | "assistant";
+  text: string;
+  uuid: string | null;
+  at: string | null;
+  hidden: boolean;
 }
+
+const SYNTHETIC_PREFIXES = [
+  "<command-name>",
+  "<command-message>",
+  "<local-command-",
+  "[Request interrupted by user",
+];
 
 function contentText(content: unknown): string | null {
   if (typeof content === "string") return content;
@@ -98,14 +152,56 @@ function contentText(content: unknown): string | null {
 }
 
 /**
- * Read the size of a transcript, the text of its last assistant message and its user texts.
+ * Parse one transcript line into a user or assistant text entry.
  *
- * @remarks Reads the last 256 KiB only, so a long transcript costs one bounded read per sample.
- * Resolves null when the file cannot be read.
+ * @remarks `hidden` marks the entries Claude Code writes for itself (meta, sidechain, compact
+ * summary, a non-human origin such as a task notification, slash command echoes, interrupt
+ * notes); the conversation skips them, the supervisor samples still count them.
  */
-export async function readTranscriptTail(
+function parseEntry(line: string): ParsedEntry | null {
+  let entry: {
+    type?: unknown;
+    uuid?: unknown;
+    timestamp?: unknown;
+    isMeta?: unknown;
+    isSidechain?: unknown;
+    isCompactSummary?: unknown;
+    origin?: { kind?: unknown };
+    message?: { content?: unknown };
+  } | null;
+  try {
+    entry = JSON.parse(line) as typeof entry;
+  } catch {
+    return null;
+  }
+  const type = entry?.type;
+  if (type !== "assistant" && type !== "user") return null;
+  const text = contentText(entry?.message?.content);
+  if (text === null) return null;
+  return {
+    type,
+    text,
+    uuid: typeof entry?.uuid === "string" ? entry.uuid : null,
+    at: typeof entry?.timestamp === "string" ? entry.timestamp : null,
+    hidden:
+      entry?.isMeta === true ||
+      entry?.isSidechain === true ||
+      entry?.isCompactSummary === true ||
+      (typeof entry?.origin?.kind === "string" &&
+        entry.origin.kind !== "human") ||
+      SYNTHETIC_PREFIXES.some((prefix) => text.startsWith(prefix)),
+  };
+}
+
+/**
+ * Read the last 256 KiB of a file as whole lines, with the byte offset of the first kept line.
+ *
+ * @remarks A tail that starts inside the file drops its partial first line. Resolves null when
+ * the file cannot be read.
+ */
+async function readTailLines(
   file: string,
-): Promise<TranscriptTail | null> {
+): Promise<{ size: number; start: number; lines: string[] } | null> {
   let handle: fsp.FileHandle;
   try {
     handle = await fsp.open(file, "r");
@@ -114,22 +210,75 @@ export async function readTranscriptTail(
   }
   try {
     const { size } = await handle.stat();
-    const start = Math.max(0, size - TAIL_BYTES);
-    const buffer = Buffer.alloc(size - start);
-    await handle.read(buffer, 0, buffer.length, start);
-    const lines = buffer.toString("utf8").split("\n");
-    if (start > 0) lines.shift();
-    let lastAssistantText: string | null = null;
-    const userTexts: string[] = [];
-    for (const line of lines) {
-      const entry = entryText(line);
-      if (entry?.type === "assistant") lastAssistantText = entry.text;
-      else if (entry?.type === "user") userTexts.push(entry.text);
-    }
-    return { size, lastAssistantText, userTexts };
+    const from = Math.max(0, size - TAIL_BYTES);
+    const buffer = Buffer.alloc(size - from);
+    await handle.read(buffer, 0, buffer.length, from);
+    const skip = from > 0 ? buffer.indexOf(10) + 1 : 0;
+    const lines = buffer.subarray(skip).toString("utf8").split("\n");
+    return { size, start: from + skip, lines };
   } catch {
     return null;
   } finally {
     await handle.close();
   }
+}
+
+/**
+ * Read the user and assistant text entries of a transcript in order, newest `limit` kept.
+ *
+ * @remarks
+ * Tool calls, tool results, thinking and the entries Claude Code writes for itself carry no
+ * conversation text and are skipped, as is a line that does not parse. An entry with no uuid
+ * takes its byte offset as its id, so the id stays the same while the tail window moves.
+ */
+export async function readTranscriptConversation(
+  file: string,
+  limit: number,
+  textMax: number,
+): Promise<TranscriptConversation | null> {
+  const tail = await readTailLines(file);
+  if (tail === null) return null;
+  const entries: TranscriptEntry[] = [];
+  let offset = tail.start;
+  for (const line of tail.lines) {
+    const parsed = parseEntry(line);
+    if (parsed !== null && !parsed.hidden) {
+      entries.push({
+        id: parsed.uuid ?? `offset-${offset}`,
+        at: parsed.at,
+        type: parsed.type,
+        text:
+          parsed.text.length > textMax
+            ? `${parsed.text.slice(0, textMax).replace(/[\uD800-\uDBFF]$/, "")}\n[cut at ${textMax} characters]`
+            : parsed.text,
+      });
+    }
+    offset += Buffer.byteLength(line) + 1;
+  }
+  const kept = entries.slice(-limit);
+  return {
+    entries: kept,
+    truncated: tail.start > 0 || kept.length < entries.length,
+  };
+}
+
+/**
+ * Read the size of a transcript, the text of its last assistant message and its user texts.
+ *
+ * @remarks Reads the last 256 KiB only, so a long transcript costs one bounded read per sample.
+ * Resolves null when the file cannot be read.
+ */
+export async function readTranscriptTail(
+  file: string,
+): Promise<TranscriptTail | null> {
+  const tail = await readTailLines(file);
+  if (tail === null) return null;
+  let lastAssistantText: string | null = null;
+  const userTexts: string[] = [];
+  for (const line of tail.lines) {
+    const entry = parseEntry(line);
+    if (entry?.type === "assistant") lastAssistantText = entry.text;
+    else if (entry?.type === "user") userTexts.push(entry.text);
+  }
+  return { size: tail.size, lastAssistantText, userTexts };
 }

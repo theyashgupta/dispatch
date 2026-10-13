@@ -34,6 +34,7 @@ import {
 import { loadOrCreateVapidKeys } from "../services/infra/push-keys.js";
 import { VAPID_KEYS_PATH } from "../services/infra/paths.js";
 import {
+  getCrossSessionInbound,
   setHooksRuntime,
   setOrchestrationConfig,
 } from "../services/infra/config-holder.js";
@@ -63,11 +64,13 @@ import { startArtifactDetectionLoop } from "../adapters/artifact-detect.js";
 import {
   buildRegistry,
   setCredentialResolver,
+  setGithubReposReader,
   setMacCalendarReader,
 } from "../sources/registry.js";
 import { readMacEvents } from "../adapters/calendar-mac.js";
 import { resolveIcalCredential } from "../services/orchestration/calendar.js";
 import { resolveGithubToken } from "../services/orchestration/github-token.js";
+import { githubReposReader } from "../services/orchestration/github-repos.js";
 import { resolveSentryToken } from "../services/infra/sentry-token.js";
 import { resolveSlackToken } from "../services/infra/slack-token.js";
 import {
@@ -132,15 +135,20 @@ const NO_CACHE_BASENAMES = new Set(["index.html", "sw.js"]);
  * via the `root` option (never a joined absolute path): send's dotfile policy inspects every
  * segment of a bare absolute path, so an npx install under `~/.npm/_npx/...` (or nvm's
  * `~/.nvm/...`) 404s on the `.npm` segment; with `root` set, only the relative `index.html` is
- * inspected.
+ * inspected. A GET under `/boards/` redirects to the hash route instead, because the build uses
+ * relative asset URLs and `/boards/<KEY>` would load `/boards/assets/*` as HTML.
  */
-const spaFallback: express.RequestHandler = (req, res, next) => {
+export const spaFallback: express.RequestHandler = (req, res, next) => {
   if (req.method !== "GET") {
     next();
     return;
   }
   if (req.path === "/api" || req.path.startsWith("/api/")) {
     next();
+    return;
+  }
+  if (req.path === "/boards" || req.path.startsWith("/boards/")) {
+    res.redirect(302, `/#${req.originalUrl}`);
     return;
   }
   res.set("Cache-Control", "no-cache");
@@ -350,6 +358,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   setOrchestrationConfig(config);
   setBoardRepository(store);
   setCredentialResolver("github", resolveGithubToken);
+  setGithubReposReader(githubReposReader);
   setCredentialResolver("sentry", resolveSentryToken);
   setCredentialResolver("slack", resolveSlackToken);
   setMacCalendarReader(readMacEvents);
@@ -359,7 +368,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   console.log(`[push] VAPID keypair loaded from ${VAPID_KEYS_PATH}`);
 
   const statusChannel = config.statusChannel ?? "auto";
-  await installHookArtifacts();
+  await installHookArtifacts(getCrossSessionInbound());
   await installPtyShim();
   const { capable, version } = await checkHooksCapability();
   if (statusChannel === "hooks" && !capable) {

@@ -1,8 +1,6 @@
-import { ItemGroup } from "@/components/ui/item";
 import type { ProgressRow } from "@/modules/dashboard/domain/progress-rows";
 import type { SectionState } from "@/modules/dashboard/domain/section-state";
 import { DashboardSection } from "./DashboardSection";
-import { SegmentLegend } from "./GroupProgressBar";
 import { ProgressRowView } from "./ProgressRowView";
 
 interface ProgressSectionProps {
@@ -31,18 +29,11 @@ export function ProgressSection({
           progress here.
         </p>
       ) : (
-        <div className="rounded-md border border-border bg-card">
-          <ItemGroup>
-            {rows.map((row) => (
-              <ProgressRowView key={row.cardId} row={row} />
-            ))}
-          </ItemGroup>
-          {rows.some((row) => row.view !== null) && (
-            <div className="px-4 py-3">
-              <SegmentLegend />
-            </div>
-          )}
-        </div>
+        <ul className="m-0 flex list-none flex-col gap-(--space-md) p-0">
+          {rows.map((row) => (
+            <ProgressRowView key={row.cardId} row={row} />
+          ))}
+        </ul>
       )}
     </DashboardSection>
   );

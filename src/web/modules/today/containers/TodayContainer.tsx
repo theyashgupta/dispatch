@@ -3,7 +3,7 @@ import { useRouteContext, useRouter } from "@tanstack/react-router";
 import { inboxFeed } from "../../../../shared/feed-items.js";
 import { pinFromBoard } from "../../../../shared/pinned-card.js";
 import { nowMs } from "../../../../shared/format-age.js";
-import { routeHash, type Page } from "../../../../shared/route.js";
+import { pageLocation, type Page } from "../../../../shared/route.js";
 import type { BoardSnapshot, Item } from "../../../../shared/types.js";
 import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { useItems } from "@/components/ui/hooks/use-items";
@@ -25,7 +25,8 @@ import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
 
 interface TodayPageProps {
   board: BoardSnapshot;
-  items: Item[];
+  inboxItems: Item[];
+  allItems: Item[];
   onSelectCard: (id: string) => void;
   onNavigate: (page: Page, id?: string) => void;
 }
@@ -33,42 +34,49 @@ interface TodayPageProps {
 export function TodayContainer() {
   const { appStore } = useRouteContext({ from: "__root__" });
   const router = useRouter();
+  const boardKey = useAppStore(appStore, (s) => s.board);
   const board = useBoardSnapshot(
-    useAppStore(appStore, (s) => s.board),
+    boardKey,
     useAppStore(appStore, (s) => s.doneLimit),
   );
-  const errorsInFeeds = useAppStore(appStore, (s) => s.errorsInFeeds);
   const items = useItems(board);
   const enabledSources = board?.enabledSources;
   const feed = useMemo(
-    () => inboxFeed(items, errorsInFeeds, enabledSources ?? []),
-    [items, errorsInFeeds, enabledSources],
+    () => inboxFeed(items, enabledSources ?? []),
+    [items, enabledSources],
   );
   if (board == null) return null;
   return (
     <TodayPage
       board={board}
-      items={feed}
+      inboxItems={feed}
+      allItems={items}
       onSelectCard={(id) =>
         appStore.selectCard(id, pinFromBoard(id, board.cards))
       }
       onNavigate={(page, id) =>
-        void router.navigate({ href: routeHash({ page, id }).slice(1) })
+        void router.navigate({ href: pageLocation({ page, id }, boardKey) })
       }
     />
   );
 }
 
-function TodayPage({ board, items, onSelectCard, onNavigate }: TodayPageProps) {
+function TodayPage({
+  board,
+  inboxItems,
+  allItems,
+  onSelectCard,
+  onNavigate,
+}: TodayPageProps) {
   const [filter, setFilter] = useState<string | null>(null);
   const [page, setPage] = useState(1);
   const { range, setRange, count, setCount } = useP0Preferences();
 
   const nowTs = nowMs();
   const now = new Date(nowTs);
-  const pool = rankToday(board.cards, items, range, nowTs);
+  const pool = rankToday(board.cards, inboxItems, range, nowTs);
   const view = buildTodayModel(pool, count, filter, page);
-  const events = visibleAgenda(board.enabledSources, items, now);
+  const events = visibleAgenda(board.enabledSources, allItems, now);
 
   function handleOpen(entry: TodayEntry) {
     const target = entryTarget(entry);

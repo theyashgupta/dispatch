@@ -1,3 +1,4 @@
+import { isInboxDismissed } from "../../../../shared/inbox-count.js";
 import { COLUMNS } from "../../../../shared/types.js";
 import type { Card, Column as ColumnId } from "../../../../shared/types.js";
 import {
@@ -33,7 +34,8 @@ export function StatusPillSwitcher({
       >
         {COLUMNS.map((column) => {
           const count = cards.filter(
-            (c) => c.column === column && c.groupId == null,
+            (c) =>
+              c.column === column && c.groupId == null && !isInboxDismissed(c),
           ).length;
           const isActive = column === active;
           return (

@@ -324,6 +324,19 @@ void test("repoOfRemote names a github.com repository and gives null for any oth
     ["https://github.com/acme", null],
     ["https://github.com/acme/app/extra", null],
     ["", null],
+    ["git@github.com:acme/api", "acme/api"],
+    ["ssh://git@github.com/acme/api", "acme/api"],
+    ["https://github.com/the-org/my.repo-x.git", "the-org/my.repo-x"],
+    ["https://gitlab.com/acme/api.git", null],
+    ["git@gitlab.com:acme/api.git", null],
+    ["https://github.com.evil.com/acme/api", null],
+    ["https://evil.com/github.com/acme/api", null],
+    ["https://github.com/", null],
+    ["not a url", null],
+    ["https://github.com/acme/a b", null],
+    ['https://github.com/acme/"api"', null],
+    ["https://github.com/acme/it's", null],
+    ["git@github.com:acme/ap:i", null],
   ];
   for (const [url, expected] of table) {
     assert.equal(repoOfRemote(url), expected, url);
