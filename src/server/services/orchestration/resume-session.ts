@@ -13,6 +13,7 @@ import {
   recordNewestConversation,
   recordResumeTarget,
 } from "./resume-target.js";
+import { continueSession } from "./pause-card.js";
 import { registerHookToken } from "./hook-tokens.js";
 import { REATTACH_STATUS_CLEAR_MS } from "./start-session.js";
 import { ensureTerminal } from "./terminal.js";
@@ -174,7 +175,10 @@ export async function resumeSession(cardId: string): Promise<void> {
     );
     await ensureTerminal(cardId, sessionId, session);
   } catch (err) {
-    if (killTarget != null) await killSession(`=${killTarget}`);
+    if (killTarget != null) {
+      await continueSession(killTarget);
+      await killSession(`=${killTarget}`);
+    }
     if (
       attempted !== undefined &&
       err instanceof StartStepError &&

@@ -348,7 +348,8 @@ function inheritFromError(
  * Run every check of a card start and answer what the commit needs, writing nothing.
  *
  * @remarks The start dialog route and the orchestrator `start_card` tool both call it, so the two
- * paths cannot drift.
+ * paths cannot drift. A paused card is refused (`card-paused`) because a new session would orphan
+ * its stopped processes.
  */
 export async function prepareCardStart(
   id: string,
@@ -356,6 +357,8 @@ export async function prepareCardStart(
 ): Promise<Config> {
   const { playbook, newSession, inheritFrom, workspace } = input;
   const card = launchableCard(id);
+
+  if (card.paused) throw new ConflictError("card-paused");
 
   if (card.column === "done") {
     throw new ConflictError("cannot start a session for a Done card");

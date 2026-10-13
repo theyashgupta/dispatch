@@ -7,6 +7,7 @@ import {
   paneAtPrompt,
   sessionEnvHas,
 } from "../../adapters/tmux.js";
+import { withCardLock } from "./card-lock.js";
 import { resolveLaunchAccount } from "./claude-accounts.js";
 import {
   awaitReplReady,
@@ -22,34 +23,13 @@ import {
 export type RunClaudeOutcome =
   "launched" | "busy" | "no-session" | "legacy" | "account";
 
-const inFlight = new Set<string>();
-
-/**
- * Run `fn` under the card lock, or return `busy` while a start, relaunch or move holds it.
- *
- * @remarks Run Claude and the account move share it because two overlapping `send-keys -l`
- * interleave on one shell line.
- */
-export async function withCardLock<T>(
-  cardId: string,
-  fn: () => Promise<T>,
-): Promise<T | "busy"> {
-  if (inFlight.has(cardId) || store.isStarting(cardId)) return "busy";
-  inFlight.add(cardId);
-  try {
-    return await fn();
-  } finally {
-    inFlight.delete(cardId);
-  }
-}
-
 /**
  * Relaunch claude inside a card's live shell session: the Run Claude button, and the same
  * command the person could type by hand with the right flags.
  *
- * @remarks Refuses with `busy` unless the pane's root shell owns the foreground and no start or
- * relaunch of the same card is in flight, because two overlapping `send-keys -l` interleave on
- * one shell line; refuses with `legacy` for a session created by an older build, whose pane root
+ * @remarks Refuses with `busy` unless the pane's root shell owns the foreground, no start or
+ * relaunch of the same card is in flight and the card is not paused, because two overlapping
+ * `send-keys -l` interleave on one shell line; refuses with `legacy` for a session created by an older build, whose pane root
  * is claude itself and would receive the line as prompt input. Resumes the conversation the hooks channel recorded (`--resume <id>`) and
  * otherwise starts a new one: `--continue` was measured to refuse even with a transcript on
  * disk for the cwd. A recorded id Claude refuses ("No conversation found", a session killed

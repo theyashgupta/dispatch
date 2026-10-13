@@ -26,6 +26,7 @@ import {
 import { CROSS_SESSION_INBOUND_VALUES } from "../../../shared/types.js";
 import { worktreePath } from "../domain/workspace-paths.js";
 import { run } from "../../adapters/exec.js";
+import { continueSession } from "./pause-card.js";
 
 /**
  * The three groups `uninstall` reasons about, produced once by `scanFootprint` and consumed by both
@@ -292,6 +293,7 @@ export async function runUninstall(
   const stoppedTtyd = killTtydPids(plan.stop.ttydPids);
   let stoppedSessions = 0;
   for (const session of plan.stop.sessions) {
+    await continueSession(session);
     if (await killSession(`=${session}`)) stoppedSessions++;
   }
   if (plan.stop.service) {

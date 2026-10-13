@@ -199,12 +199,19 @@ async function act(
  * Record a lost session and run the resume duty once.
  *
  * @remarks A lost session leaves the watcher's capture set, so the store's `session_lost` event
- * is its only signal; a session already marked lost is not resumed twice.
+ * is its only signal; a session already marked lost is not resumed twice. A partial loss (the card
+ * still has a live session, emitted when a paused session dies) is not a lost card.
  */
 export async function superviseLost(cardId: string): Promise<void> {
   const card = store.getCard(cardId);
   const session = card?.sessions?.find((s) => s.id === card.activeSessionId);
-  if (!card || !session || session.state === "lost") return;
+  if (
+    !card ||
+    card.sessionLost !== true ||
+    !session ||
+    session.state === "lost"
+  )
+    return;
   if (
     store.getBoard(card.boardKey ?? DEFAULT_BOARD_KEY)?.policy.supervisor !==
     "on"
@@ -257,6 +264,7 @@ export async function supervisePane(
       now,
       tmuxAlive: true,
       atShellPrompt: shellPrompt,
+      paused: card.paused ?? null,
       pane: sample.pane,
       engineSessionId: engineSessionIdOf(card),
       completion: card.loopProgress?.completion ?? null,
