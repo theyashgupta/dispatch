@@ -156,9 +156,9 @@ void test("the contrast instrument passes on both themes", () => {
 void test("each soft tint mixes its state token over transparent in the root block", () => {
   const root = new Map(rootBlock);
   for (const [name, base] of [
-    ["--ok-soft", "--col-agent-done"],
-    ["--warn-soft", "--col-needs-input"],
-    ["--danger-soft", "--destructive"],
+    ["--ok-soft", "--status-ok"],
+    ["--warn-soft", "--status-stale"],
+    ["--danger-soft", "--status-down"],
     ["--dot-grid", "--text-muted"],
   ]) {
     assert.match(
