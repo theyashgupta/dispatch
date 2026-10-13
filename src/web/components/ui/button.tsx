@@ -34,6 +34,7 @@ const buttonVariants = cva(
         "icon-md": "size-7",
         "icon-compact": "h-8 w-7.5",
         "icon-lg": "size-10",
+        wrap: "h-auto min-h-9 flex-wrap px-4 py-2 whitespace-normal has-[>svg]:px-3",
       },
     },
     compoundVariants: [

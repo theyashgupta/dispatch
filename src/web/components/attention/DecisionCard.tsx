@@ -81,8 +81,9 @@ export function DecisionCard({ view, disabled, onAnswer }: DecisionCardProps) {
             key={option.id}
             type="button"
             variant="outline"
+            size="wrap"
             disabled={disabled}
-            className="h-auto min-h-9 w-full flex-wrap justify-between whitespace-normal"
+            className="w-full justify-between"
             onClick={() => void onAnswer(option.id, null)}
           >
             <span className="min-w-0 text-left">{option.label}</span>
