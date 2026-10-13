@@ -22,6 +22,8 @@ Source folder: `~/.claude/projects/-Users-yash-dispatch-workspaces-LOCAL-22/` (r
 | `auto-continue-2.txt`      | "Automatic continue cancelled" notice                                      | `4d1c1cad-ea85-4eda-8b6a-6b2df4b0c078.jsonl` | 1788 | 2026-10-01T19:11:50.323Z | none   |
 | `api-error.txt`            | API Error: response stopped arriving                                       | `4d1c1cad-ea85-4eda-8b6a-6b2df4b0c078.jsonl` | 2777 | 2026-10-02T02:18:10.082Z | none   |
 | `api-error-2.txt`          | API Error: computer went to sleep mid-response                             | `4d1c1cad-ea85-4eda-8b6a-6b2df4b0c078.jsonl` | 997  | 2026-10-01T04:47:42.643Z | none   |
+| `limit-cancelled.txt` | "Automatic continue cancelled" post-menu screen, stale auto-continue lines above the prompt | `~/.claude/projects/-Users-yash/97721651-269e-483e-8fab-914c457772e6.jsonl` (MEDI-28 tail), plus two GROUP-21 lines from `62ccf37c-0341-4457-9840-4fa0f6c0f921.jsonl` at 2026-10-12T11:56:40Z | 7782 | 2026-10-12T15:03:22.856Z | none |
+| `auto-continue-3.txt` | live "Continuing shortly · esc to cancel" notice below the prompt, a persisted "continuing automatically" line above it | `4d1c1cad-ea85-4eda-8b6a-6b2df4b0c078.jsonl` | 3137 | 2026-10-02T10:10:59.166Z | none |
 | `warming-up.txt`           | status line warming up                                                     | `f28703a9-bfe1-47a5-b3fb-9712e55dfa29.jsonl` | 723  | 2026-09-24T21:45:45.071Z | none   |
 | `warming-up-2.txt`         | warming up with the startup banner and a queued prompt                     | `f28703a9-bfe1-47a5-b3fb-9712e55dfa29.jsonl` | 2778 | 2026-09-25T05:30:34.463Z | none   |
 
@@ -45,10 +47,12 @@ Source folder: `~/.claude/projects/-Users-yash-dispatch-workspaces-LOCAL-22/` (r
   - `api-error-2.txt`: first 12 lines (pane); later lines are other commands.
   - `warming-up.txt`: whole result.
   - `warming-up-2.txt`: whole result.
+  - `auto-continue-3.txt`: GROUP-14 section only; the lines before and after it are other commands.
 - Scrub rules checked on every fixture: API key prefixes (OpenAI style, GitHub, Slack, AWS), bearer headers, token query parameters, hex or base64 strings over 32 characters, and email addresses. No fixture contained a match, so nothing was replaced and the Scrubs column says none. The scan result is in `.planning/g18-orch-runtime-unit-2/qa/phase-1/secret-scan.txt`.
 - Script source check: no fixture contains `#!/bin/`, `case "$` or `grep -E`. Every kept capture is a tool result, not text written by the orchestrator model.
 - The panes show the Claude Code footer with `bypass permissions on`. That mode hides `esc to interrupt`, so the working state is recognised by the spinner line (for example `✽ Boondoggling… (25m 53s · ↓ 33.3k tokens)`).
 - `peer-message.txt` also holds a `DISPATCH_STATUS: NEEDS_INPUT` line above the held message dialog.
+- `limit-cancelled.txt` joins two real captures from 2026-10-12 (LOCAL-112): the two auto-continue lines GROUP-21 showed at the limit, placed above the MEDI-28 tail capture, because no single full-pane capture of the failing screen exists.
 
 ## Not found in the source
 
