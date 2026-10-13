@@ -35,50 +35,45 @@ export function CentreToolbar({
   alert,
 }: CentreToolbarProps) {
   return (
-    <div className="flex flex-col gap-(--space-sm) border-b border-border px-(--space-lg) py-(--space-sm)">
-      <div className="flex flex-wrap items-start gap-(--space-sm)">
-        {staleBadge !== null && (
-          <Badge tone="neutral" role="status" className="self-center">
-            {staleBadge}
-          </Badge>
+    <div className="relative flex min-w-0 flex-1 flex-wrap items-center gap-(--space-sm)">
+      {staleBadge !== null && (
+        <Badge tone="neutral" role="status">
+          {staleBadge}
+        </Badge>
+      )}
+      <div className="ml-auto flex flex-wrap items-center justify-end gap-(--space-sm)">
+        {switcher !== null && (
+          <>
+            <Label htmlFor="centre-switcher" className="sr-only">
+              Orchestrator
+            </Label>
+            <Select value={switcher.value} onValueChange={switcher.onChange}>
+              <SelectTrigger id="centre-switcher" size="sm">
+                <SelectValue placeholder="Orchestrator" />
+              </SelectTrigger>
+              <SelectContent>
+                {switcher.options.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </>
         )}
-        <div className="ml-auto flex flex-wrap items-start justify-end gap-(--space-sm)">
-          {switcher !== null && (
-            <>
-              <Label htmlFor="centre-switcher" className="sr-only">
-                Orchestrator
-              </Label>
-              <Select value={switcher.value} onValueChange={switcher.onChange}>
-                <SelectTrigger id="centre-switcher" size="sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {switcher.options.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </>
-          )}
-          {controls}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onSettings}
-          >
-            Settings
-          </Button>
-        </div>
+        {controls}
+        <Button type="button" variant="outline" size="sm" onClick={onSettings}>
+          Settings
+        </Button>
       </div>
       {alert !== null && (
-        <PanelAlertBar
-          message={alert.message}
-          retryDisabled={alert.retryDisabled}
-          onRetry={alert.onRetry}
-        />
+        <div className="absolute top-full right-0 z-10 mt-(--space-xs) w-max max-w-120">
+          <PanelAlertBar
+            message={alert.message}
+            retryDisabled={alert.retryDisabled}
+            onRetry={alert.onRetry}
+          />
+        </div>
       )}
     </div>
   );
