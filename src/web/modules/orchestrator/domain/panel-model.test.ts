@@ -10,6 +10,8 @@ import {
   staleBadgeText,
   startErrorCopy,
   STALE_REASON,
+  terminalFor,
+  terminalSrcFor,
   SUPERVISOR_OFF_REASON,
   STOP_TOOLTIP,
   type OrchestratorView,
@@ -310,4 +312,12 @@ test("a running record whose session is lost asks for a resume in the terminal",
   );
   assert.equal(model.terminal, "resume");
   assert.equal(model.control?.kind, "resume");
+});
+
+test("the terminal of an extra record with an open session is live at its own session path", () => {
+  const extra = main("running", { activeSessionId: "s9" }, "extra");
+  assert.equal(terminalFor(extra), "live");
+  assert.equal(terminalSrcFor("live", extra), "/sessions/s9/terminal/");
+  assert.equal(terminalSrcFor("connecting", extra), null);
+  assert.equal(terminalFor(null), "empty");
 });

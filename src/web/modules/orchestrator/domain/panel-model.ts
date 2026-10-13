@@ -65,9 +65,16 @@ const STOP_BLOCKED_STATES: readonly string[] = [
   "shell_prompt",
 ];
 
-function controlFor(
+type ControlInput = Pick<PanelInput, "supervisor" | "stale" | "pending">;
+
+/**
+ * The Start, Stop or Resume control that one orchestrator record shows, or null while it changes state.
+ *
+ * @remarks A null record is a board with no orchestrator, which shows Start. The panel and the command centre share this rule.
+ */
+export function controlFor(
   main: OrchestratorView | null,
-  input: PanelInput,
+  input: ControlInput,
 ): PanelControl | null {
   const state = main?.session?.state ?? null;
   const locked = input.stale || input.pending !== null;
@@ -102,7 +109,7 @@ function controlFor(
   };
 }
 
-function terminalFor(main: OrchestratorView | null): TerminalMode {
+export function terminalFor(main: OrchestratorView | null): TerminalMode {
   if (main === null) return "empty";
   const session = main.session;
   if (session?.ttydPort != null && session.activeSessionId !== null) {
@@ -115,6 +122,15 @@ function terminalFor(main: OrchestratorView | null): TerminalMode {
     return "resume";
   }
   return "not-running";
+}
+
+export function terminalSrcFor(
+  terminal: TerminalMode,
+  main: OrchestratorView | null,
+): string | null {
+  return terminal === "live" && main?.session?.activeSessionId != null
+    ? `/sessions/${main.session.activeSessionId}/terminal/`
+    : null;
 }
 
 /**
@@ -141,10 +157,7 @@ export function panelModel(input: PanelInput): PanelModel {
           : null,
     control: loaded ? controlFor(main, input) : null,
     terminal,
-    terminalSrc:
-      terminal === "live" && main?.session?.activeSessionId != null
-        ? `/sessions/${main.session.activeSessionId}/terminal/`
-        : null,
+    terminalSrc: terminalSrcFor(terminal, main),
     startFailure:
       main?.state === "stopped" && main.session?.startError
         ? startErrorCopy(main.session.startError)
