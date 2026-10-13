@@ -18,6 +18,7 @@ import {
   typedLine,
   type SendResult,
 } from "./supervisor-send.js";
+import { assertMemoryHeadroom } from "./memory-governor.js";
 
 export const sessionTools: {
   send: typeof sendConfirmed;
@@ -219,6 +220,7 @@ export async function resumeLoop(
           "session is not stopped by stop_session or a supervisor give-up",
       });
     }
+    assertMemoryHeadroom(caller.boardKey);
     const policy = callerPolicy(caller);
     enforce(
       checkCap({

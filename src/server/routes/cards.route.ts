@@ -12,14 +12,11 @@ import {
   boardRepository as store,
 } from "../store/board-repository.js";
 import { startCardFromDialog } from "../services/orchestration/start-session.js";
-import {
-  createGroup,
-  startGroup,
-} from "../services/orchestration/group-launch.js";
+import { createAndStartGroup } from "../services/orchestration/group-launch.js";
 import { createTicket } from "../services/orchestration/ticket-create.js";
 import {
+  beginResume,
   reconnectTerminal,
-  resumeSession,
 } from "../services/orchestration/resume-session.js";
 import { resolveResumeTarget } from "../services/orchestration/resume-target.js";
 import { cleanupWorkspace } from "../services/orchestration/cleanup.js";
@@ -205,7 +202,7 @@ cardsRouter.post("/cards/:id/resume", (req, res) => {
     throw new ConflictError("a start is in flight for this card");
   }
 
-  void resumeSession(id);
+  beginResume(card);
   res.status(202).json({ resuming: true });
 });
 
@@ -392,13 +389,11 @@ async function createGroupHandler(req: Request, res: Response): Promise<void> {
   const { title, memberIds, playbook, extraDirection, workspace } =
     parseOrThrow(createGroupBodySchema, req.body);
   const { key: board } = resolveBoardForCreate(parseBoardParam(req.query));
-  const card = await createGroup(board, {
-    title,
-    memberIds,
-    playbook,
-    workspace,
-  });
-  void startGroup(card.id, { extraDirection, playbook });
+  const card = await createAndStartGroup(
+    board,
+    { title, memberIds, playbook, workspace },
+    { extraDirection, playbook },
+  );
   res.status(202).json({ started: true, card: redactCard(card) });
 }
 

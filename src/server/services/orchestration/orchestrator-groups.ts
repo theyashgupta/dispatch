@@ -42,6 +42,7 @@ import {
 } from "./group-launch.js";
 import { groupCost } from "./orchestrator-read.js";
 import { appendToExtraScope } from "./orchestrator-session.js";
+import { assertMemoryHeadroom } from "./memory-governor.js";
 
 export const groupStarter: { start: typeof startGroup } = {
   start: startGroup,
@@ -223,6 +224,7 @@ export async function startOrchestratorGroup(
     if (!current || isRunningCard(current) || isLiveSessionCard(current)) {
       throw new ConflictError("already-started");
     }
+    assertMemoryHeadroom(caller.boardKey);
     enforce(checkCap({ policy, runningLoops: runningLoops(caller.boardKey) }));
     enforce(checkBudget({ policy, cost: groupCost(current) }));
     const waitingOn = (current.dependsOn ?? []).filter(

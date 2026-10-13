@@ -35,6 +35,7 @@ import {
 } from "./steps.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { isHiddenCard } from "../../../shared/hidden-card.js";
+import { assertMemoryHeadroom } from "./memory-governor.js";
 
 /** Milliseconds after which a transient reattach statusReason is cleared (shared with resume). */
 export const REATTACH_STATUS_CLEAR_MS = 5000;
@@ -454,9 +455,11 @@ export async function startCardFromDialog(
   id: string,
   input: CardStartInput,
 ): Promise<void> {
+  const card = launchableCard(id);
+  assertMemoryHeadroom(card.boardKey ?? DEFAULT_BOARD_KEY);
   const start = {
     ...input,
-    workspace: bodyWorkspace(launchableCard(id), input.workspace),
+    workspace: bodyWorkspace(card, input.workspace),
   };
   const config = await prepareCardStart(id, start);
   await commitCardStart(id, config, start);

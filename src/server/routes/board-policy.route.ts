@@ -63,6 +63,8 @@ const policyBodySchema = z
         .enum(CROSS_SESSION_INBOUND_VALUES, "invalid-crossSessionInbound")
         .nullable()
         .optional(),
+      memoryFloorMb: whole("memoryFloorMb", 0, 65536).optional(),
+      swapCeilingMb: whole("swapCeilingMb", 256, 65536).optional(),
     },
     { error: unknownFieldError("invalid-policy") },
   )

@@ -16,6 +16,7 @@ import {
   type GroupStartOutcome,
 } from "./group-launch.js";
 import { groupCost } from "./orchestrator-read.js";
+import { memoryCheck } from "./memory-governor.js";
 
 export interface PassDeps {
   power: PowerHolder;
@@ -90,6 +91,7 @@ async function startHeldGroups(cards: Card[], deps: PassDeps): Promise<void> {
     const key = card.boardKey ?? DEFAULT_BOARD_KEY;
     const cap = ownerPolicy(card)?.concurrencyCap ?? 0;
     if (runningLoops(key) >= cap) continue;
+    if (!memoryCheck(key).ok) continue;
     const outcome = deps.startGroup(card.id);
     if (outcome === null) continue;
     await store.setGroupQueue(card.id, { startQueued: false });
