@@ -82,10 +82,10 @@ export function DecisionCard({ view, disabled, onAnswer }: DecisionCardProps) {
             type="button"
             variant="outline"
             disabled={disabled}
-            className="w-full justify-between"
+            className="h-auto min-h-9 w-full flex-wrap justify-between whitespace-normal"
             onClick={() => void onAnswer(option.id, null)}
           >
-            <span className="min-w-0 truncate">{option.label}</span>
+            <span className="min-w-0 text-left">{option.label}</span>
             {option.recommended && <Badge tone="neutral">Recommended</Badge>}
           </Button>
         ))}
