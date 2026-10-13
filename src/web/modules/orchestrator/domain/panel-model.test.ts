@@ -53,20 +53,15 @@ function main(
 const ON = { supervisor: "on", stale: false, pending: null } as const;
 
 function controlOf(
-  orchestrators: readonly OrchestratorView[],
+  record: OrchestratorView | null,
   patch: Partial<Parameters<typeof controlFor>[1]> = {},
 ) {
-  const record = orchestrators.find((o) => o.role === "main") ?? null;
   return controlFor(record, { ...ON, ...patch });
 }
 
-function terminalOf(orchestrators: readonly OrchestratorView[]) {
-  return terminalFor(orchestrators.find((o) => o.role === "main") ?? null);
-}
-
 test("a board with no orchestrator shows an enabled Start and the empty terminal", () => {
-  assert.equal(terminalOf([]), "empty");
-  assert.deepEqual(controlOf([]), {
+  assert.equal(terminalFor(null), "empty");
+  assert.deepEqual(controlOf(null), {
     kind: "start",
     label: "Start orchestrator",
     disabled: false,
@@ -76,23 +71,23 @@ test("a board with no orchestrator shows an enabled Start and the empty terminal
 });
 
 test("Start is disabled with the supervisor reason when the supervisor is off", () => {
-  const control = controlOf([], { supervisor: "off" });
+  const control = controlOf(null, { supervisor: "off" });
   assert.equal(control?.kind, "start");
   assert.equal(control?.disabled, true);
   assert.equal(control?.reason, SUPERVISOR_OFF_REASON);
 });
 
 test("a stopped record with no session shows Start and a not-running terminal", () => {
-  const records = [main("stopped", null)];
-  assert.equal(controlOf(records)?.kind, "start");
-  assert.equal(terminalOf(records), "not-running");
+  const record = main("stopped", null);
+  assert.equal(controlOf(record)?.kind, "start");
+  assert.equal(terminalFor(record), "not-running");
 });
 
 const RESUME_CASES = ["lost", "shell_prompt"] as const;
 for (const state of RESUME_CASES) {
   test(`${state} shows only Resume`, () => {
     for (const record of ["running", "stopped"] as const) {
-      const control = controlOf([main(record, { state })]);
+      const control = controlOf(main(record, { state }));
       assert.equal(control?.kind, "resume");
       assert.equal(control?.label, "Resume orchestrator");
       assert.equal(control?.disabled, false);
@@ -115,7 +110,7 @@ const STOP_TABLE: [SupervisorState | null, boolean][] = [
 ];
 for (const [state, disabled] of STOP_TABLE) {
   test(`a running session at ${String(state)} has Stop ${disabled ? "disabled" : "enabled"}`, () => {
-    const control = controlOf([main("running", { state })]);
+    const control = controlOf(main("running", { state }));
     assert.equal(control?.kind, "stop");
     assert.equal(control?.disabled, disabled);
     assert.equal(control?.tooltip, STOP_TOOLTIP);
@@ -123,18 +118,18 @@ for (const [state, disabled] of STOP_TABLE) {
 }
 
 test("starting and stopping records show no control", () => {
-  assert.equal(controlOf([main("starting", { hasTmuxSession: false })]), null);
-  assert.equal(controlOf([main("stopping", { state: "idle" })]), null);
+  assert.equal(controlOf(main("starting", { hasTmuxSession: false })), null);
+  assert.equal(controlOf(main("stopping", { state: "idle" })), null);
 });
 
 test("a stale stream disables every control with the reconnect reason", () => {
-  const records: [OrchestratorView[], string][] = [
-    [[], "start"],
-    [[main("running", { state: "working" })], "stop"],
-    [[main("stopped", { state: "lost" })], "resume"],
+  const records: [OrchestratorView | null, string][] = [
+    [null, "start"],
+    [main("running", { state: "working" }), "stop"],
+    [main("stopped", { state: "lost" }), "resume"],
   ];
-  for (const [orchestrators, kind] of records) {
-    const control = controlOf(orchestrators, { stale: true });
+  for (const [record, kind] of records) {
+    const control = controlOf(record, { stale: true });
     assert.equal(control?.kind, kind);
     assert.equal(control?.disabled, true);
     assert.equal(control?.reason, STALE_REASON);
@@ -142,7 +137,7 @@ test("a stale stream disables every control with the reconnect reason", () => {
 });
 
 test("an action in flight disables the control", () => {
-  const control = controlOf([], { pending: "start" });
+  const control = controlOf(null, { pending: "start" });
   assert.equal(control?.disabled, true);
   assert.equal(control?.reason, null);
 });
@@ -154,12 +149,6 @@ test("the terminal is live once the session has a ttyd port and an id", () => {
   const waiting = main("running", { state: "working", ttydPort: null });
   assert.equal(terminalFor(waiting), "connecting");
   assert.equal(terminalSrcFor("connecting", waiting), null);
-});
-
-test("an extra orchestrator alone does not count as the main one", () => {
-  const records = [main("running", { state: "working" }, "extra")];
-  assert.equal(terminalOf(records), "empty");
-  assert.equal(controlOf(records)?.kind, "start");
 });
 
 test("refusal codes map to reason text and unknown ones pass through", () => {
@@ -208,11 +197,13 @@ test("error copy follows the contract strings", () => {
 });
 
 test("a running record whose session is lost asks for a resume in the terminal", () => {
-  const records = [
-    main("running", { state: "lost", hasTmuxSession: false, ttydPort: null }),
-  ];
-  assert.equal(terminalOf(records), "resume");
-  assert.equal(controlOf(records)?.kind, "resume");
+  const record = main("running", {
+    state: "lost",
+    hasTmuxSession: false,
+    ttydPort: null,
+  });
+  assert.equal(terminalFor(record), "resume");
+  assert.equal(controlOf(record)?.kind, "resume");
 });
 
 test("the terminal of an extra record with an open session is live at its own session path", () => {
@@ -254,7 +245,7 @@ test("a stopped record whose start failed in the background shows the error copy
     startFailureFor(failed),
     "The orchestrator did not start: the launch failed.",
   );
-  assert.equal(controlOf([failed])?.kind, "start");
+  assert.equal(controlOf(failed)?.kind, "start");
 });
 
 test("no start failure shows for a running record, a stopped record with no error or no record", () => {
