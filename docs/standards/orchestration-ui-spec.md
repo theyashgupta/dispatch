@@ -38,18 +38,18 @@ Table rules:
 - An unknown or archived `board` key shows the default board `LOCAL` and the toast "Board <KEY> is not available." When the user archives the selected board, the app goes to the same page on the default board.
 - New route `/boards`: the boards page (Screen 1). It is not board-scoped.
 - New route `/dashboard`: the dashboard of the selected board (Screen 4).
-- The orchestrator panel (Screen 3) is a right panel on the `/board` route. The search parameter `panel=orchestrator` opens it, so a link can open it. At 1440 px and 1024 px it is a `resizable` panel beside the columns. The board header button "Orchestrator" toggles the panel, and its close button closes it at every width. At 390 px it is a `sheet` from the right edge.
+- The orchestrator panel (Screen 3) is a right panel on the `/board` route. The search parameter `panel=orchestrator` opens it, so a link can open it. At 1440 px and 1024 px it is a `resizable` panel beside the columns. The board header button "Orchestrator" toggles the panel, and its close button closes it at every width. At 390 px it is a `sheet` from the right edge. LOCAL-111 replaces it with the settings sheet of Screen 6, and the old parameter `panel=orchestrator` redirects to the centre.
 - The ticket detail panel stays as today: a fixed right panel above the page. When the user opens a card while the orchestrator panel is open, the detail panel covers the orchestrator panel. Escape closes the detail panel first.
 
 ### Where each screen lives
 
-| Screen                        | Route or place                                       | How the user gets to it                                                                                                                                                                   |
-| ----------------------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1. Boards page                | `/boards`                                            | The command palette entry "Manage boards". The icon of the Boards section in the collapsed sidebar.                                                                                       |
-| 2. Sidebar Boards section     | The sidebar content, after the System group          | It always shows. The shortcut `b` opens the command palette with the Boards group only. The command palette entries "Switch to board <name>".                                             |
-| 3. Orchestrator panel         | The right panel of `/board?panel=orchestrator`       | The board header button "Orchestrator" when the board has a main orchestrator, else "Add orchestrator" (Screen 5).                                                                        |
-| 4. Dashboard                  | `/dashboard?board=<KEY>`                             | The sidebar row "Dashboard" in the Work group. The row shows only when the selected board has a main orchestrator. The command palette entry "Go to Dashboard" shows under the same rule. |
-| 5. Board with no orchestrator | `/board` when the selected board has no orchestrator | The sidebar row "Board", as today.                                                                                                                                                        |
+| Screen                        | Route or place                                                                                            | How the user gets to it                                                                                                                                                                   |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1. Boards page                | `/boards`                                                                                                 | The command palette entry "Manage boards". The icon of the Boards section in the collapsed sidebar.                                                                                       |
+| 2. Sidebar Boards section     | The sidebar content, after the System group                                                               | It always shows. The shortcut `b` opens the command palette with the Boards group only. The command palette entries "Switch to board <name>".                                             |
+| 3. Orchestrator panel         | The settings sheet of `/boards/<KEY>/orchestrator?settings=policy` or `settings=orchestrators` (Screen 6) | The button "Settings" of Screen 6. The old link `/board?panel=orchestrator` redirects to the centre (LOCAL-111).                                                                          |
+| 4. Dashboard                  | `/dashboard?board=<KEY>`                                                                                  | The sidebar row "Dashboard" in the Work group. The row shows only when the selected board has a main orchestrator. The command palette entry "Go to Dashboard" shows under the same rule. |
+| 5. Board with no orchestrator | `/board` when the selected board has no orchestrator                                                      | The sidebar row "Board", as today.                                                                                                                                                        |
 
 Navigation rules:
 
@@ -157,6 +157,8 @@ Rules:
 | Stale   | The rows show the last board list and the last counts. One muted line shows under the rows.       | "Counts from <time>".                           |
 
 ## Screen 3: Orchestrator panel
+
+Replaced by Screen 6 and its settings sheet (LOCAL-111).
 
 ### Purpose
 
@@ -341,7 +343,7 @@ Flow states: `running` "Running" with `Play`, `stopped` "Stopped" with `CircleSt
 | Inline reply              | `field`, `label`, `textarea`, `button` | Label "Reply to <group id>" (sr-only). Placeholder "Reply to <group id>". Button "Send reply" (`outline` variant). Results "Delivered", "Not confirmed. Check the terminal." and, when the send route rejects the input, "Not sent. <group id> is now at <state label>. Open the terminal." |
 | Open terminal link        | `button`                               | "Open terminal" (link variant)                                                                                                                                                                                                                                                              |
 | Resume loop button        | `button`                               | "Resume loop", "Try resume again" Both use the `outline` variant.                                                                                                                                                                                                                           |
-| Change budget button      | `button`                               | "Change budget". When the group uses the board budget, it opens the Policy tab of the orchestrator panel (Screen 3). When the budget comes from a `budgetPerGroup` override, it opens the Orchestrators tab with the "Edit overrides of <name>" dialog of the owner orchestrator.           |
+| Change budget button      | `button`                               | "Change budget". It opens the settings sheet of Screen 6 on the Policy tab.                                                                                                                                                                                                                 |
 | Open board link           | `button`                               | "Open board" (link variant). It opens `/board?board=<KEY>`.                                                                                                                                                                                                                                 |
 | Group progress bar        | module component                       | "Unit 2 of 3, phase 4 of 9". LOCAL-92 adds it to the allowed custom families (U2-07).                                                                                                                                                                                                       |
 | Last gate and context     | `badge`                                | "Phase 3 gate passed 12:41", "Context 38%"                                                                                                                                                                                                                                                  |
@@ -475,13 +477,56 @@ The user sees the orchestrator of a board as one centre: the orchestrator node, 
 | Stale        | The last data stays. A `badge` beside the page title shows the time of the last update. The reply, resume, decision and send buttons are disabled until the stream is back.                  | Badge "Data from <time>". Disabled reason "Reconnecting. Actions are off until the board stream is back."                  |
 | Action error | A failed reply, decision answer, resume or comment. The control stays and shows an `alert` under it.                                                                                         | "<Action> failed: <error message>." Button "Try again". "Not sent. <id> is now at <state label>. Open the terminal."       |
 
+### Settings sheet
+
+#### Purpose
+
+The user edits the board policy and manages the orchestrators of the board from the command centre. The sheet replaces the Policy and Orchestrators tabs of Screen 3 (LOCAL-111).
+
+#### Data
+
+- The route `/boards/<KEY>/orchestrator` or `/boards/<KEY>/orchestrator/<orchestrator id>` with the search parameter `settings`. The value `policy` or `orchestrators` opens the sheet on that tab. Any other value opens no sheet.
+- The old link `/boards/<KEY>?panel=orchestrator` redirects to the centre of the main orchestrator. With `tab=policy` or `tab=orchestrators` the sheet opens on that tab. With `tab=terminal`, `tab=decisions` or no tab the sheet stays closed.
+- The board record policy, the orchestrator list and the board cards. The sheet makes no new request.
+- The button "Settings" opens the sheet on the Policy tab and adds one history entry, so Back closes the sheet. A tab change adds no history entry.
+
+#### Layout
+
+- **1440 px:** a `sheet` from the right edge, at the width of the panel width token, over the dimmed centre.
+- **390 px:** the same `sheet`, full width.
+
+#### Parts
+
+| Part                | Primitive              | Copy                                                                                                                                                                    |
+| ------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sheet               | `sheet`                | Title "Orchestrator settings". Description (sr-only) "Policy and orchestrators of <board name>." The close button is an X button. A click on the dimmed page closes it. |
+| Stale badge         | `badge`                | "Data from <time>". It shows in the sheet header while the board stream is down.                                                                                        |
+| Tabs                | `tabs`, `line` variant | "Policy", "Orchestrators (<n>)". While the list loads, the label reads "Orchestrators".                                                                                 |
+| Policy form         | module component       | The form of Screen 3, with the same fields, validation and save.                                                                                                        |
+| Orchestrators table | module component       | The table of Screen 3 with its dialogs: add an extra orchestrator, edit overrides and move groups. The same actions and validation.                                     |
+| List error          | text, `button`         | "Orchestrators did not load: <error message>." Button "Try again".                                                                                                      |
+
+#### Keyboard
+
+- Escape closes an open dialog first, then the sheet.
+- When the sheet closes, focus returns to the button "Settings".
+
+#### States
+
+| State   | What shows                                                         | Copy                                                               |
+| ------- | ------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| Empty   | The empty state of the orchestrators table.                        | The existing copy of Screen 3.                                     |
+| Loading | The tab label has no count. The table shows its loading state.     | Tab label "Orchestrators".                                         |
+| Error   | The Orchestrators tab shows one line and a button.                 | "Orchestrators did not load: <error message>." Button "Try again". |
+| Stale   | The last data stays. A `badge` in the sheet header shows the time. | Badge "Data from <time>".                                          |
+
 ## Cross-screen rules
 
 ### Keyboard
 
 - Each control on the five screens is reachable with Tab, in the visual order: page header, then the content top to bottom, then the panel.
 - `b` opens the command palette with the Boards group only (Screen 2). The cheat sheet always lists it in the Global group as "Switch board".
-- Escape closes the top layer first: a menu, then a dialog, then the detail panel, then the orchestrator panel (at every width, when focus is in the panel).
+- Escape closes the top layer first: a menu, then a dialog, then the detail panel, then the settings sheet of Screen 6 (an open dialog in the sheet closes first, then the sheet).
 - In a decision item, the option buttons are in their written order. The recommended mark does not move the option.
 - The board keys of today (`j`, `k`, `h`, `l`, Enter and the digits) stay off while the orchestrator panel has focus, as they stay off while the detail panel is open.
 
@@ -621,3 +666,12 @@ This entry replaces the Layout, the section order rule and the Section 2 segment
 - **Section 6, Cost and usage.** The same rows and meters, as compact rows. "No cost yet." stays.
 - **Motion.** The glow of the current node breathes only when the system allows motion (`motion-safe`).
 - **Colour-free reading.** Each node, each tile and each pill has a glyph and a text. Colour is an extra signal, never the only one.
+
+### 2026-10-14 (LOCAL-111)
+
+This entry changes the routes row of the panel, the Change budget row, the Escape order line and the first line of Screen 3. It adds the settings sheet part to Screen 6.
+
+- **Screen 6, settings sheet.** The settings sheet replaces the Policy and Orchestrators tabs of the panel of Screen 3.
+- **Entry points.** The button "Settings" and the old panel links open the sheet. The old link `/boards/<KEY>?panel=orchestrator` redirects to the centre.
+- **Screen 3.** Screen 6 and its settings sheet replace Screen 3.
+- **Change budget.** The button always opens the Policy tab. The earlier text gave a second path for a `budgetPerGroup` override (the Orchestrators tab with the "Edit overrides of <name>" dialog). The app never had that path. This entry removes it, so the spec agrees with the app.
