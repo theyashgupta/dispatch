@@ -5,6 +5,7 @@ import {
   decisionViews,
   liveReplyResults,
   refusalText,
+  replyFeedback,
   replyKey,
   replyOutcomeText,
 } from "./decision-view.js";
@@ -243,4 +244,37 @@ test("a plan is a gate with its rows in plan order and no other answer", () => {
     ["CEN-1", "CEN-2"],
   );
   assert.deepEqual(view?.proposalTitles, []);
+});
+
+test("a reply feedback gives the result for a send and the failure only for a refusal with no result", () => {
+  assert.deepEqual(
+    replyFeedback(
+      { ok: true, result: "confirmed" },
+      "CEN-1",
+      undefined,
+      "Reply",
+    ),
+    { result: "Delivered", failure: null },
+  );
+  assert.deepEqual(
+    replyFeedback(
+      { ok: false, error: "session-state-refused", reason: null },
+      "CEN-1",
+      "permission_prompt",
+      "Reply",
+    ),
+    {
+      result: "Not sent. CEN-1 is now at Permission prompt. Open the terminal.",
+      failure: null,
+    },
+  );
+  assert.deepEqual(
+    replyFeedback(
+      { ok: false, error: "no-live-session", reason: null },
+      "CEN-1",
+      "needs_input",
+      "Message",
+    ),
+    { result: null, failure: "Message failed: there is no open session." },
+  );
 });

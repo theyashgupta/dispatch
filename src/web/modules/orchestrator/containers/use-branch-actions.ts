@@ -6,7 +6,7 @@ import {
   REPLY_COPY,
   actionFailedText,
   refusalText,
-  replyOutcomeText,
+  replyFeedback,
 } from "../../../../shared/decision-view.js";
 import type { BoardKey, Card } from "../../../../shared/types.js";
 import type { TileFeedback } from "@/modules/orchestrator/components/BranchTile";
@@ -49,21 +49,16 @@ export function useBranchActions(board: BoardKey, cards: readonly Card[]) {
     if (cardId === null) return;
     const outcome = await reply.mutateAsync({ cardId, text });
     const card = cards.find((c) => c.id === cardId);
-    const result = replyOutcomeText(
+    const { result, failure } = replyFeedback(
       outcome,
       branch.identifier ?? cardId,
       card === undefined ? undefined : activeSessionView(card)?.state,
+      "Reply",
     );
     remember(branch.id, {
       result,
       since: branch.stateSince,
-      failure:
-        outcome.ok || result !== null
-          ? null
-          : actionFailedText(
-              "Reply",
-              refusalText(outcome.error, outcome.reason),
-            ),
+      failure,
       retry: () => void onReply(branch, text),
     });
     if (outcome.ok && outcome.result === "confirmed") {

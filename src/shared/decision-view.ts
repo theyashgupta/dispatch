@@ -139,11 +139,13 @@ export function liveReplyResults<T>(
   return live;
 }
 
+type ReplyOutcome =
+  | { ok: true; result: ReplyResult | null }
+  | { ok: false; error: string; reason: string | null };
+
 /** Build the line under a reply after the send, for a confirmed or unconfirmed send or a refusal. */
 export function replyOutcomeText(
-  outcome:
-    | { ok: true; result: ReplyResult | null }
-    | { ok: false; error: string; reason: string | null },
+  outcome: ReplyOutcome,
   title: string,
   state: SupervisorState | undefined,
 ): string | null {
@@ -152,6 +154,28 @@ export function replyOutcomeText(
   const label =
     state === undefined ? "another state" : SESSION_STATES[state].label;
   return `Not sent. ${title} is now at ${label}. Open the terminal.`;
+}
+
+/**
+ * Map a reply outcome to the result line and the failure line of the reply.
+ *
+ * @remarks
+ * A refusal that has its own result line, such as a changed session state, shows no failure line.
+ */
+export function replyFeedback(
+  outcome: ReplyOutcome,
+  title: string,
+  state: SupervisorState | undefined,
+  action: string,
+): { result: string | null; failure: string | null } {
+  const result = replyOutcomeText(outcome, title, state);
+  return {
+    result,
+    failure:
+      outcome.ok || result !== null
+        ? null
+        : actionFailedText(action, refusalText(outcome.error, outcome.reason)),
+  };
 }
 
 /** The toast or error line of a failed action, for example "Resume loop failed: there is no open session.". */
