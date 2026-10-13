@@ -481,20 +481,23 @@ void test("usage: an added account reads its sha8-suffixed keychain item and nev
   await call("DELETE", `/accounts/${ID_A}`);
 });
 
-void test("usage: the poll loop refreshes at boot and again on every tick (DISPATCH_USAGE_POLL_MS)", async () => {
+void test("usage: the poll loop refreshes at boot and again on every tick (DISPATCH_USAGE_TIME_SCALE)", async () => {
   const domain = await import("../services/orchestration/claude-usage.js");
   domain.forgetUsage("default");
   const calls = stubFetch(200, GRILL_PAYLOAD);
-  process.env.DISPATCH_USAGE_POLL_MS = "60";
+  process.env.DISPATCH_USAGE_TIME_SCALE = "6000";
   const stop = domain.startUsagePollLoop();
-  delete process.env.DISPATCH_USAGE_POLL_MS;
-  await new Promise((r) => setTimeout(r, 250));
+  const deadline = Date.now() + 10_000;
+  while (calls() < 3 && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, 20));
+  }
   stop();
   await new Promise((r) => setTimeout(r, 100));
   const seen = calls();
   assert.ok(seen >= 3, `expected boot + ticks, saw ${seen}`);
   await new Promise((r) => setTimeout(r, 200));
   assert.equal(calls(), seen);
+  delete process.env.DISPATCH_USAGE_TIME_SCALE;
   assert.equal(domain.getUsage("default").status, "ok");
   domain.forgetUsage("default");
 });

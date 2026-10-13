@@ -17,6 +17,6 @@ void test("the listener runs after a Default refresh and not after an added acco
   assert.equal(calls, 0);
   await usage.refreshUsage("default");
   assert.equal(calls, 1);
-  await usage.refreshAllUsage();
+  await usage.runUsageTick(Date.now() + 2 * 60 * 60 * 1000);
   assert.equal(calls, 2);
 });

@@ -10,7 +10,7 @@ import { ChainList } from "./ChainList";
 import {
   ChainSettings,
   type ChainSwitchNowControl,
-  type ChainThresholdControl,
+  type ChainNumberControl,
 } from "./ChainSettings";
 
 interface ChainPanelProps {
@@ -23,7 +23,8 @@ interface ChainPanelProps {
   orderErrorText: string | null;
   autoMovePending: boolean;
   autoMoveErrorText: string | null;
-  threshold: ChainThresholdControl;
+  threshold: ChainNumberControl;
+  hysteresis: ChainNumberControl;
   switchNow: ChainSwitchNowControl;
   onOrderChange: (from: number, to: number) => void;
   onAutoMoveChange: (value: boolean) => void;
@@ -50,6 +51,7 @@ export function ChainPanel({
   autoMovePending,
   autoMoveErrorText,
   threshold,
+  hysteresis,
   switchNow,
   onOrderChange,
   onAutoMoveChange,
@@ -93,6 +95,7 @@ export function ChainPanel({
         autoMovePending={autoMovePending}
         autoMoveErrorText={autoMoveErrorText}
         threshold={threshold}
+        hysteresis={hysteresis}
         switchNow={switchNow}
         onAutoMoveChange={onAutoMoveChange}
       />

@@ -1,3 +1,4 @@
+import { bindingPercent } from "./usage-poll-plan.js";
 import type {
   ChainAccountEntry,
   ChainAccountState,
@@ -45,4 +46,37 @@ export function selectAccount(
     }
   }
   return { exhausted: true, earliestReset };
+}
+
+/**
+ * Tell whether an account sits far enough below the threshold to take work on a usage trigger.
+ *
+ * @remarks Hysteresis 0 passes every account. Otherwise the binding bucket is the one with the
+ * highest percent, and an account with no buckets or an `unknown` state never passes.
+ */
+export function passesHysteresis(
+  buckets: readonly { percent: number }[],
+  state: ChainAccountState,
+  thresholdPercent: number,
+  hysteresisPercent: number,
+): boolean {
+  if (hysteresisPercent === 0) return true;
+  const binding = bindingPercent(buckets);
+  if (state === "unknown" || binding === null) return false;
+  return binding < thresholdPercent - hysteresisPercent;
+}
+
+/**
+ * Keep the usage-trigger candidates whose binding bucket is below the hysteresis line.
+ */
+export function filterByHysteresis<
+  T extends ChainCandidate & { buckets: readonly { percent: number }[] },
+>(
+  chain: readonly T[],
+  thresholdPercent: number,
+  hysteresisPercent: number,
+): T[] {
+  return chain.filter((a) =>
+    passesHysteresis(a.buckets, a.state, thresholdPercent, hysteresisPercent),
+  );
 }

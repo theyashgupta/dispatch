@@ -4,6 +4,7 @@ import type { ClaudeUsageSnapshot } from "../../../../shared/types.js";
 import {
   chipState,
   formatReset,
+  loginExpiryView,
   PACE_BADGE,
   pacedAtFor,
   paceTitle,
@@ -355,4 +356,20 @@ void test("chipState names the tightest window, its tone and reset, or the statu
     summary: "usage stale",
     label: "usage stale",
   });
+});
+
+void test("loginExpiryView warns within 3 days or past, stays neutral later, null when absent", () => {
+  const now = Date.parse("2026-10-11T12:00:00Z");
+  const day = 24 * 60 * 60 * 1000;
+  const at = (ms: number) => new Date(now + ms).toISOString();
+  const soon = loginExpiryView(at(2 * day), now);
+  assert.equal(soon?.tone, "warning");
+  assert.ok(soon?.text.startsWith("Login expires"));
+  assert.equal(loginExpiryView(at(30 * day), now)?.tone, "neutral");
+  assert.equal(loginExpiryView(at(3 * day), now)?.tone, "warning");
+  const past = loginExpiryView(at(-day), now);
+  assert.equal(past?.tone, "warning");
+  assert.ok(past?.text.startsWith("Login expired"));
+  assert.equal(loginExpiryView(undefined, now), null);
+  assert.equal(loginExpiryView("not-a-date", now), null);
 });

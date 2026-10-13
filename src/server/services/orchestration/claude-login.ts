@@ -173,7 +173,7 @@ async function settle(
     lastLoginAt: now,
   };
   await upsertAccount(record);
-  await refreshUsage(record.id).catch(() => undefined);
+  await refreshUsage(record.id, "login").catch(() => undefined);
   const usage = getUsage(record.id);
   view = {
     state: "done",
