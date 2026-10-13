@@ -8,6 +8,7 @@ interface HeaderStripProps {
   facts: string[];
   needsCount: number;
   needsText: string | null;
+  action: ReactNode;
   onNeedsClick: () => void;
 }
 
@@ -17,6 +18,7 @@ export function HeaderStrip({
   facts,
   needsCount,
   needsText,
+  action,
   onNeedsClick,
 }: HeaderStripProps) {
   const items: ReactNode[] = facts.map((fact) => <span>{fact}</span>);
@@ -48,9 +50,12 @@ export function HeaderStrip({
           {boardName}
         </p>
       )}
-      <h2 className="m-0 text-(length:--font-page-title) leading-(--line-display) font-semibold text-foreground">
-        Project map
-      </h2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="m-0 text-(length:--font-page-title) leading-(--line-display) font-semibold text-foreground">
+          Project map
+        </h2>
+        {action}
+      </div>
       {items.length > 0 && (
         <p className="m-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted-foreground tabular-nums">
           {items.map((item, index) => (

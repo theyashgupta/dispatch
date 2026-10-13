@@ -102,9 +102,9 @@ const COLUMN_INK_NAMES = [
 const DATA_INK_SHARE = 0.35;
 const SOFT_TINTS = [
   ["accent-soft", "accent", "accent-text"],
-  ["ok-soft", "col-agent-done", "status-ok"],
-  ["warn-soft", "col-needs-input", "status-stale"],
-  ["danger-soft", "destructive", "destructive-text"],
+  ["ok-soft", "status-ok", "status-ok"],
+  ["warn-soft", "status-stale", "status-stale"],
+  ["danger-soft", "status-down", "destructive-text"],
 ];
 const SOFT_TINT_TIERS = ["--surface-card", "--surface-column"];
 const MARK_NAMES = [

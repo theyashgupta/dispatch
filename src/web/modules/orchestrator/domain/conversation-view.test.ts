@@ -148,13 +148,12 @@ test("the author of a message follows its role", () => {
   );
 });
 
-test("a message entry carries its time, role and text", () => {
+test("a message entry carries its time, author and text", () => {
   const [entry] = view([message("m1", "2026-10-08T10:00:00.000Z", "user")], []);
   assert.deepEqual(entry, {
     kind: "message",
     id: "m1",
     at: "2026-10-08T10:00:00.000Z",
-    role: "user",
     author: "You",
     text: "text m1",
   });
@@ -228,17 +227,17 @@ test("a roadmap approval has no other answer and a ruling answers on the recomme
   assert.equal(ruling.kind === "decision" && ruling.view.otherOptionId, "b");
 });
 
-test("an open decision has state open and no answer label", () => {
+test("an open decision has state open and no answer text", () => {
   const [entry] = view([], [decision()]);
   assert.equal(entry.kind, "decision");
   if (entry.kind !== "decision") return;
   assert.equal(entry.state, "open");
-  assert.equal(entry.answerLabel, null);
+  assert.equal(entry.answerText, null);
   assert.equal(entry.at, "2026-10-08T11:00:00.000Z");
   assert.equal(entry.view.meta, "GROUP-13, asked by Main orchestrator 1 h ago");
 });
 
-test("an answered decision shows the label of the answered option", () => {
+test("an answered decision reads Answered and the label of the answered option", () => {
   const [entry] = view(
     [],
     [
@@ -252,10 +251,10 @@ test("an answered decision shows the label of the answered option", () => {
   assert.equal(entry.kind, "decision");
   if (entry.kind !== "decision") return;
   assert.equal(entry.state, "answered");
-  assert.equal(entry.answerLabel, "Give 2 more rounds");
+  assert.equal(entry.answerText, "Answered: Give 2 more rounds");
 });
 
-test("an answered decision whose option is gone has a null label", () => {
+test("an answered decision whose option is gone reads Answered", () => {
   const [entry] = view(
     [],
     [
@@ -265,10 +264,10 @@ test("an answered decision whose option is gone has a null label", () => {
       }),
     ],
   );
-  assert.equal(entry.kind === "decision" && entry.answerLabel, null);
+  assert.equal(entry.kind === "decision" && entry.answerText, "Answered");
 });
 
-test("a decision entry carries its kind and the typed note of its answer", () => {
+test("a decision entry carries its badge and the typed note of its answer", () => {
   const [entry] = conversationView({
     messages: [],
     decisions: [
@@ -297,8 +296,73 @@ test("a decision entry carries its kind and the typed note of its answer", () =>
   });
   assert.equal(entry?.kind, "decision");
   if (entry?.kind !== "decision") return;
-  assert.equal(entry.decisionKind, "ruling");
   assert.equal(entry.badge, "Question");
-  assert.equal(entry.answerLabel, "Main");
+  assert.equal(entry.answerText, "Answered: Main");
   assert.equal(entry.answerNote, "Use the release branch after 18:00");
+});
+
+function answered(id: string, minute: number, orchestratorId = "main") {
+  const at = `2026-10-08T10:${String(minute).padStart(2, "0")}:00.000Z`;
+  return decision({
+    id,
+    orchestratorId,
+    state: "answered",
+    createdAt: `2026-10-08T09:${String(minute).padStart(2, "0")}:00.000Z`,
+    answeredAt: at,
+    answer: { optionId: "a", note: null },
+  });
+}
+
+function answeredRange(count: number, orchestratorId = "main") {
+  return Array.from({ length: count }, (_, i) =>
+    answered(`a${String(i + 1).padStart(2, "0")}`, i + 1, orchestratorId),
+  );
+}
+
+const KEPT = answeredRange(25)
+  .slice(5)
+  .map((d) => d.id);
+
+test("25 answered and 3 open give the 20 newest answered and the 3 open", () => {
+  const open = ["o1", "o2", "o3"].map((id) =>
+    decision({ id, createdAt: "2026-10-08T11:00:00.000Z" }),
+  );
+  const entries = view([], [...answeredRange(25), ...open]);
+  assert.deepEqual(ids(entries).sort(), [...KEPT, "o1", "o2", "o3"].sort());
+});
+
+test("exactly 20 answered all stay", () => {
+  assert.equal(view([], answeredRange(20)).length, 20);
+});
+
+test("the cap counts only the answered decisions of the selected orchestrator", () => {
+  const entries = view(
+    [],
+    [...answeredRange(25, "extra-1"), ...answeredRange(25)],
+  );
+  assert.deepEqual(ids(entries), KEPT);
+});
+
+test("an answered decision with no answer time falls back to its creation time", () => {
+  const stale = answered("old", 59);
+  stale.answeredAt = null;
+  stale.createdAt = "2026-10-08T08:00:00.000Z";
+  const entries = view([], [...answeredRange(20), stale]);
+  assert.equal(ids(entries).includes("old"), false);
+});
+
+test("the cap keeps a decision created first and answered last, and drops the oldest answers", () => {
+  const late = answered("late", 59);
+  late.createdAt = "2026-10-08T08:00:00.000Z";
+  const entries = view([], [...answeredRange(20), late]);
+  assert.equal(ids(entries).includes("late"), true);
+  assert.equal(ids(entries).includes("a01"), false);
+  assert.equal(entries.length, 20);
+});
+
+test("an item in both the open and the answered list shows once, as answered", () => {
+  const entries = view([], [decision({ id: "d9" }), answered("d9", 5)]);
+  assert.equal(entries.length, 1);
+  const entry = entries[0];
+  assert.equal(entry.kind === "decision" && entry.state, "answered");
 });

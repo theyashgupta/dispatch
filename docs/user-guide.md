@@ -106,7 +106,7 @@ To open the policy form of a board:
 1. If the board does not exist, create it (see "Create a board").
 2. Select the board in the **Boards** section (see "Switch boards").
 3. Open the board page.
-4. Choose **Orchestrator**, or **Add orchestrator** when the board has none. The panel has four tabs: **Terminal**, **Decisions**, **Policy** and **Orchestrators**.
+4. Choose **Orchestrator**, or **Add orchestrator** when the board has none. The command centre opens. Choose **Settings** to open the orchestrator panel. The panel has four tabs: **Terminal**, **Decisions**, **Policy** and **Orchestrators**.
 5. Open **Policy**. The form is called **Policy for** and the board name.
 
 Only you can change the policy. The orchestrator reads it. No tool can change it.
@@ -159,7 +159,7 @@ A session that starts without hooks gets no settings file, so this value does no
 ## Add and start an orchestrator
 
 1. Select the board in the **Boards** section. Open the board page. Every board has its own button. `LOCAL` has one too, and its supervisor starts **Off**.
-2. Choose **Add orchestrator** in the page header. When the board already has an orchestrator, the button reads **Orchestrator**. The orchestrator panel opens as a side panel over the board. Its header shows the board name.
+2. Choose **Add orchestrator** in the page header. When the board already has an orchestrator, the button reads **Orchestrator**. The command centre opens (see "The command centre"). Choose **Settings** to open the orchestrator panel as a side panel over the board. Its header shows the board name.
 3. Make sure the supervisor is **On** in the **Policy** tab. With the supervisor **Off**, the panel shows: "Turn on the supervisor in Policy to start an orchestrator."
 4. Choose **Start orchestrator**.
 
@@ -316,6 +316,167 @@ Below 1024 px, the sections show in this order: the status line, **Needs your ca
 Each node and each tile state has a glyph and a text. The page reads without color.
 
 When the connection to the server drops, the dashboard keeps the last data. The status line reads "Data from <time>". The reply, resume and decision buttons are off, with the reason "Reconnecting. Actions are off until the board stream is back."
+
+## The command centre
+
+The command centre shows one orchestrator of a board as one page. It has the orchestrator, one branch for each ticket and group that it runs, and a conversation with it. The page reads the conversation and the decision items every 3 seconds. The branches follow the board stream.
+
+### Open the command centre
+
+- Choose **Orchestrator** in the page header of the board. When the board has no orchestrator, the button reads **Add orchestrator** from 768 px wide. On a narrower screen it reads **Orchestrator**. Both buttons open the command centre.
+- Choose **Open command centre** next to the **Project map** title of the dashboard.
+- Open `/boards/<key>/orchestrator` for the main orchestrator. Open `/boards/<key>/orchestrator/<orchestrator id>` for another orchestrator.
+- The address `/orchestrator?board=<key>` only redirects to `/boards/<key>/orchestrator`. The same applies to `/orchestrator/<orchestrator id>?board=<key>`.
+
+The sidebar has no row for the command centre.
+
+### The orchestrator node
+
+The node is the card at the top left of the canvas. It shows these items:
+
+- The heading "Orchestrator", the name and the state badge. The badge reads **Starting**, **Stopping**, **Stopped** or the label of the session state.
+- "Context <n>%" and "$<cost> today". Each shows only when Dispatch has the value.
+- The count line "<n> branches, <m> need you". One branch reads "1 branch, 0 need you".
+
+The count <n> includes the older shipped branches that the page hides. The count <m> is the size of the band **Needs you**.
+
+### The bands and the tiles
+
+The branches stand in five bands, in this order: **Needs you**, **Running**, **Planned**, **Done** and **Shipped**. Each band heading shows its count. A band with no branch shows only the heading. A branch belongs to the orchestrator that owns its card. A hidden card and a group member are not branches.
+
+- **Needs you** holds a branch at Needs input, Usage limit, Budget reached or Resume failed. It also holds a branch in a stuck session state.
+- **Running** holds a branch with a session that works.
+- **Planned** holds a branch with no session. It comes from the plan, also when its card does not exist yet.
+- **Done** holds a branch at Agent done.
+- **Shipped** holds a shipped branch.
+
+The stuck session states are **No progress**, **Permission prompt**, **API error**, **Session lost** and **Claude exited**.
+
+The newest approved plan of the orchestrator sets the planned branches and their order. A newer open plan adds only the tickets that the approved plan lacks, after them. A rejected plan adds nothing.
+
+A tile shows these items:
+
+- The card id, the state badge and the title.
+- A detail line. See the list below.
+- "Playbook <name>", "Context <n>%" and "$<cost>". A planned branch with no session shows "Not started" in place of the meters.
+
+The detail line reads as follows:
+
+- Running: "Unit <n> of <m>, phase <p> of <q>", or "Phase <p> of <q>". A group with no phase reads "Group of <n> tickets".
+- Planned: "Plan order <n>, size <size>".
+- Needs input: "Needs your answer". Usage limit: "Stopped at the usage limit". Budget reached: "Budget reached".
+- Done: "Done <time>, awaiting ship".
+- Shipped: "Shipped <time>, PR <number>".
+
+A time reads "HH:MM" on the current day. On another day it reads "<day> <month> HH:MM". The clock has 24 hours.
+
+At 768 px wide and more, the canvas draws a line from the node to each tile. The line is dashed for a planned branch. Choose a tile to open its card. A planned branch with no card has nothing to open.
+
+### Tile actions
+
+A tile shows only the actions that fit its state. The actions are the same as in the attention queue.
+
+| Action               | When it shows                                                                               |
+| -------------------- | ------------------------------------------------------------------------------------------- |
+| Inline reply         | The field "Reply to <card id>" and **Send reply**. The state is Needs input or No progress. |
+| **Resume loop**      | The loop stopped at the usage limit or at the budget.                                       |
+| **Try resume again** | The state is Resume failed.                                                                 |
+| **Open terminal**    | A stuck session state, or Resume failed.                                                    |
+
+How the actions work:
+
+- A reply shows the count "<n> of 500 characters. A longer reply goes as a file." The result shows next to the buttons: "Delivered" or "Not confirmed. Check the terminal."
+- When the session changed state, a reply shows "Not sent. <card id> is now at <state label>. Open the terminal."
+- A failed action shows an alert, for example "Reply failed: <message>." The alert has the button **Try again**.
+- A result and an alert hide when the branch changes state. A reply draft stays when you change a tab.
+- **Open terminal** goes to the board page.
+- The page hides a branch that shipped more than 24 hours ago. Choose **Show <n> older shipped** under the bands to show it. The link then reads **Hide older shipped**.
+
+### Orchestrator controls
+
+From 768 px wide, the controls sit in the page header. Below 768 px, they sit above the node in the page. The controls are:
+
+- A badge "Data from <time>". It shows only while the connection is down.
+- The switcher. It has the hidden label "Orchestrator". It shows only when the board has more than one orchestrator. Each option reads "<name> (Main)" or "<name> (Extra)". Choose an option to open that orchestrator.
+- **Start**, **Stop** or **Resume**. One of them shows at a time. The state badge is part of the node and not of the controls.
+- **Settings**. It opens the orchestrator panel of the board at the **Policy** tab.
+
+The rules of the buttons follow the orchestrator panel:
+
+- **Start** shows for a stopped orchestrator. It is off when the supervisor is **Off**. Then the reason reads "Turn on the supervisor in Policy to start an orchestrator."
+- **Stop** shows for a running orchestrator. It interrupts the current turn. The session stays open. It is off at a permission prompt, at a usage limit and at a shell prompt.
+- **Resume** shows when the session is lost or Claude exited.
+- No button shows while the orchestrator starts or stops.
+- A failed button shows an alert with the reason and the button **Try again**.
+
+### The pane
+
+From 768 px wide, the pane stands at the right of the canvas. It is 360 px wide, and 420 px wide from 1280 px. It has two tabs:
+
+- **Conversation**. This tab opens first.
+- **Terminal**. It shows the live terminal of the orchestrator session. The terminal stays open when you change tabs.
+
+### The conversation
+
+The tab lists the messages and the decisions of the orchestrator in time order. Tool calls do not show. The list scrolls to the newest entry when a new entry comes.
+
+A message shows an author, an age and the text. The author reads "You", the name of the orchestrator or "Dispatch". The age reads, for example, "5m ago". The text keeps its line breaks. It has no markdown.
+
+A decision message shows the badge **Decision** or **Question**. A roadmap approval, a ticket proposal and a plan are a **Decision**. All other kinds are a **Question**.
+
+- An open decision shows the same card as the attention queue. It has the question, the option buttons and the badge **Recommended**. A question also has the field "Or type an answer" and **Send answer**.
+- A plan shows a table before the options. The table heads are **Order**, **Ticket**, **Playbook** and **Size**. The options are "Approve the plan" and "Do not approve".
+- An answered decision shows the question, the plan table and the line "Answered: <option label>". A typed answer shows below the line.
+- A failed answer shows "Decision answer failed: <message>." with the button **Try again**.
+
+The tab shows every open decision of the orchestrator. It shows only the 20 newest answered decisions.
+
+### The comment box
+
+The comment box sits under the messages. It sends text to the orchestrator session.
+
+- The field has the hidden label and the placeholder "Message the orchestrator".
+- The line under the field reads "<n> of 500 characters. A longer reply goes as a file."
+- The button **Send** is off when the field is empty or has only spaces. It is also off while Dispatch sends and while the connection is down.
+- The result shows next to **Send**: "Delivered" or "Not confirmed. Check the terminal." After "Delivered" the field clears. After any other result the text stays.
+- When the session changed state, the result reads "Not sent. <orchestrator name> is now at <state label>. Open the terminal."
+- A failed send shows the alert "Message failed: <message>." with the button **Try again**. The text stays.
+- Dispatch refuses a text that starts with a mode character of Claude (`/`, `!`, `#`, `&` or `@`) or that has only control characters. The alert reads "Message failed: the text is empty or starts with a mode character." Change the first character and send again.
+- When the orchestrator has no session, **Send** sends no message. The alert "Message failed: <orchestrator name> has no session. Start it first." shows under the field. The text stays.
+
+### Narrow screens
+
+Below 768 px, the page has one column:
+
+1. The controls: the switcher, **Start**, **Stop** or **Resume**, and **Settings**.
+2. The node in a compact form. It has no heading "Orchestrator".
+3. Two tabs: **Branches** and **Conversation**. **Branches** opens first.
+
+The tab **Branches** shows the bands as a list, with the same tiles and actions. It has no lines between the node and the tiles. The tab **Conversation** is 480 px high. It holds the pane with its own tabs **Conversation** and **Terminal**.
+
+Enter on the node selects the tab **Conversation** and the pane tab **Conversation**. Then it moves focus to the comment box. When you leave the page, the tabs return to their first values.
+
+### States
+
+| State   | What shows                                                                                                                                                                                 |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Empty   | "This board has no orchestrator." and **Start**. A board with no branch shows "No tickets or groups yet. Ask the orchestrator in the conversation." An empty pane shows "No messages yet." |
+| Loading | Three grey blocks. The hidden text reads "Loading command centre".                                                                                                                         |
+| Error   | An alert in the region that did not load, for example "Canvas did not load: <message>." The other region stays. The alert has the button **Try again**.                                    |
+| Stale   | The last data stays. The badge "Data from <time>" shows. The line "Reconnecting. Actions are off until the board stream is back." shows above the canvas and above the comment box.        |
+
+- A path with an unknown orchestrator id shows "Canvas did not load: no orchestrator <id> on this board."
+- When Dispatch cannot read the transcript, the pane shows "The conversation is not available." and the link **Open the terminal.** The link opens the **Terminal** tab. The decision messages still show.
+- While the connection is down, these controls are off: **Reply**, **Resume loop**, **Try resume again**, **Start**, **Stop**, **Resume**, the decision buttons and **Send**. **Settings**, **Open terminal** and the tiles stay on.
+
+### Keyboard
+
+- Tab goes through the page header, the node, the tiles in band order, and then the pane.
+- The down arrow and the up arrow move focus to the next tile and to the previous tile. The node is the first stop.
+- Home moves focus to the node. End moves focus to the last tile.
+- Enter on a tile opens its card.
+- Enter on the node moves focus to the comment box. With no orchestrator, Enter does nothing.
+- The reply field and the buttons inside a tile take Tab. The arrow keys do not move focus away from them.
 
 ## The attention queue
 

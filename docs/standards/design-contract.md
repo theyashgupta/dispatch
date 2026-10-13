@@ -336,12 +336,14 @@ background-tier-only hover rule, the `focus-ring` treatment and every other row 
 their state token through `var()`, so each tint follows the theme of its state token and needs no
 light value.
 
-| Token           | Value                                                         | Use on the dashboard                                 |
-| --------------- | ------------------------------------------------------------- | ---------------------------------------------------- |
-| `--ok-soft`     | `color-mix(in srgb, var(--col-agent-done) 16%, transparent)`  | done state tint, no component uses it yet            |
-| `--warn-soft`   | `color-mix(in srgb, var(--col-needs-input) 16%, transparent)` | needs input tile and pill                            |
-| `--danger-soft` | `color-mix(in srgb, var(--destructive) 16%, transparent)`     | stuck tile hatch, stuck pill, Needs your call card   |
-| `--dot-grid`    | `color-mix(in srgb, var(--text-muted) 18%, transparent)`      | the dots of the page background (`dot-grid` utility) |
+| Token           | Value                                                      | Use on the dashboard                                 |
+| --------------- | ---------------------------------------------------------- | ---------------------------------------------------- |
+| `--ok-soft`     | `color-mix(in srgb, var(--status-ok) 16%, transparent)`    | done state tint, no dashboard component uses it yet  |
+| `--warn-soft`   | `color-mix(in srgb, var(--status-stale) 16%, transparent)` | needs input tile and pill                            |
+| `--danger-soft` | `color-mix(in srgb, var(--status-down) 16%, transparent)`  | stuck tile hatch, stuck pill, Needs your call card   |
+| `--dot-grid`    | `color-mix(in srgb, var(--text-muted) 18%, transparent)`   | the dots of the page background (`dot-grid` utility) |
+
+The command centre (LOCAL-104) defined the same three tints on the status tokens first. The dashboard uses those definitions, so each tint has one definition in `tokens.css`.
 
 Only `--text` and the state text role of the tint (`--accent-text`, `--status-ok`,
 `--status-stale`, `--destructive-text`) go on a soft tint. Muted text does not go on a soft tint:

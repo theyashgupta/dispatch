@@ -127,13 +127,18 @@ function graph(patch: Partial<CentreGraphInput> = {}) {
     decisions: [],
     now: NOW,
     showOlderShipped: false,
+    timeZone: "UTC",
     ...patch,
   });
 }
 
 const ids = (branches: readonly CentreBranch[]) => branches.map((b) => b.id);
 
-const shipDone = { state: "done", finishedAt: iso(2) } as ShipFlow;
+const shipDone = {
+  state: "done",
+  finishedAt: iso(2),
+  branches: [],
+} as unknown as ShipFlow;
 
 test("no orchestrator gives no centre, no branches and five empty bands", () => {
   const result = graph({
@@ -460,7 +465,7 @@ const statusRows: StatusRow[] = [
       tone: "muted",
       band: "shipped",
       actions: ["open"],
-      detail: null,
+      detail: "Shipped 10:00",
     },
   },
   {
@@ -472,7 +477,7 @@ const statusRows: StatusRow[] = [
       tone: "muted",
       band: "shipped",
       actions: ["open"],
-      detail: null,
+      detail: "Shipped 10:00",
     },
   },
   {
@@ -484,7 +489,7 @@ const statusRows: StatusRow[] = [
       tone: "success",
       band: "done",
       actions: ["open"],
-      detail: "Awaiting ship",
+      detail: "Done 10:00, awaiting ship",
     },
   },
   {
@@ -496,7 +501,7 @@ const statusRows: StatusRow[] = [
       tone: "success",
       band: "done",
       actions: ["open"],
-      detail: "Awaiting ship",
+      detail: "Done 10:00, awaiting ship",
     },
   },
   {
@@ -841,6 +846,50 @@ test("a running loop with a phase and no units shows the phase only", () => {
   } as LoopProgress;
   const result = graph({ cards: [live("CEN-1", { loopProgress: loop })] });
   assert.equal(result.branches[0].detail, "Phase 2");
+});
+
+test("done and shipped details name the time, the date when it is another day, and the PR", () => {
+  const prs = (...list: [number, "open" | "merged" | "closed"][]) =>
+    list.map(([number, state]) => ({ number, state })) as Card["prs"];
+  const rows: [string, Partial<Card>, string][] = [
+    [
+      "done with the session time",
+      { column: "agent_done" },
+      "Done 10:00, awaiting ship",
+    ],
+    [
+      "done on another day",
+      { column: "agent_done", columnSince: "2026-10-07T09:30:00.000Z" },
+      "Done 7 Oct 09:30, awaiting ship",
+    ],
+    ["shipped with no PR", { column: "done" }, "Shipped 10:00"],
+    [
+      "shipped with the ship flow PR",
+      {
+        column: "done",
+        prs: prs([3, "open"]),
+        shipFlow: {
+          ...shipDone,
+          branches: [{ pr: null }, { pr: 42 }],
+        } as unknown as ShipFlow,
+      },
+      "Shipped 10:00, PR 42",
+    ],
+    [
+      "shipped with the merged PR first",
+      { column: "done", prs: prs([3, "open"], [4, "merged"]) },
+      "Shipped 10:00, PR 4",
+    ],
+    [
+      "shipped with the first PR when none merged",
+      { column: "done", prs: prs([5, "open"], [6, "closed"]) },
+      "Shipped 10:00, PR 5",
+    ],
+  ];
+  for (const [name, patch, expected] of rows) {
+    const [branch] = graph({ cards: [live("CEN-1", patch)] }).branches;
+    assert.equal(branch.detail, expected, name);
+  }
 });
 
 test("a running group with no loop progress shows its ticket count", () => {

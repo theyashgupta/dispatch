@@ -1,11 +1,11 @@
+import { ACTION_LABELS } from "../../../../shared/decision-view.js";
 import { AttentionCard } from "@/components/attention/AttentionCard";
 import { AttentionItemCard } from "@/components/attention/AttentionItemCard";
 import { DecisionCard } from "@/components/attention/DecisionCard";
 import { Empty, EmptyHeader, EmptyTitle } from "@/components/ui/empty";
-import {
-  ACTION_LABELS,
-  type AttentionAction,
-  type AttentionRow,
+import type {
+  AttentionAction,
+  AttentionRow,
 } from "@/modules/dashboard/domain/attention-rows";
 import { NEEDS_YOUR_CALL_ID } from "@/modules/dashboard/domain/header-strip";
 import type { SectionState } from "@/modules/dashboard/domain/section-state";

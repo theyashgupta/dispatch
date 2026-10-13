@@ -2,26 +2,26 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useNavigate } from "@tanstack/react-router";
 import {
+  ACTION_LABELS,
   REPLY_COPY,
   actionFailedText,
   liveReplyResults,
   refusalText,
   replyKey,
+  replyOutcomeText,
   type StoredReply,
 } from "../../../../shared/decision-view.js";
 import { AttentionQueueSection } from "@/modules/dashboard/components/AttentionQueueSection";
 import {
   ACTIONS_OFF,
-  ACTION_LABELS,
-  replyResultText,
   type AttentionAction,
 } from "@/modules/dashboard/domain/attention-rows";
 import { sectionState } from "@/modules/dashboard/domain/section-state";
-import { useRetryResumeMutation } from "@/modules/dashboard/queries/orchestration-queries";
 import {
   useAnswerDecisionMutation,
   useLoopReplyMutation,
   useResumeLoopMutation,
+  useRetryResumeMutation,
 } from "@/queries/attention-actions-queries";
 import { useAttentionRows } from "./use-attention-rows";
 import { retryFailed, useDashboardData } from "./use-dashboard-data";
@@ -49,7 +49,7 @@ export function AttentionQueueContainer() {
     if (row?.type !== "reply") return false;
     const outcome = await reply.mutateAsync({ cardId, text });
     const card = cards?.find((c) => c.id === cardId);
-    const resultText = replyResultText(outcome, row.title, card?.state);
+    const resultText = replyOutcomeText(outcome, row.title, card?.state);
     if (resultText === null) {
       if (!outcome.ok) {
         toast.error(

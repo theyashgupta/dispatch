@@ -1,4 +1,7 @@
 import { useMemo } from "react";
+import { Link } from "@tanstack/react-router";
+import { staleText as staleTextOf } from "../../../../shared/stale-text.js";
+import { Button } from "@/components/ui/button";
 import { HeaderStrip } from "@/modules/dashboard/components/HeaderStrip";
 import {
   NEEDS_YOUR_CALL_ID,
@@ -8,7 +11,6 @@ import {
   spentText,
 } from "@/modules/dashboard/domain/header-strip";
 import { loopsRunningText } from "@/modules/dashboard/domain/progress-rows";
-import { staleBadgeText } from "@/modules/dashboard/domain/section-state";
 import { clock } from "@/modules/dashboard/domain/usage-meters";
 import { useAttentionRows } from "./use-attention-rows";
 import { useDashboardData } from "./use-dashboard-data";
@@ -20,12 +22,12 @@ function focusNeedsYourCall() {
 }
 
 export function HeaderStripContainer() {
-  const { snapshot, summary, decisions, boardName, connection, now } =
+  const { boardKey, snapshot, summary, decisions, boardName, connection, now } =
     useDashboardData();
   const needsCount = useAttentionRows().length;
   const cards = snapshot.data?.cards;
   const updatedAt = snapshot.dataUpdatedAt;
-  const staleText = staleBadgeText(connection, updatedAt);
+  const staleText = staleTextOf(connection === "disconnected", updatedAt);
   const facts = useMemo(() => {
     const synced =
       staleText !== null || updatedAt === 0
@@ -55,6 +57,16 @@ export function HeaderStripContainer() {
         snapshot.data !== undefined && decisions.data !== undefined
           ? needsCallText(needsCount)
           : null
+      }
+      action={
+        <Button asChild variant="outline" size="sm">
+          <Link
+            to="/boards/$key/orchestrator/{-$id}"
+            params={{ key: boardKey }}
+          >
+            Open command centre
+          </Link>
+        </Button>
       }
       onNeedsClick={focusNeedsYourCall}
     />

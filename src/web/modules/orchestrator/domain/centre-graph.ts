@@ -99,6 +99,12 @@ export interface CentreGraphInput {
   decisions: readonly DecisionItem[];
   now: number;
   showOlderShipped: boolean;
+  timeZone?: string;
+}
+
+interface Clock {
+  now: number;
+  timeZone: string | undefined;
 }
 
 const OLDER_SHIPPED_MS = 86_400_000;
@@ -261,12 +267,52 @@ function actionsOf(
   return actions;
 }
 
+/**
+ * Format an ISO time as "HH:MM" on the day of `now`, else as "D MMM HH:MM", both on a 24-hour clock.
+ *
+ * @remarks The day is compared in the given zone, the local zone when none is given, so the text matches the clock the user reads.
+ */
+function timeText(iso: string, clock: Clock): string | null {
+  const at = Date.parse(iso);
+  if (Number.isNaN(at)) return null;
+  const { timeZone } = clock;
+  const day = (ms: number) =>
+    new Date(ms).toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+      timeZone,
+    });
+  const time = new Date(at).toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+    timeZone,
+  });
+  if (day(at) === day(clock.now)) return time;
+  const date = new Date(at).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    timeZone,
+  });
+  return `${date} ${time}`;
+}
+
+function prNumberOf(card: Card): number | null {
+  const fromShip = card.shipFlow?.branches.find((b) => b.pr !== null)?.pr;
+  if (fromShip != null) return fromShip;
+  const prs = card.prs ?? [];
+  return (prs.find((pr) => pr.state === "merged") ?? prs[0])?.number ?? null;
+}
+
 function detailOf(
   card: Card,
   status: Status,
   entry: PlanEntry | undefined,
-  reason: ActiveSessionView["stateReason"],
+  session: ActiveSessionView | null,
+  clock: Clock,
 ): string | null {
+  const reason = session?.stateReason;
   if (status.state === "running") {
     if (hasLoopProgress(card)) return loopView(card.loopProgress, {}).label;
     const phase = card.loopProgress?.summary.currentPhase;
@@ -278,7 +324,22 @@ function detailOf(
   if (status.state === "planned") {
     return entry === undefined ? null : planDetail(entry);
   }
-  if (status.state === "done") return "Awaiting ship";
+  if (status.state === "done") {
+    const time = timeText(
+      session?.stateSince ?? card.columnSince ?? card.updatedAt,
+      clock,
+    );
+    return time === null ? "Awaiting ship" : `Done ${time}, awaiting ship`;
+  }
+  if (status.state === "shipped") {
+    const time = timeText(
+      card.shipFlow?.finishedAt ?? card.columnSince ?? card.updatedAt,
+      clock,
+    );
+    if (time === null) return null;
+    const pr = prNumberOf(card);
+    return pr === null ? `Shipped ${time}` : `Shipped ${time}, PR ${pr}`;
+  }
   if (status.state === "usage_limit") return "Stopped at the usage limit";
   if (status.state === "attention" && reason === "budget") {
     return "Budget reached";
@@ -287,7 +348,11 @@ function detailOf(
   return null;
 }
 
-function branchOf(card: Card, entry: PlanEntry | undefined): CentreBranch {
+function branchOf(
+  card: Card,
+  entry: PlanEntry | undefined,
+  clock: Clock,
+): CentreBranch {
   const session = activeSessionView(card);
   const status = statusOf(card, session);
   return {
@@ -297,7 +362,7 @@ function branchOf(card: Card, entry: PlanEntry | undefined): CentreBranch {
     title: card.title,
     ...status,
     actions: actionsOf(status, session),
-    detail: detailOf(card, status, entry, session?.stateReason),
+    detail: detailOf(card, status, entry, session, clock),
     contextPercent: session?.contextPercent ?? null,
     cost: session?.cost ?? null,
     playbook:
@@ -402,6 +467,7 @@ export function centreGraph(input: CentreGraphInput): CentreGraph {
       hiddenShipped: 0,
     };
   }
+  const clock = { now: input.now, timeZone: input.timeZone };
   const entries = currentPlan(input.decisions, selected.id);
   const matched = new Set<PlanEntry>();
   const all: CentreBranch[] = [];
@@ -416,7 +482,7 @@ export function centreGraph(input: CentreGraphInput): CentreGraph {
     const entry = entryOf(entries, card);
     if (!isRunByOrchestrator(card, entry)) continue;
     if (entry !== undefined) matched.add(entry);
-    all.push(branchOf(card, entry));
+    all.push(branchOf(card, entry, clock));
   }
   for (const entry of entries) {
     const onBoard = input.cards.some((card) => entryOf([entry], card));

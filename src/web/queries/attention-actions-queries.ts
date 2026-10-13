@@ -8,8 +8,9 @@ import {
 import type { BoardKey } from "../../shared/types.js";
 import {
   answerDecision,
-  getOpenDecisions,
+  getDecisions,
   resumeLoop,
+  retryResume,
   sendLoopInput,
 } from "./attention-actions-api.js";
 
@@ -32,7 +33,7 @@ export interface AnswerVariables {
 export function openDecisionsQueryOptions(board: BoardKey) {
   return queryOptions({
     queryKey: attentionActionsKeys.decisions(board),
-    queryFn: () => getOpenDecisions(board),
+    queryFn: () => getDecisions(board, "open"),
   });
 }
 
@@ -88,4 +89,21 @@ export function resumeLoopMutationOptions(
 
 export function useResumeLoopMutation(board: BoardKey) {
   return useMutation(resumeLoopMutationOptions(useQueryClient(), board));
+}
+
+/** Build the mutation options of "Try resume again", which refresh the orchestration reads of the board after it settles. */
+export function retryResumeMutationOptions(
+  queryClient: QueryClient,
+  board: BoardKey,
+) {
+  return {
+    mutationFn: (cardId: string) => retryResume(cardId),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: orchestrationKey(board) }),
+  };
+}
+
+/** Try the resume of a dead session again. */
+export function useRetryResumeMutation(board: BoardKey) {
+  return useMutation(retryResumeMutationOptions(useQueryClient(), board));
 }

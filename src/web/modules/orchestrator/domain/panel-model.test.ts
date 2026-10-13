@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { SupervisorState } from "../../../../shared/types.js";
 import {
   actionErrorCopy,
+  controlFor,
   failureCopy,
   loadErrorCopy,
   panelModel,
@@ -10,8 +11,11 @@ import {
   staleBadgeText,
   startErrorCopy,
   STALE_REASON,
+  terminalFor,
+  terminalSrcFor,
   SUPERVISOR_OFF_REASON,
   STOP_TOOLTIP,
+  type ControlKind,
   type OrchestratorView,
   type PanelInput,
 } from "./panel-model.js";
@@ -310,4 +314,80 @@ test("a running record whose session is lost asks for a resume in the terminal",
   );
   assert.equal(model.terminal, "resume");
   assert.equal(model.control?.kind, "resume");
+});
+
+test("the terminal of an extra record with an open session is live at its own session path", () => {
+  const extra = main("running", { activeSessionId: "s9" }, "extra");
+  assert.equal(terminalFor(extra), "live");
+  assert.equal(terminalSrcFor("live", extra), "/sessions/s9/terminal/");
+  assert.equal(terminalSrcFor("connecting", extra), null);
+  assert.equal(terminalFor(null), "empty");
+});
+
+const CASES: { name: string; record: OrchestratorView | null }[] = [
+  { name: "no record", record: null },
+  {
+    name: "running",
+    record: main("running", { state: "working" }),
+  },
+  {
+    name: "running at a permission prompt",
+    record: main("running", { state: "permission_prompt" }),
+  },
+  { name: "stopped", record: main("stopped", null) },
+  {
+    name: "lost",
+    record: main("running", { state: "lost" }),
+  },
+  { name: "starting", record: main("starting", null) },
+];
+
+const INPUTS: {
+  supervisor: "on" | "off";
+  stale: boolean;
+  pending: ControlKind | null;
+}[] = [
+  { supervisor: "on", stale: false, pending: null },
+  { supervisor: "off", stale: false, pending: null },
+  { supervisor: "on", stale: true, pending: null },
+  { supervisor: "on", stale: false, pending: "stop" },
+];
+
+test("the centre control equals the panel control of the main record in every case", () => {
+  for (const { name, record: rec } of CASES) {
+    for (const args of INPUTS) {
+      const expected = panelModel({
+        orchestrators: rec === null ? [] : [rec],
+        decisionCount: 0,
+        ...args,
+      }).control;
+      assert.deepEqual(
+        controlFor(rec, args),
+        expected,
+        `${name} with ${JSON.stringify(args)}`,
+      );
+    }
+  }
+});
+
+test("the centre control follows the spec rules for running, stopped, lost, stale and pending", () => {
+  const on = { supervisor: "on", stale: false, pending: null } as const;
+  const running = main("running", { state: "working" });
+  assert.equal(controlFor(running, on)?.kind, "stop");
+  assert.equal(controlFor(running, on)?.disabled, false);
+  assert.equal(controlFor(main("stopped", null), on)?.kind, "start");
+  const lost = main("running", { state: "lost" });
+  assert.equal(controlFor(lost, on)?.kind, "resume");
+  const stale = controlFor(running, { ...on, stale: true });
+  assert.equal(stale?.disabled, true);
+  assert.equal(stale?.reason, STALE_REASON);
+  assert.equal(controlFor(running, { ...on, pending: "stop" })?.disabled, true);
+});
+
+test("the centre control of an extra record follows the same rules as the main record", () => {
+  const on = { supervisor: "on", stale: false, pending: null } as const;
+  const extra = main("running", { state: "working" }, "extra");
+  const expected = controlFor(main("running", { state: "working" }), on);
+  assert.deepEqual(controlFor(extra, on), expected);
+  assert.equal(controlFor(main("stopped", null, "extra"), on)?.kind, "start");
 });

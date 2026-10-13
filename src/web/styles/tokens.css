@@ -30,9 +30,6 @@
     white 30%,
     var(--accent)
   ); /* Accent TEXT role only, 4.5:1 or more on every tier and on the accent tint */
-  --ok-soft: color-mix(in srgb, var(--col-agent-done) 16%, transparent);
-  --warn-soft: color-mix(in srgb, var(--col-needs-input) 16%, transparent);
-  --danger-soft: color-mix(in srgb, var(--destructive) 16%, transparent);
   --dot-grid: color-mix(in srgb, var(--text-muted) 18%, transparent);
   --glow-current:
     0 0 0 4px var(--accent-soft),
@@ -119,6 +116,9 @@
   --status-ok: #3fb950;
   --status-stale: #ef8e3b;
   --status-down: #e5484d;
+  --ok-soft: color-mix(in srgb, var(--status-ok) 16%, transparent);
+  --warn-soft: color-mix(in srgb, var(--status-stale) 16%, transparent);
+  --danger-soft: color-mix(in srgb, var(--status-down) 16%, transparent);
 
   /* Source signal palette (SourceBadge text and tint), consumed only through
      SOURCE_ACCENT in src/web/components/badges/source-accent.ts (NEW-24); see

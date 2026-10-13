@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { MutationObserver, QueryClient } from "@tanstack/react-query";
 import { DEFAULT_BOARD_KEY as LOCAL } from "../../shared/board-key.js";
-import { getOpenDecisions, postAction } from "./attention-actions-api.js";
+import { getDecisions, postAction } from "./attention-actions-api.js";
 import {
   answerDecisionMutationOptions,
   attentionActionsKeys,
@@ -10,6 +10,7 @@ import {
   openDecisionsQueryOptions,
   orchestrationKey,
   resumeLoopMutationOptions,
+  retryResumeMutationOptions,
 } from "./attention-actions-queries.js";
 
 const realFetch = globalThis.fetch;
@@ -62,9 +63,12 @@ test("the open decisions query reads the open decisions of the board", async () 
   assert.equal(calls[0]?.url, "/api/decisions?board=LOCAL&state=open");
 });
 
-test("getOpenDecisions throws on a failure status", async () => {
+test("getDecisions throws on a failure status", async () => {
   stubFetch({ status: 500, body: {} });
-  await assert.rejects(getOpenDecisions(LOCAL), /getOpenDecisions failed: 500/);
+  await assert.rejects(
+    getDecisions(LOCAL, "answered"),
+    /getDecisions failed: 500/,
+  );
 });
 
 test("a decision answer posts the option id and the note, and refreshes the decisions", async () => {
@@ -178,4 +182,21 @@ test("a refusal without a body reads the status text, and a network failure reso
     error: "offline",
     reason: null,
   });
+});
+
+test("Try resume again posts to the card resume route and refreshes the orchestration reads", async () => {
+  const client = newClient();
+  client.setQueryData(orchestrationKey(LOCAL), []);
+  stubFetch({ status: 200, body: {} });
+  const result = await new MutationObserver(
+    client,
+    retryResumeMutationOptions(client, LOCAL),
+  ).mutate("GROUP-4");
+  assert.deepEqual(result, { ok: true, result: null });
+  assert.equal(calls[0]?.url, "/api/cards/GROUP-4/resume");
+  assert.equal(calls[0]?.init?.method, "POST");
+  assert.equal(
+    client.getQueryState(orchestrationKey(LOCAL))?.isInvalidated,
+    true,
+  );
 });

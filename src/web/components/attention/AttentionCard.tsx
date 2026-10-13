@@ -1,9 +1,8 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { SessionStateBadge } from "@/components/badges/SessionStateBadge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Field, FieldDescription } from "@/components/ui/field";
-import { Textarea } from "@/components/ui/textarea";
+import { ReplyField } from "./ReplyField";
 
 interface AttentionCardProps {
   kind: "needs_input" | "stale" | "permission_prompt";
@@ -26,6 +25,7 @@ export function AttentionCard({
   onReply,
   onOpenTerminal,
 }: AttentionCardProps) {
+  const replyId = useId();
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const typed = draft.trim();
@@ -58,27 +58,15 @@ export function AttentionCard({
                 {text}
               </p>
             )}
-            <Field>
-              <Textarea
-                aria-label={`Reply to ${title}`}
-                value={draft}
-                placeholder={`Reply to ${title}`}
-                onChange={(event) => setDraft(event.target.value)}
-              />
-              <FieldDescription>
-                {draft.length} of 500 characters. A longer reply goes as a file.
-              </FieldDescription>
-            </Field>
-            <div className="flex flex-wrap items-center gap-(--space-sm)">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={disabled || sending || typed === ""}
-                onClick={() => void sendReply()}
-              >
-                Send reply
-              </Button>
+            <ReplyField
+              id={replyId}
+              label={`Reply to ${title}`}
+              value={draft}
+              onChange={setDraft}
+              onSend={() => void sendReply()}
+              disabled={disabled}
+              sending={sending}
+            >
               <Button
                 type="button"
                 variant="link"
@@ -93,7 +81,7 @@ export function AttentionCard({
                   {resultText}
                 </span>
               )}
-            </div>
+            </ReplyField>
           </>
         ) : (
           <>

@@ -224,7 +224,7 @@ async function assertPlanProposed(sb: Sandbox): Promise<string> {
   assert.equal(reads.conversation.status, "ok");
   assert.equal(reads.conversation.messages[0]?.role, "system");
   const plan = timelineOf(reads).find(
-    (e) => e.kind === "decision" && e.decisionKind === "plan",
+    (e) => e.kind === "decision" && e.view.planRows.length > 0,
   );
   assert.ok(plan?.kind === "decision");
   assert.deepEqual(

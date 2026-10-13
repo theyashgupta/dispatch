@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import { SESSION_STATES } from "../../../shared/session-states.js";
 import type { SupervisorState } from "../../../shared/types.js";
-import { Badge } from "@/components/ui/badge";
+import { ToneBadge } from "./ToneBadge.js";
 
 const GLYPHS: Record<SupervisorState, LucideIcon> = {
   working: Play,
@@ -38,27 +38,5 @@ interface SessionStateBadgeProps {
 
 export function SessionStateBadge({ state }: SessionStateBadgeProps) {
   const { label, tone } = SESSION_STATES[state];
-  const Glyph = GLYPHS[state];
-  const content = (
-    <>
-      <Glyph aria-hidden="true" />
-      {label}
-    </>
-  );
-  switch (tone) {
-    case "attention":
-      return (
-        <Badge tone="state" stateColor="var(--col-needs-input)">
-          {content}
-        </Badge>
-      );
-    case "error":
-      return <Badge tone="danger">{content}</Badge>;
-    case "success":
-      return <Badge tone="success">{content}</Badge>;
-    case "muted":
-      return <Badge tone="neutral">{content}</Badge>;
-    case "neutral":
-      return <Badge variant="outline">{content}</Badge>;
-  }
+  return <ToneBadge label={label} tone={tone} glyph={GLYPHS[state]} />;
 }
