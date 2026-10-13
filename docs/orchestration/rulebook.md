@@ -132,6 +132,7 @@ Start work in these ways:
 `start_card` starts one ticket card the way the start dialog does. It refuses these cases:
 
 - The cap is reached (403 `policy-refused`).
+- Memory on this Mac is low (409 `memory-pressure`, with the reading and the limit in `reason`). `start_group` and `resume_loop` refuse the same way. Do not retry at once. Try again after a running loop finishes or the next wake.
 - The card is a group card.
 - The card is in Done or Inbox.
 - The card is running.

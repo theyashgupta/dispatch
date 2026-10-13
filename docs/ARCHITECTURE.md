@@ -46,6 +46,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
   - [GitHub Source](#github-source)
   - [Sentry Source](#sentry-source)
   - [SSE Transport](#sse-transport)
+  - [Memory Scheduler](#memory-scheduler)
   - [Startup Preflight](#startup-preflight)
   - [Cleanup Lifecycle](#cleanup-lifecycle)
   - [Cleanup Mirror Chokepoint](#cleanup-mirror-chokepoint)
@@ -321,6 +322,14 @@ Mount prefix: `/api`.
 | Method | Path          | Auth | Purpose                                                  |
 | ------ | ------------- | ---- | -------------------------------------------------------- |
 | GET    | `/api/stream` | User | Open the server-sent event stream of the board snapshot. |
+
+### `routes/system.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                 | Auth | Purpose                                         |
+| ------ | -------------------- | ---- | ----------------------------------------------- |
+| GET    | `/api/system/memory` | User | Read the latest machine memory reading (macOS). |
 
 ### `routes/hooks.route.ts`
 
@@ -3731,7 +3740,7 @@ event merging, the client replaces its state wholesale, but two connections at d
 depths (e.g. desktop + a tunneled phone) now legitimately see different card sets. Each
 durably-inserted event also rides the SAME connection as a distinct NAMED
 `event: activity\ndata: <ActivityEvent JSON>\n\n` frame (on every store `"activity"`), alongside the
-unnamed board `data:` frame and the named `ping` heartbeat. The stream is un-buffered (`X-Accel-Buffering: no`, `Cache-Control: no-cache`, and NO
+unnamed board `data:` frame and the named `ping` heartbeat. The named `tunnel` and `memory` frames go to every client whatever its board (see [Memory Scheduler](#memory-scheduler)). The stream is un-buffered (`X-Accel-Buffering: no`, `Cache-Control: no-cache`, and NO
 compression on this route — compression would buffer and break liveness) and resync-on-connect (a
 windowed snapshot is written the instant a client connects, at the `doneLimit` it requested). The
 payload is a `BoardSnapshot` only (cards + syncedAt) — it NEVER carries the Linear API key or any
@@ -3837,6 +3846,16 @@ click: the button rendered from `selectedCard` (which DID include the pinned car
 (only Done is `doneLimit`-capped), so the gap this fix closes cannot occur there, and re-validating
 column/`groupId` from the live board rather than a moments-old hydrated snapshot is the safer
 freshness guarantee for the point where a start actually gets requested.
+
+### Memory Scheduler
+
+**Sampler (LOCAL-110).** `adapters/memory-sampler.ts` runs `vm_stat` and `sysctl -n vm.swapusage vm.loadavg` through the exec chokepoint and returns one `MemorySample`: free MB (free plus inactive pages, page size from the `vm_stat` header), compressor MB, swap used and swap total MB, and the 1-minute load average. Off macOS, or on a command or parse failure, it returns null. `services/orchestration/memory-governor.ts` reads it at boot and every 15 seconds (an unref'd timer started in `bootstrap/index.ts`) and keeps the latest sample. A failed read keeps the previous sample, and a sample older than 60 seconds is reported as `stale`.
+
+**Wire shape.** `GET /api/system/memory` and the named `memory` frame of `GET /api/stream` carry the same `SystemMemory` body: `{ supported: false }` when there is no sample (Linux, or before the first read), else `{ supported: true, sample, stale }`. The frame is sent on connect after the board and tunnel frames, and to every client after each sample. Memory is not a field of the board snapshot: the snapshot is per board and rebuilt on each board change, while the reading is per machine and changes every 15 seconds.
+
+**Admission gate.** `assertMemoryHeadroom(boardKey)` in the governor checks the latest reading against the board's `memoryFloorMb` and `swapCeilingMb` through the pure `admitStart` (`services/domain/memory-admission.ts`) and throws the 409 `{ error: "memory-pressure", reason }`. The reason is `free memory <n> MB is below the <floor> MB floor` or `swap used <n> MB is above the <ceiling> MB ceiling`, the free-memory check first. No reading or a stale reading admits, so a sampler fault never blocks every start. The gate runs on the human card start, the human group start (`createAndStartGroup`, before the group card exists; `createGroup` itself stays ungated because the orchestrator `create_group` tool creates without starting), the human resume of a lost session (`beginResume`, so the route answers the 409), and the orchestrator `start_card`, `start_group` and `resume_loop` (inside the cap lock, before the cap check). `resumeSession` checks again before it relaunches claude, so a Reconnect on a dead pane does not relaunch under pressure either: the session stays lost and the card shows `Resume failed: <reason>`. The supervisor's `resume` action checks before its shell-prompt relaunch, and its plain resume goes through `resumeSession`; either refusal sets `needs_input` with `resume_failed` and evidence that carries the reason. Nothing retries it when memory recovers.
+
+**Known limit.** The gate reads one 15 second sample and does not count the starts it admits, so a burst of starts between two samples can all pass; the concurrency cap still bounds the burst. The supervisor's held-group start skips the group for that pass, with no event. Run Claude on a hand-opened session and the user's resume of a loop at `needs_input` are not gated.
 
 ### Startup Preflight
 
@@ -5985,7 +6004,8 @@ phase, send waits of 1.5 s, 10 s and 10 s, a ready wait of 60 s, and a reset wai
 user route; no orchestrator route or tool changes a policy. The `groupPlaybook` field (a playbook name
 or null) is one of these fields. A save that omits `groupPlaybook` keeps the stored value, and a save
 with null clears it. `wakeMinutes` (whole number, 0 to 1440, else 400 `invalid-wakeMinutes`) is optional
-the same way. The store reads each stored policy as the defaults of `defaultBoardPolicy` with
+the same way, and so are `memoryFloorMb` (0 to 65536, default 1024, else 400 `invalid-memoryFloorMb`)
+and `swapCeilingMb` (256 to 65536, default 4096, else 400 `invalid-swapCeilingMb`). The store reads each stored policy as the defaults of `defaultBoardPolicy` with
 the stored values over them, so a board saved before a new field gets its default. A stored policy
 that is JSON `null` or an array reads as the defaults alone.
 
