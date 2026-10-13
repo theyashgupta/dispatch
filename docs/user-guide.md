@@ -411,10 +411,11 @@ The comment box sits under the messages. It sends text to the orchestrator sessi
 
 - The field has the hidden label and the placeholder "Message the orchestrator".
 - The line under the field reads "<n> of 500 characters. A longer reply goes as a file."
-- The button **Send** is off when the field is empty or has only spaces. It is also off while Dispatch sends, while the connection is down, and when the orchestrator has no card.
+- The button **Send** is off when the field is empty or has only spaces. It is also off while Dispatch sends and while the connection is down.
 - The result shows next to **Send**: "Delivered" or "Not confirmed. Check the terminal." After "Delivered" the field clears. After any other result the text stays.
 - When the session changed state, the result reads "Not sent. <orchestrator name> is now at <state label>. Open the terminal."
 - A failed send shows the alert "Message failed: <message>." with the button **Try again**. The text stays.
+- When the orchestrator has no session, **Send** sends no message. The alert "Message failed: <orchestrator name> has no session. Start it first." shows under the field. The text stays.
 
 ### Narrow screens
 
