@@ -62,6 +62,8 @@ export interface ActivityEvent {
   source: string | null;
   ts: string;
   boardKey?: BoardKey;
+  pausedPids?: number[];
+  pausedAt?: string;
 }
 
 /**
@@ -491,6 +493,12 @@ export interface Card {
   terminalError?: TerminalError | null;
   /** Fixed resume-failure copy rendered by the session-lost UI; null/absent when no resume has failed. */
   resumeError?: string | null;
+  paused?: {
+    at: string;
+    by: "memory" | "user";
+    sessionId: string;
+    pids: number[];
+  } | null;
 
   /**
    * Transient wire-visible in-flight flag for a running Sync-to-Linear attempt. Follows the
@@ -2082,7 +2090,8 @@ export type SupervisorState =
   | "api_error"
   | "stale"
   | "lost"
-  | "shell_prompt";
+  | "shell_prompt"
+  | "paused";
 
 export type SupervisorStateReason =
   | "usage_stop"

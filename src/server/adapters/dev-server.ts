@@ -1,4 +1,5 @@
 import { run } from "./exec.js";
+import { readProcessTable, treeOf } from "./process-tree.js";
 
 /**
  * Bind addresses a `http://localhost:<port>` link actually reaches, mapped to the loopback host(s)
@@ -92,38 +93,15 @@ export async function listeningPortsBySession(
 ): Promise<Map<string, DiscoveredPort[]> | null> {
   if (panePids.size === 0) return new Map();
 
-  let psOut: string;
-  try {
-    ({ stdout: psOut } = await run("ps", ["-axo", "pid=,ppid="], {
-      timeout: 5000,
-    }));
-  } catch {
-    return null;
-  }
-
-  const childrenOf = new Map<number, number[]>();
-  for (const line of psOut.split("\n")) {
-    const m = line.match(/^\s*(\d+)\s+(\d+)$/);
-    if (!m) continue;
-    const pid = Number(m[1]);
-    const ppid = Number(m[2]);
-    const list = childrenOf.get(ppid) ?? [];
-    list.push(pid);
-    childrenOf.set(ppid, list);
-  }
+  const childrenOf = await readProcessTable();
+  if (!childrenOf) return null;
 
   const sessionOfPid = new Map<number, string>();
   const allPids: number[] = [];
   for (const [session, roots] of panePids) {
-    const visited = new Set<number>();
-    const queue = [...roots];
-    while (queue.length > 0) {
-      const pid = queue.shift() as number;
-      if (visited.has(pid)) continue;
-      visited.add(pid);
+    for (const pid of treeOf(childrenOf, roots)) {
       if (!sessionOfPid.has(pid)) sessionOfPid.set(pid, session);
       allPids.push(pid);
-      queue.push(...(childrenOf.get(pid) ?? []));
     }
   }
 

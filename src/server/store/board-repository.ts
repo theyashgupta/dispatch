@@ -334,6 +334,13 @@ export interface BoardRepository {
     sessionId?: string,
   ): Promise<void>;
   clearResumeError(id: string): Promise<void>;
+  markCardPaused(
+    id: string,
+    sessionId: string,
+    mark: NonNullable<Card["paused"]>,
+  ): Promise<boolean>;
+  setPausedPids(id: string, pids: number[]): Promise<void>;
+  clearCardPaused(id: string): Promise<void>;
   recordResumeFailure(
     id: string,
     sessionId?: string,

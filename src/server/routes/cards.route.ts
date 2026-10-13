@@ -18,6 +18,10 @@ import {
   beginResume,
   reconnectTerminal,
 } from "../services/orchestration/resume-session.js";
+import {
+  pauseCard,
+  unpauseCard,
+} from "../services/orchestration/pause-card.js";
 import { resolveResumeTarget } from "../services/orchestration/resume-target.js";
 import { cleanupWorkspace } from "../services/orchestration/cleanup.js";
 import {
@@ -57,6 +61,7 @@ import { attachmentsDir } from "../services/infra/paths.js";
 import { enabledSource } from "../adapters/source-gateway.js";
 import {
   attachmentParamsSchema,
+  cardIdParamsSchema,
   cardListQuerySchema,
   commentBodySchema,
   createCardBodySchema,
@@ -72,7 +77,6 @@ import {
   sessionPinBodySchema,
   startBodySchema,
   syncBodySchema,
-  resumeTargetParamsSchema,
   unwindBodySchema,
 } from "./cards-schemas.js";
 import { httpErrorHandler } from "./error-handler.js";
@@ -166,7 +170,7 @@ async function getResumeTarget(
   req: Request<{ id: string }>,
   res: Response,
 ): Promise<void> {
-  const { id } = parseOrThrow(resumeTargetParamsSchema, req.params);
+  const { id } = parseOrThrow(cardIdParamsSchema, req.params);
   const card = store.getCard(id);
   if (!card) throw new NotFoundError(`unknown card id: ${id}`);
   const session = card.sessions?.find((s) => s.id === card.activeSessionId);
@@ -204,6 +208,18 @@ cardsRouter.post("/cards/:id/resume", (req, res) => {
 
   beginResume(card);
   res.status(202).json({ resuming: true });
+});
+
+cardsRouter.post("/cards/:id/pause", async (req, res) => {
+  const { id } = parseOrThrow(cardIdParamsSchema, req.params);
+  const card = await pauseCard(id, { by: "user", reason: "paused by user" });
+  res.status(200).json(redactCard(card));
+});
+
+cardsRouter.post("/cards/:id/unpause", async (req, res) => {
+  const { id } = parseOrThrow(cardIdParamsSchema, req.params);
+  const card = await unpauseCard(id, { reason: "resumed by user" });
+  res.status(200).json(redactCard(card));
 });
 
 cardsRouter.post("/cards/:id/terminal", (req, res) => {
@@ -294,6 +310,7 @@ cardsRouter.post("/cards/:id/session", async (req, res) => {
   const { id } = req.params;
 
   const card = actionableCard(id);
+  if (card.paused) throw new ConflictError("card-paused");
 
   const { sessionId } = parseOrThrow(sessionBodySchema, req.body);
 
