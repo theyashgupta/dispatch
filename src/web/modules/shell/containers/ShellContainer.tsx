@@ -151,6 +151,7 @@ const PAGE_TITLES: Record<Page, string> = {
   flow: "Flow",
   boards: "Boards",
   dashboard: "Dashboard",
+  orchestrator: "Orchestrator",
   "board-settings": "Board settings",
 };
 
