@@ -96,8 +96,8 @@ export function lifecycleMutationOptions(
 ) {
   return {
     mutationFn: (vars: LifecycleVariables) =>
-      vars.kind === "start"
-        ? startMain(board, vars.hasRecord)
+      vars.kind === "start" && !vars.hasRecord
+        ? startMain(board)
         : runLifecycle(board, vars.id, vars.kind),
     onSettled: () =>
       Promise.all([

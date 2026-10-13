@@ -96,6 +96,19 @@ test("Start on a board with a record only starts it", async () => {
   );
 });
 
+test("Start on an extra orchestrator posts to its own id", async () => {
+  stubFetch({ status: 202, body: {} });
+  await runLifecycle(newClient(), {
+    kind: "start",
+    id: "extra-1",
+    hasRecord: true,
+  });
+  assert.deepEqual(
+    calls.map((c) => c.url),
+    ["/api/boards/LOCAL/orchestrators/extra-1/start"],
+  );
+});
+
 test("a refused add stops Start before the start call", async () => {
   stubFetch({ status: 409, body: { error: "main-exists" } });
   const result = await runLifecycle(newClient(), {
