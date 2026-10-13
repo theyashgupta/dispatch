@@ -2,18 +2,17 @@ import { formatAge, nowMs } from "../../../../shared/format-age.js";
 import { DecisionCard, PlanTable } from "@/components/attention/DecisionCard";
 import { Badge } from "@/components/ui/badge";
 import { Item, ItemContent } from "@/components/ui/item";
-import { PanelAlertBar } from "@/modules/orchestrator/components/PanelAlertBar";
+import { Eyebrow } from "@/modules/orchestrator/components/Eyebrow";
+import {
+  PanelAlertBar,
+  type RetryFailure,
+} from "@/modules/orchestrator/components/PanelAlertBar";
 import type { ConversationEntry } from "@/modules/orchestrator/domain/conversation-view";
-
-export interface DecisionFailure {
-  message: string;
-  onRetry: () => void;
-}
 
 interface ConversationListProps {
   entries: readonly ConversationEntry[];
   disabled: boolean;
-  failures: Readonly<Record<string, DecisionFailure | null>>;
+  failures: Readonly<Partial<Record<string, RetryFailure>>>;
   onAnswer: (
     id: string,
     optionId: string,
@@ -26,14 +25,6 @@ function EntryTime({ at }: { at: string | null }) {
   return (
     <span className="font-mono text-xs text-muted-foreground">
       {formatAge(at, nowMs())}
-    </span>
-  );
-}
-
-function Eyebrow({ children }: { children: string }) {
-  return (
-    <span className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-      {children}
     </span>
   );
 }
@@ -64,7 +55,7 @@ export function ConversationList({
             </li>
           );
         }
-        const failure = failures[entry.id] ?? null;
+        const failure = failures[entry.id];
         return (
           <li key={entry.id}>
             <Item size="sm">
@@ -82,7 +73,7 @@ export function ConversationList({
                         onAnswer(entry.id, optionId, note)
                       }
                     />
-                    {failure !== null && (
+                    {failure !== undefined && (
                       <PanelAlertBar
                         message={failure.message}
                         retryDisabled={disabled}
@@ -99,9 +90,7 @@ export function ConversationList({
                       <PlanTable rows={entry.view.planRows} />
                     )}
                     <p className="m-0 text-sm wrap-anywhere">
-                      {entry.answerLabel === null
-                        ? "Answered"
-                        : `Answered: ${entry.answerLabel}`}
+                      {entry.answerText}
                     </p>
                     {entry.answerNote !== null && (
                       <p className="m-0 text-sm wrap-anywhere whitespace-pre-wrap text-muted-foreground">

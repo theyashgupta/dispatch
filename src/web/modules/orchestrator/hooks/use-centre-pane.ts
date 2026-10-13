@@ -1,4 +1,5 @@
-import { useSyncExternalStore } from "react";
+import { useCallback } from "react";
+import { createModuleState } from "@/components/ui/hooks/module-state";
 
 interface CentrePaneState {
   page: "branches" | "conversation";
@@ -12,63 +13,35 @@ const DEFAULTS: CentrePaneState = {
   focusPending: false,
 };
 
-const listeners = new Set<() => void>();
-let state = DEFAULTS;
-
-function update(next: Partial<CentrePaneState>) {
-  state = { ...state, ...next };
-  for (const notify of listeners) notify();
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => void listeners.delete(listener);
-}
-
-function read(): CentrePaneState {
-  return state;
-}
-
-function setPage(page: CentrePaneState["page"]) {
-  update({ page });
-}
-
-function setPane(pane: CentrePaneState["pane"]) {
-  update({ pane });
-}
-
-function requestCommentFocus() {
-  update({ page: "conversation", pane: "conversation", focusPending: true });
-}
-
-function takeCommentFocus(): boolean {
-  const pending = state.focusPending;
-  if (pending) update({ focusPending: false });
-  return pending;
-}
-
-/**
- * Restore the default page, pane and focus request.
- *
- * @remarks The centre page calls this on leave, so the next visit opens on Branches below 768 px and on Conversation in the pane.
- */
-export function resetCentrePane() {
-  state = DEFAULTS;
-  for (const notify of listeners) notify();
-}
+const useCentrePaneState = createModuleState<CentrePaneState>(DEFAULTS);
 
 /**
  * Read the shared page tab, pane tab and comment focus request of the command centre, with their setters.
  *
- * @remarks The canvas container and the pane container read one module store, so neither imports the other. `takeCommentFocus` returns the pending request and clears it, so one Enter focuses the box once.
+ * @remarks
+ * The canvas container and the pane container read one module store, so neither imports the other.
  */
 export function useCentrePane() {
-  const snapshot = useSyncExternalStore(subscribe, read);
+  const [state, set] = useCentrePaneState();
+  const reset = useCallback(() => set(DEFAULTS), [set]);
   return {
-    ...snapshot,
-    setPage,
-    setPane,
-    requestCommentFocus,
-    takeCommentFocus,
+    ...state,
+    setPage: (page: string) =>
+      set({
+        ...state,
+        page: page === "conversation" ? "conversation" : "branches",
+      }),
+    setPane: (pane: string) =>
+      set({
+        ...state,
+        pane: pane === "terminal" ? "terminal" : "conversation",
+      }),
+    requestCommentFocus: () =>
+      set({ page: "conversation", pane: "conversation", focusPending: true }),
+    takeCommentFocus: (): boolean => {
+      if (state.focusPending) set({ ...state, focusPending: false });
+      return state.focusPending;
+    },
+    reset,
   };
 }

@@ -72,9 +72,7 @@ export function CentrePaneContainer({
   return (
     <CentrePane
       value={pane}
-      onValueChange={(value) =>
-        setPane(value === "terminal" ? "terminal" : "conversation")
-      }
+      onValueChange={setPane}
       conversation={<ConversationContainer />}
       terminal={frame}
     />

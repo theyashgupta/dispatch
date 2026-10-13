@@ -9,7 +9,7 @@ interface CentreNarrowProps {
   nodeRef: Ref<HTMLElement>;
   onNodeKeyDown: KeyboardEventHandler<HTMLElement>;
   reason: ReactNode;
-  page: string;
+  page: "branches" | "conversation";
   onPageChange: (page: string) => void;
   branches: ReactNode;
   pane: ReactNode;

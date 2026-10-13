@@ -1,3 +1,4 @@
+import { actionFailedText } from "../../../../shared/decision-view.js";
 import type { OrchestratorConversation } from "../../../../shared/types.js";
 import { mainOrchestrator } from "../../../../shared/orchestrator-owner.js";
 import type { CentreBranch } from "./centre-graph.js";
@@ -27,7 +28,7 @@ export const CENTRE_CONTROL_LABELS: Record<ControlKind, string> = {
 };
 
 export type RegionState = "loading" | "error" | "empty" | "ready";
-export type ConversationState = RegionState | "unavailable";
+type ConversationState = RegionState | "unavailable";
 
 /** Build the counts line of the centre node, for example "3 branches, 1 need you". */
 export function countsText(branchCount: number, needYouCount: number): string {
@@ -95,7 +96,8 @@ export function regionState(input: {
 /**
  * Pick the display state of the conversation pane.
  *
- * @remarks `pending` and `error` mean the query holds no data. An unavailable transcript still shows its decision entries, so the caller renders the list under the line.
+ * @remarks
+ * An unavailable transcript still shows its decision entries, so the caller renders the list under the line.
  */
 export function conversationState(input: {
   pending: boolean;
@@ -109,7 +111,13 @@ export function conversationState(input: {
   if (input.status === "no-transcript" || input.status === "unreadable") {
     return "unavailable";
   }
-  return input.entryCount === 0 ? "empty" : "ready";
+  if (input.entryCount > 0) return "ready";
+  return input.pending ? "loading" : "empty";
+}
+
+/** Build the error line of a send to an orchestrator that has no session. */
+export function noSessionSendText(name: string): string {
+  return actionFailedText("Message", `${name} has no session. Start it first`);
 }
 
 /** Build the error line of a region that did not load. */

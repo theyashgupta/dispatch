@@ -1,5 +1,8 @@
 import { ReplyField } from "@/components/attention/ReplyField";
-import { PanelAlertBar } from "@/modules/orchestrator/components/PanelAlertBar";
+import {
+  PanelAlertBar,
+  type RetryFailure,
+} from "@/modules/orchestrator/components/PanelAlertBar";
 import { COMMENT_BOX_ID } from "@/modules/orchestrator/domain/centre-page-state";
 
 interface CommentBoxProps {
@@ -10,7 +13,7 @@ interface CommentBoxProps {
   sending: boolean;
   describedBy: string | null;
   result: string | null;
-  failure: { message: string; onRetry: () => void } | null;
+  failure: RetryFailure | null;
 }
 
 export function CommentBox({

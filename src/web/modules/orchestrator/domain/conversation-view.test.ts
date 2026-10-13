@@ -5,10 +5,7 @@ import type {
   ConversationMessage,
   DecisionItem,
 } from "../../../../shared/types.js";
-import {
-  ANSWERED_DECISION_CAP,
-  conversationView,
-} from "./conversation-view.js";
+import { conversationView } from "./conversation-view.js";
 
 const NOW = Date.parse("2026-10-08T12:00:00.000Z");
 const names = new Map([
@@ -151,13 +148,12 @@ test("the author of a message follows its role", () => {
   );
 });
 
-test("a message entry carries its time, role and text", () => {
+test("a message entry carries its time, author and text", () => {
   const [entry] = view([message("m1", "2026-10-08T10:00:00.000Z", "user")], []);
   assert.deepEqual(entry, {
     kind: "message",
     id: "m1",
     at: "2026-10-08T10:00:00.000Z",
-    role: "user",
     author: "You",
     text: "text m1",
   });
@@ -231,17 +227,17 @@ test("a roadmap approval has no other answer and a ruling answers on the recomme
   assert.equal(ruling.kind === "decision" && ruling.view.otherOptionId, "b");
 });
 
-test("an open decision has state open and no answer label", () => {
+test("an open decision has state open and no answer text", () => {
   const [entry] = view([], [decision()]);
   assert.equal(entry.kind, "decision");
   if (entry.kind !== "decision") return;
   assert.equal(entry.state, "open");
-  assert.equal(entry.answerLabel, null);
+  assert.equal(entry.answerText, null);
   assert.equal(entry.at, "2026-10-08T11:00:00.000Z");
   assert.equal(entry.view.meta, "GROUP-13, asked by Main orchestrator 1 h ago");
 });
 
-test("an answered decision shows the label of the answered option", () => {
+test("an answered decision reads Answered and the label of the answered option", () => {
   const [entry] = view(
     [],
     [
@@ -255,10 +251,10 @@ test("an answered decision shows the label of the answered option", () => {
   assert.equal(entry.kind, "decision");
   if (entry.kind !== "decision") return;
   assert.equal(entry.state, "answered");
-  assert.equal(entry.answerLabel, "Give 2 more rounds");
+  assert.equal(entry.answerText, "Answered: Give 2 more rounds");
 });
 
-test("an answered decision whose option is gone has a null label", () => {
+test("an answered decision whose option is gone reads Answered", () => {
   const [entry] = view(
     [],
     [
@@ -268,10 +264,10 @@ test("an answered decision whose option is gone has a null label", () => {
       }),
     ],
   );
-  assert.equal(entry.kind === "decision" && entry.answerLabel, null);
+  assert.equal(entry.kind === "decision" && entry.answerText, "Answered");
 });
 
-test("a decision entry carries its kind and the typed note of its answer", () => {
+test("a decision entry carries its badge and the typed note of its answer", () => {
   const [entry] = conversationView({
     messages: [],
     decisions: [
@@ -300,9 +296,8 @@ test("a decision entry carries its kind and the typed note of its answer", () =>
   });
   assert.equal(entry?.kind, "decision");
   if (entry?.kind !== "decision") return;
-  assert.equal(entry.decisionKind, "ruling");
   assert.equal(entry.badge, "Question");
-  assert.equal(entry.answerLabel, "Main");
+  assert.equal(entry.answerText, "Answered: Main");
   assert.equal(entry.answerNote, "Use the release branch after 18:00");
 });
 
@@ -318,38 +313,15 @@ function answered(id: string, minute: number, orchestratorId = "main") {
   });
 }
 
-const KEPT = [
-  "a06",
-  "a07",
-  "a08",
-  "a09",
-  "a10",
-  "a11",
-  "a12",
-  "a13",
-  "a14",
-  "a15",
-  "a16",
-  "a17",
-  "a18",
-  "a19",
-  "a20",
-  "a21",
-  "a22",
-  "a23",
-  "a24",
-  "a25",
-];
-
 function answeredRange(count: number, orchestratorId = "main") {
   return Array.from({ length: count }, (_, i) =>
     answered(`a${String(i + 1).padStart(2, "0")}`, i + 1, orchestratorId),
   );
 }
 
-test("the cap is 20", () => {
-  assert.equal(ANSWERED_DECISION_CAP, 20);
-});
+const KEPT = answeredRange(25)
+  .slice(5)
+  .map((d) => d.id);
 
 test("25 answered and 3 open give the 20 newest answered and the 3 open", () => {
   const open = ["o1", "o2", "o3"].map((id) =>

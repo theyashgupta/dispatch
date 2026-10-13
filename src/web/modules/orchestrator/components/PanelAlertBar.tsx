@@ -2,6 +2,8 @@ import { TriangleAlert } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 
+export type RetryFailure = Pick<PanelAlertBarProps, "message" | "onRetry">;
+
 interface PanelAlertBarProps {
   message: string;
   onRetry: () => void;

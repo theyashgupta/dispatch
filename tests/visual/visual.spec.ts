@@ -19,6 +19,7 @@ const SETUP_STATUS = {
 };
 const at = (minutesAgo: number) =>
   new Date(now - minutesAgo * 60_000).toISOString();
+const SEEDED_DECISION_PREFIX = "dec-";
 const CONVERSATION = {
   status: "ok",
   truncated: false,
@@ -47,6 +48,7 @@ const CONVERSATION = {
 const screens: {
   name: string;
   url: string;
+  routes?: (page: Page) => Promise<unknown>;
   ready: (page: Page) => Promise<void>;
 }[] = [
   {
@@ -120,6 +122,29 @@ const screens: {
   {
     name: "command-centre",
     url: `${orchestrated}/#/boards/ORC/orchestrator`,
+    routes: async (page) => {
+      await page.route(
+        "**/api/boards/ORC/orchestrators/orch-main/conversation",
+        (route) => route.fulfill({ json: CONVERSATION }),
+      );
+      await page.route(
+        (url) => url.pathname === "/api/decisions",
+        async (route) => {
+          const response = await route.fetch();
+          const { items } = (await response.json()) as {
+            items: { id: string }[];
+          };
+          await route.fulfill({
+            response,
+            json: {
+              items: items.filter((i) =>
+                i.id.startsWith(SEEDED_DECISION_PREFIX),
+              ),
+            },
+          });
+        },
+      );
+    },
     ready: async (page) => {
       if ((page.viewportSize()?.width ?? 0) < 768)
         await page.getByRole("tab", { name: "Conversation" }).first().click();
@@ -177,6 +202,12 @@ const screens: {
   {
     name: "setup-wizard",
     url: `http://127.0.0.1:${seededPort + 1}/#/boards/LOCAL`,
+    routes: (page) =>
+      page.route("**/api/setup", (route) =>
+        route.request().method() === "GET"
+          ? route.fulfill({ json: SETUP_STATUS })
+          : route.fallback(),
+      ),
     ready: (page) => expect(page.getByRole("dialog")).toBeVisible(),
   },
   {
@@ -198,32 +229,7 @@ for (const theme of ["dark", "light"] as const) {
           await page.addInitScript((value) => {
             localStorage.setItem("dsp.theme", value);
           }, theme);
-          if (screen.name === "setup-wizard") {
-            await page.route("**/api/setup", (route) =>
-              route.request().method() === "GET"
-                ? route.fulfill({ json: SETUP_STATUS })
-                : route.fallback(),
-            );
-          }
-          if (screen.name === "command-centre") {
-            await page.route(
-              "**/api/boards/ORC/orchestrators/orch-main/conversation",
-              (route) => route.fulfill({ json: CONVERSATION }),
-            );
-            await page.route(
-              (url) => url.pathname === "/api/decisions",
-              async (route) => {
-                const response = await route.fetch();
-                const { items } = (await response.json()) as {
-                  items: { id: string }[];
-                };
-                await route.fulfill({
-                  response,
-                  json: { items: items.filter((i) => i.id.startsWith("dec-")) },
-                });
-              },
-            );
-          }
+          await screen.routes?.(page);
           await page.route("**/api/**", (route) =>
             route.request().method() === "GET" && screen.name !== "gallery"
               ? route.fallback()
