@@ -72,10 +72,12 @@ const screens: {
   {
     name: "settings",
     url: `${seeded}/#/settings`,
-    ready: (page) =>
-      expect(
+    ready: async (page) => {
+      await expect(
         page.getByRole("heading", { name: "Settings", level: 1 }),
-      ).toBeVisible(),
+      ).toBeVisible();
+      await expect(page.getByText("Checking", { exact: true })).toHaveCount(0);
+    },
   },
   {
     name: "card-panel",
