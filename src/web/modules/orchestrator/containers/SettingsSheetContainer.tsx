@@ -37,7 +37,9 @@ export function SettingsSheetContainer() {
   const [lastTab, setLastTab] = useState<OrchestratorSettingsTab>("policy");
   if (settings !== undefined && settings !== lastTab) setLastTab(settings);
 
+  const leaving = useRef(false);
   useEffect(() => {
+    leaving.current = false;
     if (settings === undefined) closedAt.current = index;
   }, [settings, index]);
 
@@ -49,6 +51,8 @@ export function SettingsSheetContainer() {
   }
 
   function close() {
+    if (leaving.current) return;
+    leaving.current = true;
     if (closedAt.current !== null && index === closedAt.current + 1) {
       router.history.back();
     } else {
