@@ -1,4 +1,3 @@
-import type { Ref } from "react";
 import { formatAge, nowMs } from "../../../../shared/format-age.js";
 import { DecisionCard, PlanTable } from "@/components/attention/DecisionCard";
 import { Badge } from "@/components/ui/badge";
@@ -20,7 +19,6 @@ interface ConversationListProps {
     optionId: string,
     note: string | null,
   ) => Promise<boolean>;
-  endRef: Ref<HTMLDivElement>;
 }
 
 function EntryTime({ at }: { at: string | null }) {
@@ -45,82 +43,78 @@ export function ConversationList({
   disabled,
   failures,
   onAnswer,
-  endRef,
 }: ConversationListProps) {
   return (
-    <>
-      <ol aria-label="Conversation" className="m-0 flex list-none flex-col p-0">
-        {entries.map((entry) => {
-          if (entry.kind === "message") {
-            return (
-              <li key={entry.id}>
-                <Item size="sm">
-                  <ItemContent>
-                    <div className="flex items-center gap-(--space-sm)">
-                      <Eyebrow>{entry.author}</Eyebrow>
-                      <EntryTime at={entry.at} />
-                    </div>
-                    <p className="m-0 text-sm wrap-anywhere whitespace-pre-wrap">
-                      {entry.text}
-                    </p>
-                  </ItemContent>
-                </Item>
-              </li>
-            );
-          }
-          const failure = failures[entry.id] ?? null;
+    <ol aria-label="Conversation" className="m-0 flex list-none flex-col p-0">
+      {entries.map((entry) => {
+        if (entry.kind === "message") {
           return (
             <li key={entry.id}>
               <Item size="sm">
-                <ItemContent>
+                <ItemContent className="min-w-0">
                   <div className="flex items-center gap-(--space-sm)">
-                    <Badge tone="neutral">{entry.badge}</Badge>
+                    <Eyebrow>{entry.author}</Eyebrow>
                     <EntryTime at={entry.at} />
                   </div>
-                  {entry.state === "open" ? (
-                    <>
-                      <DecisionCard
-                        view={entry.view}
-                        disabled={disabled}
-                        onAnswer={(optionId, note) =>
-                          onAnswer(entry.id, optionId, note)
-                        }
-                      />
-                      {failure !== null && (
-                        <PanelAlertBar
-                          message={failure.message}
-                          retryDisabled={disabled}
-                          onRetry={failure.onRetry}
-                        />
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <p className="m-0 text-sm font-semibold wrap-anywhere">
-                        {entry.view.question}
-                      </p>
-                      {entry.view.planRows.length > 0 && (
-                        <PlanTable rows={entry.view.planRows} />
-                      )}
-                      <p className="m-0 text-sm wrap-anywhere">
-                        {entry.answerLabel === null
-                          ? "Answered"
-                          : `Answered: ${entry.answerLabel}`}
-                      </p>
-                      {entry.answerNote !== null && (
-                        <p className="m-0 text-sm wrap-anywhere whitespace-pre-wrap text-muted-foreground">
-                          {entry.answerNote}
-                        </p>
-                      )}
-                    </>
-                  )}
+                  <p className="m-0 text-sm wrap-anywhere whitespace-pre-wrap">
+                    {entry.text}
+                  </p>
                 </ItemContent>
               </Item>
             </li>
           );
-        })}
-      </ol>
-      <div ref={endRef} />
-    </>
+        }
+        const failure = failures[entry.id] ?? null;
+        return (
+          <li key={entry.id}>
+            <Item size="sm">
+              <ItemContent className="min-w-0">
+                <div className="flex items-center gap-(--space-sm)">
+                  <Badge tone="neutral">{entry.badge}</Badge>
+                  <EntryTime at={entry.at} />
+                </div>
+                {entry.state === "open" ? (
+                  <>
+                    <DecisionCard
+                      view={entry.view}
+                      disabled={disabled}
+                      onAnswer={(optionId, note) =>
+                        onAnswer(entry.id, optionId, note)
+                      }
+                    />
+                    {failure !== null && (
+                      <PanelAlertBar
+                        message={failure.message}
+                        retryDisabled={disabled}
+                        onRetry={failure.onRetry}
+                      />
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <p className="m-0 text-sm font-semibold wrap-anywhere">
+                      {entry.view.question}
+                    </p>
+                    {entry.view.planRows.length > 0 && (
+                      <PlanTable rows={entry.view.planRows} />
+                    )}
+                    <p className="m-0 text-sm wrap-anywhere">
+                      {entry.answerLabel === null
+                        ? "Answered"
+                        : `Answered: ${entry.answerLabel}`}
+                    </p>
+                    {entry.answerNote !== null && (
+                      <p className="m-0 text-sm wrap-anywhere whitespace-pre-wrap text-muted-foreground">
+                        {entry.answerNote}
+                      </p>
+                    )}
+                  </>
+                )}
+              </ItemContent>
+            </Item>
+          </li>
+        );
+      })}
+    </ol>
   );
 }

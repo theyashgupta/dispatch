@@ -13,6 +13,7 @@ interface ReplyFieldProps {
   disabled: boolean;
   sending: boolean;
   describedBy?: string | null;
+  sendLabel?: string;
   children?: ReactNode;
 }
 
@@ -25,6 +26,7 @@ export function ReplyField({
   disabled,
   sending,
   describedBy = null,
+  sendLabel = "Send reply",
   children,
 }: ReplyFieldProps) {
   return (
@@ -52,7 +54,7 @@ export function ReplyField({
           aria-describedby={describedBy ?? undefined}
           onClick={onSend}
         >
-          Send reply
+          {sendLabel}
         </Button>
         {children}
       </div>

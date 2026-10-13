@@ -13,7 +13,9 @@ export const NO_BRANCHES_TEXT =
 export const LOADING_TEXT = "Loading command centre";
 export const NO_MESSAGES_TEXT = "No messages yet.";
 export const CONVERSATION_UNAVAILABLE_TEXT =
-  "The conversation is not available. Open the terminal.";
+  "The conversation is not available.";
+export const OPEN_TERMINAL_LINK_TEXT = "Open the terminal.";
+export const COMMENT_BOX_ID = "centre-comment-box";
 const NOT_STARTED_TEXT = "Not started";
 
 export const OPEN_TERMINAL_LABEL = "Open terminal";
