@@ -2,14 +2,9 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { MutationObserver, QueryClient } from "@tanstack/react-query";
 import { DEFAULT_BOARD_KEY as LOCAL } from "../../shared/board-key.js";
-import {
-  getAnsweredDecisions,
-  getOpenDecisions,
-  postAction,
-} from "./attention-actions-api.js";
+import { getDecisions, postAction } from "./attention-actions-api.js";
 import {
   answerDecisionMutationOptions,
-  answeredDecisionsQueryOptions,
   attentionActionsKeys,
   loopReplyMutationOptions,
   openDecisionsQueryOptions,
@@ -68,9 +63,12 @@ test("the open decisions query reads the open decisions of the board", async () 
   assert.equal(calls[0]?.url, "/api/decisions?board=LOCAL&state=open");
 });
 
-test("getOpenDecisions throws on a failure status", async () => {
+test("getDecisions throws on a failure status", async () => {
   stubFetch({ status: 500, body: {} });
-  await assert.rejects(getOpenDecisions(LOCAL), /getOpenDecisions failed: 500/);
+  await assert.rejects(
+    getDecisions(LOCAL, "answered"),
+    /getDecisions failed: 500/,
+  );
 });
 
 test("a decision answer posts the option id and the note, and refreshes the decisions", async () => {
@@ -184,28 +182,6 @@ test("a refusal without a body reads the status text, and a network failure reso
     error: "offline",
     reason: null,
   });
-});
-
-test("the answered decisions query reads the answered decisions of the board every 3 s", async () => {
-  const options = answeredDecisionsQueryOptions(LOCAL);
-  assert.deepEqual(options.queryKey, [
-    "orchestration",
-    "LOCAL",
-    "decisions",
-    "answered",
-  ]);
-  assert.equal(options.refetchInterval, 3000);
-  stubFetch({ status: 200, body: { items: [{ id: "d2" }] } });
-  assert.deepEqual(await newClient().fetchQuery(options), [{ id: "d2" }]);
-  assert.equal(calls[0]?.url, "/api/decisions?board=LOCAL&state=answered");
-});
-
-test("getAnsweredDecisions throws on a failure status", async () => {
-  stubFetch({ status: 500, body: {} });
-  await assert.rejects(
-    getAnsweredDecisions(LOCAL),
-    /getAnsweredDecisions failed: 500/,
-  );
 });
 
 test("Try resume again posts to the card resume route and refreshes the orchestration reads", async () => {

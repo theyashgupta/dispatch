@@ -4,10 +4,6 @@ import type {
   OrchestrationSummary,
 } from "../../../../shared/types.js";
 import { http, httpError } from "@/lib/http";
-import {
-  postAction,
-  type ActionOutcome,
-} from "@/queries/attention-actions-api";
 
 export interface OrchestrationEventsParams {
   since?: number;
@@ -46,9 +42,4 @@ export async function fetchOrchestrationEvents(
   );
   if (!result.ok) throw httpError("fetchOrchestrationEvents", result);
   return result.data.events;
-}
-
-/** Try the resume of a dead session again: POST /api/cards/:id/resume. */
-export function retryResume(cardId: string): Promise<ActionOutcome> {
-  return postAction(`/api/cards/${encodeURIComponent(cardId)}/resume`, {});
 }

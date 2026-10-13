@@ -1,5 +1,3 @@
-import { clock } from "./usage-meters.js";
-
 export type SectionState =
   { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready" };
 
@@ -22,14 +20,4 @@ export function sectionState(queries: readonly QueryRead[]): SectionState {
   return queries.some((q) => q.data === undefined)
     ? { kind: "loading" }
     : { kind: "ready" };
-}
-
-/** Builds the stale badge text "Data from 12:41", or null while the stream is connected. */
-export function staleBadgeText(
-  connection: "connecting" | "connected" | "disconnected",
-  updatedAt: number,
-  timeZone?: string,
-): string | null {
-  if (connection !== "disconnected" || updatedAt === 0) return null;
-  return `Data from ${clock(new Date(updatedAt).toISOString(), timeZone, false)}`;
 }

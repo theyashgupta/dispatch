@@ -1,10 +1,10 @@
 import type { LucideIcon } from "lucide-react";
+import type { SessionTone } from "../../../shared/session-states.js";
 import { Badge } from "@/components/ui/badge";
-import type { BranchTone } from "@/modules/orchestrator/domain/centre-graph";
 
 interface ToneBadgeProps {
   label: string;
-  tone: BranchTone;
+  tone: SessionTone;
   glyph: LucideIcon;
 }
 

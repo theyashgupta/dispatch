@@ -1,19 +1,19 @@
-import { Link, useRouteContext } from "@tanstack/react-router";
+import { Link } from "@tanstack/react-router";
+import { staleText } from "../../../../shared/stale-text.js";
 import { PageHeaderActions } from "@/components/PageHeaderActions";
 import { Button } from "@/components/ui/button";
-import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { DashboardStaleBadge } from "@/modules/dashboard/components/DashboardStaleBadge";
-import { staleBadgeText } from "@/modules/dashboard/domain/section-state";
 import { useDashboardData } from "./use-dashboard-data";
 
 export function DashboardHeaderContainer() {
-  const { snapshot, connection } = useDashboardData();
-  const { appStore } = useRouteContext({ from: "__root__" });
-  const boardKey = useAppStore(appStore, (s) => s.board);
+  const { boardKey, snapshot, connection } = useDashboardData();
   return (
     <>
       <DashboardStaleBadge
-        staleText={staleBadgeText(connection, snapshot.dataUpdatedAt)}
+        staleText={staleText(
+          connection === "disconnected",
+          snapshot.dataUpdatedAt,
+        )}
       />
       <PageHeaderActions>
         <Button asChild variant="outline" size="sm">

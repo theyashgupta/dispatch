@@ -5,7 +5,6 @@ import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import type { Card, ClaudeAccountSummary } from "../../../../shared/types.js";
 import {
   attentionRows,
-  replyResultText,
   waitingText,
   type AttentionContext,
   type AttentionRow,
@@ -214,41 +213,6 @@ test("a usage stop reads the account of a wire-shape card", () => {
       }),
     )?.body,
     "Stopped at the usage limit. The limit resets at 05:30.",
-  );
-});
-
-test("a reply result reads Delivered, Not confirmed, or Not sent with the new state", () => {
-  assert.equal(
-    replyResultText(
-      { ok: true, result: "confirmed" },
-      "GROUP-1",
-      "needs_input",
-    ),
-    "Delivered",
-  );
-  assert.equal(
-    replyResultText({ ok: true, result: "unconfirmed" }, "GROUP-1", undefined),
-    "Not confirmed. Check the terminal.",
-  );
-  assert.equal(
-    replyResultText(
-      {
-        ok: false,
-        error: "session-state-refused",
-        reason: "session is at shell_prompt",
-      },
-      "GROUP-1",
-      "shell_prompt",
-    ),
-    "Not sent. GROUP-1 is now at Claude exited. Open the terminal.",
-  );
-  assert.equal(
-    replyResultText(
-      { ok: false, error: "no-live-session", reason: null },
-      "GROUP-1",
-      "needs_input",
-    ),
-    null,
   );
 });
 

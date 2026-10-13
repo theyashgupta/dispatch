@@ -1,4 +1,5 @@
-import type { DecisionItem, PlanEntry } from "./types.js";
+import { SESSION_STATES } from "./session-states.js";
+import type { DecisionItem, PlanEntry, SupervisorState } from "./types.js";
 
 export interface DecisionOptionView {
   id: string;
@@ -22,6 +23,11 @@ export const REPLY_COPY: Record<ReplyResult, string> = {
   confirmed: "Delivered",
   unconfirmed: "Not confirmed. Check the terminal.",
 };
+
+export const ACTION_LABELS = {
+  resume: "Resume loop",
+  retry_resume: "Try resume again",
+} as const;
 
 export interface StoredReply<T = ReplyResult> {
   result: T;
@@ -131,6 +137,21 @@ export function liveReplyResults<T>(
     }
   }
   return live;
+}
+
+/** Build the line under a reply after the send, for a confirmed or unconfirmed send or a refusal. */
+export function replyOutcomeText(
+  outcome:
+    | { ok: true; result: ReplyResult | null }
+    | { ok: false; error: string; reason: string | null },
+  title: string,
+  state: SupervisorState | undefined,
+): string | null {
+  if (outcome.ok) return REPLY_COPY[outcome.result ?? "unconfirmed"];
+  if (outcome.error !== "session-state-refused") return null;
+  const label =
+    state === undefined ? "another state" : SESSION_STATES[state].label;
+  return `Not sent. ${title} is now at ${label}. Open the terminal.`;
 }
 
 /** The toast or error line of a failed action, for example "Resume loop failed: there is no open session.". */
