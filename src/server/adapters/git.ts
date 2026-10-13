@@ -118,6 +118,22 @@ export async function revParseVerify(
   }
 }
 
+/** The text of `file` at `ref`, or null when git cannot show it. */
+export async function showFileAtRef(
+  repoPath: string,
+  ref: string,
+  file: string,
+): Promise<string | null> {
+  try {
+    const { stdout } = await run("git", ["show", `${ref}:${file}`], {
+      cwd: repoPath,
+    });
+    return stdout;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The default branch name from `origin/HEAD` (e.g. `refs/remotes/origin/main` -> `main`), or null.
  * `origin/HEAD` is frequently unset on local clones, so a missing symref swallows into null (never

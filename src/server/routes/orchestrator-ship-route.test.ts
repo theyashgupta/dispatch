@@ -442,3 +442,366 @@ void test("start_ship answers 409 loop-not-finished for a group with loop progre
   assert.equal(reply.body.error, "loop-not-finished");
   assert.equal(store.getCard(card.id)?.shipFlow, undefined);
 });
+
+/**
+ * A started SBX ticket card with a launch in `column`, its session branch ahead of `main` or level.
+ *
+ * @remarks The fake gh squash merge fails on an empty diff, so a flow that must merge needs a tree
+ * that `main` does not hold yet.
+ */
+async function launchedTicket(
+  column: "agent_done" | "needs_input" | null,
+  { ahead = true, launched = true, tree = "unit-1" } = {},
+): Promise<Card> {
+  const t = await store.createLocalCard(SBX, "launched ticket", "");
+  if (launched) {
+    await store.setOrchestratorFields(t.id, {
+      launch: { direction: "ship it" },
+    });
+  }
+  await store.setCardWorkspace(t.id, {
+    folder: stack.ws,
+    repos: [{ path: stack.repo, base: "main" }],
+  });
+  await store.completeStart(t.id, undefined, {
+    workspacePath: stack.ws,
+    tmuxSession: `dsp-${t.id}`,
+    branch: t.id,
+  });
+  if (column !== null) {
+    await store.applyMarker(
+      t.id,
+      undefined,
+      column,
+      undefined,
+      `marker-${t.id}`,
+      column === "agent_done" ? "status_agent_done" : "status_needs_input",
+    );
+  }
+  const tip = ahead
+    ? await gitOutput(
+        stack.repo,
+        "commit-tree",
+        await gitOutput(stack.repo, "rev-parse", `${tree}^{tree}`),
+        "-p",
+        "main",
+        "-m",
+        `${t.id} work`,
+      )
+    : "main";
+  await gitOutput(stack.repo, "branch", t.id, tip);
+  return store.getCard(t.id)!;
+}
+
+const awaitingShip: LoopProgress = {
+  ...FINISHED,
+  units: FINISHED.units.map((u) => ({
+    ...u,
+    branch: null,
+    phaseTotal: 1,
+    phases: [
+      {
+        number: 1,
+        name: "Ship it",
+        gate: "pass",
+        attempts: 1,
+        passedAt: "2026-10-07T00:00:00.000Z",
+      },
+    ],
+  })),
+};
+
+void test("start_ship answers 202 for a launched ticket card that is done, ahead and clean, and records shipped", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const card = await launchedTicket("agent_done", { tree: "unit-2" });
+  assert.equal(card.source, "local");
+  const reply = await shipOf(card, card.id);
+  assert.equal(reply.status, 202, JSON.stringify(reply.body));
+  const flow = reply.body.flow as ShipFlow;
+  assert.equal(flow.state, "running");
+  assert.equal(flow.rights, "merge");
+  assert.deepEqual(
+    flow.branches.map((b) => b.name),
+    [card.id],
+  );
+  await waitFor(
+    () => Promise.resolve(store.getCard(card.id)?.shipFlow?.state === "done"),
+    30_000,
+    "flow done",
+  );
+  assert.equal(store.getCard(card.id)?.shipFlow?.branches[0]?.state, "merged");
+  const shipped = store
+    .listOrchestrationEvents(SBX, 0, 10_000)
+    .filter(
+      (e) =>
+        e.kind === "group_state" &&
+        e.cardId === card.id &&
+        e.data.state === "shipped",
+    );
+  assert.equal(shipped.length, 1);
+});
+
+void test("start_ship answers 202 for a launched ticket card with Part A progress whose unit is built, awaiting /ship", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const card = await launchedTicket("agent_done", {
+    tree: "test/ship-specs",
+  });
+  await store.setLoopProgress(card.id, awaitingShip);
+  const reply = await shipOf(card, card.id);
+  assert.equal(reply.status, 202, JSON.stringify(reply.body));
+  await waitFor(
+    () => Promise.resolve(store.getCard(card.id)?.shipFlow?.state === "done"),
+    30_000,
+    "flow done",
+  );
+});
+
+void test("start_ship answers 400 not-group-card for a ticket card with no launch", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const card = await launchedTicket("agent_done", { launched: false });
+  const reply = await shipOf(card, card.id);
+  assert.equal(reply.status, 400);
+  assert.equal(reply.body.error, "not-group-card");
+  assert.equal(store.getCard(card.id)?.shipFlow, undefined);
+});
+
+void test("start_ship answers 409 card-not-done for a launched ticket card in Needs input and In progress", async () => {
+  await setPolicy({ shipRights: "merge" });
+  for (const column of ["needs_input", null] as const) {
+    const card = await launchedTicket(column);
+    const reply = await shipOf(card, card.id);
+    assert.equal(reply.status, 409, String(column));
+    assert.equal(reply.body.error, "card-not-done");
+    assert.equal(store.getCard(card.id)?.shipFlow, undefined);
+  }
+});
+
+void test("start_ship answers 400 invalid-branch-name for a launched ticket card and a branch that is not its session branch", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const card = await launchedTicket("agent_done");
+  for (const name of ["unit-1", "main"]) {
+    const reply = await shipOf(card, name);
+    assert.equal(reply.status, 400, name);
+    assert.equal(reply.body.error, "invalid-branch-name", name);
+    assert.equal(reply.body.branch, name, name);
+  }
+  assert.equal(store.getCard(card.id)?.shipFlow, undefined);
+});
+
+void test("start_ship answers 409 branch-not-ahead for a launched ticket card whose branch has no commit beyond the base", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const card = await launchedTicket("agent_done", { ahead: false });
+  const reply = await shipOf(card, card.id);
+  assert.equal(reply.status, 409);
+  assert.equal(reply.body.error, "branch-not-ahead");
+  assert.equal(reply.body.branch, card.id);
+  assert.equal(store.getCard(card.id)?.shipFlow, undefined);
+});
+
+void test("start_ship answers 409 worktree-dirty for a launched ticket card with an untracked file", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const card = await launchedTicket("agent_done");
+  const untracked = path.join(stack.worktree, "stray.txt");
+  try {
+    fs.writeFileSync(untracked, "x\n");
+    const reply = await shipOf(card, card.id);
+    assert.equal(reply.status, 409);
+    assert.equal(reply.body.error, "worktree-dirty");
+  } finally {
+    fs.rmSync(untracked, { force: true });
+  }
+  assert.equal(store.getCard(card.id)?.shipFlow, undefined);
+});
+
+void test("start_ship answers 409 engine-not-closed for a launched ticket card with an engine file at its session root", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const card = await launchedTicket("agent_done");
+  const engine = path.join(stack.ws, ".claude", "ralph-loop.local.md");
+  try {
+    fs.mkdirSync(path.dirname(engine), { recursive: true });
+    fs.writeFileSync(engine, "---\nactive: true\n---\n");
+    const reply = await shipOf(card, card.id);
+    assert.equal(reply.status, 409);
+    assert.equal(reply.body.error, "engine-not-closed");
+  } finally {
+    fs.rmSync(engine, { force: true });
+  }
+  assert.equal(store.getCard(card.id)?.shipFlow, undefined);
+});
+
+void test("start_ship answers 409 loop-not-finished for a launched ticket card whose unit is in progress", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const card = await launchedTicket("agent_done");
+  await store.setLoopProgress(card.id, {
+    ...awaitingShip,
+    units: awaitingShip.units.map((u) => ({ ...u, status: "in progress" })),
+  });
+  const reply = await shipOf(card, card.id);
+  assert.equal(reply.status, 409);
+  assert.equal(reply.body.error, "loop-not-finished");
+  assert.equal(store.getCard(card.id)?.shipFlow, undefined);
+});
+
+void test("start_ship answers 403 policy-refused for a launched ticket card when ship rights are none", async () => {
+  await setPolicy({ shipRights: "none" });
+  try {
+    const card = await launchedTicket("agent_done");
+    const reply = await shipOf(card, card.id);
+    assert.equal(reply.status, 403);
+    assert.equal(reply.body.error, "policy-refused");
+    assert.equal(store.getCard(card.id)?.shipFlow, undefined);
+  } finally {
+    await setPolicy({ shipRights: "merge" });
+  }
+});
+
+const doneFlow = (branchName: string): ShipFlow => ({
+  state: "done",
+  rights: "merge",
+  repository: stack.repo,
+  repo: null,
+  orchestratorId: "orc-sbx",
+  identity: { name: "Ship Test", email: "ship@example.com" },
+  branches: [
+    {
+      ...branch(branchName),
+      state: "merged",
+      pr: null,
+      checks: null,
+      identity: null,
+      admin: false,
+      tip: null,
+      checked: null,
+    },
+  ],
+  failedStep: null,
+  reason: null,
+  decisionId: null,
+  startedAt: "2026-10-07T00:00:00.000Z",
+  finishedAt: "2026-10-07T00:01:00.000Z",
+});
+
+void test("start_ship refuses 409 already-shipped for a card whose ship flow is done", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const ticket = await launchedTicket("agent_done");
+  const group = await finishedGroup();
+  for (const [card, name] of [
+    [ticket, ticket.id],
+    [group, "unit-1"],
+  ] as const) {
+    await store.setShipFlow(card.id, doneFlow(name));
+    const reply = await shipOf(card, name);
+    assert.equal(reply.status, 409, name);
+    assert.equal(reply.body.error, "already-shipped", name);
+    assert.deepEqual(store.getCard(card.id)?.shipFlow, doneFlow(name));
+  }
+});
+
+async function settled(card: Card): Promise<ShipFlow> {
+  await waitFor(
+    () =>
+      Promise.resolve(
+        store.getCard(card.id)?.shipFlow !== undefined &&
+          store.getCard(card.id)?.shipFlow?.state !== "running",
+      ),
+    30_000,
+    "flow settled",
+  );
+  return store.getCard(card.id)!.shipFlow!;
+}
+
+/** Cut the branch `name` from `test/ship-specs` with one new file, so its tree is not on `main` yet. */
+async function freshTree(name: string): Promise<string> {
+  await gitOutput(
+    stack.worktree,
+    "checkout",
+    "-q",
+    "-b",
+    name,
+    "test/ship-specs",
+  );
+  fs.writeFileSync(path.join(stack.worktree, `${name}.txt`), `${name}\n`);
+  await gitOutput(stack.worktree, "add", "-A");
+  await gitOutput(stack.worktree, "commit", "-qm", `${name} work`);
+  await gitOutput(stack.worktree, "checkout", "-q", "group-work");
+  return name;
+}
+
+void test("start_ship writes one ship_stopped group_state row naming a launched ticket card whose PR checks fail", async () => {
+  await setPolicy({ shipRights: "merge" });
+  setGhScenario(gh.scenario, { checks: "fail" });
+  try {
+    const card = await launchedTicket("agent_done", {
+      tree: await freshTree("stop-tree"),
+    });
+    const reply = await shipOf(card, card.id);
+    assert.equal(reply.status, 202, JSON.stringify(reply.body));
+    const flow = await settled(card);
+    assert.equal(flow.state, "stopped");
+    const stopped = store
+      .listOrchestrationEvents(SBX, 0, 10_000)
+      .filter(
+        (e) =>
+          e.kind === "group_state" &&
+          e.cardId === card.id &&
+          e.data.state === "ship_stopped",
+      );
+    assert.equal(stopped.length, 1);
+  } finally {
+    setGhScenario(gh.scenario, { checks: "pass" });
+  }
+});
+
+void test("start_ship refuses 409 ship-flow-running for a launched ticket card while another flow runs on the board", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const other = await launchedTicket("agent_done");
+  const card = await launchedTicket("agent_done");
+  await store.setShipFlow(other.id, {
+    ...doneFlow(other.id),
+    state: "running",
+    finishedAt: null,
+  });
+  try {
+    const reply = await shipOf(card, card.id);
+    assert.equal(reply.status, 409);
+    assert.equal(reply.body.error, "ship-flow-running");
+    assert.equal(store.getCard(card.id)?.shipFlow, undefined);
+  } finally {
+    await store.setShipFlow(other.id, {
+      ...doneFlow(other.id),
+      state: "stopped",
+    });
+  }
+});
+
+void test("start_ship answers 202 again for a card whose ship flow is stopped", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const card = await launchedTicket("agent_done", {
+    tree: await freshTree("reship-tree"),
+  });
+  await store.setShipFlow(card.id, {
+    ...doneFlow(card.id),
+    state: "stopped",
+    failedStep: "checking",
+    reason: "check command failed",
+  });
+  const reply = await shipOf(card, card.id);
+  assert.equal(reply.status, 202, JSON.stringify(reply.body));
+  const flow = await settled(card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+});
+
+void test("start_ship does not refuse already-shipped for a card whose done flow is for another repository", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const card = await launchedTicket("agent_done", {
+    tree: await freshTree("other-repo-tree"),
+  });
+  await store.setShipFlow(card.id, {
+    ...doneFlow(card.id),
+    repository: path.join(stack.root, "another-repo"),
+  });
+  const reply = await shipOf(card, card.id);
+  assert.equal(reply.status, 202, JSON.stringify(reply.body));
+  assert.equal((reply.body.flow as ShipFlow).repository, stack.repo);
+  await settled(card);
+});

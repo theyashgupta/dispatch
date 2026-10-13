@@ -230,6 +230,12 @@ A line that you type in the **Terminal** tab of the orchestrator is a direction.
 
 Dispatch updates a seeded playbook file that you never edited at the next start of Dispatch. Dispatch keeps a file that you edited.
 
+When a single card that the orchestrator started reaches Agent done, the orchestrator ships it. It calls `start_ship` with the session branch of the card. The ship checks are the same as for a group. The ship rights of the board decide what the flow does. With **None, I ship**, the orchestrator raises a decision item and you ship the branch.
+
+The orchestrator can prepare a release. It calls `release_prep` with the bump, the features and the merged pull requests. Dispatch reads the version of the base branch and creates a card **Release v<next version>** in **To Do**. The orchestrator starts that card with the **Release** playbook. The release session bumps the version, drafts the notes and records the demo. When the bump pull request is merged, the orchestrator tells the session, and the session publishes only when the **Ship rights** are **Open and merge PRs**. Else it asks you to publish.
+
+Before it starts a long loop, the orchestrator calls `list_accounts`. It chooses the account with the most weekly headroom and starts the card on that account. It never chooses usage credits. The start dialog that you use is unchanged.
+
 ## Groups and loops
 
 ### How a group starts
@@ -265,7 +271,7 @@ The loop also reports each phase gate and unit gate to Dispatch. The report uses
 ### How progress shows
 
 - The boards page **Loops** column shows each running loop as a group id and a percent.
-- The dashboard section **Progress per group** shows one row for each group that has a loop.
+- The dashboard section **Progress per group** shows one row for each group that has a loop. It also shows each single card that the orchestrator started, with the phases of its PRD.
 - The dashboard section **Changed since** shows the gate events.
 
 ## The dashboard
@@ -708,11 +714,13 @@ When the loop shows the state **Handing off** and the engine file says `handoff-
 
 If a repeated handoff request arrives in the first five minutes after the resume, the supervisor sends one line that cancels it.
 
+The supervisor also hands off a single PRD loop at the handoff percent. The loop writes its resume prompt in its feature folder.
+
 An orchestrator uses the same thresholds. Its request tells it to call `write_state` with the full state and `handoffReady` set to true. Then it prints `HANDOFF_READY <orchestrator id>`. The fresh session starts with a prompt to call `read_state` first.
 
 ## Ship flow
 
-The ship flow merges the branches of a finished group in order. It runs when the main orchestrator calls the `start_ship` tool for a group. The field **Ship rights** decides what it may do.
+The ship flow merges the branches of a finished group in order. It runs when the main orchestrator calls the `start_ship` tool for a group, or for a single card that it started. The field **Ship rights** decides what it may do.
 
 | Ship rights            | What the flow does                                                                                               |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------- |
@@ -751,7 +759,7 @@ When a branch fails, the flow stops. The block shows "Stopped at <step>: <reason
 
 ## Playbook reference
 
-A playbook is a markdown file with a name. Dispatch gives its text to Claude when a session starts. Dispatch seeds seven playbooks on the first boot of a machine. Each seeded playbook is a file in the `playbooks` folder of the Dispatch data folder. Dispatch seeds a name once. If you delete a seeded playbook, it stays deleted. Open **Playbooks** in the sidebar, group **System**, to edit, copy or delete playbooks.
+A playbook is a markdown file with a name. Dispatch gives its text to Claude when a session starts. Dispatch seeds eight playbooks on the first boot of a machine. Each seeded playbook is a file in the `playbooks` folder of the Dispatch data folder. Dispatch seeds a name once. If you delete a seeded playbook, it stays deleted. Open **Playbooks** in the sidebar, group **System**, to edit, copy or delete playbooks.
 
 Every seeded playbook has one input: the extra direction. It is the optional text that you type in the start dialog. The token `{extra}` in the playbook marks where the text goes. When you type nothing, Dispatch removes the block that holds the token.
 
@@ -824,6 +832,13 @@ Every seeded playbook has one input: the extra direction. It is the optional tex
   - Act on another board.
   - Answer its own decision item or approve a permission prompt.
   - Delete a branch, a worktree or a card that it did not create.
+
+### Release
+
+- **File:** `release.md`
+- **When to use:** you do not pick this playbook. The orchestrator starts it on the card that `release_prep` made.
+- **Inputs:** the extra direction.
+- **What it does:** it tells Claude to read the release card, bump the version in `package.json`, run the check command and commit the bump. Then it tells Claude to draft the release notes and record the demo. Claude never pushes, tags or opens a pull request. When the orchestrator says that the bump pull request merged, the orchestrator also names the current ship rights. Claude publishes the release only when those ship rights are merge, and never by hand. Else Claude asks you to publish.
 
 ### The tags key
 

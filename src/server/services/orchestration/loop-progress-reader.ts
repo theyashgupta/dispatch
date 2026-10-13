@@ -8,9 +8,11 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import type { Card, LoopProgress } from "../../../shared/types.js";
+import { isLoopCard } from "../../../shared/running-group.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import {
   buildLoopProgress,
+  buildPrdProgress,
   ENGINE_FILE,
   parseProgressFile,
   phaseDir,
@@ -18,6 +20,11 @@ import {
   reasonOf,
   unitFilePaths,
 } from "../domain/loop-progress.js";
+import {
+  featureDir,
+  parsePrdEngine,
+  prdSlugOf,
+} from "../domain/prd-progress.js";
 
 const MAX_BYTES = 1_048_576;
 const ROADMAP_PATTERN = /^ROADMAP.*\.md$/;
@@ -182,14 +189,18 @@ async function pickRoadmap(
   return chosen;
 }
 
-async function readModel(sessionRoot: string): Promise<LoopProgress | null> {
-  const root = path.resolve(sessionRoot);
-  const folders = await listFiles(
-    path.join(root, ".roadmap"),
-    null,
-    "progress.md",
-  );
-  if (folders.length === 0) return null;
+interface ReadOptions {
+  single?: boolean;
+  previous?: LoopProgress;
+}
+
+interface GuardedReader {
+  warnings: string[];
+  refused: Set<string>;
+  read: (rel: string) => Promise<string | null>;
+}
+
+async function guardedReader(root: string): Promise<GuardedReader> {
   const realRoot = await realpath(root);
   const warnings: string[] = [];
   const refused = new Set<string>();
@@ -199,13 +210,121 @@ async function readModel(sessionRoot: string): Promise<LoopProgress | null> {
     if (warnings.length > before) refused.add(rel);
     return text;
   };
+  return { warnings, refused, read };
+}
 
-  let engineText = await read(ENGINE_FILE);
+async function readEngineText(
+  reader: GuardedReader,
+): Promise<{ text: string | null; closed: boolean }> {
+  let text = await reader.read(ENGINE_FILE);
   let closed = false;
-  if (engineText === null && !refused.has(ENGINE_FILE)) {
-    engineText = await read(`${ENGINE_FILE}.done`);
+  if (text === null && !reader.refused.has(ENGINE_FILE)) {
+    text = await reader.read(`${ENGINE_FILE}.done`);
     closed = true;
   }
+  return { text, closed };
+}
+
+async function readPrdModel(
+  root: string,
+  previous: LoopProgress | undefined,
+): Promise<LoopProgress | null> {
+  let reader: GuardedReader;
+  try {
+    reader = await guardedReader(root);
+  } catch (error) {
+    if (isMissing(error)) return null;
+    throw error;
+  }
+  const { warnings, refused, read } = reader;
+  const { text: engineText, closed } = await readEngineText(reader);
+  const parsed = parsePrdEngine(engineText ?? "");
+  const sameLoop = parsed.slug === null || parsed.slug === previous?.slug;
+  const known = sameLoop ? previous?.prdFile : undefined;
+  const prdFile = parsed.prdPath ?? known ?? null;
+  const engine = engineText === null ? null : { text: engineText, closed };
+  if (prdFile === null) {
+    if (parsed.slug === null) return null;
+    warnings.push(`${ENGINE_FILE}: no PRD path in the loop prompt`);
+    return buildPrdProgress({
+      slug: parsed.slug,
+      prdFile: null,
+      readAt: new Date().toISOString(),
+      prdText: null,
+      statePath: null,
+      stateText: null,
+      attemptsPath: null,
+      attemptsText: null,
+      engine,
+      refused,
+      warnings,
+    });
+  }
+  const prdRel = path.isAbsolute(prdFile)
+    ? path.relative(root, prdFile)
+    : path.normalize(prdFile);
+  const outside = !isInside(root, path.resolve(root, prdRel));
+  const slug =
+    parsed.slug ??
+    (parsed.prdPath === null ? previous?.slug : undefined) ??
+    prdSlugOf(prdRel);
+  if (slug === null || slug === undefined) return null;
+
+  let prdText: string | null = null;
+  let statePath: string | null = null;
+  let stateText: string | null = null;
+  let attemptsPath: string | null = null;
+  let attemptsText: string | null = null;
+  if (outside) {
+    warnings.push(`${prdFile}: outside the session root`);
+    refused.add(prdFile);
+  } else {
+    prdText = await read(prdRel);
+    const dir = featureDir(prdRel, slug);
+    if (dir === null) {
+      warnings.push(`${prdRel}: no .planning/ folder in the PRD path`);
+    } else {
+      statePath = `${dir}/state.md`;
+      attemptsPath = `${dir}/attempts.md`;
+      stateText = await read(statePath);
+      attemptsText = await read(attemptsPath);
+    }
+  }
+  const model = buildPrdProgress({
+    slug,
+    prdFile: outside ? prdFile : prdRel,
+    readAt: new Date().toISOString(),
+    prdText,
+    statePath,
+    stateText,
+    attemptsPath,
+    attemptsText,
+    engine,
+    refused,
+    warnings,
+  });
+  if (outside) delete model.prdFile;
+  return model;
+}
+
+async function readModel(
+  sessionRoot: string,
+  options: ReadOptions,
+): Promise<LoopProgress | null> {
+  const root = path.resolve(sessionRoot);
+  const folders = await listFiles(
+    path.join(root, ".roadmap"),
+    null,
+    "progress.md",
+  );
+  if (folders.length === 0) {
+    return options.single === true
+      ? readPrdModel(root, options.previous)
+      : null;
+  }
+  const reader = await guardedReader(root);
+  const { warnings, refused, read } = reader;
+  const { text: engineText, closed } = await readEngineText(reader);
   const slug = pickSlug(folders, engineText, warnings);
   const progressText = await read(progressPathOf(slug));
   const roadmapFile = await pickRoadmap(root, progressText, warnings);
@@ -250,9 +369,10 @@ export async function readLoopFile(
  */
 export async function readLoopProgress(
   sessionRoot: string,
+  options: ReadOptions = {},
 ): Promise<LoopProgress | null> {
   try {
-    return await readModel(sessionRoot);
+    return await readModel(sessionRoot, options);
   } catch (error) {
     console.warn(`${LOG_PREFIX} ${sessionRoot}: ${reasonOf(error)}`);
     return null;
@@ -264,7 +384,7 @@ function isTracked(
 ): card is Card & { workspacePath: string } {
   return (
     card !== undefined &&
-    card.source === "group" &&
+    isLoopCard(card) &&
     card.column !== "done" &&
     card.workspacePath !== undefined &&
     card.workspacePath !== ""
@@ -275,10 +395,12 @@ function phaseDirOf(progress: LoopProgress, root: string): string | null {
   const unit = progress.units.find(
     (candidate) => candidate.number === progress.summary.currentUnit,
   );
-  const rel =
-    unit?.prdPath == null
-      ? null
-      : phaseDir(unit.prdPath, progress.slug, unit.number);
+  let rel: string | null = null;
+  if (progress.prdFile !== undefined) {
+    rel = featureDir(progress.prdFile, progress.slug);
+  } else if (unit?.prdPath != null) {
+    rel = phaseDir(unit.prdPath, progress.slug, unit.number);
+  }
   if (rel === null) return null;
   const dir = path.resolve(root, rel);
   return isInside(root, dir) ? dir : null;
@@ -292,7 +414,10 @@ async function refreshOnce(cardId: string): Promise<void> {
     const card = store.getCard(cardId);
     if (!isTracked(card)) return;
     const root = path.resolve(card.workspacePath);
-    const progress = await readLoopProgress(root);
+    const progress = await readLoopProgress(root, {
+      single: card.source !== "group",
+      previous: card.loopProgress,
+    });
     if (progress !== null) await store.setLoopProgress(cardId, progress);
   } catch (error) {
     console.warn(`${LOG_PREFIX} ${cardId}: ${reasonOf(error)}`);
@@ -311,7 +436,7 @@ async function refreshUntilQuiet(cardId: string): Promise<void> {
 }
 
 /**
- * Re-reads the loop files of one tracked group card and stores the result.
+ * Re-reads the loop files of one tracked loop card and stores the result.
  *
  * @remarks A call during a read queues exactly one more read and returns the in-flight promise, which settles after that rerun. The promise never rejects.
  */
@@ -342,7 +467,7 @@ interface CardWatch {
 }
 
 /**
- * Starts the file watches and the periodic read of every tracked group card, and returns the stop function.
+ * Starts the file watches and the periodic read of every tracked loop card, and returns the stop function.
  *
  * @remarks The timer also re-syncs the watch set, so folders that appear later get a watch within one interval.
  */

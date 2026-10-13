@@ -616,3 +616,193 @@ void test("the watch set follows the current unit across a unit boundary", async
     stop();
   }
 });
+
+const SINGLE_PRD = "repo/.planning/prds/demo.md";
+const SINGLE_DIR = "repo/.planning/demo-feature";
+
+function singleRoot(prdPath?: string): string {
+  const root = emptyTemp();
+  mkdirSync(join(root, ".claude"), { recursive: true });
+  mkdirSync(join(root, "repo/.planning/prds"), { recursive: true });
+  mkdirSync(join(root, SINGLE_DIR), { recursive: true });
+  writeFileSync(
+    join(root, ".claude/ralph-loop.local.md"),
+    `---\nactive: true\niteration: 2\nsession_id: abc\ncompletion_promise: "RALPH COMPLETE demo-feature"\n---\nExecute the PRD at ${prdPath ?? join(root, SINGLE_PRD)} per the ralph-loop skill.\n`,
+  );
+  writeFileSync(
+    join(root, SINGLE_PRD),
+    "# Demo feature\n\n### Phase 1: One\n\n### Phase 2: Two\n\n### Phase 3: Three\n",
+  );
+  writeFileSync(
+    join(root, SINGLE_DIR, "state.md"),
+    "phase 1 One GREEN 2026-10-11T04:00:00Z gate=pass\n",
+  );
+  writeFileSync(
+    join(root, SINGLE_DIR, "attempts.md"),
+    "phase 2 RED attempt 1 2026-10-11T05:00:00Z\n",
+  );
+  return root;
+}
+
+function launchedCard(root: string, launch: boolean): Card {
+  const card = groupCard(root, "in_progress", "linear");
+  return launch ? { ...card, launch: { direction: "x" } } : card;
+}
+
+void test("a single read gives one unit from the engine PRD", async () => {
+  const root = singleRoot();
+  const progress = await readLoopProgress(root, { single: true });
+  assert.ok(progress);
+  assert.equal(progress.prdFile, SINGLE_PRD);
+  assert.equal(progress.slug, "demo-feature");
+  assert.equal(progress.units.length, 1);
+  assert.deepEqual(
+    progress.units[0]?.phases.map((phase) => phase.gate),
+    ["pass", "fail", "pending"],
+  );
+  assert.equal(progress.engine?.active, true);
+  assert.deepEqual(progress.warnings, []);
+});
+
+void test("a single read keeps the PRD after the engine file is gone", async () => {
+  const root = singleRoot();
+  const first = await readLoopProgress(root, { single: true });
+  assert.ok(first);
+  const aside = emptyTemp();
+  renameSync(
+    join(root, ".claude/ralph-loop.local.md"),
+    join(aside, "engine.md"),
+  );
+  appendFileSync(
+    join(root, SINGLE_DIR, "state.md"),
+    "phase 2 Two GREEN 2026-10-11T06:00:00Z gate=pass\n",
+  );
+  const second = await readLoopProgress(root, {
+    single: true,
+    previous: first,
+  });
+  assert.ok(second);
+  assert.deepEqual(
+    second.units[0]?.phases.map((phase) => phase.gate),
+    ["pass", "pass", "pending"],
+  );
+  assert.equal(second.engine, null);
+  assert.equal(second.prdFile, SINGLE_PRD);
+});
+
+void test("a single read of a closed loop reads the renamed .done engine file", async () => {
+  const root = singleRoot();
+  appendFileSync(
+    join(root, SINGLE_DIR, "state.md"),
+    "phase 2 Two GREEN 2026-10-11T06:00:00Z gate=pass\nphase 3 Three GREEN 2026-10-11T07:00:00Z gate=pass\n",
+  );
+  renameSync(
+    join(root, ".claude/ralph-loop.local.md"),
+    join(root, ".claude/ralph-loop.local.md.done"),
+  );
+  const progress = await readLoopProgress(root, { single: true });
+  assert.ok(progress);
+  assert.equal(progress.prdFile, SINGLE_PRD);
+  assert.equal(progress.engine?.closed, true);
+  assert.deepEqual(
+    progress.units[0]?.phases.map((phase) => phase.gate),
+    ["pass", "pass", "pass"],
+  );
+  assert.equal(progress.units[0]?.statusText, "built, awaiting /ship");
+  assert.deepEqual(progress.warnings, []);
+});
+
+void test("a read without single stays null for a root with no ledger", async () => {
+  assert.equal(await readLoopProgress(singleRoot()), null);
+});
+
+void test("an engine PRD path outside the root warns and reads no phases", async () => {
+  const root = singleRoot("/elsewhere/repo/.planning/prds/demo.md");
+  const progress = await readLoopProgress(root, { single: true });
+  assert.ok(progress);
+  assert.deepEqual(progress.warnings, [
+    "/elsewhere/repo/.planning/prds/demo.md: outside the session root",
+  ]);
+  assert.deepEqual(progress.units[0]?.phases, []);
+  assert.equal(
+    progress.units[0]?.prdPath,
+    "/elsewhere/repo/.planning/prds/demo.md",
+  );
+  assert.equal(progress.prdFile, undefined);
+});
+
+void test("a relative engine PRD path reads like the absolute one", async () => {
+  const relative = await readLoopProgress(singleRoot(SINGLE_PRD), {
+    single: true,
+  });
+  const absolute = await readLoopProgress(singleRoot(), { single: true });
+  assert.ok(relative && absolute);
+  assert.equal(relative.prdFile, SINGLE_PRD);
+  assert.deepEqual(relative.units, absolute.units);
+  assert.deepEqual(relative.summary, absolute.summary);
+  assert.deepEqual(relative.warnings, []);
+});
+
+void test("a PRD above 1 MiB gives the size warning and no phases", async () => {
+  const root = singleRoot();
+  writeFileSync(join(root, SINGLE_PRD), "a".repeat(2 * 1024 * 1024));
+  const progress = await readLoopProgress(root, { single: true });
+  assert.ok(progress);
+  assert.deepEqual(progress.warnings, [`${SINGLE_PRD}: larger than 1 MiB`]);
+  assert.deepEqual(progress.units[0]?.phases, []);
+  assert.equal(progress.units[0]?.phaseTotal, null);
+});
+
+void test("an engine with a new slug and no PRD line does not borrow the previous PRD", async () => {
+  const root = singleRoot();
+  const first = await readLoopProgress(root, { single: true });
+  assert.ok(first);
+  writeFileSync(
+    join(root, ".claude/ralph-loop.local.md"),
+    '---\nactive: true\niteration: 1\nsession_id: abc\ncompletion_promise: "RALPH COMPLETE other-feature"\n---\nhello\n',
+  );
+  const second = await readLoopProgress(root, {
+    single: true,
+    previous: first,
+  });
+  assert.ok(second);
+  assert.equal(second.slug, "other-feature");
+  assert.deepEqual(second.units[0]?.phases, []);
+  assert.equal(second.prdFile, undefined);
+  assert.deepEqual(second.warnings, [
+    ".claude/ralph-loop.local.md: no PRD path in the loop prompt",
+  ]);
+});
+
+void test("a launched ticket card stores the one unit progress", async () => {
+  const root = singleRoot();
+  const recorded: Recorded[] = [];
+  installRepo(() => launchedCard(root, true), recorded);
+  await refreshLoopProgress("card-1");
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0]?.progress.units.length, 1);
+  assert.equal(recorded[0]?.progress.prdFile, SINGLE_PRD);
+});
+
+void test("a launched card drops the previous PRD phases when the engine names a new slug", async () => {
+  const root = singleRoot();
+  const recorded: Recorded[] = [];
+  installRepo(() => launchedCard(root, true), recorded);
+  await refreshLoopProgress("card-1");
+  writeFileSync(
+    join(root, ".claude/ralph-loop.local.md"),
+    '---\nactive: true\niteration: 1\nsession_id: abc\ncompletion_promise: "RALPH COMPLETE other-feature"\n---\nhello\n',
+  );
+  await refreshLoopProgress("card-1");
+  assert.equal(recorded.length, 2);
+  assert.equal(recorded[1]?.progress.slug, "other-feature");
+  assert.deepEqual(recorded[1]?.progress.units[0]?.phases, []);
+});
+
+void test("a ticket card with no launch stores nothing", async () => {
+  const root = singleRoot();
+  const recorded: Recorded[] = [];
+  installRepo(() => launchedCard(root, false), recorded);
+  await refreshLoopProgress("card-1");
+  assert.equal(recorded.length, 0);
+});

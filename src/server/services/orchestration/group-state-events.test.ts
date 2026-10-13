@@ -25,6 +25,21 @@ const rows = (cardId: string) =>
     .listOrchestrationEvents(SBX, 0, 500)
     .filter((e) => e.cardId === cardId && e.kind === "group_state");
 
+const launchedTicket = async (launched: boolean) => {
+  const card = await store.createLocalCard(SBX, "launched ticket", "");
+  await store.completeStart(card.id, undefined, {
+    workspacePath: `/tmp/ws-${card.id}`,
+    tmuxSession: `dsp-${card.id}`,
+    branch: card.id,
+  });
+  if (launched) {
+    await store.setOrchestratorFields(card.id, {
+      launch: { playbook: "Write code directly", direction: "" },
+    });
+  }
+  return store.getCard(card.id)!;
+};
+
 void test("a group card gets one event with the board key, card id, session id and data", async () => {
   const { g } = await startedGroup(store, { board: SBX });
   recordGroupState(g, "agent_done", "DONE marker");
@@ -36,6 +51,56 @@ void test("a group card gets one event with the board key, card id, session id a
     state: "agent_done",
     reason: "DONE marker",
   });
+});
+
+void test("a launched ticket card writes one event for each of agent_done, needs_input, loop_error and usage_limit", async () => {
+  const card = await launchedTicket(true);
+  for (const state of [
+    "agent_done",
+    "needs_input",
+    "loop_error",
+    "usage_limit",
+  ] as const) {
+    recordGroupState(card, state, `why ${state}`);
+  }
+  assert.deepEqual(
+    rows(card.id).map((e) => e.data.state),
+    ["agent_done", "needs_input", "loop_error", "usage_limit"],
+  );
+  assert.ok(rows(card.id).every((e) => e.cardId === card.id));
+});
+
+void test("a launched ticket card repeats a state only after a working row", async () => {
+  const card = await launchedTicket(true);
+  recordGroupState(card, "agent_done", "one");
+  recordGroupState(card, "agent_done", "two");
+  assert.equal(rows(card.id).length, 1);
+  store.appendOrchestrationEvent({
+    boardKey: SBX,
+    cardId: card.id,
+    sessionId: null,
+    kind: "supervisor_state",
+    data: { from: "idle", to: "working" },
+    ts: new Date().toISOString(),
+  });
+  recordGroupState(card, "agent_done", "three");
+  assert.deepEqual(
+    rows(card.id).map((e) => e.data.reason),
+    ["one", "three"],
+  );
+});
+
+void test("a ticket card with no launch writes no event", async () => {
+  const card = await launchedTicket(false);
+  for (const state of [
+    "agent_done",
+    "needs_input",
+    "loop_error",
+    "usage_limit",
+  ] as const) {
+    recordGroupState(card, state, "x");
+  }
+  assert.equal(rows(card.id).length, 0);
 });
 
 void test("a ticket card and the orchestrator card write no event", async () => {
@@ -90,6 +155,16 @@ void test("a repeat is written again after the card's session went back to worki
     rows(g.id).map((e) => e.data.reason),
     ["one", "again"],
   );
+});
+
+void test("two start_failed states in a row write two rows for a launched ticket and a group", async () => {
+  const ticket = await launchedTicket(true);
+  const { g } = await startedGroup(store, { board: SBX });
+  for (const card of [ticket, g]) {
+    recordGroupState(card, "start_failed", "start failed at worktree", null);
+    recordGroupState(card, "start_failed", "start failed at worktree", null);
+    assert.equal(rows(card.id).length, 2);
+  }
 });
 
 void test("a failing append is logged and never thrown", async () => {

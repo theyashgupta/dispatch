@@ -23,6 +23,7 @@ const { projectsDirOf } = await import("../../adapters/transcript.js");
 const { setHooksRuntime, setOrchestrationConfig } =
   await import("../infra/config-holder.js");
 const { hookSettingsPath } = await import("../infra/paths.js");
+const { upsertAccount } = await import("./claude-accounts.js");
 setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
 const HOSTILE_ARG = "be terse; $(id) `id` && echo pwned | cat";
 setOrchestrationConfig({
@@ -291,6 +292,73 @@ async function kickoffWithRecordTimer(
     },
   };
 }
+
+void test("starting claude resolves the account the start asked for, not the active account", async () => {
+  await store.load();
+  const card = await store.createLocalCard(
+    DEFAULT_BOARD_KEY,
+    "asked account",
+    "",
+  );
+  const missing = "99999999-9999-4999-8999-999999999999";
+  const tmuxSession = `dsp-asked-account-${process.pid}`;
+  const ctx = {
+    card,
+    identifier: card.identifier,
+    sessionName: `asked-account-${process.pid}`,
+    sessionId: undefined,
+    workspacePath: env.root,
+    requestedAccountId: missing,
+    warnings: [],
+  } as unknown as SagaContext;
+  await assert.rejects(
+    stepNamed("starting claude").run(ctx),
+    new RegExp(`${missing} is no longer registered`),
+  );
+  assert.equal(await tmux.hasSession(`=${tmuxSession}`), false);
+});
+
+void test("starting claude with no requested account resolves the active account", async () => {
+  await store.load();
+  const card = await store.createLocalCard(
+    DEFAULT_BOARD_KEY,
+    "active account",
+    "",
+  );
+  const active = "88888888-8888-4888-8888-888888888888";
+  await upsertAccount({
+    id: active,
+    email: "active-account@example.com",
+    orgId: "org-active",
+    orgName: "Org Active",
+    subscriptionType: "pro",
+    createdAt: "2026-09-02T00:00:00.000Z",
+    lastLoginAt: "2026-09-02T00:00:00.000Z",
+  });
+  const config = {
+    linearApiKey: "",
+    claudeArgs: `--append-system-prompt '${HOSTILE_ARG}'`,
+  };
+  setOrchestrationConfig({ ...config, activeClaudeAccountId: active });
+  const tmuxSession = `dsp-active-account-${process.pid}`;
+  const ctx = {
+    card,
+    identifier: card.identifier,
+    sessionName: `active-account-${process.pid}`,
+    sessionId: undefined,
+    workspacePath: env.root,
+    warnings: [],
+  } as unknown as SagaContext;
+  try {
+    await assert.rejects(
+      stepNamed("starting claude").run(ctx),
+      /active-account@example\.com has no config directory/,
+    );
+  } finally {
+    setOrchestrationConfig(config);
+  }
+  assert.equal(await tmux.hasSession(`=${tmuxSession}`), false);
+});
 
 for (const [title, label, runtime] of [
   ["silent-pane", "the pane channel", { capable: true, statusChannel: "pane" }],

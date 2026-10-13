@@ -144,6 +144,7 @@ Mount prefix: `/api/orchestrator`.
 | GET    | `/api/orchestrator/cards/:id`                      | Orchestrator token | Tool `get_card`: read one card of the board with its members.                                       |
 | GET    | `/api/orchestrator/sessions`                       | Orchestrator token | Tool `list_sessions`: list the sessions of the board, only the live ones when asked.                |
 | GET    | `/api/orchestrator/groups/:id/progress`            | Orchestrator token | Tool `get_group_progress`: read the loop progress of one group card.                                |
+| GET    | `/api/orchestrator/cards/:id/progress`             | Orchestrator token | Tool `get_card_progress`: read the loop progress of one ticket card that `start_card` started.      |
 | GET    | `/api/orchestrator/sessions/:cardId/pane`          | Orchestrator token | Tool `read_pane_tail`: read the last lines of the terminal of a session.                            |
 | GET    | `/api/orchestrator/events`                         | Orchestrator token | Tool `list_events`: list the board events after a cursor, oldest first.                             |
 | GET    | `/api/orchestrator/policy`                         | Orchestrator token | Tool `get_policy`: read the policy of the caller with the running loop count and the group costs.   |
@@ -163,13 +164,15 @@ Mount prefix: `/api/orchestrator`.
 | POST   | `/api/orchestrator/sessions/:cardId/stop`          | Orchestrator token | Tool `stop_session`: press Escape in a session pane and park it at Needs input.                     |
 | POST   | `/api/orchestrator/decisions`                      | Orchestrator token | Tool `create_decision_item`: raise a decision item for the user to answer.                          |
 | POST   | `/api/orchestrator/events/wait`                    | Orchestrator token | Tool `wait_for_event`: hold the call until a board event matches or the time limit passes.          |
-| POST   | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `start_ship`: start the ship flow of a finished group card.                                    |
+| POST   | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `start_ship`: start the ship flow of a finished group card or a launched single card.          |
 | GET    | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `get_ship_state`: read the stored ship flow of a group card.                                   |
 | GET    | `/api/orchestrator/state`                          | Orchestrator token | Tool `read_state`: read the saved state of the calling orchestrator.                                |
 | PUT    | `/api/orchestrator/state`                          | Orchestrator token | Tool `write_state`: replace the saved state of the calling orchestrator.                            |
 | GET    | `/api/orchestrator/playbooks`                      | Orchestrator token | Tool `list_playbooks`: list the playbooks with the name, the when line and the source.              |
 | GET    | `/api/orchestrator/rulebook`                       | Orchestrator token | Tool `get_rulebook`: read the orchestration rule book.                                              |
+| GET    | `/api/orchestrator/accounts`                       | Orchestrator token | Tool `list_accounts`: list the Claude accounts with state and usage windows, from the cached meter. |
 | POST   | `/api/orchestrator/cards/:cardId/start`            | Orchestrator token | Tool `start_card`: start the session of one ticket card with a playbook and a direction.            |
+| POST   | `/api/orchestrator/releases`                       | Orchestrator token | Tool `release_prep`: create a To Do release card with the next version from the base branch.        |
 
 ### `routes/board.route.ts`
 
@@ -5888,6 +5891,8 @@ Scenario 5 (tests/e2e/scenario-5-wake.e2e.ts) proves that the server wakes the o
 
 Scenario 6 (tests/e2e/scenario-6-intake-judgment.e2e.ts) proves that the orchestrator judges an intake and starts three loops inside a cap of 2. The board has four tickets (a quick fix, a single feature and two related tickets), the policy **Ask me for each roadmap** and a cap of 2. The fake orchestrator reads the rule book and the playbooks, raises one plan decision item and waits for it. The test answers the plan through `POST /api/decisions/:id/answer`. The orchestrator then calls `start_card` for the quick fix with "Write code directly" and for the single feature with "PRD + Ralph Loop", and creates a group of the two related tickets with "Roadmap Loop". The test checks that the accepted `start_card` and `start_group` rows are in that order, that each card and the group carry their playbook, and that the first `start_group` answers 403 `policy-refused` and starts no session. The test then makes the quick fix card reach Agent done with a Stop hook, which frees a slot, and checks that the second `start_group` starts the group. A watcher checks that no more than 2 cards or groups hold a slot at any time. The scenario types no key into any pane, and a static check of its own files enforces that.
 
+Scenario 6 part B (tests/e2e/scenario-6b-ship-order.e2e.ts) proves the ship order and the release version. The board has a cap of 3, the ship rights **merge** and a sample repository with `package.json` version `1.2.3`. The test calls the orchestrator routes with a minted token and starts a quick fix with "Write code directly", a single feature with "PRD + Ralph Loop" and a group of two tickets, and checks that `start_ship` of the running feature answers 409 `card-not-done`. Each session commits on its branch and sends the done Stop hook, and the feature card carries seeded loop files with every phase passed and a closed engine. The test checks one `agent_done` `group_state` event and one wake line for the feature, and that `get_card_progress` and the card read show its phases. It then ships the quick fix, the feature and the group one at a time and checks that the fake `gh` log creates and merges their PRs in that order and that the bare origin `main` holds the three files. `release_prep` with bump `minor` creates `Release v1.3.0` in To Do, and a second call answers 409 `release-exists`. A watcher checks that no more than 3 cards or groups hold a slot at any time.
+
 The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
 ## Orchestration Initiative
@@ -5908,8 +5913,9 @@ root (`card.workspacePath`): the one `.roadmap/<slug>/progress.md`, the roadmap 
 that `progress.md` line 1 names (else the only `ROADMAP*.md`), the loop engine file
 `.claude/ralph-loop.local.md` (else its `.done` copy), and for each unit its PRD and the
 `state.md` and `attempts.md` files of `<repo>/.planning/<slug>-unit-<n>/`. The pure parsers are in
-`loop-progress.ts`. The result is `Card.loopProgress`. A tracked card is a group card that is not
-in Done and has a `workspacePath`.
+`loop-progress.ts`. The result is `Card.loopProgress`. A tracked card is a loop card
+(a group card, or a ticket card that `start_card` started) that is not in Done and has a
+`workspacePath`. For a ticket card the reader reads its single PRD loop.
 
 **Refresh.** The reader reads a tracked card when a watched folder changes (300 ms debounce per
 card) and every 60 s. The watched folders are the session root, `.claude/`, `.roadmap/<slug>/`
@@ -6191,7 +6197,7 @@ reads the identity or writes, `assertAheadAndClean` resolves the base once. The 
 `branch-not-ahead`) and the worktree must be clean (409 `worktree-dirty`). A failed git call of
 these two checks answers 409 `no-workspace`. A group with loop progress keeps the D-8 rules.
 
-**MCP server.** `dispatch mcp` serves the 30 tools over stdio. `bootstrap/cli.ts` reads and checks
+**MCP server.** `dispatch mcp` serves the 33 tools over stdio. `bootstrap/cli.ts` reads and checks
 `DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and
 `bootstrap/mcp-tools.ts` holds the zod input and the description of each tool. The dependency
 cruiser rule `mcp-server-isolated` refuses an import of `routes`, `services`, `store`, `adapters`

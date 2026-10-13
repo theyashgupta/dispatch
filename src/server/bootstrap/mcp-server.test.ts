@@ -81,13 +81,13 @@ describe("dispatch mcp", () => {
     await new Promise<void>((resolve) => fake.close(() => resolve()));
   });
 
-  it("lists the 30 tools", async () => {
+  it("lists the 33 tools", async () => {
     const { tools } = await client.listTools();
     assert.deepEqual(
       tools.map((t) => t.name).sort(),
       MCP_TOOLS.map((t) => t.name).sort(),
     );
-    assert.equal(tools.length, 30);
+    assert.equal(tools.length, 33);
   });
 
   it("sends get_card as a GET with the token header", async () => {

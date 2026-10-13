@@ -2,8 +2,14 @@ import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
 import { parseBoardKey } from "../../../shared/board-key.js";
-import type { BoardKey, BoardPolicy, Card } from "../../../shared/types.js";
+import type {
+  BoardKey,
+  BoardPolicy,
+  Card,
+  Config,
+} from "../../../shared/types.js";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { startedGroup } from "../../test-support/group-fixtures.js";
 import {
@@ -19,8 +25,9 @@ const { tempRepoWithWorkspace } =
 const { setOrchestrationConfig } = await import("../infra/config-holder.js");
 const { seedPlaybooks } = await import("../infra/playbooks.js");
 const { runningLoops } = await import("./boards.js");
-const { sessionStarter } = await import("./start-session.js");
+const { sessionStarter, startSession } = await import("./start-session.js");
 const { startOrchestratorCard } = await import("./orchestrator-cards.js");
+const { accountDir, upsertAccount } = await import("./claude-accounts.js");
 
 const SBX = parseBoardKey("SBX") as BoardKey;
 const NOB = parseBoardKey("NOB") as BoardKey;
@@ -31,10 +38,20 @@ const CALLER = { boardKey: SBX, orchestratorId: "orc-sbx" };
 const PLAYBOOK = "Write code directly";
 
 const starts: { id: string; extraDirection: string; playbook?: string }[] = [];
-sessionStarter.start = (id, extraDirection, _config, opts) => {
+const startAccounts = new Map<string, string | undefined>();
+const startOptions = new Map<string, Record<string, unknown> | undefined>();
+const recordStart: typeof sessionStarter.start = (
+  id,
+  extraDirection,
+  _config,
+  opts,
+) => {
   starts.push({ id, extraDirection, playbook: opts?.playbook });
+  startAccounts.set(id, opts?.account);
+  startOptions.set(id, opts);
   return Promise.resolve();
 };
+sessionStarter.start = recordStart;
 
 setOrchestrationConfig({ linearApiKey: "" });
 await store.load();
@@ -349,10 +366,9 @@ void test("two overlapping starts under one free slot start one card", async () 
   await setPolicy({ concurrencyCap: runningLoops(SBX) + 1 });
   const [a, b] = [await ticket(), await ticket()];
   let started: Card | undefined;
-  sessionStarter.start = (id, extraDirection, _config, opts) => {
-    starts.push({ id, extraDirection, playbook: opts?.playbook });
+  sessionStarter.start = (id, extraDirection, config, opts) => {
     store.beginStart(id);
-    return Promise.resolve();
+    return recordStart(id, extraDirection, config, opts);
   };
   try {
     const results = await Promise.allSettled([
@@ -375,10 +391,7 @@ void test("two overlapping starts under one free slot start one card", async () 
     started = [a, b][1 - lost];
   } finally {
     if (started) store.endStart(started.id);
-    sessionStarter.start = (id, extraDirection, _config, opts) => {
-      starts.push({ id, extraDirection, playbook: opts?.playbook });
-      return Promise.resolve();
-    };
+    sessionStarter.start = recordStart;
     await setPolicy({ concurrencyCap: 10 });
   }
 });
@@ -388,10 +401,9 @@ void test("two parallel starts of one card with different playbooks start one se
   assert.notEqual(PLAYBOOK_B, PLAYBOOK);
   const card = await ticket();
   const startsBefore = starts.length;
-  sessionStarter.start = (id, extraDirection, _config, opts) => {
-    starts.push({ id, extraDirection, playbook: opts?.playbook });
+  sessionStarter.start = (id, extraDirection, config, opts) => {
     store.beginStart(id);
-    return Promise.resolve();
+    return recordStart(id, extraDirection, config, opts);
   };
   try {
     const playbooks = [PLAYBOOK, PLAYBOOK_B];
@@ -413,9 +425,143 @@ void test("two parallel starts of one card with different playbooks start one se
     assert.equal(store.getCard(card.id)?.launch?.playbook, playbooks[won]);
   } finally {
     store.endStart(card.id);
-    sessionStarter.start = (id, extraDirection, _config, opts) => {
-      starts.push({ id, extraDirection, playbook: opts?.playbook });
-      return Promise.resolve();
-    };
+    sessionStarter.start = recordStart;
   }
+});
+
+const FLB = parseBoardKey("FLB") as BoardKey;
+const blockedRoot = path.join(env.root, "not-a-folder");
+fs.writeFileSync(blockedRoot, "");
+await store.createBoard({
+  key: FLB,
+  name: "Failing starts",
+  workspaceRoot: blockedRoot,
+  repositories: [],
+  linearTeamKeys: [],
+});
+
+async function failedStart(launched: boolean): Promise<Card> {
+  const card = await store.createLocalCard(FLB, "failing start", "");
+  if (launched) {
+    await store.setOrchestratorFields(card.id, {
+      launch: { playbook: PLAYBOOK, direction: "" },
+    });
+  }
+  await startSession(card.id, "", {} as Config);
+  return store.getCard(card.id)!;
+}
+
+const startFailedRows = (cardId: string) =>
+  store
+    .listOrchestrationEvents(FLB, 0, 500)
+    .filter(
+      (e) =>
+        e.cardId === cardId &&
+        e.kind === "group_state" &&
+        e.data.state === "start_failed",
+    );
+
+void test("a failed start of a launched ticket writes one start_failed group_state row naming the step", async () => {
+  const card = await failedStart(true);
+  assert.ok(card.startError);
+  const added = startFailedRows(card.id);
+  assert.equal(added.length, 1);
+  assert.equal(added[0].data.reason, `start failed at ${card.startError.step}`);
+});
+
+void test("a failed start of a ticket with no launch writes no group_state row", async () => {
+  const card = await failedStart(false);
+  assert.ok(card.startError);
+  assert.equal(startFailedRows(card.id).length, 0);
+});
+
+void test("start_card with an unknown account is refused with unknown-account and starts nothing", async () => {
+  const card = await ticket();
+  const input = { playbook: PLAYBOOK, account: randomUUID() };
+  await refused(card, input, ValidationError, "unknown-account");
+  await runningTicket(true);
+  await setPolicy({ concurrencyCap: runningLoops(SBX) });
+  try {
+    await refused(card, input, ValidationError, "unknown-account");
+  } finally {
+    await setPolicy({ concurrencyCap: 10 });
+  }
+});
+
+void test("start_card refuses a registered account with no config dir as unknown-account and starts nothing", async () => {
+  const registered = randomUUID();
+  await upsertAccount({
+    id: registered,
+    email: "nodir@example.com",
+    orgId: "org-nodir",
+    orgName: "Org Nodir",
+    subscriptionType: "pro",
+    createdAt: "2026-09-02T00:00:00.000Z",
+    lastLoginAt: "2026-09-02T00:00:00.000Z",
+  });
+  assert.equal(fs.existsSync(accountDir(registered)), false);
+  await refused(
+    await ticket(),
+    { playbook: PLAYBOOK, account: registered },
+    ValidationError,
+    "unknown-account",
+  );
+});
+
+void test("start_card with account default and with a registered account passes it to the session start", async () => {
+  const registered = randomUUID();
+  await upsertAccount({
+    id: registered,
+    email: "added@example.com",
+    orgId: "org-added",
+    orgName: "Org Added",
+    subscriptionType: "pro",
+    createdAt: "2026-09-02T00:00:00.000Z",
+    lastLoginAt: "2026-09-02T00:00:00.000Z",
+  });
+  fs.mkdirSync(accountDir(registered), { recursive: true });
+  for (const account of ["default", registered]) {
+    const card = await ticket();
+    await startOrchestratorCard(CALLER, card, { playbook: PLAYBOOK, account });
+    assert.equal(starts.at(-1)?.id, card.id);
+    assert.equal(startAccounts.get(card.id), account);
+  }
+});
+
+void test("start_card with no account passes no account", async () => {
+  const card = await ticket();
+  await startOrchestratorCard(CALLER, card, { playbook: PLAYBOOK });
+  assert.equal(starts.at(-1)?.id, card.id);
+  assert.equal(startAccounts.has(card.id), true);
+  assert.equal(startAccounts.get(card.id), undefined);
+});
+
+void test("start_card with a chosen account passes the account and no pin, and stores no accountPinned", async () => {
+  const registered = randomUUID();
+  await upsertAccount({
+    id: registered,
+    email: "unpinned@example.com",
+    orgId: "org-unpinned",
+    orgName: "Org Unpinned",
+    subscriptionType: "pro",
+    createdAt: "2026-09-02T00:00:00.000Z",
+    lastLoginAt: "2026-09-02T00:00:00.000Z",
+  });
+  fs.mkdirSync(accountDir(registered), { recursive: true });
+  const card = await ticket();
+  await startOrchestratorCard(CALLER, card, {
+    playbook: PLAYBOOK,
+    account: registered,
+  });
+  const options = startOptions.get(card.id) ?? {};
+  assert.equal(options.account, registered);
+  assert.deepEqual(
+    Object.keys(options).filter((k) => /pin/i.test(k)),
+    [],
+  );
+  const sessions = store.getCard(card.id)?.sessions ?? [];
+  assert.equal(
+    sessions.some((s) => s.accountPinned !== undefined),
+    false,
+  );
 });

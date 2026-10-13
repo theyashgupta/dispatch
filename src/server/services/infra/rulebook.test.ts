@@ -57,3 +57,34 @@ void test("the rule book has no em dash, no double hyphen, no user path and no s
   assert.equal(markdown.includes("/Users/"), false);
   assert.equal(markdown.includes("DISPATCH_STATUS"), false);
 });
+
+void test("the rule book names get_card_progress and the single card handoff, and not supervisor_state", () => {
+  assert.ok(markdown.includes("get_card_progress"));
+  assert.ok(
+    markdown.includes(
+      "For a group or a single card at the handoff percent, call `request_handoff`.",
+    ),
+  );
+  assert.equal(markdown.includes("supervisor_state"), false);
+});
+
+void test("the rule book names release_prep, list_accounts and start_ship for a single card, and no decision item for a single ship or a release", () => {
+  for (const text of [
+    "release_prep",
+    "list_accounts",
+    "`account`",
+    "Release playbook",
+    "send_input",
+    "Never choose usage credits",
+    "Ship a single card that `start_card` started",
+  ]) {
+    assert.ok(markdown.includes(text), text);
+  }
+  for (const text of ["works on group cards only", "has no release tool"]) {
+    assert.equal(markdown.includes(text), false, text);
+  }
+});
+
+void test("the rule book tells the orchestrator to read get_policy before it sends the ship rights to the release session", () => {
+  assert.ok(markdown.includes("call `get_policy`. Then call `send_input`"));
+});

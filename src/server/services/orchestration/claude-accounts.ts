@@ -395,6 +395,20 @@ export async function readRegistry(): Promise<ClaudeAccountRecord[]> {
 }
 
 /**
+ * True when a card start can run on the account `id`.
+ *
+ * @remarks A start on an account with no config dir fails with an error that names its email.
+ */
+export async function isLaunchableAccount(id: string): Promise<boolean> {
+  if (id === DEFAULT_CLAUDE_ACCOUNT_ID) return true;
+  return (
+    isAccountId(id) &&
+    (await readRegistry()).some((a) => a.id === id) &&
+    fs.existsSync(accountDir(id))
+  );
+}
+
+/**
  * Read the chain order: every account id, Default included, from the lowest position up.
  *
  * @remarks Default sorts before an added account at the same position.

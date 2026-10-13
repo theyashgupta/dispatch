@@ -2,10 +2,11 @@ import fs from "node:fs";
 import path from "node:path";
 import { ENGINE_FILE } from "../domain/loop-progress.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
-import { hasLoopProgress } from "../../../shared/running-group.js";
+import { hasLoopProgress, isLoopCard } from "../../../shared/running-group.js";
 import type {
   BoardKey,
   Card,
+  LoopProgress,
   ShipBranch,
   ShipBranchState,
   ShipFlow,
@@ -150,20 +151,18 @@ function shipTarget(
 }
 
 /**
- * Throw the typed 400 unless each name is allowed for the group.
+ * Throw the typed 400 unless each name is allowed for the card.
  *
- * @remarks A group with loop progress allows a unit branch or the specs branch of the loop. A group
- * with no loop progress allows only its session branch, else its identifier. `main`, `master`,
- * `HEAD`, a full ref name and the repository base are refused for both, so no flow pushes to a
- * protected branch.
+ * @remarks A card whose loop cannot vouch for its branches allows only its session branch, else its
+ * identifier. `main`, `master`, `HEAD`, a full ref name and the repository base are always refused.
  */
-function assertGroupBranches(
+function assertShipBranches(
   card: Card,
   repository: string,
   names: string[],
 ): void {
   let allowed: Set<string>;
-  if (hasLoopProgress(card)) {
+  if (isGroupLoop(card)) {
     const { units, slug } = card.loopProgress;
     allowed = new Set(units.flatMap((u) => (u.branch ? [u.branch] : [])));
     if (slug) allowed.add(`test/${slug}-specs`);
@@ -183,6 +182,18 @@ function assertGroupBranches(
   }
 }
 
+/**
+ * True for a group card whose loop progress vouches for its branches.
+ *
+ * @remarks A launched ticket card takes the ahead and clean checks even with Part A progress, because its one
+ * unit names no branch and so cannot vouch for the session branch.
+ */
+function isGroupLoop(
+  card: Card,
+): card is Card & { loopProgress: LoopProgress } {
+  return card.source === "group" && hasLoopProgress(card);
+}
+
 /** Throw the typed 409 when a flow on the board runs or is being started. */
 function assertNoRunningFlow(boardKey: BoardKey): void {
   const running = store
@@ -194,18 +205,18 @@ function assertNoRunningFlow(boardKey: BoardKey): void {
 }
 
 /**
- * Check the ship preconditions of a group card in their fixed order, with no git call and no write.
+ * Check the ship preconditions of a loop card in their fixed order, with no git call and no write.
  *
- * @remarks A group whose engine is active and not closed is refused whatever its unit count. A
- * group with loop progress also needs finished units, and one with no loop progress needs the
- * Agent done column. A refusal is a typed error, so a refused call stores no flow.
+ * @remarks A card whose engine is active and not closed is refused whatever its unit count. A group
+ * with no loop progress and every launched ticket card need the Agent done column, and a refusal is
+ * a typed error, so a refused call stores no flow.
  */
 function assertShippable(
   caller: OrchestratorIdentity,
   card: Card,
   { repository, branches }: ShipInput,
 ): ShipFlow["rights"] {
-  if (card.source !== "group") throw new ValidationError("not-group-card");
+  if (!isLoopCard(card)) throw new ValidationError("not-group-card");
   if (
     !mayShip(resolveBoard(caller.boardKey).orchestrators, caller.orchestratorId)
   ) {
@@ -220,14 +231,16 @@ function assertShippable(
   if (engine?.active && !engine.closed) {
     throw new ConflictError("engine-not-closed");
   }
-  if (hasLoopProgress(card)) {
-    if (card.loopProgress.units.some((u) => !FINISHED_STATUSES.has(u.status))) {
-      throw new ConflictError("loop-not-finished");
-    }
-  } else if (card.column !== "agent_done") {
+  if (
+    hasLoopProgress(card) &&
+    card.loopProgress.units.some((u) => !FINISHED_STATUSES.has(u.status))
+  ) {
+    throw new ConflictError("loop-not-finished");
+  }
+  if (!isGroupLoop(card) && card.column !== "agent_done") {
     throw new ConflictError("card-not-done");
   }
-  assertGroupBranches(
+  assertShipBranches(
     card,
     repository,
     branches.map((b) => b.name),
@@ -238,6 +251,11 @@ function assertShippable(
       reason: waiting.join(", "),
     });
   }
+  if (
+    card.shipFlow?.state === "done" &&
+    card.shipFlow.repository === repository
+  )
+    throw new ConflictError("already-shipped");
   assertNoRunningFlow(caller.boardKey);
   return policy.shipRights === "merge" ? "merge" : "open_prs";
 }
@@ -245,8 +263,8 @@ function assertShippable(
 /**
  * Throw the typed 409 unless each branch is ahead of its base and the worktree is clean.
  *
- * @remarks Only a group with no loop progress runs it, because that group has no loop that
- * vouches for its branches. The base is `origin/<base>` when that ref exists, because the session
+ * @remarks Only a card whose loop cannot vouch for its branches runs it: a group with no loop
+ * progress or a launched ticket card. The base is `origin/<base>` when that ref exists, because the session
  * branch is cut from it, else the local base. It runs before any write, so a refusal stores no flow.
  */
 async function assertAheadAndClean(
@@ -308,8 +326,11 @@ export async function startShip(
 ): Promise<ShipFlow> {
   const rights = assertShippable(caller, card, input);
   if (!card.workspacePath) throw new ConflictError("no-workspace");
-  const noLoop = !hasLoopProgress(card);
-  if (noLoop && fs.existsSync(path.join(card.workspacePath, ENGINE_FILE))) {
+  const needsGitChecks = !isGroupLoop(card);
+  if (
+    needsGitChecks &&
+    fs.existsSync(path.join(card.workspacePath, ENGINE_FILE))
+  ) {
     throw new ConflictError("engine-not-closed");
   }
   const target = shipTarget(card, input.repository);
@@ -330,7 +351,7 @@ export async function startShip(
         throw new ValidationError("invalid-branch-name", { branch: name });
       }
     }
-    if (noLoop) await assertAheadAndClean(card, input, target);
+    if (needsGitChecks) await assertAheadAndClean(card, input, target);
     const gitConfig = (key: string) => exec(target, "git", ["config", key]);
     let identity: ShipFlow["identity"];
     try {
