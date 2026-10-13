@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { Eyebrow } from "@/modules/orchestrator/components/Eyebrow";
 import type { BandKey } from "@/modules/orchestrator/domain/centre-graph";
 
 const TINTS: Partial<Record<BandKey, string>> = {
@@ -30,12 +31,9 @@ export function BranchBand({
       className={cn("flex flex-col gap-(--space-sm)", TINTS[bandKey])}
     >
       <div className="flex items-center gap-(--space-sm)">
-        <h3
-          id={id}
-          className="m-0 text-xs font-semibold tracking-wide text-muted-foreground uppercase"
-        >
+        <Eyebrow as="h3" id={id}>
           {label}
-        </h3>
+        </Eyebrow>
         <Badge tone="neutral">{count}</Badge>
       </div>
       {count > 0 && (

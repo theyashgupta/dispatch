@@ -1,6 +1,7 @@
 import type { Ref, KeyboardEventHandler } from "react";
 import { CircleCheck, Pause, Play, TriangleAlert } from "lucide-react";
 import { ToneBadge } from "@/components/badges/ToneBadge";
+import { Eyebrow } from "@/modules/orchestrator/components/Eyebrow";
 import type {
   BranchTone,
   CentreNode as CentreNodeModel,
@@ -41,11 +42,7 @@ export function CentreNode({
       onKeyDown={onKeyDown}
       className="flex flex-col gap-(--space-sm) rounded-md border border-border bg-card p-(--space-lg) focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
     >
-      {!compact && (
-        <p className="m-0 text-xs font-semibold tracking-wide text-muted-foreground uppercase">
-          Orchestrator
-        </p>
-      )}
+      {!compact && <Eyebrow as="p">Orchestrator</Eyebrow>}
       <div className="flex flex-wrap items-center gap-(--space-sm)">
         <h2 className="m-0 min-w-0 text-base font-semibold wrap-anywhere">
           {node.name}
