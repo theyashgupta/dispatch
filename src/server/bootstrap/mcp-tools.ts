@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { COMMENT_BODY_MAX } from "../../shared/comment-body.js";
 import {
+  ACCOUNT_ID_MAX,
   BOARD_NAME_MAX,
   CARD_ID_MAX,
   DECISION_ID_RE,
@@ -16,6 +17,10 @@ import {
   PLAN_ENTRIES_MAX,
   PLAN_PLAYBOOK_MAX,
   PLAN_REF_MAX,
+  RELEASE_BUMPS,
+  RELEASE_FEATURE_MAX,
+  RELEASE_FEATURES_MAX,
+  RELEASE_PRS_MAX,
   SESSION_INPUT_MAX,
   SHIP_BODY_MAX,
   SHIP_TITLE_MAX,
@@ -172,6 +177,28 @@ export const MCP_TOOLS: readonly McpTool[] = [
     path: "/tickets",
   },
   {
+    name: "release_prep",
+    description:
+      "Prepare a release: read the version in package.json of the repository on its base branch from origin, compute the next version from bump (patch for fixes to released features, minor for a new feature area, major only when the user names it), and create a To Do card titled Release v<version> with the features, the pull requests and the board ship rights. Omit repository to use the first board repository with a base branch. The tool does not start the card; start it with start_card and the Release playbook. An open card with the same title is refused with release-exists, a version that is not x.y.z with invalid-version, and a failed fetch of the base with fetch-failed.",
+    input: {
+      repository: z.string().min(1).optional(),
+      bump: z.enum(RELEASE_BUMPS),
+      features: z
+        .array(
+          z
+            .string()
+            .min(1)
+            .max(RELEASE_FEATURE_MAX)
+            .refine((f) => !/[\r\n]/.test(f)),
+        )
+        .min(1)
+        .max(RELEASE_FEATURES_MAX),
+      prs: z.array(z.number().int().positive()).max(RELEASE_PRS_MAX),
+    },
+    method: "POST",
+    path: "/releases",
+  },
+  {
     name: "update_ticket",
     description:
       "Change the title or the description of a ticket. Text that holds the status marker is refused.",
@@ -280,7 +307,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "start_ship",
     description:
-      "Start the ship steps of a finished group card for its branches in stack order. A board with no ship rights is refused.",
+      "Start the ship steps of a finished group card, or of a finished single card that start_card started, for its branches in stack order. A single card ships its session branch from Agent done. A board with no ship rights is refused. A card whose ship flow is done is refused with already-shipped.",
     input: {
       ...cardIdParam,
       repository: z.string().min(1),
@@ -393,6 +420,14 @@ export const MCP_TOOLS: readonly McpTool[] = [
     path: "/playbooks",
   },
   {
+    name: "list_accounts",
+    description:
+      "List the Claude accounts with the active id: for each account the id, the default flag, the plan, the chain state, the in use flag, the chain position, the limit end and the usage windows with their percent and reset time. Choose the account with the most weekly headroom for a long loop and pass it to start_card. This tool changes nothing.",
+    input: {},
+    method: "GET",
+    path: "/accounts",
+  },
+  {
     name: "get_rulebook",
     description:
       "Read the orchestration rule book. Call it after read_state at the start and after each handoff, and follow it. This tool changes nothing.",
@@ -403,13 +438,14 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "start_card",
     description:
-      "Start the session of one ticket card with a playbook and a direction, the way the start dialog does. Omit repos to use the stored workspace of the card, else the board repositories with their base branch. A stored workspace with no repository counts as none, and a board with no repository answers no-repositories. A group card, a running card, a card in Done or Inbox, the Board Orchestrator playbook and a start at the concurrency cap are refused.",
+      "Start the session of one ticket card with a playbook and a direction, the way the start dialog does. Omit repos to use the stored workspace of the card, else the board repositories with their base branch. A stored workspace with no repository counts as none, and a board with no repository answers no-repositories. A group card, a running card, a card in Done or Inbox, the Board Orchestrator playbook and a start at the concurrency cap are refused. Pass account, an account id from list_accounts or default, to start on that account; an unknown account is refused with unknown-account. Omit it to use the active account.",
     input: {
       ...cardIdParam,
       playbook: z.string().min(1).max(200),
       direction: z.string().max(DIRECTION_MAX).optional(),
       folder: z.string().min(1).optional(),
       repos: reposField,
+      account: z.string().min(1).max(ACCOUNT_ID_MAX).optional(),
     },
     method: "POST",
     path: "/cards/:cardId/start",

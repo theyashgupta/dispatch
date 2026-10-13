@@ -118,7 +118,7 @@ await call("DELETE", "/boards/SBX/orchestrators/orc-old/token");
 
 type Summary = { name: string; when: string; source: string };
 
-void test("list_playbooks answers seven seeded playbooks and a user playbook", async () => {
+void test("list_playbooks answers eight seeded playbooks and a user playbook", async () => {
   const made = await createPlaybook({
     name: "My notes",
     body: "## Rules\n{extra}\n",
@@ -128,7 +128,7 @@ void test("list_playbooks answers seven seeded playbooks and a user playbook", a
   assert.equal(reply.status, 200);
   const playbooks = reply.body.playbooks as Summary[];
   const seeded = playbooks.filter((p) => p.source === "seeded");
-  assert.equal(seeded.length, 7);
+  assert.equal(seeded.length, 8);
   for (const p of seeded) assert.ok(p.when.length > 0, p.name);
   const mine = playbooks.find((p) => p.name === "My notes");
   assert.equal(mine?.source, "user");
@@ -302,6 +302,21 @@ void test("start_card refuses a bad body with 400 and writes nothing", async () 
     "unknown-repository",
   );
   assert.equal(store.getCard(card.id)?.launch, undefined);
+});
+
+void test("start_card with an unknown account answers 400 unknown-account and writes no launch", async () => {
+  const card = await store.createLocalCard(SBX, "unknown account", "");
+  const startsBefore = starts.length;
+  assertRefused(
+    await startCard(card.id, {
+      playbook: PLAYBOOK,
+      account: "99999999-9999-4999-8999-999999999999",
+    }),
+    400,
+    "unknown-account",
+  );
+  assert.equal(store.getCard(card.id)?.launch, undefined);
+  assert.equal(starts.length, startsBefore);
 });
 
 void test("start_card refuses a card of another board and a card of another owner", async () => {

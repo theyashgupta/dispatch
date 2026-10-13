@@ -311,6 +311,25 @@ export async function loadPlaybooksForPicker(): Promise<{
   return { valid, invalid };
 }
 
+const RELEASE_PLAYBOOK = `---
+name: Release
+when: One release card from release_prep. Bump the version, draft the notes, record the demo, then publish after the bump merges.
+---
+## Extra direction
+{extra}
+
+## Workflow
+Read the release card first: it names the next version, the bump, the repository, the base, the features, the pull requests and the ship rights.
+1. On the session branch, run npm pkg set version=<version> with the card version, run npm install so the lock file takes the same version, run the check command, and commit chore(release): v<version>.
+2. Draft the release notes with the release-notes skill: the user problem first, then the limits and the upgrade notes.
+3. Record the demo with the record-flow skill and make the GIF and the MP4.
+4. Never push, tag or open a pull request yourself. End with the DONE status line.
+After the orchestrator tells you the bump pull request merged, it also names the current ship rights of the board. Use the ship rights in that message, not the ones in the card.
+5. When the message says ship rights merge, create the draft release, upload the GIF and the MP4, add the inline player, publish the release (the Publish workflow publishes to npm), and end with the DONE status line.
+6. Else end with the NEEDS_INPUT status line and ask the user to publish.
+Never publish by hand and never use a token. When the Publish workflow fails, or when a skill asks for the approval of a person, end with the NEEDS_INPUT status line.
+Never read an env file or a vault.`;
+
 const SEED_PLAYBOOKS: { slug: string; content: string }[] = [
   { slug: "prd-ralph-loop", content: PRD_RALPH_LOOP_PLAYBOOK },
   { slug: "superpowers", content: SUPERPOWERS_PLAYBOOK },
@@ -319,6 +338,7 @@ const SEED_PLAYBOOKS: { slug: string; content: string }[] = [
   { slug: "roadmap-loop", content: ROADMAP_LOOP_PLAYBOOK },
   { slug: "review-pull-request", content: REVIEW_PULL_REQUEST_PLAYBOOK },
   { slug: "board-orchestrator", content: BOARD_ORCHESTRATOR_PLAYBOOK },
+  { slug: "release", content: RELEASE_PLAYBOOK },
 ];
 
 const SEED_WHEN_BY_SLUG: ReadonlyMap<string, string> = new Map(

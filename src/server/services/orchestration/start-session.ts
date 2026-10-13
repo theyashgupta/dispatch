@@ -149,6 +149,7 @@ export async function startSession(
     crossSessionInbound?: CrossSessionInbound;
     newSession?: boolean;
     inheritFrom?: string;
+    account?: string;
   },
 ): Promise<void> {
   if (store.isStarting(cardId)) return;
@@ -259,6 +260,7 @@ export async function startSession(
       warnings,
       inheritBaseRef: reserved?.parentBranch,
       launchIntent,
+      requestedAccountId: opts?.account,
     };
 
     const done: SagaStep[] = [];
@@ -330,6 +332,7 @@ export interface CardStartInput {
   newSession?: boolean | undefined;
   inheritFrom?: string | undefined;
   workspace?: NonNullable<Card["workspace"]> | undefined;
+  account?: string | undefined;
 }
 
 export const sessionStarter: { start: typeof startSession } = {
@@ -442,6 +445,7 @@ export async function commitCardStart(
     crossSessionInbound: input.crossSessionInbound,
     newSession: input.newSession,
     inheritFrom: input.inheritFrom,
+    account: input.account,
   });
 }
 

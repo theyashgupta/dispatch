@@ -20,6 +20,7 @@ import {
   scopeTargetOf,
 } from "../services/orchestration/boards.js";
 import {
+  accountsSummary,
   cardProgress,
   cardWithMembers,
   eventsAfter,
@@ -56,6 +57,7 @@ import {
   sendInput,
   stopSession,
 } from "../services/orchestration/orchestrator-sessions.js";
+import { prepareRelease } from "../services/orchestration/release-prep.js";
 import { startShip } from "../services/orchestration/ship-flow.js";
 import { boardRepository } from "../store/board-repository.js";
 import {
@@ -73,6 +75,7 @@ import {
   listSessionsQuerySchema,
   moveBodySchema,
   paneQuerySchema,
+  releasePrepBodySchema,
   sendInputBodySchema,
   sessionCardParamsSchema,
   shipBodySchema,
@@ -264,6 +267,20 @@ export const createTicketHandler: ToolHandler = async (
   call.cardId = card.id;
   call.result = card.id;
   res.status(201).json({ card });
+};
+
+/** Create the To Do card of the next release of a board repository. */
+export const releasePrepHandler: ToolHandler = async (
+  req,
+  res,
+  caller,
+  call,
+) => {
+  const input = parseOrThrow(releasePrepBodySchema, req.body);
+  const out = await prepareRelease(caller, input);
+  call.cardId = out.cardId;
+  call.result = `created ${out.identifier} v${out.version}`;
+  res.status(201).json(out);
 };
 
 /** Change the title or description of a local ticket. */
@@ -514,6 +531,18 @@ export const listPlaybooksHandler: ToolHandler = async (
   const playbooks = await playbookSummaries();
   call.result = `${playbooks.length} playbooks`;
   res.status(200).json({ playbooks });
+};
+
+/** Answer the active account id and the accounts with their usage windows. */
+export const listAccountsHandler: ToolHandler = async (
+  _req,
+  res,
+  _caller,
+  call,
+) => {
+  const summary = await accountsSummary();
+  call.result = `${summary.accounts.length} accounts`;
+  res.status(200).json(summary);
 };
 
 export const getRulebookHandler: ToolHandler = async (

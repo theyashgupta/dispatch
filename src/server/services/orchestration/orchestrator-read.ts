@@ -3,6 +3,7 @@ import type {
   BoardKey,
   BoardPolicy,
   Card,
+  ClaudeAccountSummary,
   LoopProgress,
   OrchestrationEvent,
 } from "../../../shared/types.js";
@@ -16,6 +17,8 @@ import { effectivePolicy } from "../domain/orchestrator-rules.js";
 import type { OrchestratorIdentity } from "../domain/orchestrator-scope.js";
 import { isSeedSlug, loadPlaybooks } from "../infra/playbooks.js";
 import { callerPolicy, getBoard, runningLoops } from "./boards.js";
+import { listAccountSummaries } from "./claude-account-ops.js";
+import { getActiveAccountId } from "./claude-accounts.js";
 
 export type CapturePane = (target: string) => Promise<string>;
 
@@ -191,4 +194,31 @@ export async function playbookSummaries(): Promise<
     when: p.when ?? "",
     source: p.slug !== undefined && isSeedSlug(p.slug) ? "seeded" : "user",
   }));
+}
+
+/** One account with only the fields an orchestrator may see, copied field by field. */
+export function safeAccount(summary: ClaudeAccountSummary) {
+  return {
+    id: summary.id,
+    isDefault: summary.isDefault,
+    subscriptionType: summary.subscriptionType,
+    state: summary.state,
+    inUse: summary.inUse,
+    position: summary.position,
+    limitedUntil: summary.limitedUntil,
+    windows: summary.usage.windows.map((w) => ({
+      kind: w.kind,
+      label: w.label,
+      percent: w.percent,
+      resetsAt: w.resetsAt,
+    })),
+  };
+}
+
+/** The active account id and every account in chain order, with its cached usage windows. */
+export async function accountsSummary() {
+  return {
+    activeId: getActiveAccountId(),
+    accounts: (await listAccountSummaries()).map(safeAccount),
+  };
 }
