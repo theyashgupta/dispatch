@@ -18,11 +18,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import type { DecisionView } from "../../../shared/decision-view.js";
 
 interface DecisionCardProps {
   view: DecisionView;
   disabled: boolean;
+  boldRecommended?: boolean;
   onAnswer: (optionId: string, note: string | null) => Promise<boolean>;
 }
 
@@ -51,7 +53,12 @@ export function PlanTable({ rows }: { rows: DecisionView["planRows"] }) {
   );
 }
 
-export function DecisionCard({ view, disabled, onAnswer }: DecisionCardProps) {
+export function DecisionCard({
+  view,
+  disabled,
+  boldRecommended = false,
+  onAnswer,
+}: DecisionCardProps) {
   const [text, setText] = useState("");
   const typed = text.trim();
   const canSend = !disabled && typed !== "" && view.otherOptionId !== null;
@@ -86,7 +93,14 @@ export function DecisionCard({ view, disabled, onAnswer }: DecisionCardProps) {
             className="w-full justify-between"
             onClick={() => void onAnswer(option.id, null)}
           >
-            <span className="min-w-0 text-left">{option.label}</span>
+            <span
+              className={cn(
+                "min-w-0 text-left",
+                boldRecommended && option.recommended && "font-semibold",
+              )}
+            >
+              {option.label}
+            </span>
             {option.recommended && <Badge tone="neutral">Recommended</Badge>}
           </Button>
         ))}

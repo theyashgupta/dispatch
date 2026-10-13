@@ -18,32 +18,34 @@ export function CostMeterRow({
   groupLabel = false,
 }: CostMeterRowProps) {
   return (
-    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 md:flex-nowrap">
-      <span
-        className={cn(
-          "w-full text-sm text-foreground md:w-36 md:shrink-0",
-          groupLabel && "font-mono font-semibold",
-        )}
-      >
-        {label}
-      </span>
+    <div className="flex min-w-0 flex-col gap-1">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5">
+        <span
+          className={cn(
+            "text-sm text-foreground",
+            groupLabel && "font-mono font-semibold",
+          )}
+        >
+          {label}
+        </span>
+        <span className="flex items-center gap-1 text-sm text-foreground tabular-nums">
+          {near && (
+            <TriangleAlert
+              aria-hidden="true"
+              className="size-3.5 shrink-0 text-(--status-stale)"
+            />
+          )}
+          {text}
+        </span>
+      </div>
       {percent !== null && (
         <Progress
           value={Math.min(percent, 100)}
           tone={near ? "stale" : "default"}
           aria-label={text}
-          className="h-1.25 min-w-0 flex-1 basis-full rounded-sm bg-border md:basis-0"
+          className="h-1.25 rounded-sm bg-border"
         />
       )}
-      <span className="flex items-center gap-1 text-sm text-foreground tabular-nums md:w-64 md:shrink-0">
-        {near && (
-          <TriangleAlert
-            aria-hidden="true"
-            className="size-3.5 shrink-0 text-(--status-stale)"
-          />
-        )}
-        {text}
-      </span>
     </div>
   );
 }

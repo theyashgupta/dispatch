@@ -193,3 +193,24 @@ test("a no-loop running row sorts with the running rows, then by group id", () =
     ["GROUP-5", "GROUP-7", "GROUP-10", "GROUP-1"],
   );
 });
+
+test("a row carries the track of its loop, and a row with no loop has a null track", () => {
+  const rows = progressRows(
+    [
+      card("GROUP-1", progress("running")),
+      groupCard("GROUP-4", { tmuxSession: "dsp-4" }),
+    ],
+    NOW,
+  );
+  assert.deepEqual(rows[0]?.track, [
+    {
+      unit: 1,
+      name: "unit",
+      state: "next",
+      stateLine: "Next",
+      accessibleName: "Unit 1: unit, pending",
+      phase: null,
+    },
+  ]);
+  assert.equal(rows[1]?.track, null);
+});

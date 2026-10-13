@@ -6,7 +6,12 @@ import type {
   OrchestrationEvent,
   OrchestrationEventKind,
 } from "../../../../shared/types.js";
-import { ACTIVITY_PAGE_SIZE, activityRows } from "./activity-rows.js";
+import {
+  ACTIVITY_PAGE_SIZE,
+  activityRows,
+  changedSinceTitle,
+  type ActivityRow,
+} from "./activity-rows.js";
 
 const CARDS = [
   { id: "c13", identifier: "GROUP-13" },
@@ -283,4 +288,129 @@ test("a wake row reads Woke <orchestrator name>: <reasons>, and falls back to th
       "Woke Release: decision d1 answered, timer 15 min",
     ],
   );
+});
+
+test("tone follows the event kind and its data", () => {
+  const tones = (events: OrchestrationEvent[]) =>
+    activityRows(events, CARDS, UTC)
+      .reverse()
+      .map((r) => r.tone);
+  assert.deepEqual(
+    tones([
+      event(1, "loop_gate", "c14", { phase: 1, result: "fail" }),
+      event(2, "loop_gate", "c14", { phase: 1, result: "pass" }),
+      event(3, "group_state", "c14", { state: "loop_error" }),
+      event(4, "group_state", "c14", { state: "start_failed" }),
+      event(5, "group_state", "c14", { state: "ship_stopped" }),
+      event(6, "group_state", "c14", { state: "needs_input" }),
+      event(7, "group_state", "c14", { state: "usage_limit" }),
+      event(8, "group_state", "c14", { state: "agent_done" }),
+      event(9, "group_state", "c14", { state: "shipped" }),
+      event(10, "supervisor_action", "c14", { action: "start_group_failed" }),
+      event(11, "supervisor_action", "c14", { action: "needs_input" }),
+      event(12, "supervisor_state", "c14", { to: "needs_input" }),
+    ]),
+    [
+      "danger",
+      "ok",
+      "danger",
+      "danger",
+      "danger",
+      "warn",
+      "warn",
+      "ok",
+      "ok",
+      "danger",
+      "warn",
+      "warn",
+    ],
+  );
+});
+
+test("every other event and any unknown value has the muted tone", () => {
+  const rows = activityRows(
+    [
+      event(1, "supervisor_action", "c14", { action: "mystery" }),
+      event(2, "supervisor_action", "c14", { action: "constructor" }),
+      event(3, "group_state", "c14", { state: "toString" }),
+      event(4, "group_state", "c14", {}),
+      event(5, "supervisor_state", "c14", { to: "working" }),
+      event(6, "supervisor_action", "c14", { action: "continue" }),
+      event(7, "tool_call", "c13", { tool: "t" }),
+      event(8, "machine_wake", null, {}),
+      event(9, "decision_raised", "c14", {}),
+      event(10, "pr_state", "c14", {}),
+    ],
+    CARDS,
+    UTC,
+  );
+  assert.ok(rows.every((r) => r.tone === "muted"));
+});
+
+test("emphasis is the index range of the card identifier in the line", () => {
+  const rows = activityRows(
+    [
+      event(1, "tool_call", "c13", { tool: "send_input" }),
+      event(2, "supervisor_action", "c14", { action: "continue" }),
+      event(3, "machine_wake", null, {}),
+      event(
+        4,
+        "tool_call",
+        "c13",
+        { tool: "send_input" },
+        "2026-10-07T09:00:00Z",
+      ),
+    ],
+    CARDS,
+    UTC,
+  );
+  const [wake, action, , tool] = rows;
+  assert.equal(wake?.emphasis, null);
+  assert.deepEqual(
+    [
+      action?.line.slice(action.emphasis?.start, action.emphasis?.end),
+      tool?.line.slice(tool.emphasis?.start, tool.emphasis?.end),
+    ],
+    ["GROUP-14", "GROUP-13"],
+  );
+});
+
+test("emphasis is null when the identifier is not in the line", () => {
+  const rows = activityRows(
+    [event(1, "intake_submitted", "c13", {})],
+    CARDS,
+    UTC,
+  );
+  assert.equal(rows[0]?.emphasis, null);
+});
+
+test("emphasis skips a longer identifier that contains the card identifier", () => {
+  const cards = [{ id: "m1", identifier: "LOCAL-1" }] as Card[];
+  const [none, only, before] = activityRows(
+    [
+      event(1, "tool_call", "m1", { tool: "LOCAL-10", result: "ok" }),
+      event(2, "tool_call", "m1", { tool: "send_input", result: "LOCAL-10" }),
+      event(3, "tool_call", "m1", { tool: "LOCAL-10", result: "LOCAL-10" }),
+    ],
+    cards,
+    UTC,
+  );
+  assert.deepEqual(
+    [before, only].map((r) =>
+      r?.line.slice(r.emphasis?.start, r.emphasis?.end),
+    ),
+    ["LOCAL-1", "LOCAL-1"],
+  );
+  assert.equal(none?.line.indexOf("LOCAL-1"), 14);
+  assert.deepEqual(none?.emphasis, { start: 26, end: 33 });
+});
+
+test("the changed since title uses the time of the last row", () => {
+  const row = (time: string) => ({ time }) as ActivityRow;
+  assert.equal(changedSinceTitle([]), "Changed since");
+  assert.equal(
+    changedSinceTitle([row("10:05"), row("09:00")]),
+    "Changed since 09:00",
+  );
+  assert.equal(changedSinceTitle([row("10:05"), row("")]), "Changed since");
 });

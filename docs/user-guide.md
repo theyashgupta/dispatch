@@ -193,7 +193,7 @@ The hidden card and the MCP configuration file do not show in the UI. To confirm
 
 1. The badge reads **Working** and the **Stop** button shows.
 2. The **Terminal** tab shows the live terminal.
-3. The **Activity log** of the dashboard shows a row such as "Supervisor: a card is now Working".
+3. The **Changed since** card of the dashboard shows a row such as "Supervisor: a card is now Working".
 
 The start can fail. The panel then shows the line "The orchestrator did not start: <reason>." The reason names the step and the last text of the Claude pane. Dispatch waits about 30 seconds for Claude to be ready, so the badge can read **Starting** for some time before the line shows. Choose **Try again** beside the line to start again. The board now has a main orchestrator, so the page header button reads **Orchestrator**.
 
@@ -266,30 +266,56 @@ The loop also reports each phase gate and unit gate to Dispatch. The report uses
 
 - The boards page **Loops** column shows each running loop as a group id and a percent.
 - The dashboard section **Progress per group** shows one row for each group that has a loop.
-- The dashboard section **Activity log** shows the gate events.
+- The dashboard section **Changed since** shows the gate events.
 
 ## The dashboard
 
 Open the dashboard from the sidebar row **Dashboard** (group **Work**), or from the palette command **Go to Dashboard**. The sidebar row and the palette command show only when the board has a main orchestrator. The dashboard shows the board that is selected in the **Boards** section.
 
-The page has six sections in a fixed order. Each section shows its own loading state and its own error. A section error has the button **Try again**. The other sections stay.
+The page has the title "Project map" on a dot-grid background. Each section shows its own loading state and its own error. A section error has the button **Try again**. The other sections stay.
 
-1. **Attention queue.** Each item that needs you, oldest wait first. With no item it shows "Nothing needs you."
-2. **Progress per group.** One row for each group that has a loop. With no loop it shows "No loops on this board yet. Start a group from the board to see its progress here." The count of the section reads "<n> of <cap> loops running". A row shows these items:
-   - The group id, the loop slug and the session state badge.
-   - The context percent, for example "Context 38%".
-   - The session age and an estimate of the time left. The estimate reads "Estimate after 2 gates" until two gates passed.
-   - A text label such as "Unit 2 of 3, phase 4 of 9". A complete loop shows "3 of 3 units built, awaiting ship".
-   - A bar with one segment for each unit.
-   - The last gate line: "Phase 3 gate passed 12:41" or "Phase 4 gate failed 13:05, attempt 1 of 2".
-3. **Tickets by column.** The cards of the board for each column, with the count of cards that an orchestrator created (**By orchestrator**). The link **Open board** goes to the board. Choose **Show cards** to list the cards. The filters **Group** and **Column** limit them.
-4. **Activity log.** One row for each recorded event, newest first. The orchestrator rows are tool calls and raised decisions. The supervisor rows are actions, session state changes, loop gates, PR changes and a wake of the machine. Your rows are the decisions that you answer and the goals that you submit. A policy save, a board change and a press of **Start orchestrator** write no row of their own. The filters **Actor** (**All**, **Orchestrator**, **Supervisor**, **You**) and **Group** limit the rows. The log shows 20 rows. Choose **Show more** for 20 more. With no event it shows "No activity on this board yet."
-5. **PRs and merge order.** One block for each group in ship order. See the section "Ship flow". With no PR it shows "No PRs yet."
-6. **Cost and usage.** The cost of each group against its budget, and the usage meters of the Claude account. With no cost it shows "No cost yet." See the section "Budgets and usage limits".
+Under the title, one status line shows these items:
 
-Each segment of the progress bar has a glyph and a text name (done, current, pending or failed gate). The bar reads without color.
+- "Synced HH:MM". When the stream is down, it reads "Data from <time>".
+- "<n> of <cap> loops running".
+- "<n> gates passed today". The count is the number of loop phases whose gate passed on the local calendar day.
+- "$<amount> spent". This is a running total of the group costs. It is not a daily figure.
+- The link "<n> need a call". With zero rows it reads "nothing needs you" and its dot is muted. The link moves focus to the **Needs your call** card.
 
-When the connection to the server drops, the dashboard keeps the last data. A badge beside the title reads "Data from <time>". The reply, resume and decision buttons are off, with the reason "Reconnecting. Actions are off until the board stream is back."
+At 1024 px and wider, the sections show in this order:
+
+1. The status line.
+2. **Progress per group**, full width.
+3. **Left on this board**, full width.
+4. Two columns. The main column holds **Tickets by column** and then **PRs and merge order**. The rail holds **Next step**, **Needs your call**, **Changed since** and **Cost and usage**.
+
+Below 1024 px, the sections show in this order: the status line, **Needs your call**, **Progress per group**, **Left on this board**, **Tickets by column**, **PRs and merge order**, **Next step**, **Changed since** and **Cost and usage**. Each section shows once in the page. The section headings are small uppercase labels. A screen reader still reads the names "Attention queue", "Progress per group", "Left on this board", "Tickets by column", "PRs and merge order", "Next step", "Activity log" and "Cost and usage".
+
+- **Progress per group.** Each loop is a milestone track with one node for each unit. With no units it shows "No loop progress". The session badges and the last gate text stay on the track header. A node has one of these states:
+  - Done. The node has a check glyph and the state line "Done HH:MM" or "Done".
+  - Current. The node has an accent ring, a glow, the pill "You are here" and a phase sub-bar. The state line reads "Phase n of m". The glow moves only when the system allows motion.
+  - Failed gate. The node has an X glyph and the state line "Gate failed".
+  - Pending. The node is an outline. The state line reads "Next" for the first pending node and "Later" for the other nodes.
+- **Left on this board.** The count of open cards and one pill for each open card. An open card is a card that is not in **Agent done**, **In review** or **Done**. A pill shows the card id and a glyph. The order is stuck, needs input, current, not started. With no open card it shows "Nothing open."
+- **Tickets by column.** The filters **Group** and **Column** are above the tiles and stay visible. The section shows one tile for each card that the filters select. With no match it shows "No cards match." The link **Open board** stays on the section header. The collapsible **Show column counts** holds the table of column counts, with the count of cards that an orchestrator created (**By orchestrator**). Below 768 px, it holds a list. A tile shows these items:
+  - The card id in a mono font and the title.
+  - A state pill with a glyph and the column label, or "Stuck: <reason>".
+  - A footer line when there is data: the last gate text, "Depends on <ids>" or "Shipped HH:MM".
+- **Next step.** For the first running loop that has a current unit, it shows "<group id> unit <n>: <unit title>" and "Phase <n> of <m>: <phase name>". With no such loop it shows "No loop running" and "Start a group from the board."
+- **Needs your call.** Each item that needs you, oldest wait first. With no item it shows "Nothing needs you." The card has a red tint only when it holds at least one item. The recommended decision option is bold. See the section "The attention queue".
+- **Changed since <time>.** The time is the time of the oldest row on the shown page. A row has a dot, the change text with the card id in bold, and the time on the right. The dot colors are red, amber, green and grey:
+  - Red is for a failed gate, a loop error, a failed start or a stopped ship.
+  - Amber is for needs input and a usage limit.
+  - Green is for a passed gate, agent done and shipped.
+  - Grey is for the other rows.
+- **PRs and merge order.** One block for each group in ship order. See the section "Ship flow". With no PR it shows "No PRs yet."
+- **Cost and usage.** The cost of each group against its budget, and the usage meters of the Claude account, as compact rows. With no cost it shows "No cost yet." See the section "Budgets and usage limits".
+
+**Changed since** shows one row for each recorded event, newest first. The orchestrator rows are tool calls and raised decisions. The supervisor rows are actions, session state changes, loop gates, PR changes and a wake of the machine. Your rows are the decisions that you answer and the goals that you submit. A policy save, a board change and a press of **Start orchestrator** write no row of their own. The filters **Actor** (**All**, **Orchestrator**, **Supervisor**, **You**) and **Group** limit the rows. The log shows 20 rows. Choose **Show more** for 20 more. With no match it shows "No activity matches." With no event it shows "No activity on this board yet."
+
+Each node and each tile state has a glyph and a text. The page reads without color.
+
+When the connection to the server drops, the dashboard keeps the last data. The status line reads "Data from <time>". The reply, resume and decision buttons are off, with the reason "Reconnecting. Actions are off until the board stream is back."
 
 ## The command centre
 
@@ -298,7 +324,7 @@ The command centre shows one orchestrator of a board as one page. It has the orc
 ### Open the command centre
 
 - Choose **Orchestrator** in the page header of the board. When the board has no orchestrator, the button reads **Add orchestrator** from 768 px wide. On a narrower screen it reads **Orchestrator**. Both buttons open the command centre.
-- Choose **Open command centre** in the page header of the dashboard.
+- Choose **Open command centre** next to the **Project map** title of the dashboard.
 - Open `/boards/<key>/orchestrator` for the main orchestrator. Open `/boards/<key>/orchestrator/<orchestrator id>` for another orchestrator.
 - The address `/orchestrator?board=<key>` only redirects to `/boards/<key>/orchestrator`. The same applies to `/orchestrator/<orchestrator id>?board=<key>`.
 
@@ -454,7 +480,7 @@ Enter on the node selects the tab **Conversation** and the pane tab **Conversati
 
 ## The attention queue
 
-The attention queue is the first section of the dashboard. Dispatch builds it from the sessions, the last gate of each group and the open decision items. An item leaves the queue when its cause ends.
+The attention queue is the card **Needs your call** on the dashboard. Dispatch builds it from the sessions, the last gate of each group and the open decision items. An item leaves the queue when its cause ends.
 
 Each item shows the group id, a badge, the wait time ("waiting 34 min", "waiting 5 h" or "waiting 3 d") and the actions of its kind.
 

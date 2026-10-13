@@ -30,6 +30,10 @@
     white 30%,
     var(--accent)
   ); /* Accent TEXT role only, 4.5:1 or more on every tier and on the accent tint */
+  --dot-grid: color-mix(in srgb, var(--text-muted) 18%, transparent);
+  --glow-current:
+    0 0 0 4px var(--accent-soft),
+    0 0 16px color-mix(in srgb, var(--accent) 45%, transparent);
   --on-accent: #ffffff; /* Label on the accent fill */
   --on-danger: #ffffff; /* Label on the danger fill */
   --scrim: rgba(0, 0, 0, 0.4); /* Modal and panel scrim */
@@ -60,6 +64,8 @@
   --font-heading: 17px; /* panel title, modal heading */
   --font-md-h1: 14px; /* description-heading cap — held at 14px; the panel title moved to 17px so the old "one step below 15px" relationship no longer holds, but no replacement value was rendered and checked, so this is deliberately not retuned */
   --font-display: 22px; /* wordmark, startup-error title */
+  --font-page-title: 26px;
+  --font-rail-headline: 18px;
 
   --weight-regular: 400;
   --weight-medium: 500; /* column headers, panel section labels, sidebar sync status text */
@@ -139,6 +145,7 @@
   --motion-splash-in: 400ms;
   --motion-splash-out: 300ms;
   --motion-flow-pulse: 1s;
+  --motion-node-breathe: 2.4s;
   --easing-enter: ease-out;
   --easing-exit: ease-in;
   --motion-hover: 120ms;
@@ -364,6 +371,15 @@ body {
   }
   to {
     offset-distance: 100%;
+  }
+}
+@keyframes node-breathe {
+  0%,
+  100% {
+    box-shadow: var(--glow-current);
+  }
+  50% {
+    box-shadow: 0 0 0 2px var(--accent-soft);
   }
 }
 @keyframes flow-pulse {

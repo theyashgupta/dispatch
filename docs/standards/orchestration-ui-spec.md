@@ -585,3 +585,39 @@ This entry adds to the screens above. It does not change the text of an earlier 
 - **Screen 6, "Not sent" line.** A refused send because of the session state shows as the result line next to the button, with no alert and no "Try again". In the comment box it reads "Not sent. <orchestrator name> is now at <state label>. Open the terminal." The same applies to the inline reply of a tile, with the card id.
 - **Screen 6, Enter on the node.** Enter selects the Conversation page tab and the Conversation pane tab, then moves focus to the comment box. Only a plain Enter on the node itself does this. With no orchestrator record, Enter does nothing.
 - **Screen 6, unknown orchestrator.** A path with an orchestrator id that the board does not have shows "Canvas did not load: no orchestrator <id> on this board." with "Try again".
+
+### 2026-10-13 (LOCAL-106)
+
+This entry adds to the screens above. It does not change the text of an earlier section.
+
+This entry replaces the Layout, the section order rule and the Section 2 segmented bar of Screen 4 for the dashboard look. It changes no data, action or state.
+
+- **Layout.** The page title is "Project map", on a dot-grid background. At 1024 px and wider, the order is: the status line, Progress per group (full width), Left on this board (full width), then two columns. The main column holds Tickets by column and then PRs and merge order. The rail holds Next step, Needs your call, Changed since, and Cost and usage. Below 1024 px, the order is: the status line, Needs your call, Progress per group, Left on this board, Tickets by column, PRs and merge order, Next step, Changed since, and Cost and usage. Each section has one copy in the DOM. The section headings are small uppercase labels. The screen reader names stay: "Attention queue", "Progress per group", "Left on this board", "Tickets by column", "PRs and merge order", "Next step", "Activity log" and "Cost and usage".
+- **Command centre link.** The link "Open command centre" sits at the end of the title row. It replaces the dashboard page header link of the LOCAL-104 entry. The dashboard has no page header actions.
+- **Status line.** One line under the title. It shows "Synced HH:MM" (or "Data from <time>" when the stream is down), "<n> of <cap> loops running", "<n> gates passed today" (loop phases whose gate passed on the local calendar day), "$<amount> spent" (a running total of the group costs, not a daily figure) and the link "<n> need a call". With zero rows the link reads "nothing needs you" and its dot is muted. The link moves focus to the Needs your call card.
+- **Section 2, milestone track.** Each loop is a track with one node for each unit. A loop with no units shows "No loop progress". The session badges and the last gate text stay on the track header. A node has a glyph and a state line, so it reads without color.
+
+  | State       | Glyph                                                | State line                                                     |
+  | ----------- | ---------------------------------------------------- | -------------------------------------------------------------- |
+  | Done        | Check                                                | "Done HH:MM", or "Done" with no time                           |
+  | Current     | Accent ring with a glow, and the pill "You are here" | "Phase n of m", with a phase sub-bar                           |
+  | Failed gate | X                                                    | "Gate failed"                                                  |
+  | Pending     | Outline                                              | "Next" for the first pending node, "Later" for the other nodes |
+
+- **Left on this board.** The count of open cards (cards not in Agent done, In review or Done) and one pill for each open card. A pill shows the card id and a glyph. The order is stuck, needs input, current, not started. With no open card it shows "Nothing open."
+- **Section 3, tiles.** The filters Group and Column are above the tiles and stay visible. One tile shows for each card that the filters select. With no match it shows "No cards match." A tile shows the mono id, the title, a state pill and a footer line when there is data. The pill shows a glyph and the column label, or "Stuck: <reason>". The footer shows the last gate text, "Depends on <ids>" or "Shipped HH:MM". The collapsible "Show column counts" replaces "Show cards" and holds the column count table (and a list below 768 px). The link "Open board" stays on the section header. Tiles sort by state, then by id.
+
+  | Tile state  | Source                                                           | Look           |
+  | ----------- | ---------------------------------------------------------------- | -------------- |
+  | Stuck       | Start error, lost session or failed last gate (wins over column) | Red hatch      |
+  | Needs input | The card needs input                                             | Amber tint     |
+  | Current     | In Progress                                                      | Accent ring    |
+  | Not started | To Do or Parked                                                  | Dashed outline |
+  | Done        | Agent Done, In Review or Done                                    | Plain          |
+
+- **Next step.** For the first running loop with a current unit, it shows "<group id> unit <n>: <unit title>" and "Phase <n> of <m>: <phase name>". With no such loop it shows "No loop running" and "Start a group from the board."
+- **Section 1, Needs your call.** The card was "Attention queue". The items, the actions, the disabled reason text and the empty text "Nothing needs you." stay. The card has a red tint only when it holds at least one item. The recommended decision option is bold.
+- **Section 4, Changed since.** The section was "Activity log". The heading reads "Changed since <time>", where the time is the time of the oldest row on the shown page. A row has a dot, the change text with the card id in bold, and the time on the right. The dot is red for a failed gate, a loop error, a failed start or a stopped ship. It is amber for needs input and a usage limit. It is green for a passed gate, agent done and shipped. It is grey for the other rows. The Actor and Group filters, "Show more" (20 rows for each page), "No activity matches." and "No activity on this board yet." stay.
+- **Section 6, Cost and usage.** The same rows and meters, as compact rows. "No cost yet." stays.
+- **Motion.** The glow of the current node breathes only when the system allows motion (`motion-safe`).
+- **Colour-free reading.** Each node, each tile and each pill has a glyph and a text. Colour is an extra signal, never the only one.

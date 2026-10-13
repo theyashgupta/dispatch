@@ -15,12 +15,16 @@ export type ActivityActorFilter = "all" | "orchestrator" | "supervisor" | "you";
 
 type ActorKind = "Orchestrator" | "Supervisor" | "You";
 
+export type ActivityTone = "danger" | "warn" | "ok" | "muted";
+
 export interface ActivityRow {
   id: number;
   time: string;
   actor: string;
   text: string;
   line: string;
+  tone: ActivityTone;
+  emphasis: { start: number; end: number } | null;
 }
 
 const ACTORS: Record<OrchestrationEventKind, ActorKind> = {
@@ -66,6 +70,44 @@ function supervisorAction(action: string) {
   return Object.hasOwn(SUPERVISOR_ACTIONS, action)
     ? SUPERVISOR_ACTIONS[action]
     : undefined;
+}
+
+const GROUP_STATE_TONES: Record<string, ActivityTone> = {
+  loop_error: "danger",
+  start_failed: "danger",
+  ship_stopped: "danger",
+  needs_input: "warn",
+  usage_limit: "warn",
+  agent_done: "ok",
+  shipped: "ok",
+};
+
+const ACTION_TONES: Record<string, ActivityTone> = {
+  start_group_failed: "danger",
+  needs_input: "warn",
+};
+
+function toneFrom(
+  table: Record<string, ActivityTone>,
+  key: string | null,
+): ActivityTone {
+  return key !== null && Object.hasOwn(table, key) ? table[key] : "muted";
+}
+
+function toneOf(event: OrchestrationEvent): ActivityTone {
+  const { data } = event;
+  switch (event.kind) {
+    case "loop_gate":
+      return data.result === "fail" ? "danger" : "ok";
+    case "group_state":
+      return toneFrom(GROUP_STATE_TONES, str(data.state));
+    case "supervisor_action":
+      return toneFrom(ACTION_TONES, str(data.action));
+    case "supervisor_state":
+      return data.to === "needs_input" ? "warn" : "muted";
+    default:
+      return "muted";
+  }
 }
 
 function str(value: unknown): string | null {
@@ -150,6 +192,28 @@ function actorName(
   return extra === undefined ? actor : `Extra orchestrator ${extra.name}`;
 }
 
+/** Finds the first whole-token occurrence of an identifier, so LOCAL-1 does not match inside LOCAL-10. */
+function identifierIndex(line: string, identifier: string): number {
+  const isPart = (char: string | undefined) =>
+    char !== undefined && /[A-Za-z0-9-]/.test(char);
+  for (
+    let at = line.indexOf(identifier);
+    at >= 0;
+    at = line.indexOf(identifier, at + 1)
+  ) {
+    if (!isPart(line[at - 1]) && !isPart(line[at + identifier.length])) {
+      return at;
+    }
+  }
+  return -1;
+}
+
+/** Titles the activity section with the time of its oldest shown row. */
+export function changedSinceTitle(rows: readonly ActivityRow[]): string {
+  const time = rows.at(-1)?.time ?? "";
+  return time === "" ? "Changed since" : `Changed since ${time}`;
+}
+
 /**
  * Turns orchestration events into activity log rows, newest first.
  *
@@ -188,12 +252,22 @@ export function activityRows(
       const verbPhrase =
         event.kind === "supervisor_action" &&
         supervisorAction(str(event.data.action) ?? "") !== undefined;
+      const line = verbPhrase ? `${actor} ${text}` : `${actor}: ${text}`;
+      const identifier =
+        event.cardId === null ? undefined : byId.get(event.cardId)?.identifier;
+      const start =
+        identifier === undefined ? -1 : identifierIndex(line, identifier);
       return {
         id: event.id,
         time: clock(event.ts, filter.timeZone, false) ?? "",
         actor,
         text,
-        line: verbPhrase ? `${actor} ${text}` : `${actor}: ${text}`,
+        line,
+        tone: toneOf(event),
+        emphasis:
+          identifier === undefined || start < 0
+            ? null
+            : { start, end: start + identifier.length },
       };
     });
 }

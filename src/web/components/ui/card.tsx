@@ -22,6 +22,9 @@ const cardVariants = cva("", {
       hover: "border-(--text-muted)",
       multi: "border-(--text)",
       attention: "border-(--accent)",
+      warn: "border-(--col-needs-input)",
+      danger: "border-(--destructive)",
+      pending: "border-dashed border-(--border-strong)",
     },
     surface: {
       rest: "bg-card",

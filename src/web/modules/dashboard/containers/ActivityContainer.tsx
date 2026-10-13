@@ -3,6 +3,7 @@ import { ActivitySection } from "@/modules/dashboard/components/ActivitySection"
 import {
   ACTIVITY_PAGE_SIZE,
   activityRows,
+  changedSinceTitle,
   type ActivityActorFilter,
 } from "@/modules/dashboard/domain/activity-rows";
 import { sectionState } from "@/modules/dashboard/domain/section-state";
@@ -26,11 +27,13 @@ export function ActivityContainer() {
       }),
     [events.data, cards, actor, groupValue, orchestrators],
   );
+  const shownRows = rows.slice(0, shown);
   const groups = useMemo(() => groupOptions(cards ?? []), [cards]);
   return (
     <ActivitySection
       state={sectionState([snapshot, events])}
-      rows={rows.slice(0, shown)}
+      title={changedSinceTitle(shownRows)}
+      rows={shownRows}
       total={events.data?.length ?? 0}
       hasMore={rows.length > shown}
       actorValue={actor}

@@ -7,6 +7,7 @@ import type {
   AttentionAction,
   AttentionRow,
 } from "@/modules/dashboard/domain/attention-rows";
+import { NEEDS_YOUR_CALL_ID } from "@/modules/dashboard/domain/header-strip";
 import type { SectionState } from "@/modules/dashboard/domain/section-state";
 import { DashboardSection } from "./DashboardSection";
 
@@ -64,7 +65,10 @@ export function AttentionQueueSection({
 
   return (
     <DashboardSection
-      title="Attention queue"
+      id={NEEDS_YOUR_CALL_ID}
+      title="Needs your call"
+      label="Attention queue"
+      tone={rows.length > 0 ? "danger" : "default"}
       count={rows.length}
       state={state}
       onRetry={onRetry}
@@ -80,9 +84,7 @@ export function AttentionQueueSection({
       ) : (
         <div className="flex flex-col gap-(--space-md)">
           {disabledReason !== null && (
-            <p className="m-0 text-sm text-muted-foreground">
-              {disabledReason}
-            </p>
+            <p className="m-0 text-sm text-foreground">{disabledReason}</p>
           )}
           <ul className="m-0 flex list-none flex-col gap-(--space-md) p-0">
             {rows.map((row) => (
@@ -91,6 +93,7 @@ export function AttentionQueueSection({
                   <DecisionCard
                     view={row.view}
                     disabled={disabled}
+                    boldRecommended
                     onAnswer={(optionId, note) =>
                       onAnswer(row.view.id, optionId, note)
                     }
