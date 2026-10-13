@@ -6342,15 +6342,32 @@ two racing calls make one ticket, and a failed create frees the index. No tool c
 text.
 
 **User session routes.** `routes/session-input.route.ts` holds `POST /api/sessions/:cardId/input` and
-`POST /api/sessions/:cardId/resume-loop` for the panel. They use the same send and state checks as
+`POST /api/sessions/:cardId/resume-loop` for the dashboard and the command centre. They use the same send and state checks as
 `send_input` and `resume_loop`, but a user may reply to a loop that stopped on `budget` or `usage_stop`,
 and `resume-loop` runs no cap or budget check. They are state changing user routes, so
 `refuseOrchestratorTokenOnUserRoute` refuses an orchestrator token on them.
 
 **Command centre.** The `orchestrator` web module (`web/modules/orchestrator/`) holds the command centre. The
-route `/boards/$key/orchestrator/{-$id}` shows it. The entry button is in the page header (Screen 5):
-"Add orchestrator" on a board with no record and "Orchestrator" with one, and it reads only the `Board`
-that the board list holds. The settings sheet on the centre has two tabs:
+route `/boards/$key/orchestrator/{-$id}` shows it. The entry button is in the page header (Screen 5).
+Its label is "Add orchestrator" on a board with no record. Its label is "Orchestrator" on a board with a
+record. It reads only the `Board` that the board list holds.
+
+The toolbar of the centre shows one control for the selected record. It is Start on a board with no
+record and on a stopped record. It is Stop on a running record. It is Resume when the session state is
+`lost` or `shell_prompt`. The control calls the lifecycle routes. The toolbar shows no control while the
+record starts or stops. Every control is off while the board stream is down. Start is also off while the
+board policy has the supervisor off. Stop is off while the session state is `permission_prompt`,
+`usage_limit_dialog` or `usage_limit_wait`.
+
+A stopped record can hold a start error from a background start. The toolbar then shows the alert "The
+orchestrator did not start: <reason>." with a retry button. The retry button runs Start.
+
+The conversation pane answers a decision item through `POST /api/decisions/:id/answer`. A `roadmap_approval`,
+`ticket_proposal` or `plan` item is a gate. A gate has no "Other answer" field. It offers its options
+only. Any other kind shows the field. The field sends the typed text as `note` with the recommended
+option id. If no option is recommended, it sends the first option id.
+
+The settings sheet on the centre has two tabs:
 
 - Policy: the board policy form, saved through `PUT /api/boards/:key/policy`. The model lists are in
   `shared/orchestrator-models.ts`, and the route refuses any other model with 400.
