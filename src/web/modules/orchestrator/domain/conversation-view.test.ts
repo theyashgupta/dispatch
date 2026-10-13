@@ -351,6 +351,15 @@ test("an answered decision with no answer time falls back to its creation time",
   assert.equal(ids(entries).includes("old"), false);
 });
 
+test("the cap keeps a decision created first and answered last, and drops the oldest answers", () => {
+  const late = answered("late", 59);
+  late.createdAt = "2026-10-08T08:00:00.000Z";
+  const entries = view([], [...answeredRange(20), late]);
+  assert.equal(ids(entries).includes("late"), true);
+  assert.equal(ids(entries).includes("a01"), false);
+  assert.equal(entries.length, 20);
+});
+
 test("an item in both the open and the answered list shows once, as answered", () => {
   const entries = view([], [decision({ id: "d9" }), answered("d9", 5)]);
   assert.equal(entries.length, 1);
