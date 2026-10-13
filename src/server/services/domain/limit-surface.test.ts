@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   CREDITS_OPTION,
+  inputLineAt,
   limitChoice,
   parseLimitSurface,
   planLimitKeys,
@@ -66,6 +67,53 @@ void test("the recorded auto continue notice is surface a; a cancelled one is no
   assert.deepEqual(parseLimitSurface(pane("auto-continue.txt")), { kind: "a" });
   assert.equal(parseLimitSurface(pane("auto-continue-2.txt")), null);
   assert.deepEqual(planLimitKeys({ kind: "a" }), ["Escape"]);
+});
+
+void test("the live shortly notice below the input line is surface a, under a persisted notice above it", () => {
+  assert.deepEqual(parseLimitSurface(pane("auto-continue-3.txt")), {
+    kind: "a",
+  });
+});
+
+void test("a permission dialog footer under prose that says continuing shortly is no surface", () => {
+  assert.equal(
+    parseLimitSurface(
+      "❯ fix it\n⏺ Continuing shortly with the edit.\n Do you want to proceed?\n ❯ 1. Yes\n   2. No\n Esc to cancel · Tab to amend",
+    ),
+    null,
+  );
+});
+
+void test("a surface left above the input line is scrollback, not a surface", () => {
+  assert.equal(parseLimitSurface(pane("limit-cancelled.txt")), null);
+  const linesAboveInput = pane("limit-cancelled.txt").split("\n").slice(0, 2);
+  assert.deepEqual(parseLimitSurface(linesAboveInput.join("\n")), {
+    kind: "a",
+  });
+  assert.equal(
+    parseLimitSurface(`${menu([STOP, WAIT, CREDITS], 0)}\n❯ \n`),
+    null,
+  );
+});
+
+void test("a menu below a rate-limit-options echo line and a notice below an input line are surfaces", () => {
+  assert.deepEqual(
+    parseLimitSurface(
+      `❯ /rate-limit-options\n${menu([STOP, WAIT, CREDITS], 1)}`,
+    ),
+    { kind: "b", options: [STOP, WAIT, CREDITS], cursor: 1 },
+  );
+  assert.deepEqual(
+    parseLimitSurface(
+      "❯ \nUsage limit reached · continuing automatically at 10:40am · esc to cancel",
+    ),
+    { kind: "a" },
+  );
+});
+
+void test("the input line skips numbered menu rows and the permission Deny row", () => {
+  assert.equal(inputLineAt(["❯ ", "❯ 1. Yes", "❯ Deny"]), 0);
+  assert.equal(inputLineAt(["❯ 1. Yes", "  2. No"]), -1);
 });
 
 void test("a pane that only mentions usage credits is not a surface", () => {
