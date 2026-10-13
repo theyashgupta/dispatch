@@ -1,4 +1,10 @@
-import { useMemo, useState, useSyncExternalStore } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useSyncExternalStore,
+  type KeyboardEvent,
+} from "react";
 import { NARROW_QUERY } from "../../../../shared/media-queries.js";
 import { pinFromBoard } from "../../../../shared/pinned-card.js";
 import type { Card } from "../../../../shared/types.js";
@@ -20,6 +26,10 @@ import {
   regionState,
 } from "@/modules/orchestrator/domain/centre-page-state";
 import { STALE_REASON } from "@/modules/orchestrator/domain/panel-model";
+import {
+  resetCentrePane,
+  useCentrePane,
+} from "@/modules/orchestrator/hooks/use-centre-pane";
 import { useEdgePaths } from "@/modules/orchestrator/hooks/use-edge-paths";
 import { useTileFocus } from "@/modules/orchestrator/hooks/use-tile-focus";
 import {
@@ -70,6 +80,24 @@ export function CentreContainer() {
   );
   const order = useMemo(() => focusOrder(graph), [graph]);
   const { register, onKeyDown } = useTileFocus(order);
+  const { page, setPage, requestCommentFocus } = useCentrePane();
+
+  useEffect(() => () => resetCentrePane(), []);
+
+  const nodeKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    const plainEnter =
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.metaKey;
+    if (plainEnter && record !== null && event.target === event.currentTarget) {
+      event.preventDefault();
+      requestCommentFocus();
+      return;
+    }
+    onKeyDown(CENTRE_FOCUS_ID)(event);
+  };
   const { container, paths } = useEdgePaths(
     wide ? graph.branches.map((b) => `${b.id}:${b.band}`) : [],
   );
@@ -146,7 +174,7 @@ export function CentreContainer() {
           paths={paths}
           containerRef={container}
           nodeRef={register(CENTRE_FOCUS_ID)}
-          onNodeKeyDown={onKeyDown(CENTRE_FOCUS_ID)}
+          onNodeKeyDown={nodeKeyDown}
           showOlderShipped={showOlderShipped}
           onToggleShipped={toggleShipped}
           tile={tile}
@@ -162,7 +190,7 @@ export function CentreContainer() {
       controls={<CentreControlsContainer inline />}
       centre={ready ? graph.centre : null}
       nodeRef={register(CENTRE_FOCUS_ID)}
-      onNodeKeyDown={onKeyDown(CENTRE_FOCUS_ID)}
+      onNodeKeyDown={nodeKeyDown}
       reason={stale ? <StaleReason id={REASON_ID} padded={false} /> : null}
       branches={
         ready ? (
@@ -177,7 +205,11 @@ export function CentreContainer() {
           notReady
         )
       }
-      terminal={<CentrePaneContainer inTab />}
+      page={page}
+      onPageChange={(value) =>
+        setPage(value === "conversation" ? "conversation" : "branches")
+      }
+      pane={<CentrePaneContainer inTab />}
     />
   );
 }

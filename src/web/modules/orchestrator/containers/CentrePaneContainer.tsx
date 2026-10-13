@@ -9,6 +9,7 @@ import {
   terminalFor,
   terminalSrcFor,
 } from "@/modules/orchestrator/domain/panel-model";
+import { useCentrePane } from "@/modules/orchestrator/hooks/use-centre-pane";
 import { useEnsureOrchestratorTerminalMutation } from "@/modules/orchestrator/queries/orchestrator-queries";
 import { ConversationContainer } from "./ConversationContainer";
 import { useCentreSelection } from "./use-centre-selection";
@@ -22,6 +23,7 @@ export function CentrePaneContainer({
 }: CentrePaneContainerProps) {
   const { panel, record, unknown } = useCentreSelection();
   const wide = !useMediaQuery(NARROW_QUERY);
+  const { pane, setPane } = useCentrePane();
   const { mutateAsync: ensureTerminal } =
     useEnsureOrchestratorTerminalMutation();
   const spawnedFor = useRef<string | null>(null);
@@ -67,9 +69,14 @@ export function CentrePaneContainer({
         loading={panel.isPending}
       />
     );
-  return inTab ? (
-    frame
-  ) : (
-    <CentrePane conversation={<ConversationContainer />} terminal={frame} />
+  return (
+    <CentrePane
+      value={pane}
+      onValueChange={(value) =>
+        setPane(value === "terminal" ? "terminal" : "conversation")
+      }
+      conversation={<ConversationContainer />}
+      terminal={frame}
+    />
   );
 }

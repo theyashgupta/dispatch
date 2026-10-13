@@ -2,13 +2,24 @@ import type { ReactNode } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 interface CentrePaneProps {
+  value: string;
+  onValueChange: (value: string) => void;
   conversation: ReactNode;
   terminal: ReactNode;
 }
 
-export function CentrePane({ conversation, terminal }: CentrePaneProps) {
+export function CentrePane({
+  value,
+  onValueChange,
+  conversation,
+  terminal,
+}: CentrePaneProps) {
   return (
-    <Tabs defaultValue="conversation" className="min-h-0 flex-1 gap-0">
+    <Tabs
+      value={value}
+      onValueChange={onValueChange}
+      className="min-h-0 flex-1 gap-0"
+    >
       <TabsList
         variant="line"
         className="h-auto w-full justify-start px-(--space-lg) pb-(--space-sm)"
@@ -22,7 +33,8 @@ export function CentrePane({ conversation, terminal }: CentrePaneProps) {
       </TabsList>
       <TabsContent
         value="conversation"
-        className="min-h-0 flex-1 overflow-auto"
+        forceMount
+        className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
       >
         {conversation}
       </TabsContent>

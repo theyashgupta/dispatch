@@ -9,8 +9,10 @@ interface CentreNarrowProps {
   nodeRef: Ref<HTMLElement>;
   onNodeKeyDown: KeyboardEventHandler<HTMLElement>;
   reason: ReactNode;
+  page: string;
+  onPageChange: (page: string) => void;
   branches: ReactNode;
-  terminal: ReactNode;
+  pane: ReactNode;
 }
 
 export function CentreNarrow({
@@ -19,8 +21,10 @@ export function CentreNarrow({
   nodeRef,
   onNodeKeyDown,
   reason,
+  page,
+  onPageChange,
   branches,
-  terminal,
+  pane,
 }: CentreNarrowProps) {
   return (
     <div className="flex flex-col gap-(--space-md) p-(--space-lg)">
@@ -34,22 +38,26 @@ export function CentreNarrow({
         />
       )}
       {reason}
-      <Tabs defaultValue="branches" className="gap-(--space-md)">
+      <Tabs
+        value={page}
+        onValueChange={onPageChange}
+        className="gap-(--space-md)"
+      >
         <TabsList variant="line" className="h-auto w-full justify-start">
           <TabsTrigger value="branches" className="flex-none">
             Branches
           </TabsTrigger>
-          <TabsTrigger value="terminal" className="flex-none">
-            Terminal
+          <TabsTrigger value="conversation" className="flex-none">
+            Conversation
           </TabsTrigger>
         </TabsList>
         <TabsContent value="branches">{branches}</TabsContent>
         <TabsContent
-          value="terminal"
+          value="conversation"
           forceMount
-          className="flex min-h-0 flex-col data-[state=inactive]:hidden"
+          className="flex h-120 min-h-0 flex-none flex-col data-[state=inactive]:hidden"
         >
-          {terminal}
+          {pane}
         </TabsContent>
       </Tabs>
     </div>
