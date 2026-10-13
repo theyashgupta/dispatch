@@ -12,7 +12,7 @@ export function CentreView() {
           <CentreContainer />
         </section>
         <aside
-          aria-label="Terminal"
+          aria-label="Conversation"
           className="hidden w-full shrink-0 flex-col border-t border-border md:flex md:w-90 md:border-t-0 md:border-l xl:w-105"
         >
           <CentrePaneContainer />

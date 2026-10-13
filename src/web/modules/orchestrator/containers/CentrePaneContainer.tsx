@@ -10,6 +10,7 @@ import {
   terminalSrcFor,
 } from "@/modules/orchestrator/domain/panel-model";
 import { useEnsureOrchestratorTerminalMutation } from "@/modules/orchestrator/queries/orchestrator-queries";
+import { ConversationContainer } from "./ConversationContainer";
 import { useCentreSelection } from "./use-centre-selection";
 
 interface CentrePaneContainerProps {
@@ -66,5 +67,9 @@ export function CentrePaneContainer({
         loading={panel.isPending}
       />
     );
-  return inTab ? frame : <CentrePane terminal={frame} />;
+  return inTab ? (
+    frame
+  ) : (
+    <CentrePane conversation={<ConversationContainer />} terminal={frame} />
+  );
 }

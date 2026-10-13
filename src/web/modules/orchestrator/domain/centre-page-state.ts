@@ -1,3 +1,4 @@
+import type { OrchestratorConversation } from "../../../../shared/types.js";
 import { mainOrchestrator } from "../../../../shared/orchestrator-owner.js";
 import type { CentreBranch } from "./centre-graph.js";
 import {
@@ -10,6 +11,9 @@ export const NO_ORCHESTRATOR_TEXT = "This board has no orchestrator.";
 export const NO_BRANCHES_TEXT =
   "No tickets or groups yet. Ask the orchestrator in the conversation.";
 export const LOADING_TEXT = "Loading command centre";
+export const NO_MESSAGES_TEXT = "No messages yet.";
+export const CONVERSATION_UNAVAILABLE_TEXT =
+  "The conversation is not available. Open the terminal.";
 const NOT_STARTED_TEXT = "Not started";
 
 export const OPEN_TERMINAL_LABEL = "Open terminal";
@@ -21,6 +25,7 @@ export const CENTRE_CONTROL_LABELS: Record<ControlKind, string> = {
 };
 
 export type RegionState = "loading" | "error" | "empty" | "ready";
+export type ConversationState = RegionState | "unavailable";
 
 /** Build the counts line of the centre node, for example "3 branches, 1 need you". */
 export function countsText(branchCount: number, needYouCount: number): string {
@@ -83,6 +88,26 @@ export function regionState(input: {
   if (input.error) return "error";
   if (input.loading) return "loading";
   return input.empty ? "empty" : "ready";
+}
+
+/**
+ * Pick the display state of the conversation pane.
+ *
+ * @remarks `pending` and `error` mean the query holds no data. An unavailable transcript still shows its decision entries, so the caller renders the list under the line.
+ */
+export function conversationState(input: {
+  pending: boolean;
+  error: boolean;
+  status: OrchestratorConversation["status"] | null;
+  entryCount: number;
+}): ConversationState {
+  if (input.status === null) {
+    return input.error ? "error" : input.pending ? "loading" : "empty";
+  }
+  if (input.status === "no-transcript" || input.status === "unreadable") {
+    return "unavailable";
+  }
+  return input.entryCount === 0 ? "empty" : "ready";
 }
 
 /** Build the error line of a region that did not load. */
