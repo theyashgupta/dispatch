@@ -497,14 +497,14 @@ The user edits the board policy and manages the orchestrators of the board from 
 
 #### Parts
 
-| Part                | Primitive              | Copy                                                                                                                                                                    |
-| ------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Sheet               | `sheet`                | Title "Orchestrator settings". Description (sr-only) "Policy and orchestrators of <board name>." The close button is an X button. A click on the dimmed page closes it. |
-| Stale badge         | `badge`                | "Data from <time>". It shows in the sheet header while the board stream is down.                                                                                        |
-| Tabs                | `tabs`, `line` variant | "Policy", "Orchestrators (<n>)". While the list loads, the label reads "Orchestrators".                                                                                 |
-| Policy form         | module component       | The form of Screen 3, with the same fields, validation and save.                                                                                                        |
-| Orchestrators table | module component       | The table of Screen 3 with its dialogs: add an extra orchestrator, edit overrides and move groups. The same actions and validation.                                     |
-| List error          | text, `button`         | "Orchestrators did not load: <error message>." Button "Try again".                                                                                                      |
+| Part                | Primitive              | Copy                                                                                                                                                                            |
+| ------------------- | ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Sheet               | `sheet`                | Title "Orchestrator settings". Description (sr-only) "Policy and orchestrators of <board name>." The close button is an X button. A click on the dimmed page does not close it. |
+| Stale badge         | `badge`                | "Data from <time>". It shows in the sheet header while the board stream is down.                                                                                                |
+| Tabs                | `tabs`, `line` variant | "Policy", "Orchestrators (<n>)". While the list loads, the label reads "Orchestrators".                                                                                         |
+| Policy form         | module component       | The form of Screen 3, with the same fields, validation and save.                                                                                                                |
+| Orchestrators table | module component       | The table of Screen 3 with its dialogs: add an extra orchestrator, edit overrides and move groups. The same actions and validation.                                             |
+| List error          | text, `button`         | "Orchestrators did not load: <error message>." Button "Try again".                                                                                                              |
 
 #### Keyboard
 

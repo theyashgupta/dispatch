@@ -426,7 +426,7 @@ The sheet has two tabs:
 
 A tab change does not add a history entry.
 
-To close the sheet, choose the X button, press Escape, or choose the dimmed page. Back also closes it. Focus then returns to **Settings**. When a dialog is open, Escape closes the dialog first. A second Escape closes the sheet.
+To close the sheet, choose the X button or press Escape. Back also closes it. A click on the dimmed page does not close the sheet, so an unsaved policy edit stays. Focus then returns to **Settings**. When a dialog is open, Escape closes the dialog first. A second Escape closes the sheet.
 
 An old board link that has `panel=orchestrator` opens the command centre of the main orchestrator. With `tab=policy` or `tab=orchestrators`, the sheet opens at that tab. With `tab=terminal`, `tab=decisions` or no tab, the sheet stays closed.
 
