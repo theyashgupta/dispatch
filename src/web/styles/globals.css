@@ -138,6 +138,14 @@
       transparent 3px 6px
     );
   }
+  .canvas-dots {
+    background-image: radial-gradient(
+      circle,
+      color-mix(in srgb, var(--text-muted) 35%, transparent) 1px,
+      transparent 1.5px
+    );
+    background-size: 16px 16px;
+  }
   .segment-dots {
     background-image: radial-gradient(
       circle,
