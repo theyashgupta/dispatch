@@ -1104,6 +1104,19 @@ export type TunnelState =
   | { status: "error"; message: string }
   | { status: "binary-missing"; installHint: string };
 
+export interface MemorySample {
+  at: string;
+  freeMb: number;
+  compressorMb: number;
+  swapUsedMb: number;
+  swapTotalMb: number;
+  load1: number;
+}
+
+export type SystemMemory =
+  | { supported: false }
+  | { supported: true; sample: MemorySample; stale: boolean };
+
 /**
  * The single-source-of-truth update-check snapshot shared by `dispatch update`, `dispatch doctor`,
  * the boot-time check loop, and the web update banner.
@@ -1808,6 +1821,8 @@ export interface BoardPolicy {
   groupPlaybook: string | null;
   wakeMinutes: number;
   crossSessionInbound: CrossSessionInbound | null;
+  memoryFloorMb: number;
+  swapCeilingMb: number;
 }
 
 export type OrchestratorPolicyOverride = Partial<

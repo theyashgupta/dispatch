@@ -5,6 +5,7 @@ import type {
   BoardKey,
   BoardSnapshot,
   OrchestrationEvent,
+  SystemMemory,
   TunnelState,
 } from "../../shared/types.js";
 import { DONE_PAGE_SIZE, parseDoneLimit } from "../../shared/done-limit.js";
@@ -12,6 +13,10 @@ import {
   getTunnelState,
   tunnelEmitter,
 } from "../services/orchestration/tunnel.js";
+import {
+  memoryEmitter,
+  systemMemory,
+} from "../services/orchestration/memory-governor.js";
 import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 import { boardParamSchema } from "./boards-schemas.js";
 
@@ -50,6 +55,11 @@ function orchestrationFrame(event: OrchestrationEvent): string {
 /** Serialize a tunnel status transition into a NAMED `tunnel` SSE frame. */
 function tunnelFrame(state: TunnelState): string {
   return `event: tunnel\ndata: ${JSON.stringify(state)}\n\n`;
+}
+
+/** Serialize a memory reading into a NAMED `memory` SSE frame. */
+function memoryFrame(memory: SystemMemory): string {
+  return `event: memory\ndata: ${JSON.stringify(memory)}\n\n`;
 }
 
 /**
@@ -102,6 +112,7 @@ export function sseHandler(req: Request, res: Response): void {
   const board = streamBoard(req.query);
   safeWrite(res, frame(store.snapshot(board, { doneLimit })));
   safeWrite(res, tunnelFrame(getTunnelState()));
+  safeWrite(res, memoryFrame(systemMemory()));
   clients.set(res, { board, doneLimit });
 
   const keepAlive = setInterval(() => {
@@ -159,11 +170,19 @@ store.on("orchestration", (event: OrchestrationEvent) => {
   }
 });
 
-tunnelEmitter.on("change", (state: TunnelState) => {
-  const payload = tunnelFrame(state);
+/** Write one frame to every client whatever its board, pruning dead ones. */
+function broadcastAll(payload: string): void {
   for (const client of clients.keys()) {
     if (!safeWrite(client, payload)) clients.delete(client);
   }
+}
+
+tunnelEmitter.on("change", (state: TunnelState) => {
+  broadcastAll(tunnelFrame(state));
+});
+
+memoryEmitter.on("change", (memory: SystemMemory) => {
+  broadcastAll(memoryFrame(memory));
 });
 
 export const sseRouter = Router();
