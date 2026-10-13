@@ -46,7 +46,7 @@ interface ControlInput {
 /**
  * Pick the Start, Stop or Resume control that one orchestrator record shows, or null while it changes state.
  *
- * @remarks A null record is a board with no orchestrator, which shows Start. The command centre uses this rule.
+ * @remarks A null record is a board with no orchestrator, which shows Start.
  */
 export function controlFor(
   main: OrchestratorView | null,
