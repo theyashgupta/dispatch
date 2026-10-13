@@ -1,6 +1,6 @@
 import type { Ref, KeyboardEventHandler } from "react";
 import { CircleCheck, Pause, Play, TriangleAlert } from "lucide-react";
-import { ToneBadge } from "@/modules/orchestrator/components/ToneBadge";
+import { ToneBadge } from "@/components/badges/ToneBadge";
 import type {
   BranchTone,
   CentreNode as CentreNodeModel,

@@ -11,7 +11,11 @@ import type {
   BoardPolicy,
   OrchestratorPolicyOverride,
 } from "../../../../shared/types.js";
-import { openDecisionsQueryOptions } from "@/queries/attention-actions-queries";
+import { getDecisions } from "@/queries/attention-actions-api";
+import {
+  attentionActionsKeys,
+  openDecisionsQueryOptions,
+} from "@/queries/attention-actions-queries";
 import {
   boardListKeys,
   boardListQueryOptions,
@@ -34,6 +38,8 @@ export const PANEL_POLL_MS = 3000;
 
 export const orchestratorKeys = {
   panel: (board: BoardKey) => ["orchestrators", "panel", board] as const,
+  answered: (board: BoardKey) =>
+    [...attentionActionsKeys.decisions(board), "answered"] as const,
 };
 
 /**
@@ -138,6 +144,26 @@ export function panelDecisionsQueryOptions(board: BoardKey) {
 /** Read the open decision items of the board of the open panel. */
 export function usePanelDecisionsQuery(board: BoardKey) {
   return useQuery(panelDecisionsQueryOptions(board));
+}
+
+/**
+ * Build the answered decisions query options of the command centre, refetched every 3 s.
+ *
+ * @remarks
+ * The graph reads the approved plan from an answered item, and an answer arrives from the orchestrator side with no stream event, so the poll is the live feed. The key sits under the open decisions key, so an answer from the dashboard refreshes both.
+ */
+export function answeredDecisionsQueryOptions(board: BoardKey) {
+  return queryOptions({
+    queryKey: orchestratorKeys.answered(board),
+    queryFn: () => getDecisions(board, "answered"),
+    staleTime: 0,
+    refetchInterval: PANEL_POLL_MS,
+  });
+}
+
+/** Read the answered decision items of the board of the command centre. */
+export function useAnsweredDecisionsQuery(board: BoardKey) {
+  return useQuery(answeredDecisionsQueryOptions(board));
 }
 
 /**

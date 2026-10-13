@@ -8,20 +8,19 @@ import {
   Play,
   TriangleAlert,
 } from "lucide-react";
+import { ACTION_LABELS } from "../../../../shared/decision-view.js";
+import { ReplyField } from "@/components/attention/ReplyField";
+import { ToneBadge } from "@/components/badges/ToneBadge";
 import { Button } from "@/components/ui/button";
-import { Field, FieldDescription } from "@/components/ui/field";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { PanelAlertBar } from "@/modules/orchestrator/components/PanelAlertBar";
-import { ToneBadge } from "@/modules/orchestrator/components/ToneBadge";
 import type {
   BranchAction,
   BranchState,
   CentreBranch,
 } from "@/modules/orchestrator/domain/centre-graph";
 import {
-  ACTION_LABELS,
+  OPEN_TERMINAL_LABEL,
   playbookText,
   tileMeters,
 } from "@/modules/orchestrator/domain/centre-page-state";
@@ -61,6 +60,8 @@ interface BranchTileProps {
   tile: TileBehaviour;
 }
 
+const RESUME_ACTIONS = ["resume", "retry_resume"] as const;
+
 const BODY_CLASS =
   "flex w-full flex-col gap-(--space-xs) rounded-md p-(--space-md) text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
@@ -74,7 +75,6 @@ export function BranchTile({ branch, tile }: BranchTileProps) {
   const inline = branch.actions.some((a) => a !== "open");
   const typed = draft.trim();
   const replyId = `reply-${branch.id}`;
-  const blocked = tile.disabled;
 
   async function send() {
     setSending(true);
@@ -130,6 +130,7 @@ export function BranchTile({ branch, tile }: BranchTileProps) {
             ref={tile.register(branch.id)}
             onKeyDown={tile.onKeyDown(branch.id)}
             onClick={() => tile.onOpen(branch)}
+            data-slot="branch-tile"
             className={BODY_CLASS}
           >
             {body}
@@ -139,6 +140,7 @@ export function BranchTile({ branch, tile }: BranchTileProps) {
             tabIndex={0}
             ref={tile.register(branch.id)}
             onKeyDown={tile.onKeyDown(branch.id)}
+            data-slot="branch-tile"
             className={BODY_CLASS}
           >
             {body}
@@ -147,61 +149,31 @@ export function BranchTile({ branch, tile }: BranchTileProps) {
         {inline && (
           <div className="flex flex-col gap-(--space-sm) border-t border-border p-(--space-md)">
             {has("reply") && (
-              <Field>
-                <Label htmlFor={replyId} className="sr-only">
-                  {`Reply to ${label ?? branch.title}`}
-                </Label>
-                <Textarea
-                  id={replyId}
-                  value={draft}
-                  placeholder={`Reply to ${label ?? branch.title}`}
-                  onChange={(event) =>
-                    tile.setDraft(branch, event.target.value)
-                  }
-                />
-                <FieldDescription>
-                  {draft.length} of 500 characters. A longer reply goes as a
-                  file.
-                </FieldDescription>
-                <div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={blocked || sending || typed === ""}
-                    aria-describedby={tile.reasonId ?? undefined}
-                    onClick={() => void send()}
-                  >
-                    Send reply
-                  </Button>
-                </div>
-              </Field>
+              <ReplyField
+                id={replyId}
+                label={`Reply to ${label ?? branch.title}`}
+                value={draft}
+                onChange={(text) => tile.setDraft(branch, text)}
+                onSend={() => void send()}
+                disabled={tile.disabled}
+                sending={sending}
+                describedBy={tile.reasonId}
+              />
             )}
             <div className="flex flex-wrap items-center gap-(--space-sm)">
-              {has("resume") && (
+              {RESUME_ACTIONS.filter(has).map((kind) => (
                 <Button
+                  key={kind}
                   type="button"
                   variant="outline"
                   size="sm"
-                  disabled={blocked}
+                  disabled={tile.disabled}
                   aria-describedby={tile.reasonId ?? undefined}
-                  onClick={() => tile.onAction(branch, "resume")}
+                  onClick={() => tile.onAction(branch, kind)}
                 >
-                  {ACTION_LABELS.resume}
+                  {ACTION_LABELS[kind]}
                 </Button>
-              )}
-              {has("retry_resume") && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={blocked}
-                  aria-describedby={tile.reasonId ?? undefined}
-                  onClick={() => tile.onAction(branch, "retry_resume")}
-                >
-                  {ACTION_LABELS.retry_resume}
-                </Button>
-              )}
+              ))}
               {has("open_terminal") && (
                 <Button
                   type="button"
@@ -210,7 +182,7 @@ export function BranchTile({ branch, tile }: BranchTileProps) {
                   className="h-auto p-0"
                   onClick={tile.onOpenTerminal}
                 >
-                  {ACTION_LABELS.open_terminal}
+                  {OPEN_TERMINAL_LABEL}
                 </Button>
               )}
               {feedback.result !== null && (
@@ -222,7 +194,7 @@ export function BranchTile({ branch, tile }: BranchTileProps) {
             {feedback.failure !== null && (
               <PanelAlertBar
                 message={feedback.failure}
-                retryDisabled={blocked}
+                retryDisabled={tile.disabled}
                 onRetry={() => tile.onRetry(branch)}
               />
             )}

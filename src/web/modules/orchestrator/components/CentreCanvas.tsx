@@ -4,7 +4,6 @@ import type { TileBehaviour } from "@/modules/orchestrator/components/BranchTile
 import { CentreEdges } from "@/modules/orchestrator/components/CentreEdges";
 import { CentreNode } from "@/modules/orchestrator/components/CentreNode";
 import type { CentreGraph } from "@/modules/orchestrator/domain/centre-graph";
-import { NO_BRANCHES_TEXT } from "@/modules/orchestrator/domain/centre-page-state";
 import type { EdgePath } from "@/modules/orchestrator/hooks/use-edge-paths";
 
 interface CentreCanvasProps {
@@ -30,7 +29,6 @@ export function CentreCanvas({
 }: CentreCanvasProps) {
   const { centre } = graph;
   if (centre === null) return null;
-  const empty = graph.branches.length === 0 && graph.hiddenShipped === 0;
   return (
     <div className="canvas-dots min-h-full">
       <div
@@ -47,19 +45,13 @@ export function CentreCanvas({
           />
         </div>
         <div className="relative min-w-0 flex-1">
-          {empty ? (
-            <p className="m-0 text-sm text-muted-foreground">
-              {NO_BRANCHES_TEXT}
-            </p>
-          ) : (
-            <BranchList
-              bands={graph.bands}
-              hiddenShipped={graph.hiddenShipped}
-              showOlderShipped={showOlderShipped}
-              onToggleShipped={onToggleShipped}
-              tile={tile}
-            />
-          )}
+          <BranchList
+            bands={graph.bands}
+            hiddenShipped={graph.hiddenShipped}
+            showOlderShipped={showOlderShipped}
+            onToggleShipped={onToggleShipped}
+            tile={tile}
+          />
         </div>
       </div>
     </div>

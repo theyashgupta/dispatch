@@ -68,7 +68,7 @@ const STOP_BLOCKED_STATES: readonly string[] = [
 type ControlInput = Pick<PanelInput, "supervisor" | "stale" | "pending">;
 
 /**
- * The Start, Stop or Resume control that one orchestrator record shows, or null while it changes state.
+ * Pick the Start, Stop or Resume control that one orchestrator record shows, or null while it changes state.
  *
  * @remarks A null record is a board with no orchestrator, which shows Start. The panel and the command centre share this rule.
  */
@@ -109,6 +109,7 @@ export function controlFor(
   };
 }
 
+/** Pick the terminal mode of the main orchestrator record. */
 export function terminalFor(main: OrchestratorView | null): TerminalMode {
   if (main === null) return "empty";
   const session = main.session;
@@ -124,6 +125,7 @@ export function terminalFor(main: OrchestratorView | null): TerminalMode {
   return "not-running";
 }
 
+/** Build the terminal iframe path of a live terminal, or null for any other mode. */
 export function terminalSrcFor(
   terminal: TerminalMode,
   main: OrchestratorView | null,
@@ -206,6 +208,6 @@ export function failureCopy(kind: ControlKind, reason: string): string {
     : actionErrorCopy(ACTION_NAMES[kind], reason);
 }
 
-function stripPeriod(text: string): string {
+export function stripPeriod(text: string): string {
   return text.replace(/\.+$/, "");
 }

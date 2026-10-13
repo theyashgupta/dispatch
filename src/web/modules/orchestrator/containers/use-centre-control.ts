@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { BoardKey } from "../../../../shared/types.js";
-import { centreControl } from "@/modules/orchestrator/domain/centre-page-state";
 import {
+  controlFor,
   failureCopy,
   type ControlKind,
   type OrchestratorView,
@@ -27,7 +27,7 @@ export function useCentreControl(
     kind: ControlKind;
     reason: string;
   } | null>(null);
-  const control = centreControl(record, {
+  const control = controlFor(record, {
     supervisor,
     stale,
     pending: lifecycle.isPending ? lifecycle.variables.kind : null,

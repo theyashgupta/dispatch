@@ -1,12 +1,10 @@
 import { useEffect, useRef } from "react";
+import { NARROW_QUERY } from "../../../../shared/media-queries.js";
 import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
 import { CentrePane } from "@/modules/orchestrator/components/CentrePane";
 import { PanelAlertBar } from "@/modules/orchestrator/components/PanelAlertBar";
 import { TerminalFrame } from "@/modules/orchestrator/components/TerminalFrame";
-import {
-  WIDE_QUERY,
-  regionErrorText,
-} from "@/modules/orchestrator/domain/centre-page-state";
+import { regionErrorText } from "@/modules/orchestrator/domain/centre-page-state";
 import {
   terminalFor,
   terminalSrcFor,
@@ -22,7 +20,7 @@ export function CentrePaneContainer({
   inTab = false,
 }: CentrePaneContainerProps) {
   const { panel, record, unknown } = useCentreSelection();
-  const wide = useMediaQuery(WIDE_QUERY);
+  const wide = !useMediaQuery(NARROW_QUERY);
   const { mutateAsync: ensureTerminal } =
     useEnsureOrchestratorTerminalMutation();
   const spawnedFor = useRef<string | null>(null);

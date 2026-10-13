@@ -1,24 +1,29 @@
 import { useNavigate } from "@tanstack/react-router";
-import { useBoardSnapshotQuery } from "@/queries/board-snapshot-queries";
-import { useAppStore } from "@/components/ui/hooks/use-app-store";
+import { NARROW_QUERY } from "../../../../shared/media-queries.js";
+import { staleText } from "../../../../shared/stale-text.js";
+import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
 import { CentreToolbar } from "@/modules/orchestrator/components/CentreToolbar";
 import { PanelControls } from "@/modules/orchestrator/components/PanelControls";
 import {
   CENTRE_CONTROL_LABELS,
   showSwitcher,
-  staleText,
   switcherOptions,
 } from "@/modules/orchestrator/domain/centre-page-state";
 import { STALE_REASON } from "@/modules/orchestrator/domain/panel-model";
 import { useCentreControl } from "./use-centre-control";
 import { useCentreSelection } from "./use-centre-selection";
 
-export function CentreControlsContainer() {
-  const { appStore, boardKey, stale, panel, records, record, unknown } =
+interface CentreControlsContainerProps {
+  inline?: boolean;
+}
+
+export function CentreControlsContainer({
+  inline = false,
+}: CentreControlsContainerProps) {
+  const { boardKey, stale, panel, snapshot, records, record, unknown } =
     useCentreSelection();
   const navigate = useNavigate();
-  const doneLimit = useAppStore(appStore, (s) => s.doneLimit);
-  const snapshot = useBoardSnapshotQuery(boardKey, doneLimit);
+  const wide = !useMediaQuery(NARROW_QUERY);
   const { control, run, failure, retryFailed, pending } = useCentreControl(
     boardKey,
     record,
@@ -35,8 +40,10 @@ export function CentreControlsContainer() {
             stale && control.reason === STALE_REASON ? null : control.reason,
         };
 
+  if (wide === inline) return null;
   return (
     <CentreToolbar
+      inline={inline}
       staleBadge={staleText(stale, snapshot.dataUpdatedAt)}
       switcher={
         showSwitcher(records)

@@ -1,5 +1,8 @@
 import { useCallback, useRef, type KeyboardEvent } from "react";
-import { isFocusKey, nextFocus } from "../domain/centre-focus.js";
+import {
+  isFocusKey,
+  nextFocus,
+} from "@/modules/orchestrator/domain/centre-focus";
 
 /**
  * Keep the focusable elements of the canvas by id and move focus between them with the arrow keys, Home and End.

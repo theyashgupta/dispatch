@@ -11,6 +11,7 @@ import { openDecisionsQueryOptions } from "@/queries/attention-actions-queries";
 import { boardListKeys } from "@/queries/board-list-queries";
 import {
   addExtraMutationOptions,
+  answeredDecisionsQueryOptions,
   boardRecordQueryOptions,
   lifecycleMutationOptions,
   moveGroupsMutationOptions,
@@ -259,6 +260,21 @@ test("the panel decisions query polls on the shared decisions key", async () => 
   const data = await newClient().fetchQuery(options);
   assert.deepEqual(data, [{ id: "d1" }]);
   assert.equal(calls[0]?.url, "/api/decisions?board=LOCAL&state=open");
+});
+
+test("the answered decisions query reads the answered decisions of the board every 3 s", async () => {
+  const options = answeredDecisionsQueryOptions(LOCAL);
+  assert.deepEqual(options.queryKey, [
+    "orchestration",
+    "LOCAL",
+    "decisions",
+    "answered",
+  ]);
+  assert.equal(options.refetchInterval, PANEL_POLL_MS);
+  assert.equal(options.staleTime, 0);
+  stubFetch({ status: 200, body: { items: [{ id: "d2" }] } });
+  assert.deepEqual(await newClient().fetchQuery(options), [{ id: "d2" }]);
+  assert.equal(calls[0]?.url, "/api/decisions?board=LOCAL&state=answered");
 });
 
 test("Save policy puts the thirteen fields and no credits value, then updates the board list", async () => {

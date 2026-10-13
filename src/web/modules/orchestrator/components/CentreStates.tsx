@@ -29,7 +29,7 @@ export function CentreLoading() {
   );
 }
 
-interface NoOrchestratorProps {
+export interface NoOrchestratorProps {
   startDisabled: boolean;
   reason: string | null;
   onStart: () => void;

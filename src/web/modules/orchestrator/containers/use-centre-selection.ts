@@ -6,11 +6,12 @@ import {
 } from "@/modules/orchestrator/domain/centre-page-state";
 import type { OrchestratorView } from "@/modules/orchestrator/domain/panel-model";
 import { useOrchestratorPanelQuery } from "@/modules/orchestrator/queries/orchestrator-queries";
+import { useBoardSnapshotQuery } from "@/queries/board-snapshot-queries";
 
 const NO_RECORDS: OrchestratorView[] = [];
 
 /**
- * Read what every region of the command centre shares: the board, the orchestrator in the path, its record and the stream state.
+ * Read what every region of the command centre shares: the board, the orchestrator in the path, its record, the board snapshot and the stream state.
  *
  * @remarks `unknown` is true once the records loaded and the path names no orchestrator, or the board has records but no main. Each region container calls this hook, and TanStack Query shares one 3 s poll of the records between them.
  */
@@ -19,7 +20,9 @@ export function useCentreSelection() {
   const { id } = useParams({ from: "/boards/$key/orchestrator/{-$id}" });
   const boardKey = useAppStore(appStore, (s) => s.board);
   const stale = useAppStore(appStore, (s) => s.connection === "disconnected");
+  const doneLimit = useAppStore(appStore, (s) => s.doneLimit);
   const panel = useOrchestratorPanelQuery(boardKey, true);
+  const snapshot = useBoardSnapshotQuery(boardKey, doneLimit);
   const records = panel.data ?? NO_RECORDS;
   const record = selectedRecord(records, id);
   const unknown =
@@ -32,6 +35,7 @@ export function useCentreSelection() {
     id,
     stale,
     panel,
+    snapshot,
     records,
     record,
     unknown,

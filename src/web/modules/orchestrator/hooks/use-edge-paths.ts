@@ -1,5 +1,5 @@
 import { useLayoutEffect, useState } from "react";
-import { elbowPath } from "../domain/centre-edges.js";
+import { elbowPath } from "@/modules/orchestrator/domain/centre-edges";
 
 export interface EdgePath {
   to: string;

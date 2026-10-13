@@ -1,36 +1,32 @@
 import { useMemo, useState, useSyncExternalStore } from "react";
+import { NARROW_QUERY } from "../../../../shared/media-queries.js";
 import { pinFromBoard } from "../../../../shared/pinned-card.js";
 import type { Card } from "../../../../shared/types.js";
-import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
 import { readClock, subscribeClock } from "@/components/ui/hooks/wake-clock";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { BranchList } from "@/modules/orchestrator/components/BranchList";
 import type { TileBehaviour } from "@/modules/orchestrator/components/BranchTile";
 import { CentreCanvas } from "@/modules/orchestrator/components/CentreCanvas";
-import { CentreNode } from "@/modules/orchestrator/components/CentreNode";
-import {
-  CentreLoading,
-  NoOrchestrator,
-} from "@/modules/orchestrator/components/CentreStates";
-import { PanelAlertBar } from "@/modules/orchestrator/components/PanelAlertBar";
+import { CentreNarrow } from "@/modules/orchestrator/components/CentreNarrow";
+import { CentreNotReady } from "@/modules/orchestrator/components/CentreNotReady";
+import { StaleReason } from "@/modules/orchestrator/components/StaleReason";
 import { centreGraph } from "@/modules/orchestrator/domain/centre-graph";
 import {
   CENTRE_FOCUS_ID,
   focusOrder,
 } from "@/modules/orchestrator/domain/centre-focus";
 import {
-  NO_BRANCHES_TEXT,
-  WIDE_QUERY,
   regionErrorText,
   regionState,
 } from "@/modules/orchestrator/domain/centre-page-state";
 import { STALE_REASON } from "@/modules/orchestrator/domain/panel-model";
 import { useEdgePaths } from "@/modules/orchestrator/hooks/use-edge-paths";
 import { useTileFocus } from "@/modules/orchestrator/hooks/use-tile-focus";
-import { usePanelDecisionsQuery } from "@/modules/orchestrator/queries/orchestrator-queries";
-import { useAnsweredDecisionsQuery } from "@/queries/attention-actions-queries";
-import { useBoardSnapshotQuery } from "@/queries/board-snapshot-queries";
+import {
+  useAnsweredDecisionsQuery,
+  usePanelDecisionsQuery,
+} from "@/modules/orchestrator/queries/orchestrator-queries";
+import { CentreControlsContainer } from "./CentreControlsContainer";
 import { CentrePaneContainer } from "./CentrePaneContainer";
 import { useBranchActions } from "./use-branch-actions";
 import { useCentreControl } from "./use-centre-control";
@@ -40,13 +36,20 @@ const NO_CARDS: Card[] = [];
 const REASON_ID = "centre-actions-off";
 
 export function CentreContainer() {
-  const { appStore, boardKey, id, stale, panel, records, record, unknown } =
-    useCentreSelection();
-  const doneLimit = useAppStore(appStore, (s) => s.doneLimit);
-  const snapshot = useBoardSnapshotQuery(boardKey, doneLimit);
+  const {
+    appStore,
+    boardKey,
+    id,
+    stale,
+    panel,
+    snapshot,
+    records,
+    record,
+    unknown,
+  } = useCentreSelection();
   const open = usePanelDecisionsQuery(boardKey);
   const answered = useAnsweredDecisionsQuery(boardKey);
-  const wide = useMediaQuery(WIDE_QUERY);
+  const wide = !useMediaQuery(NARROW_QUERY);
   const now = useSyncExternalStore(subscribeClock, readClock);
   const [showOlderShipped, setShowOlderShipped] = useState(false);
   const cards = snapshot.data?.cards ?? NO_CARDS;
@@ -100,120 +103,81 @@ export function CentreContainer() {
   const toggleShipped = () => setShowOlderShipped((shown) => !shown);
 
   const startReason = start.control?.reason ?? null;
-  const notReady =
-    state === "loading" ? (
-      <CentreLoading />
-    ) : state === "error" ? (
-      <div className="p-(--space-xl)">
-        <PanelAlertBar
-          message={regionErrorText(
-            "Canvas",
-            failed?.error?.message ??
-              `no orchestrator ${id ?? "main"} on this board`,
-          )}
-          retryDisabled={false}
-          onRetry={() => {
-            for (const q of queries) {
-              if (q.error !== null || (unknown && q === panel)) {
-                void q.refetch();
-              }
+  const ready = state === "ready";
+  const notReady = (
+    <CentreNotReady
+      state={state}
+      error={{
+        message: regionErrorText(
+          "Canvas",
+          failed?.error?.message ??
+            `no orchestrator ${id ?? "main"} on this board`,
+        ),
+        onRetry: () => {
+          for (const q of queries) {
+            if (q.error !== null || (unknown && q === panel)) {
+              void q.refetch();
             }
-          }}
-        />
-      </div>
-    ) : state === "empty" ? (
-      <NoOrchestrator
-        startDisabled={start.control?.disabled ?? true}
-        reason={startReason === STALE_REASON ? null : startReason}
-        onStart={() => void start.run("start")}
-        alert={
+          }
+        },
+      }}
+      start={{
+        startDisabled: start.control?.disabled ?? true,
+        reason: startReason === STALE_REASON ? null : startReason,
+        onStart: () => void start.run("start"),
+        alert:
           start.failure === null
             ? null
             : {
                 message: start.failure,
                 onRetry: start.retryFailed,
                 retryDisabled: stale || start.pending,
-              }
-        }
-      />
-    ) : null;
-  const reason = stale ? (
-    <p
-      id={REASON_ID}
-      role="status"
-      className="m-0 text-sm text-muted-foreground"
-    >
-      {STALE_REASON}
-    </p>
-  ) : null;
+              },
+      }}
+    />
+  );
 
   if (wide) {
-    return (
-      notReady ?? (
-        <>
-          {reason !== null && (
-            <div className="px-(--space-xl) pt-(--space-md)">{reason}</div>
-          )}
-          <CentreCanvas
-            graph={graph}
-            paths={paths}
-            containerRef={container}
-            nodeRef={register(CENTRE_FOCUS_ID)}
-            onNodeKeyDown={onKeyDown(CENTRE_FOCUS_ID)}
+    return ready ? (
+      <>
+        {stale && <StaleReason id={REASON_ID} padded />}
+        <CentreCanvas
+          graph={graph}
+          paths={paths}
+          containerRef={container}
+          nodeRef={register(CENTRE_FOCUS_ID)}
+          onNodeKeyDown={onKeyDown(CENTRE_FOCUS_ID)}
+          showOlderShipped={showOlderShipped}
+          onToggleShipped={toggleShipped}
+          tile={tile}
+        />
+      </>
+    ) : (
+      notReady
+    );
+  }
+
+  return (
+    <CentreNarrow
+      controls={<CentreControlsContainer inline />}
+      centre={ready ? graph.centre : null}
+      nodeRef={register(CENTRE_FOCUS_ID)}
+      onNodeKeyDown={onKeyDown(CENTRE_FOCUS_ID)}
+      reason={stale ? <StaleReason id={REASON_ID} padded={false} /> : null}
+      branches={
+        ready ? (
+          <BranchList
+            bands={graph.bands}
+            hiddenShipped={graph.hiddenShipped}
             showOlderShipped={showOlderShipped}
             onToggleShipped={toggleShipped}
             tile={tile}
           />
-        </>
-      )
-    );
-  }
-
-  const noBranches = graph.branches.length === 0 && graph.hiddenShipped === 0;
-  return (
-    <div className="flex flex-col gap-(--space-md) p-(--space-lg)">
-      {notReady === null && graph.centre !== null && (
-        <CentreNode
-          node={graph.centre}
-          compact
-          nodeRef={register(CENTRE_FOCUS_ID)}
-          onKeyDown={onKeyDown(CENTRE_FOCUS_ID)}
-        />
-      )}
-      {reason}
-      <Tabs defaultValue="branches" className="gap-(--space-md)">
-        <TabsList variant="line" className="h-auto w-full justify-start">
-          <TabsTrigger value="branches" className="flex-none">
-            Branches
-          </TabsTrigger>
-          <TabsTrigger value="terminal" className="flex-none">
-            Terminal
-          </TabsTrigger>
-        </TabsList>
-        <TabsContent value="branches">
-          {notReady ??
-            (noBranches ? (
-              <p className="m-0 text-sm text-muted-foreground">
-                {NO_BRANCHES_TEXT}
-              </p>
-            ) : (
-              <BranchList
-                bands={graph.bands}
-                hiddenShipped={graph.hiddenShipped}
-                showOlderShipped={showOlderShipped}
-                onToggleShipped={toggleShipped}
-                tile={tile}
-              />
-            ))}
-        </TabsContent>
-        <TabsContent
-          value="terminal"
-          forceMount
-          className="flex min-h-0 flex-col data-[state=inactive]:hidden"
-        >
-          <CentrePaneContainer inTab />
-        </TabsContent>
-      </Tabs>
-    </div>
+        ) : (
+          notReady
+        )
+      }
+      terminal={<CentrePaneContainer inTab />}
+    />
   );
 }

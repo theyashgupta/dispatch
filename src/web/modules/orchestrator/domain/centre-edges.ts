@@ -4,7 +4,7 @@ interface Point {
 }
 
 /**
- * The SVG path of one elbow edge: a run right from the node, a vertical run at the middle, a run right into the tile.
+ * Build the SVG path of one elbow edge: a run right from the node, a vertical run at the middle, a run right into the tile.
  *
  * @remarks Coordinates are rounded to whole pixels so the one-pixel stroke stays sharp.
  */

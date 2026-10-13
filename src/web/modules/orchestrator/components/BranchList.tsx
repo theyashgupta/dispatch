@@ -5,6 +5,7 @@ import {
   type TileBehaviour,
 } from "@/modules/orchestrator/components/BranchTile";
 import type { CentreBand } from "@/modules/orchestrator/domain/centre-graph";
+import { NO_BRANCHES_TEXT } from "@/modules/orchestrator/domain/centre-page-state";
 
 interface BranchListProps {
   bands: readonly CentreBand[];
@@ -21,6 +22,13 @@ export function BranchList({
   onToggleShipped,
   tile,
 }: BranchListProps) {
+  const empty =
+    hiddenShipped === 0 && bands.every((band) => band.branches.length === 0);
+  if (empty) {
+    return (
+      <p className="m-0 text-sm text-muted-foreground">{NO_BRANCHES_TEXT}</p>
+    );
+  }
   return (
     <div className="flex min-w-0 flex-col gap-(--space-lg)">
       {bands.map((band) => (

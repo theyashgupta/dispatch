@@ -12,6 +12,7 @@ import {
 import { PanelAlertBar } from "@/modules/orchestrator/components/PanelAlertBar";
 
 interface CentreToolbarProps {
+  inline: boolean;
   staleBadge: string | null;
   switcher: {
     options: readonly { value: string; label: string }[];
@@ -28,6 +29,7 @@ interface CentreToolbarProps {
 }
 
 export function CentreToolbar({
+  inline,
   staleBadge,
   switcher,
   controls,
@@ -67,7 +69,13 @@ export function CentreToolbar({
         </Button>
       </div>
       {alert !== null && (
-        <div className="absolute top-full right-0 z-10 mt-(--space-xs) w-max max-w-120">
+        <div
+          className={
+            inline
+              ? "w-full"
+              : "absolute top-full right-0 z-10 mt-(--space-xs) w-max max-w-120"
+          }
+        >
           <PanelAlertBar
             message={alert.message}
             retryDisabled={alert.retryDisabled}

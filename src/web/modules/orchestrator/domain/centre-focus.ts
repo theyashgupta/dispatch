@@ -2,16 +2,17 @@ import type { CentreGraph } from "./centre-graph.js";
 
 export const CENTRE_FOCUS_ID = "centre";
 
-type FocusKey = "ArrowDown" | "ArrowUp" | "Home" | "End";
+const FOCUS_KEYS = ["ArrowDown", "ArrowUp", "Home", "End"] as const;
 
-const FOCUS_KEYS: readonly string[] = ["ArrowDown", "ArrowUp", "Home", "End"];
+type FocusKey = (typeof FOCUS_KEYS)[number];
 
+/** Tell whether a key moves focus between the canvas tiles. */
 export function isFocusKey(key: string): key is FocusKey {
-  return FOCUS_KEYS.includes(key);
+  return (FOCUS_KEYS as readonly string[]).includes(key);
 }
 
 /**
- * The focus order of the canvas: the centre node, then the visible branches band by band.
+ * Build the focus order of the canvas: the centre node, then the visible branches band by band.
  *
  * @remarks Branches follow the band order, not the slot order, so the arrow keys walk the tiles as they sit on screen.
  */
@@ -23,7 +24,7 @@ export function focusOrder(graph: CentreGraph): string[] {
 }
 
 /**
- * The id that takes focus after a key press on `current`.
+ * Give the id that takes focus after a key press on `current`.
  *
  * @remarks An id that is not in the order, for example a tile that just left the canvas, sends focus to the centre node.
  */

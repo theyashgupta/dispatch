@@ -2,17 +2,15 @@ import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { activeSessionView } from "../../../../shared/active-session.js";
 import {
+  ACTION_LABELS,
   REPLY_COPY,
   actionFailedText,
   refusalText,
+  replyOutcomeText,
 } from "../../../../shared/decision-view.js";
 import type { BoardKey, Card } from "../../../../shared/types.js";
 import type { TileFeedback } from "@/modules/orchestrator/components/BranchTile";
 import type { CentreBranch } from "@/modules/orchestrator/domain/centre-graph";
-import {
-  ACTION_LABELS,
-  replyOutcomeText,
-} from "@/modules/orchestrator/domain/centre-page-state";
 import {
   useLoopReplyMutation,
   useResumeLoopMutation,
