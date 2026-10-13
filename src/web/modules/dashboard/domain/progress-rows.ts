@@ -2,7 +2,7 @@ import { activeSessionView } from "../../../../shared/active-session.js";
 import { loopView, type LoopView } from "../../../../shared/loop-view.js";
 import {
   hasLoopProgress,
-  isRunningGroup,
+  isRunningLoopCard,
 } from "../../../../shared/running-group.js";
 import type {
   Card,
@@ -26,8 +26,9 @@ export interface ProgressRow {
 /**
  * Builds the Section 2 rows: running groups first by group id, then the other loops by group id.
  *
- * @remarks A card with loop progress that has at least one unit has a loop row. A running group
- * with no loop progress, or with zero units, has one row with a null view. Any other card has no row.
+ * @remarks A card with loop progress that has at least one unit has a loop row. A running loop card
+ * (a group, or a ticket card that an orchestrator started) with no loop progress, or with zero units,
+ * has one row with a null view. Any other card has no row.
  */
 export function progressRows(
   cards: readonly Card[],
@@ -39,7 +40,7 @@ export function progressRows(
   return cards
     .flatMap((card) => {
       const progress = hasLoopProgress(card) ? card.loopProgress : null;
-      return progress !== null || isRunningGroup(card)
+      return progress !== null || isRunningLoopCard(card)
         ? [{ card, progress }]
         : [];
     })

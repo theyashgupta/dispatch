@@ -193,3 +193,68 @@ test("a no-loop running row sorts with the running rows, then by group id", () =
     ["GROUP-5", "GROUP-7", "GROUP-10", "GROUP-1"],
   );
 });
+
+const launched = { launch: { direction: "ship it" } };
+
+const launchedProgress: LoopProgress = {
+  ...progress("running"),
+  slug: "single-prd",
+  roadmapFile: "",
+  prdFile: "PRD.md",
+  units: [
+    {
+      ...UNIT,
+      phases: [1, 2, 3].map((number) => ({
+        number,
+        name: `phase ${number}`,
+        gate: "pending" as const,
+        attempts: 0,
+        passedAt: null,
+      })),
+      phaseTotal: 3,
+    },
+  ],
+};
+
+test("a running launched ticket card with no progress has one row with a null view", () => {
+  const rows = progressRows(
+    [card("LOCAL-9", undefined, { ...launched, tmuxSession: "dsp-9" })],
+    NOW,
+  );
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0]?.groupId, "LOCAL-9");
+  assert.equal(rows[0]?.view, null);
+});
+
+test("a launched ticket card with one-unit progress has a row with a view and its slug", () => {
+  const rows = progressRows(
+    [card("LOCAL-9", launchedProgress, { ...launched, tmuxSession: "dsp-9" })],
+    NOW,
+  );
+  assert.equal(rows.length, 1);
+  assert.notEqual(rows[0]?.view, null);
+  assert.equal(rows[0]?.slug, "single-prd");
+});
+
+test("a running ticket card with no launch and no progress has no row", () => {
+  const rows = progressRows(
+    [card("LOCAL-8", undefined, { tmuxSession: "dsp-8" })],
+    NOW,
+  );
+  assert.deepEqual(rows, []);
+});
+
+test("running first still holds with a group and a launched card mixed", () => {
+  const rows = progressRows(
+    [
+      card("GROUP-1", progress("complete")),
+      card("LOCAL-9", undefined, { ...launched, tmuxSession: "dsp-9" }),
+      groupCard("GROUP-5", { tmuxSession: "dsp-5" }),
+    ],
+    NOW,
+  );
+  assert.deepEqual(
+    rows.map((r) => r.groupId),
+    ["GROUP-5", "LOCAL-9", "GROUP-1"],
+  );
+});
