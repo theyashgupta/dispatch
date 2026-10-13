@@ -91,7 +91,7 @@ function toneFrom(
   table: Record<string, ActivityTone>,
   key: string | null,
 ): ActivityTone {
-  return key !== null && Object.hasOwn(table, key) ? table[key]! : "muted";
+  return key !== null && Object.hasOwn(table, key) ? table[key] : "muted";
 }
 
 function toneOf(event: OrchestrationEvent): ActivityTone {
