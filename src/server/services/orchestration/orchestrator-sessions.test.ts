@@ -180,6 +180,40 @@ void test("requestHandoff sends the handoff request and refuses a card with no l
   assert.deepEqual(sent, []);
 });
 
+void test("requestHandoff on a launched ticket card names the feature folder resume file and refuses one with no progress", async () => {
+  const ticket = await store.createLocalCard(SBX, "launched ticket", "");
+  await store.completeStart(ticket.id, undefined, {
+    workspacePath: "/tmp/ws-launched",
+    tmuxSession: "dsp-launched-ticket",
+    branch: "launched-ticket",
+  });
+  await store.setOrchestratorFields(ticket.id, {
+    launch: { direction: "ship it" },
+  });
+  sent.length = 0;
+  await assert.rejects(
+    requestHandoff(store.getCard(ticket.id)!, false),
+    (err) => err instanceof ConflictError && err.code === "no-loop",
+  );
+  assert.equal(sent.length, 0);
+  await store.setLoopProgress(ticket.id, {
+    ...LOOP_PROGRESS,
+    slug: "demo-feature",
+    prdFile: "repo/.planning/prds/demo.md",
+  });
+  assert.equal(
+    await requestHandoff(store.getCard(ticket.id)!, false),
+    "confirmed",
+  );
+  assert.equal(sent[0]?.kind, "handoff");
+  const text = sent[0]?.text ?? "";
+  assert.ok(
+    text.includes("/tmp/ws-launched/repo/.planning/demo-feature/resume.md"),
+  );
+  assert.ok(text.includes("HANDOFF_READY demo-feature"));
+  assert.ok(!text.includes("progress.md"));
+});
+
 void test("resumeLoop continues a stopped loop and marks the session working", async () => {
   await setPolicy({ concurrencyCap: 50, budgetPerGroup: null });
   const card = await liveGroup("needs_input", "stop_session");

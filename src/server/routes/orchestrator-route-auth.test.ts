@@ -307,11 +307,13 @@ const TOOL_ROUTES: [method: string, route: string, tool: string][] = [
   ["GET", "/cards/:id", "get_card"],
   ["GET", "/sessions", "list_sessions"],
   ["GET", "/groups/:id/progress", "get_group_progress"],
+  ["GET", "/cards/:id/progress", "get_card_progress"],
   ["GET", "/sessions/:cardId/pane", "read_pane_tail"],
   ["GET", "/events", "list_events"],
   ["GET", "/policy", "get_policy"],
   ["GET", "/board-workspace", "get_board_workspace"],
   ["POST", "/tickets", "create_ticket"],
+  ["POST", "/releases", "release_prep"],
   ["PATCH", "/tickets/:id", "update_ticket"],
   ["POST", "/tickets/:id/move", "move_card"],
   ["POST", "/tickets/:id/comments", "add_comment"],
@@ -331,11 +333,12 @@ const TOOL_ROUTES: [method: string, route: string, tool: string][] = [
   ["GET", "/state", "read_state"],
   ["PUT", "/state", "write_state"],
   ["GET", "/playbooks", "list_playbooks"],
+  ["GET", "/accounts", "list_accounts"],
   ["GET", "/rulebook", "get_rulebook"],
   ["POST", "/cards/:cardId/start", "start_card"],
 ];
 
-void test("every one of the 30 orchestrator routes answers 401 with no token and records one tool_call row", async () => {
+void test("every one of the 33 orchestrator routes answers 401 with no token and records one tool_call row", async () => {
   const mounted = (
     orchestratorRouter.stack as {
       route?: { path: string; methods: Record<string, boolean> };
@@ -347,7 +350,7 @@ void test("every one of the 30 orchestrator routes answers 401 with no token and
         )
       : [],
   );
-  assert.equal(TOOL_ROUTES.length, 30);
+  assert.equal(TOOL_ROUTES.length, 33);
   assert.deepEqual(
     TOOL_ROUTES.map(([method, route]) => `${method} ${route}`).sort(),
     mounted.sort(),

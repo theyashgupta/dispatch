@@ -39,8 +39,8 @@ await seedPlaybooks();
 const all = await loadPlaybooks();
 const orchestrator = all.find((p) => p.name === "Board Orchestrator");
 
-void test("the seed adds the Roadmap Loop, the Review a pull request playbook and the Board Orchestrator to the four earlier playbooks", () => {
-  assert.equal(all.length, 7);
+void test("the seed adds the Roadmap Loop, the Review a pull request playbook, the Board Orchestrator and the Release playbook to the four earlier playbooks", () => {
+  assert.equal(all.length, 8);
   assert.ok(orchestrator);
   assert.equal(orchestrator.slug, "board-orchestrator");
 });
@@ -117,6 +117,41 @@ void test("the Review a pull request body holds the extra slot, the verdict rule
   assert.equal(hasDispatchMarker(review.when ?? ""), false);
   assert.doesNotMatch(review.body, /\u2014/);
   assert.equal(review.body.includes("-".repeat(2)), false);
+});
+
+void test("the Release seed has a when line and the release steps", () => {
+  const releases = all.filter((p) => p.slug === "release");
+  assert.equal(releases.length, 1);
+  const release = releases[0];
+  assert.equal(release.name, "Release");
+  assert.ok(release.when && release.when.length > 0);
+  for (const part of [
+    "release-notes",
+    "record-flow",
+    "inline player",
+    "ship rights merge",
+    "npm pkg set version=",
+    "chore(release): v",
+    "NEEDS_INPUT status line",
+    "Use the ship rights in that message",
+    "Never publish by hand",
+  ]) {
+    assert.ok(release.body.includes(part), part);
+  }
+  assert.equal(hasDispatchMarker(release.body), false);
+  assert.equal(hasDispatchMarker(release.when ?? ""), false);
+  assert.doesNotMatch(release.body, /\u2014/);
+  assert.equal(release.body.includes("-".repeat(2)), false);
+  for (const secret of ["NPM_TOKEN", "GITHUB_TOKEN", "values.env", ".env"]) {
+    assert.equal(release.body.includes(secret), false, secret);
+  }
+});
+
+void test("an edited Release file stays after a second seed", async () => {
+  const edited = "---\nname: Release\nwhen: Mine.\n---\nMy own release steps.";
+  write("release", edited);
+  await seedPlaybooks();
+  assert.equal(read("release"), edited);
 });
 
 void test("a v4.5.0 Board Orchestrator file is rewritten with the current seed", async () => {

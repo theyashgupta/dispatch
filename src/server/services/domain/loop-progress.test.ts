@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import type { LoopProgress } from "../../../shared/types.js";
 import {
   buildLoopProgress,
+  buildPrdProgress,
+  type PrdProgressInput,
   parseAttemptLines,
   parseEngineFile,
   parseProgressFile,
@@ -599,4 +601,142 @@ test("a pass line with a bad time still passes the phase and hides its older RED
   assert.equal(phase?.gate, "pass");
   assert.equal(phase?.passedAt, null);
   assert.equal(result.summary.lastGate, null);
+});
+
+const PRD_READ_AT = "2026-10-11T06:00:00.000Z";
+const PRD_FILE = "repo/.planning/prds/demo.md";
+const STATE_PATH = "repo/.planning/demo-feature/state.md";
+const ATTEMPTS_PATH = "repo/.planning/demo-feature/attempts.md";
+const PRD_THREE =
+  "# Demo feature\n\n### Phase 1: One\n\n### Phase 2: Two\n\n### Phase 3: Three\n";
+const ENGINE_ACTIVE =
+  '---\nactive: true\niteration: 2\nsession_id: abc\ncompletion_promise: "RALPH COMPLETE demo-feature"\n---\nExecute the PRD at /w/repo/.planning/prds/demo.md per the ralph-loop skill.\n';
+
+function prdInput(over: Partial<PrdProgressInput> = {}): PrdProgressInput {
+  return {
+    slug: "demo-feature",
+    prdFile: PRD_FILE,
+    readAt: PRD_READ_AT,
+    prdText: PRD_THREE,
+    statePath: STATE_PATH,
+    stateText: null,
+    attemptsPath: ATTEMPTS_PATH,
+    attemptsText: null,
+    engine: null,
+    refused: new Set(),
+    warnings: [],
+    ...over,
+  };
+}
+
+void test("no gate line and no running engine gives not started", () => {
+  const result = buildPrdProgress(prdInput());
+  assert.equal(result.units[0]?.status, "not started");
+  assert.equal(result.completion, "not_started");
+  assert.equal(result.summary.currentUnit, null);
+  assert.equal(result.summary.currentPhase, null);
+  assert.equal(result.summary.lastGate, null);
+  assert.deepEqual(result.warnings, []);
+});
+
+void test("one pass and one RED attempt give a running unit", () => {
+  const result = buildPrdProgress(
+    prdInput({
+      stateText: "phase 1 One GREEN 2026-10-11T04:00:00Z gate=pass\n",
+      attemptsText: "phase 2 RED attempt 1 2026-10-11T05:00:00Z\n",
+    }),
+  );
+  const unit = result.units[0];
+  assert.deepEqual(
+    unit?.phases.map((phase) => [phase.gate, phase.attempts]),
+    [
+      ["pass", 0],
+      ["fail", 1],
+      ["pending", 0],
+    ],
+  );
+  assert.equal(unit?.status, "in progress");
+  assert.equal(result.completion, "running");
+  assert.equal(result.summary.currentUnit, 1);
+  assert.deepEqual(result.summary.currentPhase, { number: 2, name: "Two" });
+  assert.deepEqual(result.summary.lastGate, {
+    unit: 1,
+    phase: 2,
+    result: "fail",
+    at: "2026-10-11T05:00:00Z",
+  });
+});
+
+void test("all phases passed gives a built unit", () => {
+  const result = buildPrdProgress(
+    prdInput({
+      stateText:
+        "phase 1 One GREEN 2026-10-11T04:00:00Z gate=pass\nphase 2 Two GREEN 2026-10-11T05:00:00Z gate=pass\nphase 3 Three GREEN 2026-10-11T06:00:00Z gate=pass\n",
+    }),
+  );
+  assert.equal(result.units[0]?.status, "built, awaiting /ship");
+  assert.equal(result.completion, "complete");
+  assert.equal(result.summary.unitsDone, 1);
+  assert.equal(result.summary.unitsTotal, 1);
+  assert.equal(result.summary.currentUnit, null);
+  assert.equal(result.summary.currentPhase, null);
+  assert.equal(result.summary.lastGate?.phase, 3);
+});
+
+void test("an active engine with no gate line gives in progress", () => {
+  const result = buildPrdProgress(
+    prdInput({ engine: { text: ENGINE_ACTIVE, closed: false } }),
+  );
+  assert.equal(result.units[0]?.status, "in progress");
+  assert.equal(result.completion, "running");
+  assert.equal(result.engine?.active, true);
+  assert.deepEqual(result.summary.currentPhase, { number: 1, name: "One" });
+});
+
+void test("a closed engine with no gate lines gives not started", () => {
+  const result = buildPrdProgress(
+    prdInput({ engine: { text: ENGINE_ACTIVE, closed: true } }),
+  );
+  assert.equal(result.units[0]?.status, "not started");
+  assert.equal(result.completion, "not_started");
+  assert.equal(result.engine?.closed, true);
+});
+
+void test("a PRD with no phase headings gives a warning and a null total", () => {
+  const result = buildPrdProgress(prdInput({ prdText: "# Only a title\n" }));
+  assert.equal(result.units[0]?.phaseTotal, null);
+  assert.deepEqual(result.units[0]?.phases, []);
+  assert.deepEqual(result.warnings, [`${PRD_FILE}: no phase headings`]);
+});
+
+void test("a null PRD text gives the missing warning", () => {
+  const result = buildPrdProgress(prdInput({ prdText: null }));
+  assert.deepEqual(result.warnings, [`${PRD_FILE}: missing`]);
+  assert.equal(result.units[0]?.title, "demo-feature");
+});
+
+void test("a null PRD file gives no prdFile key, no missing warning and no phases", () => {
+  const result = buildPrdProgress(prdInput({ prdFile: null, prdText: null }));
+  assert.equal("prdFile" in result, false);
+  assert.deepEqual(result.warnings, []);
+  assert.deepEqual(result.units[0]?.phases, []);
+  assert.equal(result.units[0]?.prdPath, null);
+});
+
+void test("the title is the first heading line and falls back to the slug", () => {
+  assert.equal(buildPrdProgress(prdInput()).units[0]?.title, "Demo feature");
+  assert.equal(
+    buildPrdProgress(prdInput({ prdText: "### Phase 1: One\n" })).units[0]
+      ?.title,
+    "demo-feature",
+  );
+});
+
+void test("the model has no roadmap file and carries the PRD file", () => {
+  const result = buildPrdProgress(prdInput());
+  assert.equal(result.roadmapFile, "");
+  assert.equal(result.prdFile, PRD_FILE);
+  assert.equal(result.slug, "demo-feature");
+  assert.equal(result.units[0]?.prdPath, PRD_FILE);
+  assert.equal(result.readAt, PRD_READ_AT);
 });

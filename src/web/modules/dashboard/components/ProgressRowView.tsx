@@ -22,7 +22,12 @@ export function ProgressRowView({ row }: ProgressRowViewProps) {
           {row.groupId}
         </span>
         {row.slug !== null && (
-          <span className="text-xs text-muted-foreground">{row.slug}</span>
+          <span
+            className="max-w-full min-w-0 truncate text-xs text-muted-foreground"
+            title={row.slug}
+          >
+            {row.slug}
+          </span>
         )}
         {row.state !== null && <SessionStateBadge state={row.state} />}
         {row.context !== null && (

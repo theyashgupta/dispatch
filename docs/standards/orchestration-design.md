@@ -304,6 +304,8 @@ The server enforces items 1 to 9 and the Done part of item 10: no tool exists fo
 
 The checks 1 to 3 use no git call. The check 4 reads one file and runs before any git call. The checks 5 to 7 run before the git identity is read and before any write, so a refused call stores no flow.
 
+Amendment, 2026-10-14 (LOCAL-109 part B): a ticket card that `start_card` started, which carries `launch`, ships through the same checks. The card must be in Agent done, and the only branch it may name is its session branch. The call also answers `loop-not-finished` when the card carries loop progress. A ticket card with no `launch` answers 400 `not-group-card`.
+
 **Reason:** in the G19 Unit 2 real run, group RUN-4 built and tested its code on Sonnet 5.5 for 0.25 USD and left commit 948b54c. `start_ship` refused the group twice with `loop-not-finished`, because no seeded playbook runs a roadmap loop and the group had no loop progress. The gate had no rule for a group of this kind. A review of the first version found a loop in planning with zero units and an active engine, a stale local base and a base that reached the git option parser. The engine rule, check 4 and check 6 close these cases.
 
 **Rejected:**
@@ -318,20 +320,21 @@ The checks 1 to 3 use no git call. The check 4 reads one file and runs before an
 
 ## Tool reference
 
-This section is the reference for the 30 tools. Each tool calls one route under `/api/orchestrator/`. Each call is checked against the board scope and, for a write, the policy (D-6), and is recorded as a `tool_call` row in `orchestration_events`. A tool call on a card that another orchestrator owns (D-7) returns 403 `other-owner`.
+This section is the reference for the 33 tools. Each tool calls one route under `/api/orchestrator/`. Each call is checked against the board scope and, for a write, the policy (D-6), and is recorded as a `tool_call` row in `orchestration_events`. A tool call on a card that another orchestrator owns (D-7) returns 403 `other-owner`.
 
-| Family    | Tools                                                                                                                                                                   | Notes                                                                                    |
-| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| Read      | `list_cards`, `get_card`, `list_sessions`, `get_group_progress`, `read_pane_tail`, `list_events`, `get_policy`, `get_board_workspace`, `list_playbooks`, `get_rulebook` | `list_events` takes a `since` cursor                                                     |
-| Boards    | `create_board`                                                                                                                                                          | any valid token may call it; the new board is not a board of the caller                  |
-| Tickets   | `create_ticket`, `update_ticket`, `move_card`, `add_comment`                                                                                                            | `update_ticket` closes F25                                                               |
-| Groups    | `create_base_branch`, `create_group`, `start_group`                                                                                                                     | `create_group` takes members, optional repos, playbook, direction and `dependsOn`        |
-| Cards     | `start_card`                                                                                                                                                            | starts one ticket card with a playbook and a direction                                   |
-| Sessions  | `send_input`, `approve_roadmap`, `request_handoff`, `resume_loop`, `stop_session`                                                                                       | `send_input` returns `confirmed` or `unconfirmed` (D-4); `resume_loop` per Key rules     |
-| Ship      | `start_ship`, `get_ship_state`                                                                                                                                          | D-8                                                                                      |
-| Decisions | `create_decision_item`                                                                                                                                                  | the user answers; the answer returns as an event                                         |
-| Wait      | `wait_for_event`                                                                                                                                                        | blocks until an event matches a filter or a time limit passes                            |
-| State     | `read_state`, `write_state`                                                                                                                                             | the orchestrator keeps its state in the store, because it has no file write tool (U4-05) |
+| Family    | Tools                                                                                                                                                                                        | Notes                                                                                    |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Read      | `list_cards`, `get_card`, `list_sessions`, `get_group_progress`, `get_card_progress`, `read_pane_tail`, `list_events`, `get_policy`, `get_board_workspace`, `list_playbooks`, `get_rulebook` | `list_events` takes a `since` cursor                                                     |
+| Boards    | `create_board`                                                                                                                                                                               | any valid token may call it; the new board is not a board of the caller                  |
+| Tickets   | `create_ticket`, `update_ticket`, `move_card`, `add_comment`                                                                                                                                 | `update_ticket` closes F25                                                               |
+| Groups    | `create_base_branch`, `create_group`, `start_group`                                                                                                                                          | `create_group` takes members, optional repos, playbook, direction and `dependsOn`        |
+| Cards     | `start_card`, `release_prep`                                                                                                                                                                 | `start_card` takes an optional `account`; `release_prep` creates a release card          |
+| Accounts  | `list_accounts`                                                                                                                                                                              | the accounts with state and usage windows, from the cached meter                         |
+| Sessions  | `send_input`, `approve_roadmap`, `request_handoff`, `resume_loop`, `stop_session`                                                                                                            | `send_input` returns `confirmed` or `unconfirmed` (D-4); `resume_loop` per Key rules     |
+| Ship      | `start_ship`, `get_ship_state`                                                                                                                                                               | D-8                                                                                      |
+| Decisions | `create_decision_item`                                                                                                                                                                       | the user answers; the answer returns as an event                                         |
+| Wait      | `wait_for_event`                                                                                                                                                                             | blocks until an event matches a filter or a time limit passes                            |
+| State     | `read_state`, `write_state`                                                                                                                                                                  | the orchestrator keeps its state in the store, because it has no file write tool (U4-05) |
 
 Every route sits under `/api/orchestrator/`, and the paths below are relative to it. Each tool is one entry of `src/server/bootstrap/mcp-tools.ts`, and each route is declared in `src/server/routes/orchestrator.route.ts`, its handler is in `src/server/routes/orchestrator.handlers.ts` and its zod schema is in `src/server/routes/orchestrator-schemas.ts`. These rules hold for every route, so the entries do not repeat them:
 
@@ -369,6 +372,14 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 - Input: `id` (card id).
 - Description: "Get the progress of one group card. A card outside your board is refused."
 - Refusals: 400 `not-group-card`.
+
+### `get_card_progress`
+
+- Route: `GET /cards/:id/progress`.
+- Input: `id` (card id).
+- Description: "Get the progress of one ticket card that start_card started: the phases from its PRD, the gate state of each phase, the loop engine state and the last status marker. A group card or a card that start_card did not start is refused. This tool changes nothing."
+- Result: `{ cardId, loopProgress, lastMarker }`. `loopProgress` is the one-unit loop model of a single PRD loop. Its phases come from the PRD headings. Its gate state comes from the `gate=pass` lines of `state.md` and the RED lines of `attempts.md`. Its engine state comes from the engine file, and it holds `prdFile`. `loopProgress` is null before the engine file exists.
+- Refusals: 400 `not-launched-card` for a group card or for a ticket card that `start_card` did not start. 404 `unknown-card`. 403 for a card outside the caller scope.
 
 ### `read_pane_tail`
 
@@ -500,8 +511,8 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 
 - Route: `POST /groups/:cardId/ship`. It answers 202 with `{ flow }`.
 - Input: `cardId` (card id), `repository` (string, a repository path of the group workspace), `branches` (array of 1 to 10 distinct `{ name, title, body }`: `name` 1 to 100 characters that match `[A-Za-z0-9][A-Za-z0-9._/-]{0,99}` with no `..`, `title` 1 to 200 characters after trimming, `body` 1 to 20000 characters after trimming).
-- Description: "Start the ship steps of a finished group card for its branches in stack order. A board with no ship rights is refused."
-- Refusals: 400 `not-group-card`, `unknown-repository` (also a repository with no board repository entry; an entry with an empty `checkCommand` skips step 3), `invalid-branches` (also a repeated branch name), `invalid-branch-name` (also with `branch`: a name that is not the `branch` of a loop unit or `test/<slug>-specs` or, for a group with no loop progress, a name that is not the `branch` of the card (else its identifier), a name `main`, `master` or `HEAD`, a name that starts with `refs/`, the repository base branch, or a name with no local `refs/heads/<name>`), `invalid-title`, `invalid-body`, and `content contains the DISPATCH_STATUS marker` for a title or body that holds the status marker. 403 `policy-refused` with `reason` `ship rights are none`. 404 `unknown-board`. 409 `loop-not-finished` (a group with loop progress and a unit that is not `built, awaiting /ship` or `shipped`), `engine-not-closed` (the engine of any group is active and not closed, or a group with no loop progress holds the engine file `.claude/ralph-loop.local.md` in its session root), `card-not-done` (a group with no loop progress that is not in Agent done), `dependency-not-merged` with `reason` the ids that wait, `ship-flow-running` (a flow runs on the board), `no-workspace` (no workspace path, or no worktree for the repository, checked before any git call; also a failed git call of the ahead or clean check, or a count that is not a number), `branch-not-ahead` with `branch` (a group with no loop progress: the branch has no commit that `origin/<base>`, else the local base, lacks), `unknown-base` with `branch` (the base is empty, starts with a hyphen, is not a plain branch name, or resolves to neither `refs/remotes/origin/<base>` nor `refs/heads/<base>`), `worktree-dirty` (a group with no loop progress: the worktree has an uncommitted or untracked file), `no-git-identity` (a failed or empty `user.name` or `user.email`).
+- Description: "Start the ship steps of a finished group card, or of a finished single card that start_card started, for its branches in stack order. A single card ships its session branch from Agent done. A board with no ship rights is refused. A card whose ship flow is done is refused with already-shipped."
+- Refusals: 400 `not-group-card`, `unknown-repository` (also a repository with no board repository entry; an entry with an empty `checkCommand` skips step 3), `invalid-branches` (also a repeated branch name), `invalid-branch-name` (also with `branch`: a name that is not the `branch` of a loop unit or `test/<slug>-specs` or, for a group with no loop progress or a launched ticket card, a name that is not the `branch` of the card (else its identifier), a name `main`, `master` or `HEAD`, a name that starts with `refs/`, the repository base branch, or a name with no local `refs/heads/<name>`), `invalid-title`, `invalid-body`, and `content contains the DISPATCH_STATUS marker` for a title or body that holds the status marker. 403 `policy-refused` with `reason` `ship rights are none`. 404 `unknown-board`. 409 `loop-not-finished` (a group with loop progress and a unit that is not `built, awaiting /ship` or `shipped`), `engine-not-closed` (the engine of any group is active and not closed, or a group with no loop progress or a launched ticket card holds the engine file `.claude/ralph-loop.local.md` in its session root), `card-not-done` (a group with no loop progress or a launched ticket card that is not in Agent done), `dependency-not-merged` with `reason` the ids that wait, `ship-flow-running` (a flow runs on the board), `no-workspace` (no workspace path, or no worktree for the repository, checked before any git call; also a failed git call of the ahead or clean check, or a count that is not a number), `branch-not-ahead` with `branch` (a group with no loop progress or a launched ticket card: the branch has no commit that `origin/<base>`, else the local base, lacks), `unknown-base` with `branch` (the base is empty, starts with a hyphen, is not a plain branch name, or resolves to neither `refs/remotes/origin/<base>` nor `refs/heads/<base>`), `worktree-dirty` (a group with no loop progress or a launched ticket card: the worktree has an uncommitted or untracked file), `no-git-identity` (a failed or empty `user.name` or `user.email`), `already-shipped` (the ship flow of the card is `done` for the same repository; a `stopped` flow stays restartable, and another repository of the card can still ship).
 - Flow stops: the runner reads the board policy before each step and each poll. `shipRights: none` stops the flow with `reason` `ship rights were removed`, and `open_prs` makes the flow wait for the user merge in place of `merging`. A worktree with uncommitted changes stops `merging_main` with `reason` `worktree has uncommitted changes`. Five failed PR polls in a row stop the flow. An empty check rollup is pending for 3 polls and then counts as passed; a completed check with a conclusion outside `SUCCESS`, `NEUTRAL` and `SKIPPED` is failed. A branch reuses an open PR in place of `gh pr create` only when the PR is from the same repository, into `main`, and its head commit is the checked commit.
 - Commit pinning: after `merging_main` the flow records the merged commit (`checked` on the branch). The check runs on it, the push sends `<checked>:refs/heads/<name>`, and the merge passes gh's match head commit option with it. A resumed flow at `checking` or later stops with `reason` `branch moved since the check` when HEAD is not that commit. Every gh call passes gh's repo option with the owner and name of the `origin` remote, read once at the start and stored as `repo` on the flow; an origin whose host is not `github.com` or `ssh.github.com` (an SSH host alias, another host) or a local path gives `repo` null and no repo option. The signature retry of step 6 runs only when every violation clause of the merge error (lines split on sentence ends, commas and semicolons) matches `must have verified signatures`.
 - More stops: a diff hunk under a header that names no file stops `checking` with `reason` `unparsed diff header`. A resumed flow on a card with no workspace path stops with `reason` `group has no workspace`. A runner whose card is gone stops with no write and no decision item; the runner reads the policy of the board it started on. A refused move to Done after the last merge keeps the flow `done` and raises one `ship_failure` item that asks the user to move the group by hand.
@@ -561,6 +572,14 @@ When `handoffReady` is `true`, the supervisor reads the handoff as pending, as i
 - Description: "List the playbooks with the name, the when line and the source, seeded or user. Choose a playbook by its when line. This tool changes nothing."
 - Refusals: none beyond the rules above.
 
+### `list_accounts`
+
+- Route: `GET /accounts`. It answers 200 with `{ activeId, accounts }`. Each account is `{ id, isDefault, subscriptionType, state, inUse, position, limitedUntil, windows }`, and each window is `{ kind, label, percent, resetsAt }`.
+- Input: none.
+- Description: "List the Claude accounts with the active id: for each account the id, the default flag, the plan, the chain state, the in use flag, the chain position, the limit end and the usage windows with their percent and reset time. Choose the account with the most weekly headroom for a long loop and pass it to start_card. This tool changes nothing."
+- Refusals: none beyond the rules above.
+- The answer holds no email, no organization, no login time and no token. The tool reads the cached meter only and starts no usage fetch. The home login identity may be read once in 5 minutes.
+
 ### `get_rulebook`
 
 - Route: `GET /rulebook`. It answers 200 with `{ markdown, bytes }`. The text is the file `docs/orchestration/rulebook.md` of the package.
@@ -571,10 +590,19 @@ When `handoffReady` is `true`, the supervisor reads the handoff as pending, as i
 ### `start_card`
 
 - Route: `POST /cards/:cardId/start`. It answers 202 with `{ started: true, cardId, playbook }` when the session start began, not when the worktree exists. The cap check, the write of `launch` and the start run in one cap-locked step, so two calls at the same time cannot both take the last slot.
-- Input: `cardId` (card id), `playbook` (string, 1 to 200 characters), `direction` (optional string, with the same limit and marker rule as the `create_group` direction), `folder` (optional string, 1 character or more), `repos` (optional list of `{ path, base }`, 1 entry or more).
-- Description: "Start the session of one ticket card with a playbook and a direction, the way the start dialog does. Omit repos to use the stored workspace of the card, else the board repositories with their base branch. A stored workspace with no repository counts as none, and a board with no repository answers no-repositories. A group card, a running card, a card in Done or Inbox, the Board Orchestrator playbook and a start at the concurrency cap are refused."
-- Refusals: 400 `invalid-playbook`, `invalid-direction`, `invalid-folder`, `invalid-repos`, `no-repositories` (an omitted `repos` on a board with no repository), `missing-base` with `path`, `unknown-repository`, `not-ticket-card` (the card is a group card), `orchestrator-playbook` (the playbook is Board Orchestrator), `unknown-playbook`, and the marker reason of `create_group`. 403 `policy-refused` with `reason` `concurrency cap reached: <running> of <cap> loops running`. 409 `already-started` when the card runs or has a live session. 409 for a card in Done or Inbox. 409 `a session start is already in progress` when a start of the card is running. Every refusal comes before the first write, so a refused call leaves no `launch` and no session.
+- Input: `cardId` (card id), `playbook` (string, 1 to 200 characters), `direction` (optional string, with the same limit and marker rule as the `create_group` direction), `folder` (optional string, 1 character or more), `repos` (optional list of `{ path, base }`, 1 entry or more), `account` (optional string, 1 to 200 characters: an account id from `list_accounts`, or `default`).
+- Description: "Start the session of one ticket card with a playbook and a direction, the way the start dialog does. Omit repos to use the stored workspace of the card, else the board repositories with their base branch. A stored workspace with no repository counts as none, and a board with no repository answers no-repositories. A group card, a running card, a card in Done or Inbox, the Board Orchestrator playbook and a start at the concurrency cap are refused. Pass account, an account id from list_accounts or default, to start on that account; an unknown account is refused with unknown-account. Omit it to use the active account."
+- Refusals: 400 `invalid-playbook`, `invalid-direction`, `invalid-folder`, `invalid-repos`, `invalid-account`, `unknown-account` (the account is not in `list_accounts`; the call answers it before the cap check), `no-repositories` (an omitted `repos` on a board with no repository), `missing-base` with `path`, `unknown-repository`, `not-ticket-card` (the card is a group card), `orchestrator-playbook` (the playbook is Board Orchestrator), `unknown-playbook`, and the marker reason of `create_group`. 403 `policy-refused` with `reason` `concurrency cap reached: <running> of <cap> loops running`. 409 `already-started` when the card runs or has a live session. 409 for a card in Done or Inbox. 409 `a session start is already in progress` when a start of the card is running. Every refusal comes before the first write, so a refused call leaves no `launch` and no session.
 - The tool writes `launch` on the card with the playbook and the direction, so the card counts as a running loop until it reaches Agent done or Done.
+- With `account`, the session starts on that account and the card is not pinned to it. With no `account`, the session starts on the active account. The start dialog of the user is unchanged.
+
+### `release_prep`
+
+- Route: `POST /releases`. It answers 201 with `{ cardId, identifier, version, previous }`.
+- Input: `repository` (optional string, 1 character or more: a board repository path; omitted, the first board repository with a base branch), `bump` (`patch`, `minor` or `major`), `features` (1 to 20 strings of 1 to 200 characters, with the marker rule of the `create_group` direction), `prs` (up to 50 positive integers).
+- Description: "Prepare a release: read the version in package.json of the repository on its base branch from origin, compute the next version from bump (patch for fixes to released features, minor for a new feature area, major only when the user names it), and create a To Do card titled Release v<version> with the features, the pull requests and the board ship rights. Omit repository to use the first board repository with a base branch. The tool does not start the card; start it with start_card and the Release playbook. An open card with the same title is refused with release-exists, a version that is not x.y.z with invalid-version, and a failed fetch of the base with fetch-failed."
+- Refusals: 400 `invalid-bump`, `invalid-features`, `invalid-prs`, `invalid-repos`, `missing-base`, `no-repositories`. 409 `invalid-version`, `release-exists` with `cardId` (the open card with the same title), `fetch-failed` (the fetch of the base failed and `refs/remotes/origin/<base>` exists).
+- The tool fetches the base branch, then reads `package.json` at `refs/remotes/origin/<base>`. When the fetch fails and that ref exists, the call answers 409 `fetch-failed`. When that ref does not exist it reads `refs/heads/<base>`. The card is created in To Do, created by the orchestrator and scoped to it. The tool does not start the card, push, tag or publish.
 
 ### Rules for the orchestrator session (Unit 4)
 
@@ -695,3 +723,35 @@ Reason: the command centre (LOCAL-104) shows the planned tickets and groups as b
 Change: `crossSessionInbound` moves from a fixed `refuse` in the hook settings to a setting with the default `accept` (D-3 amendment, 2026-10-10). Roadmap Loop and board orchestrator sessions keep `refuse` unless the board policy or the start request sets a value. The board policy gains the nullable field `crossSessionInbound` (D-6). The start route gains the optional field `crossSessionInbound`, and the card keeps it with the start intent. Settings shows the value next to the Claude arguments.
 
 Reason: the user sends context from a main session to a ticket session with a cross-session message, and the fixed `refuse` blocked each of these messages on 2026-10-09.
+
+### LOCAL-109
+
+Date: 2026-10-11.
+
+Change: a loop card is a group card, or a ticket card that `start_card` started. The loop progress reader reads a single PRD loop of a loop card. It takes the PRD path and the slug from the engine file. It stores one unit with the phases of the PRD.
+
+Change: a new read tool, `get_card_progress`, gives that progress and the last status marker. The tool count is 31 with `create_board` of LOCAL-104.
+
+Change: the `group_state` events, the `loop_gate` reports and the wake cover every loop card. A failed start of a launched ticket card writes `group_state` `start_failed`. Held starts and the budget stop stay group only. This amends LOCAL-96.
+
+Change: the handoff request and the resume prompt of a single PRD loop name `resume.md` in the feature folder of the PRD. The request has no progress ledger step.
+
+Change: the dashboard progress section shows a running loop card.
+
+Change: a single PRD loop that prints its completion promise gets the close loop action, the same as a roadmap loop.
+
+Reason: the orchestrator could not follow a single card that it started (LOCAL-109 scope items 1 and 2).
+
+### LOCAL-109 part B
+
+Date: 2026-10-14.
+
+Change: `start_ship` also ships a single ticket card that `start_card` started (D-10 amendment). The card must be in Agent done and it ships its session branch.
+
+Change: a new read tool, `list_accounts`, gives the Claude accounts with the active id, the state and the usage windows of each account. It gives no email, organization, login time or token. `start_card` gains the optional input `account`.
+
+Change: a new write tool, `release_prep`, creates the To Do card `Release v<next version>` for a bump, the features and the pull requests. A new seeded playbook, Release, runs that card. It is the eighth seeded playbook. The tool count is 33.
+
+Change: the rule book lines that raised a decision item for a single card ship or a release now name `start_ship`, `release_prep`, `list_accounts` and `send_input`.
+
+Reason: the orchestrator could ship only a group, had no release tool and could not choose an account (LOCAL-109 scope items 3 to 6).

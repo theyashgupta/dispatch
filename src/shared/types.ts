@@ -1990,6 +1990,7 @@ export interface LoopProgress {
   summary: LoopSummary;
   warnings: string[];
   readAt: string;
+  prdFile?: string;
 }
 
 export type ShipBranchState =

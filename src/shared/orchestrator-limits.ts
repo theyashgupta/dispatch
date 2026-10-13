@@ -24,6 +24,13 @@ export const ORCHESTRATOR_STATE_MAX_BYTES = 65536;
 export const INTAKE_GOAL_MAX = 2000;
 export const INTAKE_REQUIREMENTS_MAX_BYTES = 65536;
 export const STALE_MINUTES = 15;
+export const RELEASE_BUMPS = ["patch", "minor", "major"] as const;
+export const RELEASE_FEATURE_MAX = 200;
+export const RELEASE_FEATURES_MAX = 20;
+export const RELEASE_PRS_MAX = 50;
+export const ACCOUNT_ID_MAX = 200;
+
+export type ReleaseBump = (typeof RELEASE_BUMPS)[number];
 
 const SHIP_BRANCH_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$/;
 

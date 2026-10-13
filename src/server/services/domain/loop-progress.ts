@@ -55,6 +55,20 @@ interface UnitFilePaths {
   warnings: string[];
 }
 
+export interface PrdProgressInput {
+  slug: string;
+  prdFile: string | null;
+  readAt: string;
+  prdText: string | null;
+  statePath: string | null;
+  stateText: string | null;
+  attemptsPath: string | null;
+  attemptsText: string | null;
+  engine: { text: string; closed: boolean } | null;
+  refused: ReadonlySet<string>;
+  warnings: string[];
+}
+
 interface LoopProgressInput {
   slug: string;
   roadmapFile: string;
@@ -541,7 +555,7 @@ function readRows(
 
 function readEngine(
   ctx: ReadContext,
-  input: LoopProgressInput,
+  input: Pick<LoopProgressInput, "engine">,
 ): LoopEngine | null {
   if (input.engine === null) return null;
   const { text, closed } = input.engine;
@@ -602,6 +616,20 @@ function readEvidence(
   return evidence;
 }
 
+function warnPhaseShape(
+  ctx: ReadContext,
+  prdPath: string,
+  total: number,
+  capped: boolean,
+): void {
+  if (total === 0) ctx.warnings.push(`${prdPath}: no phase headings`);
+  if (capped) {
+    ctx.warnings.push(
+      `${prdPath}: more than ${MAX_ITEMS} phases, the rest are skipped`,
+    );
+  }
+}
+
 function buildUnit(
   ctx: ReadContext,
   input: LoopProgressInput,
@@ -631,15 +659,8 @@ function buildUnit(
   const evidence = readEvidence(ctx, input, unit, prdPath);
   evidenceByUnit.set(unit.number, evidence);
   if (headings === null) return unit;
-  if (headings.length === 0) {
-    ctx.warnings.push(`${prdPath}: no phase headings`);
-    return unit;
-  }
-  if (parsedPhases?.capped) {
-    ctx.warnings.push(
-      `${prdPath}: more than ${MAX_ITEMS} phases, the rest are skipped`,
-    );
-  }
+  warnPhaseShape(ctx, prdPath, headings.length, parsedPhases?.capped === true);
+  if (headings.length === 0) return unit;
   unit.phaseTotal = headings.length;
   unit.phases = phasesOf(headings, evidence);
   return unit;
@@ -732,5 +753,78 @@ export function buildLoopProgress(input: LoopProgressInput): LoopProgress {
     ...summarize(units, evidenceByUnit, running),
     warnings: capWarnings(ctx.warnings),
     readAt: input.readAt,
+  };
+}
+
+/**
+ * Builds the one-unit loop model of a single PRD from the already read texts of one session root.
+ *
+ * @remarks A missing state or attempts file adds no warning because a PRD that has not started has neither. The result has no roadmap, so `roadmapFile` is empty.
+ */
+export function buildPrdProgress(input: PrdProgressInput): LoopProgress {
+  const ctx: ReadContext = {
+    warnings: [...input.warnings],
+    refused: input.refused,
+  };
+  const engine = readEngine(ctx, input);
+  const prdPath = input.prdFile ?? ENGINE_FILE;
+  if (input.prdFile !== null && input.prdText === null) {
+    warnMissing(ctx, input.prdFile);
+  }
+  const parsedPhases = parseText(ctx, prdPath, input.prdText, parsePhases);
+  const headings = parsedPhases?.phases ?? [];
+  if (parsedPhases !== null) {
+    warnPhaseShape(ctx, prdPath, headings.length, parsedPhases.capped);
+  }
+  const evidence: UnitEvidence = {
+    passes:
+      input.statePath === null
+        ? []
+        : (parseText(ctx, input.statePath, input.stateText, parseStateLines) ??
+          []),
+    attempts:
+      input.attemptsPath === null
+        ? []
+        : (parseText(
+            ctx,
+            input.attemptsPath,
+            input.attemptsText,
+            parseAttemptLines,
+          ) ?? []),
+  };
+  const phases = phasesOf(headings, evidence);
+  const running = engine !== null && engine.active && !engine.closed;
+  const built = phases.length > 0 && phases.every((p) => p.gate === "pass");
+  const status: LoopUnitStatus = built
+    ? "built, awaiting /ship"
+    : running || evidence.passes.length > 0 || evidence.attempts.length > 0
+      ? "in progress"
+      : "not started";
+  const title =
+    toLines(input.prdText ?? "")
+      .find((line) => line.startsWith("# "))
+      ?.slice(2)
+      .trim() || input.slug;
+  const unit: LoopUnit = {
+    number: 1,
+    ticket: null,
+    title,
+    status,
+    statusText: status,
+    branch: null,
+    commit: null,
+    prdPath: input.prdFile,
+    phaseTotal: phases.length === 0 ? null : phases.length,
+    phases,
+  };
+  return {
+    slug: input.slug,
+    roadmapFile: "",
+    units: [unit],
+    engine,
+    ...summarize([unit], new Map([[1, evidence]]), running),
+    warnings: capWarnings(ctx.warnings),
+    readAt: input.readAt,
+    ...(input.prdFile === null ? {} : { prdFile: input.prdFile }),
   };
 }
