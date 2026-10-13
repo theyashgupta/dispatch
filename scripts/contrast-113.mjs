@@ -100,6 +100,13 @@ const COLUMN_INK_NAMES = [
   "col-done",
 ];
 const DATA_INK_SHARE = 0.35;
+const SOFT_TINTS = [
+  ["accent-soft", "accent", "accent-text"],
+  ["ok-soft", "col-agent-done", "status-ok"],
+  ["warn-soft", "col-needs-input", "status-stale"],
+  ["danger-soft", "destructive", "destructive-text"],
+];
+const SOFT_TINT_TIERS = ["--surface-card", "--surface-column"];
 const MARK_NAMES = [
   "src-github",
   "src-linear",
@@ -363,6 +370,8 @@ function srgbMix(hexA, hexB, pctA) {
  *    column tokens themselves stay graphic tokens.
  * 5. A source mark (SourceBadge.tsx, SourceIcon.tsx): the `--src-*` token as a graphic on the 16%
  *    tint of the same token over every background tier, at the 3:1 floor.
+ * 6. A soft tint surface of the dashboard: `--text` and the state text role on the 16%
+ *    tint over the card and column tiers. Muted text never sits on a soft tint, so it has no pair.
  *
  * A referenced token missing from the parsed file is pushed as a violation, never silently
  * skipped, so deleting a token cannot retire its guard.
@@ -471,6 +480,33 @@ function buildDerivedTextPairs(tokens, violations) {
         bgHex: srgbMix(col, tierHex, 0.16),
         role: "text",
       });
+    }
+  }
+  for (const [tint, base, stateText] of SOFT_TINTS) {
+    const baseHex = need(base);
+    const stateHex = need(stateText);
+    if (baseHex == null || stateHex == null) continue;
+    for (const tier of SOFT_TINT_TIERS) {
+      const tierHex = tokens.get(tier);
+      if (tierHex == null) {
+        violations.push(
+          `derived: token ${tier} is missing or does not resolve, its derived pair cannot be checked`,
+        );
+        continue;
+      }
+      for (const [fgName, fgHex] of [
+        ["text", text],
+        [stateText, stateHex],
+      ]) {
+        if (fgHex == null) continue;
+        pairs.push({
+          fg: PREFIX + fgName,
+          fgHex,
+          bg: `${tint}-on-${tier.slice(2)}(computed)`,
+          bgHex: srgbMix(baseHex, tierHex, 0.16),
+          role: "text",
+        });
+      }
     }
   }
   for (const name of MARK_NAMES) {
