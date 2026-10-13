@@ -2820,9 +2820,8 @@ the no-hooks branch of every launch site pass the same env: the builder is the s
 variable is added, so one branch cannot drift.
 
 **Usage is polled, never refreshed.** `services/orchestration/claude-usage.ts` reads each account's
-access token into memory only, calls the OAuth usage endpoint every 15 minutes (the cadence the
-reference implementation settled on because tighter polling 429s), and caches a status-tagged
-snapshot. A 401 or 403 keeps the last windows and marks them `stale`; Dispatch does not rotate the
+access token into memory only, calls the OAuth usage endpoint on the adaptive plan in Account Chain, Cadence,
+and caches a status-tagged snapshot. A 401 or 403 keeps the last windows and marks them `stale`; Dispatch does not rotate the
 refresh token, because a second rotator races the live REPL and logs both out. The manual refresh
 route is limited to one call per account per 30 seconds. Every window on the wire also carries a
 derived period (`periodStart`, `periodEnd`): the known window length back from the reset for
@@ -2918,9 +2917,10 @@ the user must turn them on.
 `defaultPosition`. The migration from version 1 puts Default first and the added accounts after it
 by creation time. The runtime state is in `chain-state.json` next to it
 (`account-chain-state.ts`): the state, buckets and `limitedUntil` of each account, `inUseSince`, the
-exhausted record and the last 50 moves. A corrupt file reads as empty and does not stop the boot.
-The settings are in `config.json` under `claudeAccounts`: `autoMove` (default false),
-`thresholdPercent` (default 100, range 50 to 100) and `minDwellMinutes` (default 15, range 0 to 240).
+exhausted record, the last 50 moves and `loginExpiryNotified`. A corrupt file reads as empty and does
+not stop the boot. The settings are in `config.json` under `claudeAccounts`: `autoMove` (default
+false), `thresholdPercent` (default 100, range 50 to 100), `minDwellMinutes` (default 15, range 0 to 240) and `hysteresisPercent` (default 10, range 0 to 50). The config reader clamps a stored value to
+its range.
 
 **States.** `account-state.ts#deriveAccountState` gives each account one state. The first
 rule that applies sets the state:
@@ -2937,6 +2937,15 @@ rule that applies sets the state:
 selects the first account whose state is `available`, `near-limit` or `unknown` and whose
 `limitedUntil` is not in the future. When no account qualifies, the chain is exhausted and the
 result is the earliest `limitedUntil`. The selection never takes a `login-expired` account.
+
+**Hysteresis.** `account-selection.ts#filterByHysteresis` limits the candidates of a usage trigger.
+The binding bucket of an account is its bucket with the highest percent. A candidate passes only
+when its binding bucket is below `thresholdPercent` minus `hysteresisPercent`. An `unknown` account
+or an account with no buckets does not pass. When `hysteresisPercent` is 0, the filter keeps every
+candidate. The filter applies to trigger 1 and to the return check only. A limit surface, a
+`StopFailure`, Switch now and the exhausted check do not use it. When no candidate passes on a usage
+trigger, the sessions stay on the account in use. If the chain without the filter is exhausted, the
+controller records the exhausted chain as before.
 
 **Triggers.** `account-chain.ts` is the controller. It runs one task at a time in a queue. A manual
 switch through `PUT /accounts/active` runs in the same queue, so it never overlaps a chain move. A
@@ -2955,9 +2964,45 @@ A limit surface whose printed time passed in the last 5 hours is a stale surface
 read shows every bucket below the threshold. The controller ignores it
 (`account-state.ts#isStaleSurface`).
 
-**Cadence.** `claude-usage.ts` reads each account at boot and each 15 minutes. While a bucket of the
-account in use is above 80 percent, it reads that account each 2 minutes. A 429 response uses the
-`Retry-After` backoff.
+**Cadence.** The usage endpoint `/api/oauth/usage` allows about 28 to 30 requests per rolling
+hour. At steady state the plan keeps each account at 20 reads per hour or fewer. An urgent climb
+to the threshold can reach about 30 reads in one rolling hour (see Known Residuals). `claude-usage.ts` reads each
+account at boot, through the same tick. Then a tick each 15 s reads each account whose planned time
+is past, and ticks never overlap. `usage-poll-plan.ts#planNextPoll` sets the next planned time after each read:
+
+- The first good read plans 300 s. Each read with no move multiplies the interval by 1.5.
+- The ceiling is 300 s for the account in use and 600 s for an idle account.
+- A move of 1 point or more halves the interval. The floor is 180 s and the ceiling above still
+  applies.
+- Urgent mode plans 60 s. It applies only to the account in use, when its binding bucket moved up 1
+  point or more and is 15 points or less below the threshold. Urgent mode stops at the threshold
+  and in the hour after a 429.
+- When an account becomes the account in use, its next read is planned within 300 s, unless it is
+  held or in the hour after a 429.
+- A limited account plans 600 s and waits at least 600 s, also after jitter. A 401 or 403 read, or
+  no token, plans 600 s.
+- Jitter changes each delay by up to 10 percent. Jitter never makes a delay longer than 600 s, or
+  longer than 1800 s in the hour after a 429.
+- The next read is never later than the next reset plus 60 s. This rule wins over the 600 s minimum
+  of a limited account. The floor wins over this rule.
+
+A 429 response holds the account for `Retry-After` plus 900 s. When `Retry-After` is missing or 0,
+the hold is 300 s plus 900 s. The hold is at most 24 hours plus 900 s. The hour after a 429
+starts when the hold ends. In that hour, the floor is 360 s for each delay, and each read multiplies
+the interval by 1.5 up to 1800 s.
+
+All usage reads go through `claude-usage.ts#refreshUsage`. The callers are the tick (`poll`), the
+manual refresh (`manual`), the limit surface check (`limit-surface`), the timer reads
+(`fresh-read`) and the login (`login`). Inside a hold, each caller gets the cached snapshot and the
+server sends no request. A call during a read of the same account shares that read. A manual
+refresh is limited to one call per account each 30 s. The planned times apply only to the tick.
+`DISPATCH_USAGE_TIME_SCALE` divides the tick and every planned time, for tests only.
+
+**Request log.** `usage-request-log.ts#appendUsageRequest` writes one JSON line for each request to
+`usage-requests.jsonl` in the data folder. A line has `ts`, `account`, `caller`, `status` (the HTTP
+status or `network`) and `nextInMs`. A line never holds a token or a header. Before the file goes
+past 1 MB, the writer renames it to `usage-requests.jsonl.1` and replaces the older copy. A write
+failure does not stop the read. A read without a token sends no request and writes no line.
 
 **Stability.** After a chain move, a usage trigger does not move the sessions again for
 `minDwellMinutes`. Triggers 2 and 3 are hard signals and override the dwell. A limited account stays
@@ -2984,8 +3029,9 @@ true to false, the controller removes each pending move that it queued.
 **Return.** Each limited account has a timer at `limitedUntil` plus 2 minutes, or 15 minutes from
 now when the time is unknown or past. The timer reads the usage again. The controller accepts only
 a good read that it took after the timer fired. If the read is not good, or the account is
-`unknown` or `login-expired`, the timer is set again 15 minutes on. If the account is no longer limited and ranks
-above the account in use, the sessions return to it with the failover policy. If it is still
+`unknown` or `login-expired`, the timer is set again 15 minutes on. If the account is no longer limited, passes the
+hysteresis rule and ranks above the account in use, the sessions return to it with the failover
+policy. If it does not pass the hysteresis rule, the timer is set again 15 minutes on. If it is still
 limited, the timer is set again. A usage read that clears the account does not cancel the timer,
 so a usage read never starts a return.
 
@@ -3008,6 +3054,16 @@ then `Continue.`; on the options menu it selects the stop option, or the wait op
 option shows, and then sends `Continue.`. A session with no limit surface on the screen gets no
 key. No key path selects a credits option.
 
+**Login expiry.** The usage read also reads `claudeAiOauth.refreshTokenExpiresAt` (epoch ms) from
+the same credential text as the token (`claude-usage.ts#readCredential`). The value stays in memory.
+The usage snapshot carries it as `loginExpiresAt`. A missing, non-number, zero or negative value
+gives no `loginExpiresAt`. The access token field `expiresAt` is not used. The server never writes,
+copies or refreshes a credential. When `loginExpiresAt` is 3 days away or less, or is in the past,
+the controller sends one `login-expiring` event (`login-expiry.ts#shouldWarnLoginExpiry`). It
+stores the value in `loginExpiryNotified` for that account, so a restart sends no second event. A
+new login gives a new value, so it sends a new event. The account row shows the expiry date, with
+the warning tone when the date is 3 days away or less.
+
 **Pin.** `accountPinned` on a session keeps it on its account. Automatic moves and "Switch now" skip
 it. A manual move still moves it: `POST /cards/:id/session/account`, and `PUT /accounts/active`
 with `applyToRunning`. `PUT /cards/:id/session/account-pin` sets the pin. Setting the pin removes
@@ -3015,7 +3071,7 @@ the pending move of the session, and a pending move that the chain queued checks
 before it runs.
 
 **Routes.** `GET /accounts` returns each account in chain order with `position`, `state`,
-`buckets`, `limitedUntil` and `inUse`, the sessions with `pinned`, and `chain` with the settings, the
+`buckets`, `limitedUntil`, `inUse` and `usage` (with `loginExpiresAt` when known), the sessions with `pinned`, and `chain` with the settings, the
 exhausted record, the history (newest first) and `inUseSince`. `PUT /accounts/chain/order` takes
 every account id once and returns 400 `invalid-order` otherwise. `PUT /accounts/chain/settings`
 returns 400 `invalid-settings` for a value out of range. `POST /accounts/chain/switch-now` returns
@@ -3027,10 +3083,13 @@ a new dwell and skips pinned sessions. It returns `{ ok: false, error: "no-eligi
 when no other account qualifies. "Switch now" calls it.
 
 **Records.** `account-chain-records.ts#recordChainEvent` writes one activity row and sends one push
-notification for each failover, return and exhausted chain. The kinds are `account_failover`,
-`account_return` and `account_chain_exhausted`. For a failover or a return, the row `reason` is the
-JSON text of `src/shared/account-chain.ts#buildChainReason`. It holds the trigger, the labels of the
-two accounts and the number of sessions. The trigger is `usage`, `surface`, `rate-limit`, `reset`,
+notification for each failover, return, exhausted chain and login warning. The kinds are
+`account_failover`, `account_return`, `account_chain_exhausted` and `account_login_expiring`. The
+reason of `account_login_expiring` is the JSON text of
+`src/shared/account-chain.ts#buildLoginExpiryReason`: the account label and the expiry time. For a
+failover or a return, the row `reason` is the JSON text of
+`src/shared/account-chain.ts#buildChainReason`. It holds the trigger, the labels of the two accounts
+and the number of sessions. The trigger is `usage`, `surface`, `rate-limit`, `reset`,
 `switch-now` or `held`. A `held` row is an offer that `autoMove` false holds back, and its number
 is 0. For a move, the number is the sessions moved plus the sessions queued. It is null when the
 move step failed. `parseChainReason` reads the row. It also reads an older row in the form
@@ -5421,6 +5480,22 @@ A slot file that is older than the last boot is dead. The gate calculates the bo
 system uptime and the wall clock. If the wall clock moves forward by a large step after a slot is
 taken, the gate can find a live slot to be dead. This can occur on Linux early in a boot. It does
 not occur on macOS.
+
+### Account chain follow-ups from claude-swap (LOCAL-107)
+
+LOCAL-107 adopted the claude-swap usage budget, 429 backoff, hysteresis and login warning. Two
+claude-swap items are not in the chain:
+
+- Consume-first order: select the account whose weekly bucket resets first, so the allowance that
+  expires first is used first. The chain uses position order only.
+- Weekly pace and projection in the chain: use the weekly pace to predict when an account becomes
+  limited. The chain uses the threshold only.
+
+The urgent mode reads the account in use each 60 s while it climbs 1 point or more per read and is
+15 points or less below the threshold. A climb of 1 point per read from 70 to the threshold can
+give about 30 reads in one rolling hour, which is the endpoint limit. The ticket sets the 60 s value.
+A 429 in that case holds the account, and a hard signal still moves the sessions. A cap on urgent
+reads per hour is a follow-up.
 
 ## Verification Gates
 
