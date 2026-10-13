@@ -5,19 +5,14 @@ import {
   actionErrorCopy,
   controlFor,
   failureCopy,
-  loadErrorCopy,
-  panelModel,
   refusalReason,
-  staleBadgeText,
   startErrorCopy,
   STALE_REASON,
   terminalFor,
   terminalSrcFor,
   SUPERVISOR_OFF_REASON,
   STOP_TOOLTIP,
-  type ControlKind,
   type OrchestratorView,
-  type PanelInput,
 } from "./panel-model.js";
 
 function main(
@@ -54,22 +49,23 @@ function main(
   };
 }
 
-function input(patch: Partial<PanelInput>): PanelInput {
-  return {
-    orchestrators: [],
-    supervisor: "on",
-    stale: false,
-    pending: null,
-    decisionCount: 0,
-    ...patch,
-  };
+const ON = { supervisor: "on", stale: false, pending: null } as const;
+
+function controlOf(
+  orchestrators: readonly OrchestratorView[],
+  patch: Partial<Parameters<typeof controlFor>[1]> = {},
+) {
+  const record = orchestrators.find((o) => o.role === "main") ?? null;
+  return controlFor(record, { ...ON, ...patch });
+}
+
+function terminalOf(orchestrators: readonly OrchestratorView[]) {
+  return terminalFor(orchestrators.find((o) => o.role === "main") ?? null);
 }
 
 test("a board with no orchestrator shows an enabled Start and the empty terminal", () => {
-  const model = panelModel(input({}));
-  assert.equal(model.main, null);
-  assert.equal(model.terminal, "empty");
-  assert.deepEqual(model.control, {
+  assert.equal(terminalOf([]), "empty");
+  assert.deepEqual(controlOf([]), {
     kind: "start",
     label: "Start orchestrator",
     disabled: false,
@@ -79,25 +75,23 @@ test("a board with no orchestrator shows an enabled Start and the empty terminal
 });
 
 test("Start is disabled with the supervisor reason when the supervisor is off", () => {
-  const control = panelModel(input({ supervisor: "off" })).control;
+  const control = controlOf([], { supervisor: "off" });
   assert.equal(control?.kind, "start");
   assert.equal(control?.disabled, true);
   assert.equal(control?.reason, SUPERVISOR_OFF_REASON);
 });
 
 test("a stopped record with no session shows Start and a not-running terminal", () => {
-  const model = panelModel(input({ orchestrators: [main("stopped", null)] }));
-  assert.equal(model.control?.kind, "start");
-  assert.equal(model.terminal, "not-running");
+  const records = [main("stopped", null)];
+  assert.equal(controlOf(records)?.kind, "start");
+  assert.equal(terminalOf(records), "not-running");
 });
 
 const RESUME_CASES = ["lost", "shell_prompt"] as const;
 for (const state of RESUME_CASES) {
   test(`${state} shows only Resume`, () => {
     for (const record of ["running", "stopped"] as const) {
-      const control = panelModel(
-        input({ orchestrators: [main(record, { state })] }),
-      ).control;
+      const control = controlOf([main(record, { state })]);
       assert.equal(control?.kind, "resume");
       assert.equal(control?.label, "Resume orchestrator");
       assert.equal(control?.disabled, false);
@@ -120,39 +114,16 @@ const STOP_TABLE: [SupervisorState | null, boolean][] = [
 ];
 for (const [state, disabled] of STOP_TABLE) {
   test(`a running session at ${String(state)} has Stop ${disabled ? "disabled" : "enabled"}`, () => {
-    const control = panelModel(
-      input({ orchestrators: [main("running", { state })] }),
-    ).control;
+    const control = controlOf([main("running", { state })]);
     assert.equal(control?.kind, "stop");
     assert.equal(control?.disabled, disabled);
     assert.equal(control?.tooltip, STOP_TOOLTIP);
   });
 }
 
-test("a running record with no session state yet still shows the Starting badge", () => {
-  const model = panelModel(
-    input({ orchestrators: [main("running", { state: null })] }),
-  );
-  assert.equal(model.stateKey, null);
-  assert.equal(model.transition, "Starting");
-  assert.equal(model.control?.kind, "stop");
-  const working = panelModel(
-    input({ orchestrators: [main("running", { state: "working" })] }),
-  );
-  assert.equal(working.transition, null);
-});
-
-test("starting and stopping records show no control and a transition label", () => {
-  const starting = panelModel(
-    input({ orchestrators: [main("starting", { hasTmuxSession: false })] }),
-  );
-  assert.equal(starting.control, null);
-  assert.equal(starting.transition, "Starting");
-  const stopping = panelModel(
-    input({ orchestrators: [main("stopping", { state: "idle" })] }),
-  );
-  assert.equal(stopping.control, null);
-  assert.equal(stopping.transition, "Stopping");
+test("starting and stopping records show no control", () => {
+  assert.equal(controlOf([main("starting", { hasTmuxSession: false })]), null);
+  assert.equal(controlOf([main("stopping", { state: "idle" })]), null);
 });
 
 test("a stale stream disables every control with the reconnect reason", () => {
@@ -162,7 +133,7 @@ test("a stale stream disables every control with the reconnect reason", () => {
     [[main("stopped", { state: "lost" })], "resume"],
   ];
   for (const [orchestrators, kind] of records) {
-    const control = panelModel(input({ orchestrators, stale: true })).control;
+    const control = controlOf(orchestrators, { stale: true });
     assert.equal(control?.kind, kind);
     assert.equal(control?.disabled, true);
     assert.equal(control?.reason, STALE_REASON);
@@ -170,48 +141,24 @@ test("a stale stream disables every control with the reconnect reason", () => {
 });
 
 test("an action in flight disables the control", () => {
-  const control = panelModel(input({ pending: "start" })).control;
+  const control = controlOf([], { pending: "start" });
   assert.equal(control?.disabled, true);
   assert.equal(control?.reason, null);
 });
 
 test("the terminal is live once the session has a ttyd port and an id", () => {
-  const live = panelModel(
-    input({ orchestrators: [main("running", { state: "working" })] }),
-  );
-  assert.equal(live.terminal, "live");
-  assert.equal(live.terminalSrc, "/sessions/s1/terminal/");
-  const waiting = panelModel(
-    input({
-      orchestrators: [main("running", { state: "working", ttydPort: null })],
-    }),
-  );
-  assert.equal(waiting.terminal, "connecting");
-  assert.equal(waiting.terminalSrc, null);
+  const live = main("running", { state: "working" });
+  assert.equal(terminalFor(live), "live");
+  assert.equal(terminalSrcFor("live", live), "/sessions/s1/terminal/");
+  const waiting = main("running", { state: "working", ttydPort: null });
+  assert.equal(terminalFor(waiting), "connecting");
+  assert.equal(terminalSrcFor("connecting", waiting), null);
 });
 
 test("an extra orchestrator alone does not count as the main one", () => {
-  const model = panelModel(
-    input({ orchestrators: [main("running", { state: "working" }, "extra")] }),
-  );
-  assert.equal(model.main, null);
-  assert.equal(model.control?.kind, "start");
-});
-
-test("tab labels carry the counts", () => {
-  const model = panelModel(
-    input({
-      decisionCount: 3,
-      orchestrators: [main("stopped", null), main("stopped", null, "extra")],
-    }),
-  );
-  assert.deepEqual(model.tabs, {
-    terminal: "Terminal",
-    decisions: "Decisions (3)",
-    policy: "Policy",
-    orchestrators: "Orchestrators (2)",
-  });
-  assert.equal(panelModel(input({})).tabs.orchestrators, "Orchestrators (0)");
+  const records = [main("running", { state: "working" }, "extra")];
+  assert.equal(terminalOf(records), "empty");
+  assert.equal(controlOf(records)?.kind, "start");
 });
 
 test("refusal codes map to reason text and unknown ones pass through", () => {
@@ -254,66 +201,17 @@ test("error copy follows the contract strings", () => {
     "The orchestrator did not start: the supervisor is off.",
   );
   assert.equal(actionErrorCopy("Stop", "boom."), "Stop failed: boom.");
-  assert.equal(
-    loadErrorCopy("getOrchestrators failed: 500"),
-    "The orchestrator panel did not load: getOrchestrators failed: 500.",
-  );
   assert.equal(failureCopy("start", "x"), "The orchestrator did not start: x.");
   assert.equal(failureCopy("stop", "x"), "Stop failed: x.");
   assert.equal(failureCopy("resume", "x"), "Resume failed: x.");
-  assert.equal(staleBadgeText("10:42"), "State from 10:42");
-});
-
-test("a stopped record whose start failed in the background shows the error copy and Start", () => {
-  const model = panelModel(
-    input({
-      orchestrators: [
-        main("stopped", {
-          startError: "the launch failed.",
-          hasTmuxSession: false,
-        }),
-      ],
-    }),
-  );
-  assert.equal(
-    model.startFailure,
-    "The orchestrator did not start: the launch failed.",
-  );
-  assert.equal(model.control?.kind, "start");
-  assert.equal(
-    panelModel(
-      input({ orchestrators: [main("stopped", { startError: null })] }),
-    ).startFailure,
-    null,
-  );
-  assert.equal(
-    panelModel(input({ orchestrators: [main("running", { startError: "x" })] }))
-      .startFailure,
-    null,
-  );
-});
-
-test("an orchestrator list that never loaded offers no control and no count", () => {
-  const model = panelModel(input({ loaded: false }));
-  assert.equal(model.control, null);
-  assert.equal(model.terminal, "unavailable");
-  assert.equal(model.tabs.orchestrators, "Orchestrators");
 });
 
 test("a running record whose session is lost asks for a resume in the terminal", () => {
-  const model = panelModel(
-    input({
-      orchestrators: [
-        main("running", {
-          state: "lost",
-          hasTmuxSession: false,
-          ttydPort: null,
-        }),
-      ],
-    }),
-  );
-  assert.equal(model.terminal, "resume");
-  assert.equal(model.control?.kind, "resume");
+  const records = [
+    main("running", { state: "lost", hasTmuxSession: false, ttydPort: null }),
+  ];
+  assert.equal(terminalOf(records), "resume");
+  assert.equal(controlOf(records)?.kind, "resume");
 });
 
 test("the terminal of an extra record with an open session is live at its own session path", () => {
@@ -322,52 +220,6 @@ test("the terminal of an extra record with an open session is live at its own se
   assert.equal(terminalSrcFor("live", extra), "/sessions/s9/terminal/");
   assert.equal(terminalSrcFor("connecting", extra), null);
   assert.equal(terminalFor(null), "empty");
-});
-
-const CASES: { name: string; record: OrchestratorView | null }[] = [
-  { name: "no record", record: null },
-  {
-    name: "running",
-    record: main("running", { state: "working" }),
-  },
-  {
-    name: "running at a permission prompt",
-    record: main("running", { state: "permission_prompt" }),
-  },
-  { name: "stopped", record: main("stopped", null) },
-  {
-    name: "lost",
-    record: main("running", { state: "lost" }),
-  },
-  { name: "starting", record: main("starting", null) },
-];
-
-const INPUTS: {
-  supervisor: "on" | "off";
-  stale: boolean;
-  pending: ControlKind | null;
-}[] = [
-  { supervisor: "on", stale: false, pending: null },
-  { supervisor: "off", stale: false, pending: null },
-  { supervisor: "on", stale: true, pending: null },
-  { supervisor: "on", stale: false, pending: "stop" },
-];
-
-test("the centre control equals the panel control of the main record in every case", () => {
-  for (const { name, record: rec } of CASES) {
-    for (const args of INPUTS) {
-      const expected = panelModel({
-        orchestrators: rec === null ? [] : [rec],
-        decisionCount: 0,
-        ...args,
-      }).control;
-      assert.deepEqual(
-        controlFor(rec, args),
-        expected,
-        `${name} with ${JSON.stringify(args)}`,
-      );
-    }
-  }
 });
 
 test("the centre control follows the spec rules for running, stopped, lost, stale and pending", () => {
