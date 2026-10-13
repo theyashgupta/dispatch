@@ -117,7 +117,7 @@ and roles only, it does not restate the layering policy.
 | Frontend routes     | `web/routes/__root.tsx`, `web/routes/board.{-$id}.lazy.tsx`, `web/modules/shell/containers/ShellContainer.tsx`                                                                                                                                                                                                                                  | Hash routes own the URL and its params. The router context gives the query client and the app store to every container. The root route renders the shell view with module views in its slots: the page, the detail panel and the card action dialogs.                                                                |
 | Frontend modules    | `web/modules/board/views/BoardView.tsx`, `web/modules/board/containers/BoardContainer.tsx`, `web/modules/detail/containers/DetailPanelContainer.tsx`, `web/modules/shell/components/AppSidebar.tsx`                                                                                                                                             | One folder per feature under `web/modules/`, with the layers views, containers, components, hooks, domain and queries. A module never imports a sibling module. [frontend-architecture.md](standards/frontend-architecture.md) has the layer rules.                                                                  |
 | Frontend boards     | `web/modules/boards/views/BoardsView.tsx`, `web/modules/boards/containers/BoardsContainer.tsx`, `web/modules/boards/containers/BoardFormContainer.tsx`, `web/modules/shell/components/SidebarBoards.tsx`                                                                                                                                        | The boards page (list, create, edit, archive, restore) and the sidebar Boards section. The path key selects the board on the keyed pages (`/boards/<key>`, `/boards/<key>/inbox` and so on). The `board` search parameter selects it on the other pages.                                                             |
-| Orchestrator panel  | `web/modules/orchestrator/views/OrchestratorEntryView.tsx`, `web/modules/orchestrator/containers/OrchestratorPanelContainer.tsx`, `web/modules/orchestrator/containers/PolicyContainer.tsx`, `web/modules/orchestrator/containers/OrchestratorsContainer.tsx`                                                                                   | The header entry button and the orchestrator panel with the tabs Terminal, Decisions, Policy and Orchestrators. The policy form is the only place where a user changes a board policy.                                                                                                                               |
+| Orchestrator centre | `web/modules/orchestrator/views/OrchestratorEntryView.tsx`, `web/modules/orchestrator/views/CentreView.tsx`, `web/modules/orchestrator/containers/SettingsSheetContainer.tsx`, `web/modules/orchestrator/containers/PolicyContainer.tsx`, `web/modules/orchestrator/containers/OrchestratorsContainer.tsx`                                      | The header entry button opens the command centre page of the board. The settings sheet on the centre has the tabs Policy and Orchestrators. The policy form is the only place where a user changes a board policy.                                                                                                   |
 | Frontend dashboard  | `web/routes/dashboard.{-$id}.lazy.tsx`, `web/modules/dashboard/views/DashboardView.tsx`, `web/modules/dashboard/containers/use-dashboard-data.ts`                                                                                                                                                                                               | The `/dashboard` page of the selected board. Each section container reads its inputs through `use-dashboard-data.ts` and shows its own loading, error and empty state. The header strip at the top of the page shows the title, the sync state and the stale text.                                                   |
 | Frontend shared     | `web/components/ui/button.tsx`, `web/components/ui/hooks/use-app-store.ts`, `web/components/ThemeProvider.tsx`, `web/queries/board-snapshot-queries.ts`                                                                                                                                                                                         | The shadcn primitives and app-wide hooks, the shared components, the queries that two or more modules read (the board snapshot and its SSE stream), and the design tokens in `web/styles/tokens.css`.                                                                                                                |
 
@@ -6347,21 +6347,12 @@ text.
 and `resume-loop` runs no cap or budget check. They are state changing user routes, so
 `refuseOrchestratorTokenOnUserRoute` refuses an orchestrator token on them.
 
-**Panel.** The `orchestrator` web module (`web/modules/orchestrator/`) adds the panel to Screen 3. The route
-`/board/{-$id}` takes the search value `panel=orchestrator`, and `SidePanelLayout` shows the panel
-beside the board as a resizable pane, or as a sheet on a narrow screen. The entry button is in the
-page header (Screen 5): "Add orchestrator" on a board with no record and "Orchestrator" with one, and
-it reads only the `Board` that the board list holds. The panel has four tabs:
+**Command centre.** The `orchestrator` web module (`web/modules/orchestrator/`) holds the command centre. The
+route `/boards/$key/orchestrator/{-$id}` shows it. The entry button is in the page header (Screen 5):
+"Add orchestrator" on a board with no record and "Orchestrator" with one, and it reads only the `Board`
+that the board list holds. The settings sheet on the centre has two tabs:
 
-- Terminal: the ttyd frame of the hidden card of the main (`/sessions/<session id>/terminal/`), and the
-  header with the state badge and one control. The control is Start, Stop, or Resume (only at `lost` and
-  `shell_prompt`), and it calls the lifecycle routes. Every control is off while the board stream is down.
-- `Decisions (n)`: open decision items with their options, and the loops at `needs_input` or
-  `permission_prompt`. A reply goes through the user session routes, and an answer through
-  `POST /api/decisions/:id/answer`. The "Other answer" field shows on no `roadmap_approval` or
-  `ticket_proposal` item (a gate: approve or reject only); on other kinds it sends the typed text as
-  `note` with the recommended option id, else the first option id.
 - Policy: the board policy form, saved through `PUT /api/boards/:key/policy`. The model lists are in
   `shared/orchestrator-models.ts`, and the route refuses any other model with 400.
-- `Orchestrators (n)`: the main and the extras, with the form to add an extra, edit its override and move
+- Orchestrators: the main and the extras, with the form to add an extra, edit its override and move
   groups.
