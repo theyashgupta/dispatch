@@ -340,7 +340,7 @@ void test("release_prep creates Release v1.3.0 from the origin base, not the loc
   assert.equal(rows.length, before.length + 1);
   assert.equal(
     rows.at(-1)!.data.result,
-    `created ${reply.body.identifier} v1.3.0`,
+    `created ${reply.body.identifier as string} v1.3.0`,
   );
 });
 
