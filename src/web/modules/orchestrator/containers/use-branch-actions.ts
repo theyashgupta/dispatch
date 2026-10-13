@@ -68,7 +68,7 @@ export function useBranchActions(board: BoardKey, cards: readonly Card[]) {
     });
     if (outcome.ok && outcome.result === "confirmed") {
       setDrafts((prev) =>
-        prev[branch.id] === text ? { ...prev, [branch.id]: "" } : prev,
+        prev[branch.id]?.trim() === text ? { ...prev, [branch.id]: "" } : prev,
       );
     }
   }
