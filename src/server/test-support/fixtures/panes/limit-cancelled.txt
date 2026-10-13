@@ -1,0 +1,10 @@
+  ⚠ Usage limit reached · limit resets 8:30am
+    Continuing automatically at 8:30am · esc to cancel · /usage-credits to continue now
+✻ Sautéed for 12m 59s · done 5:26 PM
+⏺ Automatic continue cancelled · /rate-limit-options to re-arm
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Opus 5.5 · high  │  ███░░░░░░░   27%  272k/1.0M                                                                                                                                                 new ta
+  engine  │  MEDI-28  │  thinking  │  Attention-kind  │  7d 100%  │  1h12m  │  +633/-0  │  $6.29
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents

@@ -25,11 +25,20 @@ const {
   sweepPendingMoves,
 } = await import("./session-account-apply.js");
 const { applyHookEvent } = await import("./hook-events.js");
+const { recordTurnEvent } = await import("./session-turn.js");
 const { removeAccountAndLogout, listAccountSessions } =
   await import("./claude-account-ops.js");
 const { withCardLock } = await import("./run-claude.js");
 const { setHooksRuntime } = await import("../infra/config-holder.js");
 setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
+
+const CANCELLED_PANE = fs.readFileSync(
+  new URL(
+    "../../test-support/fixtures/panes/limit-cancelled.txt",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 const ACCOUNT_A = "11111111-1111-4111-8111-111111111111";
 const ACCOUNT_B = "22222222-2222-4222-8222-222222222222";
@@ -132,6 +141,26 @@ void test("all queues the busy session and sets its pending field", async () => 
     sessionOf(busy.cardId, busy.sessionId)?.claudeAccountId,
     "default",
   );
+});
+
+void test("all moves a session on the cancelled limit screen with a hook limit and sends no Continue.", async () => {
+  const cancelled = await sessionCard("ap-cancelled", CANCELLED_PANE);
+  recordTurnEvent(
+    cancelled.cardId,
+    cancelled.sessionId,
+    "StopFailure",
+    "rate_limit",
+  );
+  const result = await applyAccountChoice("all", ACCOUNT_A);
+  assert.deepEqual(result.moved, [cancelled]);
+  assert.deepEqual(result.queued, []);
+  assert.deepEqual(result.skipped, []);
+  assert.equal(
+    sessionOf(cancelled.cardId, cancelled.sessionId)?.claudeAccountId,
+    ACCOUNT_A,
+  );
+  const calls = fs.readFileSync(path.join(fake.state, "calls.log"), "utf8");
+  assert.equal(calls.includes("Continue."), false);
 });
 
 void test("none touches no tmux session", async () => {

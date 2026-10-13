@@ -24,6 +24,14 @@ const { CREDITS_OPTION } = await import("../domain/limit-surface.js");
 const { setHooksRuntime } = await import("../infra/config-holder.js");
 setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
 
+const CANCELLED_PANE = fs.readFileSync(
+  new URL(
+    "../../test-support/fixtures/panes/limit-cancelled.txt",
+    import.meta.url,
+  ),
+  "utf8",
+);
+
 const ACCOUNT_A = "11111111-1111-4111-8111-111111111111";
 await upsertAccount({
   id: ACCOUNT_A,
@@ -168,9 +176,14 @@ void test("surface (b) with no stop or wait row sends no key and returns limit-u
   assert.equal(accountOf(cardId, sessionId), "default");
 });
 
-void test("a surface that does not clear returns limit-unknown and never stops Claude", async () => {
+void test("a surface that does not clear returns limit-unknown and never stops Claude", async (t) => {
+  const warn = t.mock.method(console, "warn", () => undefined);
   const { cardId, sessionId } = await limitCard("lim-stuck", LIMIT_PANE);
   assert.equal(await moveSessionAccount(cardId, ACCOUNT_A), "limit-unknown");
+  assert.equal(warn.mock.callCount(), 1);
+  const logged = String(warn.mock.calls[0].arguments[0]);
+  assert.match(logged, /limit-unknown/);
+  assert.ok(logged.includes(LIMIT_PANE.trim()));
   assert.deepEqual(keysSent(), ["Escape"]);
   assert.equal(accountOf(cardId, sessionId), "default");
 
@@ -202,6 +215,28 @@ void test("a hook limit with no surface left on the pane moves at the safe point
   assert.equal(await moveSessionAccount(cardId, ACCOUNT_A), "moved");
   assertMovedAfter([]);
   assert.equal(recordedTurnState(cardId, sessionId), "unknown");
+});
+
+void test("the cancelled post-menu screen with a hook limit moves with no key and does not report a limit left (C-03b)", async () => {
+  const { cardId, sessionId } = await limitCard(
+    "lim-cancelled",
+    CANCELLED_PANE,
+  );
+  recordTurnEvent(cardId, sessionId, "StopFailure", "rate_limit");
+  const seen: { leftLimit?: boolean } = {};
+  assert.equal(
+    await moveSessionAccount(
+      cardId,
+      ACCOUNT_A,
+      sessionId,
+      "automatic move",
+      seen,
+    ),
+    "moved",
+  );
+  assertMovedAfter([]);
+  assert.equal(accountOf(cardId, sessionId), ACCOUNT_A);
+  assert.equal(seen.leftLimit, undefined);
 });
 
 void test.after(() => env.cleanup());

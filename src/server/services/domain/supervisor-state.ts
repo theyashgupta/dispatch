@@ -1,6 +1,11 @@
 import { STALE_MINUTES } from "../../../shared/orchestrator-limits.js";
 import type { LoopProgress, SupervisorState } from "../../../shared/types.js";
-import { parseLimitSurface, type LimitSurface } from "./limit-surface.js";
+import {
+  AUTO_CONTINUE,
+  inputLineAt,
+  parseLimitSurface,
+  type LimitSurface,
+} from "./limit-surface.js";
 
 export type PromptKind = "dangerous_delete" | "peer_message" | "other";
 
@@ -44,7 +49,6 @@ const IDLE_SAMPLES = 3;
 const STALE_MS = STALE_MINUTES * 60_000;
 const EVIDENCE_MAX = 160;
 
-const INPUT_LINE = /^\s*❯(?!\s*\d+\.)(?!\s*Deny\b)/;
 const USER_BLOCK_START = /^\s*❯(?!\s*\d+\.)\s*\S/;
 const BLOCK_START = /^[⏺✻✽✶✳✢·※]/;
 const SPINNER_LINE = /^\s*[✻✽✶✳✢·]\s/;
@@ -143,7 +147,7 @@ function openDialog(region: readonly string[]): Dialog | null {
     };
   }
   if (limit?.kind === "a") {
-    const line = region.find((l) => /continuing automatically/i.test(l)) ?? "";
+    const line = region.find((l) => AUTO_CONTINUE.test(l)) ?? "";
     return {
       state: "usage_limit_wait",
       key: `auto:${line.trim()}`,
@@ -162,15 +166,6 @@ function openDialog(region: readonly string[]): Dialog | null {
     };
   }
   return null;
-}
-
-/** The index of the last input line of a pane, or -1 when none is drawn. */
-function inputLineAt(lines: readonly string[]): number {
-  let at = -1;
-  lines.forEach((l, i) => {
-    if (INPUT_LINE.test(l)) at = i;
-  });
-  return at;
 }
 
 /**
@@ -215,9 +210,7 @@ export function paneReady(pane: string): boolean {
  * answered as the limit dialog.
  */
 export function limitSurfaceOf(pane: string): LimitSurface | null {
-  const lines = pane.split("\n");
-  const inputAt = inputLineAt(lines);
-  const surface = parseLimitSurface(lines.slice(inputAt + 1).join("\n"));
+  const surface = parseLimitSurface(pane);
   if (surface?.kind === "b" && !surface.options.some((o) => LIMIT_ROW.test(o)))
     return null;
   return surface;
