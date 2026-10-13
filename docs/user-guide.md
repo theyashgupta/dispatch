@@ -415,6 +415,7 @@ The comment box sits under the messages. It sends text to the orchestrator sessi
 - The result shows next to **Send**: "Delivered" or "Not confirmed. Check the terminal." After "Delivered" the field clears. After any other result the text stays.
 - When the session changed state, the result reads "Not sent. <orchestrator name> is now at <state label>. Open the terminal."
 - A failed send shows the alert "Message failed: <message>." with the button **Try again**. The text stays.
+- Dispatch refuses a text that starts with a mode character of Claude (`/`, `!`, `#`, `&` or `@`) or that has only control characters. The alert reads "Message failed: the text is empty or starts with a mode character." Change the first character and send again.
 - When the orchestrator has no session, **Send** sends no message. The alert "Message failed: <orchestrator name> has no session. Start it first." shows under the field. The text stays.
 
 ### Narrow screens
