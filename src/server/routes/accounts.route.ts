@@ -100,6 +100,10 @@ accountsRouter.put("/accounts/chain/order", async (req, res) => {
 
 accountsRouter.put("/accounts/chain/settings", async (req, res) => {
   const patch = parseOrThrow(chainSettingsBodySchema, req.body);
+  const merged = { ...getClaudeAccountsSettings(), ...patch };
+  if (merged.hysteresisPercent >= merged.thresholdPercent) {
+    throw new ValidationError("invalid-settings");
+  }
   await orFail("settings-write-failed", () => updateChainSettings(patch));
   res.status(200).json(getClaudeAccountsSettings());
 });

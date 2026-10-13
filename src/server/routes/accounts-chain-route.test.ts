@@ -127,7 +127,12 @@ void test("GET /accounts lists the accounts in chain order with chain fields, se
   );
   assert.equal(list[0].limitedUntil, null);
   assert.deepEqual(body.chain, {
-    settings: { autoMove: false, thresholdPercent: 100, minDwellMinutes: 15 },
+    settings: {
+      autoMove: false,
+      thresholdPercent: 100,
+      minDwellMinutes: 15,
+      hysteresisPercent: 10,
+    },
     exhausted: null,
     history: [],
     inUseSince: null,
@@ -201,6 +206,7 @@ void test("PUT /accounts/chain/settings stores a subset and returns the full set
     autoMove: true,
     thresholdPercent: 90,
     minDwellMinutes: 15,
+    hysteresisPercent: 10,
   });
   const stored = JSON.parse(read(configPath)) as { claudeAccounts: unknown };
   assert.deepEqual(stored.claudeAccounts, {
@@ -216,6 +222,7 @@ void test("PUT /accounts/chain/settings stores a subset and returns the full set
     autoMove: true,
     thresholdPercent: 50,
     minDwellMinutes: 240,
+    hysteresisPercent: 10,
   });
 });
 
@@ -232,6 +239,9 @@ void test("PUT /accounts/chain/settings refuses out of range, non integer and un
     { autoMove: "yes" },
     { autoMove: true, extra: 1 },
     { thresholdPercent: 80, minDwellMinutes: 999 },
+    { hysteresisPercent: 51 },
+    { hysteresisPercent: -1 },
+    { hysteresisPercent: 10.5 },
   ];
   for (const patch of bad) {
     const res = await call("PUT", "/accounts/chain/settings", patch);
@@ -239,6 +249,30 @@ void test("PUT /accounts/chain/settings refuses out of range, non integer and un
     assert.equal(res.body.error, "invalid-settings");
     assert.equal(read(configPath), before);
   }
+});
+
+void test("PUT /accounts/chain/settings keeps hysteresis below the threshold in the merged settings", async () => {
+  const put = (patch: unknown) =>
+    call("PUT", "/accounts/chain/settings", patch);
+  assert.equal(
+    (await put({ thresholdPercent: 100, hysteresisPercent: 50 })).status,
+    200,
+  );
+  const lowerThreshold = await put({ thresholdPercent: 50 });
+  assert.equal(lowerThreshold.status, 400);
+  assert.equal(lowerThreshold.body.error, "invalid-settings");
+  assert.equal(
+    (await put({ thresholdPercent: 50, hysteresisPercent: 49 })).status,
+    200,
+  );
+  const raiseHysteresis = await put({ hysteresisPercent: 50 });
+  assert.equal(raiseHysteresis.status, 400);
+  assert.equal(raiseHysteresis.body.error, "invalid-settings");
+  assert.equal((await put({ hysteresisPercent: 49 })).status, 200);
+  assert.equal(
+    (await put({ thresholdPercent: 50, hysteresisPercent: 10 })).status,
+    200,
+  );
 });
 
 void test("POST /accounts/chain/switch-now is 409 no-eligible-account when every other account is limited", async () => {
@@ -323,6 +357,7 @@ const DEFAULT_SETTINGS = {
   autoMove: false,
   thresholdPercent: 100,
   minDwellMinutes: 15,
+  hysteresisPercent: 10,
 };
 
 void test("PUT /accounts/chain/settings accepts thresholdPercent 100 and minDwellMinutes 0 and stores both", async (t) => {
@@ -340,6 +375,23 @@ void test("PUT /accounts/chain/settings accepts thresholdPercent 100 and minDwel
   };
   assert.equal(stored.claudeAccounts.thresholdPercent, 100);
   assert.equal(stored.claudeAccounts.minDwellMinutes, 0);
+});
+
+void test("PUT /accounts/chain/settings accepts hysteresisPercent 0 and 50 and stores them", async (t) => {
+  t.after(async () => {
+    await call("PUT", "/accounts/chain/settings", DEFAULT_SETTINGS);
+  });
+  for (const hysteresisPercent of [0, 50]) {
+    const { status, body } = await call("PUT", "/accounts/chain/settings", {
+      hysteresisPercent,
+    });
+    assert.equal(status, 200);
+    assert.deepEqual(body, { ...DEFAULT_SETTINGS, hysteresisPercent });
+    const stored = JSON.parse(read(configPath)) as {
+      claudeAccounts: Record<string, unknown>;
+    };
+    assert.equal(stored.claudeAccounts.hysteresisPercent, hysteresisPercent);
+  }
 });
 
 void test("PUT /accounts/chain/settings with an empty body returns the current full settings unchanged", async () => {

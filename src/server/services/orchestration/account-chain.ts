@@ -9,8 +9,11 @@ import {
 import { SWITCH_NOW_REASON } from "../../../shared/account-chain.js";
 import { ALL_BOARDS } from "../../../shared/board-key.js";
 import { readClaudeIdentity } from "../../adapters/claude-cli.js";
+import type { UsageCaller } from "../../adapters/usage-request-log.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import {
+  filterByHysteresis,
+  passesHysteresis,
   selectAccount,
   type ChainCandidate,
 } from "../domain/account-selection.js";
@@ -20,6 +23,7 @@ import {
   isTokenReadFailed,
   parseSurfaceResetAt,
 } from "../domain/account-state.js";
+import { shouldWarnLoginExpiry } from "../domain/login-expiry.js";
 import {
   getClaudeAccountsSettings,
   updateClaudeAccountsSettings,
@@ -60,7 +64,10 @@ export interface ChainDeps {
   now: () => number;
   setTimer: (run: () => void, ms: number) => unknown;
   clearTimer: (handle: unknown) => void;
-  refreshUsage: (id: string) => Promise<ClaudeUsageSnapshot>;
+  refreshUsage: (
+    id: string,
+    caller?: UsageCaller,
+  ) => Promise<ClaudeUsageSnapshot>;
   cachedUsage: (id: string) => ClaudeUsageSnapshot;
   loggedIn: (id: string) => Promise<boolean>;
   emit: (event: ChainEvent) => void;
@@ -227,11 +234,14 @@ async function persist(): Promise<void> {
   await writeChainState(chain);
 }
 
-async function candidates(): Promise<ChainCandidate[]> {
+async function candidates(): Promise<
+  (ChainCandidate & Pick<ChainAccountEntry, "buckets">)[]
+> {
   return (await readChainOrder()).map((id) => ({
     id,
     state: chain.accounts[id]?.state ?? "unknown",
     limitedUntil: chain.accounts[id]?.limitedUntil ?? null,
+    buckets: chain.accounts[id]?.buckets ?? [],
   }));
 }
 
@@ -365,12 +375,24 @@ async function moveTo(
 
 /**
  * Leave the account in use for the selection result, or record the exhausted chain.
+ *
+ * @remarks With `hysteresis` the pick is limited to accounts below the hysteresis line. When none
+ * passes, the sessions stay unless the unfiltered chain is exhausted too.
  */
-async function failover(reason: string): Promise<void> {
+async function failover(reason: string, hysteresis = false): Promise<void> {
   const from = getActiveAccountId();
-  const selection = selectAccount(await candidates(), new Date(deps.now()));
+  const now = new Date(deps.now());
+  const all = await candidates();
+  const { thresholdPercent, hysteresisPercent } = getClaudeAccountsSettings();
+  const selection = selectAccount(
+    hysteresis
+      ? filterByHysteresis(all, thresholdPercent, hysteresisPercent)
+      : all,
+    now,
+  );
   if (selection.exhausted) {
-    await markExhausted(from, selection.earliestReset);
+    const fallback = hysteresis ? selectAccount(all, now) : selection;
+    if (fallback.exhausted) await markExhausted(from, fallback.earliestReset);
     return;
   }
   if (selection.id === from) return;
@@ -388,7 +410,7 @@ async function onLimited(
 ): Promise<void> {
   if (id !== getActiveAccountId()) return;
   if (!hard && inDwell()) return;
-  await failover(reason);
+  await failover(reason, !hard);
 }
 
 /**
@@ -400,6 +422,22 @@ export function handleUsageRead(
 ): Promise<void> {
   return enqueue(async () => {
     const entry = await ingest(id, usage);
+    const expiresAt = usage.loginExpiresAt;
+    if (
+      expiresAt !== undefined &&
+      shouldWarnLoginExpiry(
+        expiresAt,
+        chain.loginExpiryNotified[id],
+        deps.now(),
+      )
+    ) {
+      chain.loginExpiryNotified = {
+        ...chain.loginExpiryNotified,
+        [id]: expiresAt,
+      };
+      await persist();
+      deps.emit({ kind: "login-expiring", account: id, expiresAt });
+    }
     if (entry.state === "limited") {
       await onLimited(id, false, "usage at the threshold");
     }
@@ -442,7 +480,7 @@ export function handleLimitSignal(
       if (isStaleSurface(pane, usage, thresholdPercent, new Date(deps.now()))) {
         return;
       }
-      usage = await deps.refreshUsage(id);
+      usage = await deps.refreshUsage(id, "limit-surface");
       if (
         usage.status === "ok" &&
         usage.windows.every((w) => w.percent < thresholdPercent)
@@ -469,7 +507,7 @@ async function freshRead(
   id: string,
   startedAt: number,
 ): Promise<ClaudeUsageSnapshot | null> {
-  const usage = await deps.refreshUsage(id);
+  const usage = await deps.refreshUsage(id, "fresh-read");
   const fetchedAt =
     usage.fetchedAt === null ? NaN : Date.parse(usage.fetchedAt);
   return usage.status === "ok" && fetchedAt >= startedAt ? usage : null;
@@ -497,6 +535,18 @@ async function checkReturn(id: string): Promise<void> {
   const order = await readChainOrder();
   const rank = order.indexOf(id);
   if (id === inUse || rank < 0 || rank > order.indexOf(inUse)) return;
+  const { thresholdPercent, hysteresisPercent } = getClaudeAccountsSettings();
+  if (
+    !passesHysteresis(
+      entry.buckets,
+      entry.state,
+      thresholdPercent,
+      hysteresisPercent,
+    )
+  ) {
+    scheduleReturn(id, deps.now() + RECHECK_MS);
+    return;
+  }
   await moveOrOffer("return", inUse, id, "reset");
 }
 
@@ -558,8 +608,10 @@ export async function updateChainSettings(
 export function forgetChainAccount(id: string): Promise<void> {
   return enqueue(async () => {
     cancel(`return:${id}`);
-    if (chain.accounts[id] === undefined) return;
+    const hadNotice = id in chain.loginExpiryNotified;
+    if (chain.accounts[id] === undefined && !hadNotice) return;
     delete chain.accounts[id];
+    delete chain.loginExpiryNotified[id];
     await persist();
   });
 }

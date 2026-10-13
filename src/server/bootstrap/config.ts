@@ -200,7 +200,8 @@ function readActiveClaudeAccountId(
  * Read the `claudeAccounts` settings block, keeping only keys of the right type.
  *
  * @remarks An absent or wrong-typed key is left out, so it resolves to its default at read time.
- * A number out of range is clamped to the bounds the settings route enforces.
+ * A number out of range is clamped to the bounds the settings route enforces, and a hysteresis at
+ * or above the threshold is clamped to one below it.
  */
 function readClaudeAccounts(
   parsed: Record<string, unknown>,
@@ -212,11 +213,22 @@ function readClaudeAccounts(
   const block = raw as Record<string, unknown>;
   const out: NonNullable<Config["claudeAccounts"]> = {};
   if (typeof block.autoMove === "boolean") out.autoMove = block.autoMove;
-  for (const key of ["thresholdPercent", "minDwellMinutes"] as const) {
+  for (const key of [
+    "thresholdPercent",
+    "minDwellMinutes",
+    "hysteresisPercent",
+  ] as const) {
     const value = block[key];
     if (typeof value !== "number" || !Number.isFinite(value)) continue;
     const { min, max } = CLAUDE_ACCOUNTS_BOUNDS[key];
     out[key] = Math.min(max, Math.max(min, value));
+  }
+  if (
+    out.thresholdPercent !== undefined &&
+    out.hysteresisPercent !== undefined &&
+    out.hysteresisPercent >= out.thresholdPercent
+  ) {
+    out.hysteresisPercent = out.thresholdPercent - 1;
   }
   return out;
 }

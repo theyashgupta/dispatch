@@ -1414,6 +1414,7 @@ export interface ClaudeUsageSnapshot {
   windows: ClaudeUsageWindow[];
   fetchedAt: string | null;
   error?: string;
+  loginExpiresAt?: string;
 }
 
 export interface ClaudeAccountSummary {
@@ -1474,17 +1475,20 @@ export interface ClaudeAccountsSettings {
   autoMove: boolean;
   thresholdPercent: number;
   minDwellMinutes: number;
+  hysteresisPercent: number;
 }
 
 export const DEFAULT_CLAUDE_ACCOUNTS_SETTINGS: ClaudeAccountsSettings = {
   autoMove: false,
   thresholdPercent: 100,
   minDwellMinutes: 15,
+  hysteresisPercent: 10,
 };
 
 export const CLAUDE_ACCOUNTS_BOUNDS = {
   thresholdPercent: { min: 50, max: 100 },
   minDwellMinutes: { min: 0, max: 240 },
+  hysteresisPercent: { min: 0, max: 50 },
 } as const;
 
 export type ChainAccountState =
@@ -1526,6 +1530,7 @@ export interface ChainStateFile {
   inUseSince: string | null;
   exhausted: ChainExhaustedRecord | null;
   moves: ChainMove[];
+  loginExpiryNotified: Record<string, string>;
 }
 
 /**
@@ -1915,7 +1920,8 @@ export type AccountEventType =
   | "account_login_failed"
   | "account_failover"
   | "account_return"
-  | "account_chain_exhausted";
+  | "account_chain_exhausted"
+  | "account_login_expiring";
 
 export type AccountActivityEvent = Omit<ActivityEvent, "type"> & {
   type: AccountEventType;
