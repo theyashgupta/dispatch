@@ -24,6 +24,7 @@ function FlowBadge({ block }: { block: ShipBlock }) {
       label={block.failed ?? block.flow.label}
       glyph={block.flow.glyph}
       tone="neutral"
+      className="h-auto min-h-4.5 shrink whitespace-normal"
     />
   );
 }

@@ -26,7 +26,7 @@ export function CostSection({
       state={state}
       onRetry={onRetry}
     >
-      <div className="flex flex-col gap-4 rounded-md border border-border bg-card p-4">
+      <div className="flex flex-col gap-3">
         {rows.length === 0 ? (
           <p className="m-0 text-sm text-muted-foreground">No cost yet.</p>
         ) : (

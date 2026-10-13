@@ -1,5 +1,4 @@
 import { ChevronRight } from "lucide-react";
-import type { Card } from "../../../../shared/types.js";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,8 +23,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { SectionState } from "@/modules/dashboard/domain/section-state";
+import type { TicketTile } from "@/modules/dashboard/domain/ticket-tiles";
 import type { ColumnRow } from "@/modules/dashboard/domain/tickets-by-column";
 import { DashboardSection } from "./DashboardSection";
+import { TicketTileView } from "./TicketTileView";
 
 interface TicketsSectionProps {
   state: SectionState;
@@ -37,7 +38,7 @@ interface TicketsSectionProps {
   columnValue: string;
   onGroupChange: (value: string) => void;
   onColumnChange: (value: string) => void;
-  cards: Card[];
+  tiles: TicketTile[];
   onRetry: () => void;
 }
 
@@ -60,7 +61,7 @@ export function TicketsSection({
   columnValue,
   onGroupChange,
   onColumnChange,
-  cards,
+  tiles,
   onRetry,
 }: TicketsSectionProps) {
   return (
@@ -75,52 +76,43 @@ export function TicketsSection({
         </Button>
       }
     >
-      <div className="hidden rounded-md border border-border bg-card md:block">
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead scope="col">Column</TableHead>
-              <TableHead scope="col">Cards</TableHead>
-              <TableHead scope="col">By orchestrator</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((row) => (
-              <TableRow key={row.column}>
-                <TableCell>{row.label}</TableCell>
-                <TableCell className="tabular-nums">
-                  {row.cards.length}
-                </TableCell>
-                <TableCell>
-                  <OrchestratorCount count={row.byOrchestrator} />
-                </TableCell>
-              </TableRow>
+      <div className="flex flex-wrap gap-2">
+        <Select value={groupValue} onValueChange={onGroupChange}>
+          <SelectTrigger aria-label="Group" className="w-48">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All groups</SelectItem>
+            {groups.map((group) => (
+              <SelectItem key={group.id} value={group.id}>
+                {group.label}
+              </SelectItem>
             ))}
-          </TableBody>
-        </Table>
+          </SelectContent>
+        </Select>
+        <Select value={columnValue} onValueChange={onColumnChange}>
+          <SelectTrigger aria-label="Column" className="w-48">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All columns</SelectItem>
+            {rows.map((row) => (
+              <SelectItem key={row.column} value={row.column}>
+                {row.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
-      <ItemGroup className="rounded-md border border-border bg-card md:hidden">
-        {rows.map((row) => (
-          <Item
-            key={row.column}
-            role="listitem"
-            size="sm"
-            className="flex-nowrap border-0 border-b last:border-b-0"
-          >
-            <ItemContent className="min-w-0">
-              <span className="text-xs text-muted-foreground tabular-nums">
-                {row.cards.length === 1
-                  ? "1 card"
-                  : `${row.cards.length} cards`}
-              </span>
-              <ItemTitle>{row.label}</ItemTitle>
-              {row.byOrchestrator > 0 && (
-                <OrchestratorCount count={row.byOrchestrator} />
-              )}
-            </ItemContent>
-          </Item>
-        ))}
-      </ItemGroup>
+      {tiles.length === 0 ? (
+        <p className="m-0 text-sm text-muted-foreground">No cards match.</p>
+      ) : (
+        <ul className="m-0 grid list-none grid-cols-1 gap-(--space-sm) p-0 sm:grid-cols-2 2xl:grid-cols-3">
+          {tiles.map((tile) => (
+            <TicketTileView key={tile.cardId} tile={tile} />
+          ))}
+        </ul>
+      )}
       <Collapsible className="flex flex-col gap-2">
         <CollapsibleTrigger asChild>
           <Button
@@ -133,61 +125,56 @@ export function TicketsSection({
               aria-hidden="true"
               className="transition-transform group-data-[state=open]/trigger:rotate-90"
             />
-            Show cards
+            Show column counts
           </Button>
         </CollapsibleTrigger>
         <CollapsibleContent className="flex flex-col gap-2">
-          <div className="flex flex-wrap gap-2">
-            <Select value={groupValue} onValueChange={onGroupChange}>
-              <SelectTrigger aria-label="Group" className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All groups</SelectItem>
-                {groups.map((group) => (
-                  <SelectItem key={group.id} value={group.id}>
-                    {group.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={columnValue} onValueChange={onColumnChange}>
-              <SelectTrigger aria-label="Column" className="w-48">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All columns</SelectItem>
+          <div className="hidden rounded-md border border-border bg-card md:block">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead scope="col">Column</TableHead>
+                  <TableHead scope="col">Cards</TableHead>
+                  <TableHead scope="col">By orchestrator</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {rows.map((row) => (
-                  <SelectItem key={row.column} value={row.column}>
-                    {row.label}
-                  </SelectItem>
+                  <TableRow key={row.column}>
+                    <TableCell>{row.label}</TableCell>
+                    <TableCell className="tabular-nums">
+                      {row.cards.length}
+                    </TableCell>
+                    <TableCell>
+                      <OrchestratorCount count={row.byOrchestrator} />
+                    </TableCell>
+                  </TableRow>
                 ))}
-              </SelectContent>
-            </Select>
+              </TableBody>
+            </Table>
           </div>
-          {cards.length === 0 ? (
-            <p className="m-0 text-sm text-muted-foreground">No cards match.</p>
-          ) : (
-            <ItemGroup className="rounded-md border border-border bg-card">
-              {cards.map((card) => (
-                <Item
-                  key={card.id}
-                  role="listitem"
-                  size="sm"
-                  className="flex-nowrap border-0 border-b last:border-b-0"
-                >
-                  <ItemContent className="min-w-0">
-                    <ItemTitle className="min-w-0">
-                      <span className="font-mono text-xs text-muted-foreground">
-                        {card.identifier}
-                      </span>
-                      <span className="min-w-0 truncate">{card.title}</span>
-                    </ItemTitle>
-                  </ItemContent>
-                </Item>
-              ))}
-            </ItemGroup>
-          )}
+          <ItemGroup className="rounded-md border border-border bg-card md:hidden">
+            {rows.map((row) => (
+              <Item
+                key={row.column}
+                role="listitem"
+                size="sm"
+                className="flex-nowrap border-0 border-b last:border-b-0"
+              >
+                <ItemContent className="min-w-0">
+                  <span className="text-xs text-muted-foreground tabular-nums">
+                    {row.cards.length === 1
+                      ? "1 card"
+                      : `${row.cards.length} cards`}
+                  </span>
+                  <ItemTitle>{row.label}</ItemTitle>
+                  {row.byOrchestrator > 0 && (
+                    <OrchestratorCount count={row.byOrchestrator} />
+                  )}
+                </ItemContent>
+              </Item>
+            ))}
+          </ItemGroup>
         </CollapsibleContent>
       </Collapsible>
     </DashboardSection>
