@@ -50,6 +50,7 @@ export function CentrePaneContainer({
   }, [wide, inTab, needsTerminal, sessionCard, sessionId, ensureTerminal]);
 
   if (wide === inTab) return null;
+  const src = terminalSrcFor(mode, record);
   const frame =
     panel.data === undefined && panel.error !== null ? (
       <PanelAlertBar
@@ -59,8 +60,9 @@ export function CentrePaneContainer({
       />
     ) : (
       <TerminalFrame
+        key={src ?? mode}
         mode={mode}
-        src={terminalSrcFor(mode, record)}
+        src={src}
         loading={panel.isPending}
       />
     );
