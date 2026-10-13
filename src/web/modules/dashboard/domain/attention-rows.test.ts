@@ -149,7 +149,7 @@ test("stops offer Resume loop, a failed resume offers Try resume again, a budget
   assert.equal(body("failed_gate")?.action, null);
   assert.equal(
     body("budget_stop")?.changeBudgetHref,
-    "#/boards/LOCAL?panel=orchestrator&tab=policy",
+    "#/boards/LOCAL/orchestrator?settings=policy",
   );
   assert.equal(body("usage_stop")?.changeBudgetHref, null);
 });
