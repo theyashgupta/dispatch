@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Field, FieldDescription } from "@/components/ui/field";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { cn } from "@/lib/utils";
 import { PanelAlertBar } from "@/modules/orchestrator/components/PanelAlertBar";
 import { ToneBadge } from "@/modules/orchestrator/components/ToneBadge";
 import type {
@@ -47,7 +48,9 @@ export interface TileBehaviour {
   register: (id: string) => (element: HTMLElement | null) => void;
   onKeyDown: (id: string) => KeyboardEventHandler<HTMLElement>;
   onOpen: (branch: CentreBranch) => void;
-  onReply: (branch: CentreBranch, text: string) => Promise<boolean>;
+  draftOf: (branch: CentreBranch) => string;
+  setDraft: (branch: CentreBranch, text: string) => void;
+  onReply: (branch: CentreBranch, text: string) => Promise<void>;
   onAction: (branch: CentreBranch, kind: "resume" | "retry_resume") => void;
   onOpenTerminal: () => void;
   onRetry: (branch: CentreBranch) => void;
@@ -62,8 +65,8 @@ const BODY_CLASS =
   "flex w-full flex-col gap-(--space-xs) rounded-md p-(--space-md) text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
 export function BranchTile({ branch, tile }: BranchTileProps) {
-  const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
+  const draft = tile.draftOf(branch);
   const feedback = tile.feedback(branch);
   const label = branch.identifier ?? branch.cardId;
   const meters = tileMeters(branch);
@@ -76,7 +79,7 @@ export function BranchTile({ branch, tile }: BranchTileProps) {
   async function send() {
     setSending(true);
     try {
-      if (await tile.onReply(branch, typed)) setDraft("");
+      await tile.onReply(branch, typed);
     } finally {
       setSending(false);
     }
@@ -115,7 +118,12 @@ export function BranchTile({ branch, tile }: BranchTileProps) {
 
   return (
     <li data-edge-tile={branch.id} className="list-none">
-      <div className="rounded-md border border-border bg-card">
+      <div
+        className={cn(
+          "rounded-md border border-border",
+          branch.tone === "error" ? "bg-danger-soft" : "bg-card",
+        )}
+      >
         {has("open") ? (
           <button
             type="button"
@@ -147,7 +155,9 @@ export function BranchTile({ branch, tile }: BranchTileProps) {
                   id={replyId}
                   value={draft}
                   placeholder={`Reply to ${label ?? branch.title}`}
-                  onChange={(event) => setDraft(event.target.value)}
+                  onChange={(event) =>
+                    tile.setDraft(branch, event.target.value)
+                  }
                 />
                 <FieldDescription>
                   {draft.length} of 500 characters. A longer reply goes as a

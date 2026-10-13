@@ -6,6 +6,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PanelAlertBar } from "@/modules/orchestrator/components/PanelAlertBar";
 import {
   LOADING_TEXT,
   NO_ORCHESTRATOR_TEXT,
@@ -32,12 +33,18 @@ interface NoOrchestratorProps {
   startDisabled: boolean;
   reason: string | null;
   onStart: () => void;
+  alert: {
+    message: string;
+    onRetry: () => void;
+    retryDisabled: boolean;
+  } | null;
 }
 
 export function NoOrchestrator({
   startDisabled,
   reason,
   onStart,
+  alert,
 }: NoOrchestratorProps) {
   return (
     <Empty>
@@ -48,6 +55,13 @@ export function NoOrchestrator({
       <Button type="button" disabled={startDisabled} onClick={onStart}>
         Start
       </Button>
+      {alert !== null && (
+        <PanelAlertBar
+          message={alert.message}
+          retryDisabled={alert.retryDisabled}
+          onRetry={alert.onRetry}
+        />
+      )}
     </Empty>
   );
 }

@@ -27,6 +27,7 @@ export function BranchList({
         <BranchBand
           key={band.key}
           id={`band-${band.key}`}
+          bandKey={band.key}
           label={band.label}
           count={band.count}
         >

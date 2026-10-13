@@ -1,10 +1,11 @@
 import { useEffect, useRef } from "react";
 import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
 import { CentrePane } from "@/modules/orchestrator/components/CentrePane";
+import { PanelAlertBar } from "@/modules/orchestrator/components/PanelAlertBar";
 import { TerminalFrame } from "@/modules/orchestrator/components/TerminalFrame";
 import {
   WIDE_QUERY,
-  unknownOrchestrator,
+  regionErrorText,
 } from "@/modules/orchestrator/domain/centre-page-state";
 import {
   terminalFor,
@@ -20,13 +21,13 @@ interface CentrePaneContainerProps {
 export function CentrePaneContainer({
   inTab = false,
 }: CentrePaneContainerProps) {
-  const { id, panel, records, record } = useCentreSelection();
+  const { panel, record, unknown } = useCentreSelection();
   const wide = useMediaQuery(WIDE_QUERY);
   const { mutateAsync: ensureTerminal } =
     useEnsureOrchestratorTerminalMutation();
   const spawnedFor = useRef<string | null>(null);
 
-  const loaded = panel.data !== undefined && !unknownOrchestrator(records, id);
+  const loaded = panel.data !== undefined && !unknown;
   const mode = loaded ? terminalFor(record) : "unavailable";
   const session = record?.session ?? null;
   const sessionCard = session?.cardId;
@@ -38,7 +39,7 @@ export function CentrePaneContainer({
     session.state !== "lost";
 
   useEffect(() => {
-    if (!needsTerminal || sessionCard === undefined) {
+    if (wide === inTab || !needsTerminal || sessionCard === undefined) {
       spawnedFor.current = null;
       return;
     }
@@ -48,15 +49,22 @@ export function CentrePaneContainer({
     void ensureTerminal(sessionCard).then((result) => {
       if (!result.ok && spawnedFor.current === key) spawnedFor.current = null;
     });
-  }, [needsTerminal, sessionCard, sessionId, ensureTerminal]);
+  }, [wide, inTab, needsTerminal, sessionCard, sessionId, ensureTerminal]);
 
   if (wide === inTab) return null;
-  const frame = (
-    <TerminalFrame
-      mode={mode}
-      src={terminalSrcFor(mode, record)}
-      loading={panel.isPending}
-    />
-  );
+  const frame =
+    panel.data === undefined && panel.error !== null ? (
+      <PanelAlertBar
+        message={regionErrorText("Terminal", panel.error.message)}
+        retryDisabled={false}
+        onRetry={() => void panel.refetch()}
+      />
+    ) : (
+      <TerminalFrame
+        mode={mode}
+        src={terminalSrcFor(mode, record)}
+        loading={panel.isPending}
+      />
+    );
   return inTab ? frame : <CentrePane terminal={frame} />;
 }

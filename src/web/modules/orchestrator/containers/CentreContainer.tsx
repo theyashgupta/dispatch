@@ -24,7 +24,6 @@ import {
   WIDE_QUERY,
   regionErrorText,
   regionState,
-  unknownOrchestrator,
 } from "@/modules/orchestrator/domain/centre-page-state";
 import { STALE_REASON } from "@/modules/orchestrator/domain/panel-model";
 import { useEdgePaths } from "@/modules/orchestrator/hooks/use-edge-paths";
@@ -41,7 +40,7 @@ const NO_CARDS: Card[] = [];
 const REASON_ID = "centre-actions-off";
 
 export function CentreContainer() {
-  const { appStore, boardKey, id, stale, panel, records, record } =
+  const { appStore, boardKey, id, stale, panel, records, record, unknown } =
     useCentreSelection();
   const doneLimit = useAppStore(appStore, (s) => s.doneLimit);
   const snapshot = useBoardSnapshotQuery(boardKey, doneLimit);
@@ -69,12 +68,11 @@ export function CentreContainer() {
   const order = useMemo(() => focusOrder(graph), [graph]);
   const { register, onKeyDown } = useTileFocus(order);
   const { container, paths } = useEdgePaths(
-    wide ? graph.branches.map((b) => b.id) : [],
+    wide ? graph.branches.map((b) => `${b.id}:${b.band}`) : [],
   );
 
   const queries = [panel, snapshot, open, answered];
   const failed = queries.find((q) => q.data === undefined && q.error !== null);
-  const unknown = unknownOrchestrator(records, id) && panel.data !== undefined;
   const state = regionState({
     loading: queries.some((q) => q.data === undefined),
     error: failed !== undefined || unknown,
@@ -96,9 +94,12 @@ export function CentreContainer() {
     onAction: actions.onAction,
     onOpenTerminal: actions.onOpenTerminal,
     onRetry: actions.onRetry,
+    draftOf: actions.draftOf,
+    setDraft: actions.setDraft,
   };
   const toggleShipped = () => setShowOlderShipped((shown) => !shown);
 
+  const startReason = start.control?.reason ?? null;
   const notReady =
     state === "loading" ? (
       <CentreLoading />
@@ -107,12 +108,15 @@ export function CentreContainer() {
         <PanelAlertBar
           message={regionErrorText(
             "Canvas",
-            failed?.error?.message ?? `no orchestrator ${id} on this board`,
+            failed?.error?.message ??
+              `no orchestrator ${id ?? "main"} on this board`,
           )}
           retryDisabled={false}
           onRetry={() => {
             for (const q of queries) {
-              if (q.error !== null) void q.refetch();
+              if (q.error !== null || (unknown && q === panel)) {
+                void q.refetch();
+              }
             }
           }}
         />
@@ -120,8 +124,17 @@ export function CentreContainer() {
     ) : state === "empty" ? (
       <NoOrchestrator
         startDisabled={start.control?.disabled ?? true}
-        reason={start.control?.reason ?? null}
+        reason={startReason === STALE_REASON ? null : startReason}
         onStart={() => void start.run("start")}
+        alert={
+          start.failure === null
+            ? null
+            : {
+                message: start.failure,
+                onRetry: start.retryFailed,
+                retryDisabled: stale || start.pending,
+              }
+        }
       />
     ) : null;
   const reason = stale ? (

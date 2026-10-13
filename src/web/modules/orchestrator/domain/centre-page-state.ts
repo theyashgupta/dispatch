@@ -6,7 +6,7 @@ import { mainOrchestrator } from "../../../../shared/orchestrator-owner.js";
 import { SESSION_STATES } from "../../../../shared/session-states.js";
 import type { SupervisorState } from "../../../../shared/types.js";
 import type { CentreBranch } from "./centre-graph.js";
-import type { OrchestratorView } from "./panel-model.js";
+import type { ControlKind, OrchestratorView } from "./panel-model.js";
 
 export { controlFor as centreControl } from "./panel-model.js";
 
@@ -24,10 +24,17 @@ export const ACTION_LABELS = {
   open_terminal: "Open terminal",
 } as const;
 
+export const CENTRE_CONTROL_LABELS: Record<ControlKind, string> = {
+  start: "Start",
+  stop: "Stop",
+  resume: "Resume",
+};
+
 type RegionState = "loading" | "error" | "empty" | "ready";
 
 export function countsText(branchCount: number, needYouCount: number): string {
-  return `${branchCount} branches, ${needYouCount} need you`;
+  const noun = branchCount === 1 ? "branch" : "branches";
+  return `${branchCount} ${noun}, ${needYouCount} need you`;
 }
 
 export function contextText(percent: number): string {

@@ -31,9 +31,9 @@ interface Stored {
 const NONE: TileFeedback = { result: null, failure: null };
 
 /**
- * Run the inline actions of the branch tiles and keep the result or the failure line of each tile.
+ * Run the inline actions of the branch tiles and keep the result, the failure line and the reply draft of each tile.
  *
- * @remarks A result belongs to the state it answered: it hides once the branch has a new `stateSince`, so a stored "Delivered" never labels a question nobody answered.
+ * @remarks A result or a failure belongs to the state it answered: it hides once the branch has a new `stateSince`, so a stored "Delivered" never labels a question nobody answered. The draft lives here so a tile that remounts on a band change or a tab switch keeps it.
  */
 export function useBranchActions(board: BoardKey, cards: readonly Card[]) {
   const navigate = useNavigate();
@@ -41,13 +41,14 @@ export function useBranchActions(board: BoardKey, cards: readonly Card[]) {
   const resume = useResumeLoopMutation(board);
   const retryResume = useRetryResumeMutation(board);
   const [stored, setStored] = useState<Record<string, Stored>>({});
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
 
   const remember = (id: string, value: Stored) =>
     setStored((prev) => ({ ...prev, [id]: value }));
 
   async function onReply(branch: CentreBranch, text: string) {
     const cardId = branch.cardId;
-    if (cardId === null) return false;
+    if (cardId === null) return;
     const outcome = await reply.mutateAsync({ cardId, text });
     const card = cards.find((c) => c.id === cardId);
     const result = replyOutcomeText(
@@ -67,7 +68,11 @@ export function useBranchActions(board: BoardKey, cards: readonly Card[]) {
             ),
       retry: () => void onReply(branch, text),
     });
-    return outcome.ok && outcome.result === "confirmed";
+    if (outcome.ok && outcome.result === "confirmed") {
+      setDrafts((prev) =>
+        prev[branch.id] === text ? { ...prev, [branch.id]: "" } : prev,
+      );
+    }
   }
 
   async function onAction(branch: CentreBranch, kind: ResumeKind) {
@@ -77,10 +82,7 @@ export function useBranchActions(board: BoardKey, cards: readonly Card[]) {
       kind === "resume" ? resume : retryResume
     ).mutateAsync(cardId);
     remember(branch.id, {
-      result:
-        outcome.ok && outcome.result === "unconfirmed"
-          ? REPLY_COPY.unconfirmed
-          : null,
+      result: outcome.ok ? REPLY_COPY[outcome.result ?? "unconfirmed"] : null,
       since: branch.stateSince,
       failure: outcome.ok
         ? null
@@ -97,11 +99,15 @@ export function useBranchActions(board: BoardKey, cards: readonly Card[]) {
     feedback: (branch: CentreBranch): TileFeedback => {
       const entry = stored[branch.id];
       if (entry === undefined) return NONE;
+      const current = entry.since === branch.stateSince;
       return {
-        result: entry.since === branch.stateSince ? entry.result : null,
-        failure: entry.failure,
+        result: current ? entry.result : null,
+        failure: current ? entry.failure : null,
       };
     },
+    draftOf: (branch: CentreBranch) => drafts[branch.id] ?? "",
+    setDraft: (branch: CentreBranch, text: string) =>
+      setDrafts((prev) => ({ ...prev, [branch.id]: text })),
     onReply,
     onAction: (branch: CentreBranch, kind: ResumeKind) =>
       void onAction(branch, kind),

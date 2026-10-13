@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useState } from "react";
 import { elbowPath } from "../domain/centre-edges.js";
 
 export interface EdgePath {
@@ -9,15 +9,14 @@ export interface EdgePath {
 /**
  * Measure the node and the tiles inside a container and give one elbow path per tile.
  *
- * @remarks The node carries `data-edge-node` and each tile carries `data-edge-tile` with its id. A resize of the container or of any tile, such as an inline reply that opens, measures again.
+ * @remarks The container is a callback ref held in state, so the effect runs once it mounts. The node carries `data-edge-node` and each tile carries `data-edge-tile` with its id. A resize of the container or of any tile, such as an inline reply that opens, measures again.
  */
 export function useEdgePaths(tileIds: readonly string[]) {
-  const container = useRef<HTMLDivElement>(null);
+  const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const [paths, setPaths] = useState<EdgePath[]>([]);
   const key = tileIds.join("\n");
 
   useLayoutEffect(() => {
-    const root = container.current;
     if (root === null) return;
     const measure = () => {
       const base = root.getBoundingClientRect();
@@ -52,7 +51,7 @@ export function useEdgePaths(tileIds: readonly string[]) {
       observer.observe(el);
     }
     return () => observer.disconnect();
-  }, [key]);
+  }, [root, key]);
 
-  return { container, paths };
+  return { container: setRoot, paths };
 }
