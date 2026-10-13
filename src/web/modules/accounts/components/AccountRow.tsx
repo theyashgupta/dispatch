@@ -5,6 +5,7 @@ import { Item, ItemContent } from "@/components/ui/item";
 import { UsageDot } from "./UsageDot";
 import {
   tightestWindow,
+  loginExpiryView,
   toneFor,
   usageLine,
 } from "@/modules/accounts/domain/usage-format";
@@ -12,6 +13,7 @@ import {
 interface AccountRowProps {
   account: ClaudeAccountSummary;
   active: boolean;
+  now: number;
   reloginDisabled: boolean;
   onSwitch: () => void;
   onRelogin: () => void;
@@ -21,6 +23,7 @@ interface AccountRowProps {
 export function AccountRow({
   account,
   active,
+  now,
   reloginDisabled,
   onSwitch,
   onRelogin,
@@ -30,6 +33,7 @@ export function AccountRow({
     account.usage.status === "ok"
       ? tightestWindow(account.usage.windows)
       : null;
+  const expiry = loginExpiryView(account.usage.loginExpiresAt, now);
   const meta = [
     account.isDefault ? "Default (your home login)" : account.orgName,
     account.subscriptionType,
@@ -58,6 +62,19 @@ export function AccountRow({
           />
           {usageLine(account.usage)}
         </span>
+        {expiry && (
+          <span
+            className={
+              expiry.tone === "warning"
+                ? "text-xs text-(--status-stale)"
+                : "text-xs text-muted-foreground"
+            }
+            data-testid="account-login-expiry"
+            data-tone={expiry.tone}
+          >
+            {expiry.text}
+          </span>
+        )}
       </ItemContent>
       {active && <Badge tone="accent">Active</Badge>}
       {!active && (

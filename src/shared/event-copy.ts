@@ -1,4 +1,8 @@
-import { describeChainMove, parseChainReason } from "./account-chain.js";
+import {
+  describeChainMove,
+  parseChainReason,
+  parseLoginExpiryReason,
+} from "./account-chain.js";
 import { COLUMN_LABELS } from "./column-labels.js";
 import { LINEAR_PUSH_FAILED_PREFIX } from "./linear-state-map.js";
 import type {
@@ -98,6 +102,19 @@ export function describeEvent(
       return event.reason
         ? `Claude login failed: ${event.reason}`
         : "Claude login failed";
+    case "account_login_expiring": {
+      const facts = parseLoginExpiryReason(event.reason);
+      if (facts) {
+        const verb =
+          Date.parse(facts.expiresAt) <= Date.parse(event.ts)
+            ? "expired"
+            : "expires";
+        return `${facts.label} login ${verb} on ${new Date(facts.expiresAt).toLocaleString()}`;
+      }
+      return event.reason
+        ? `Claude login expires on ${new Date(event.reason).toLocaleString()}`
+        : "Claude login expires soon";
+    }
     case "account_failover": {
       const facts = parseChainReason(event.reason);
       return facts

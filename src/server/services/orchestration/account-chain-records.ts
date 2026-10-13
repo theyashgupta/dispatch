@@ -1,5 +1,6 @@
 import {
   buildChainReason,
+  buildLoginExpiryReason,
   describeChainMove,
   SWITCH_NOW_REASON,
   type ChainReason,
@@ -19,7 +20,8 @@ export type ChainEvent =
       moved: boolean;
       sessions: number | null;
     }
-  | { kind: "exhausted"; from: string; earliestResetAt: string | null };
+  | { kind: "exhausted"; from: string; earliestResetAt: string | null }
+  | { kind: "login-expiring"; account: string; expiresAt: string };
 
 export interface ChainRecordDeps {
   label: (id: string) => Promise<string>;
@@ -68,6 +70,19 @@ export async function recordChainEvent(
         reason: event.earliestResetAt ?? "",
         title: "Every Claude account is at its limit",
         body: `The earliest reset is ${when}`,
+      };
+    }
+    if (event.kind === "login-expiring") {
+      const label = await deps.label(event.account);
+      const date = new Date(event.expiresAt).toLocaleString();
+      const expired = Date.parse(event.expiresAt) <= Date.now();
+      return {
+        type: "account_login_expiring" as const,
+        reason: buildLoginExpiryReason(label, event.expiresAt),
+        title: expired ? "Claude login expired" : "Claude login expires soon",
+        body: expired
+          ? `${label} login expired on ${date}. Log in again.`
+          : `${label} login expires on ${date}. Log in again before then.`,
       };
     }
     const [from, to] = await Promise.all([

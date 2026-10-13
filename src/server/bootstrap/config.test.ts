@@ -303,6 +303,23 @@ test("a calendar block reads tolerantly: unknown mode is macos, bad titles drop,
   assert.deepEqual(loadConfig().sources?.calendar, { mode: "macos" });
 });
 
+test("a stored hysteresis at or above the stored threshold is clamped to one below it", () => {
+  writeConfig({
+    claudeAccounts: { thresholdPercent: 50, hysteresisPercent: 50 },
+  });
+  assert.deepEqual(loadConfig().claudeAccounts, {
+    thresholdPercent: 50,
+    hysteresisPercent: 49,
+  });
+  writeConfig({
+    claudeAccounts: { thresholdPercent: 60, hysteresisPercent: 49 },
+  });
+  assert.deepEqual(loadConfig().claudeAccounts, {
+    thresholdPercent: 60,
+    hysteresisPercent: 49,
+  });
+});
+
 test("claudeAccounts settings out of range are clamped to the route bounds at load (F12)", () => {
   writeConfig({
     claudeAccounts: { thresholdPercent: 0, minDwellMinutes: -5 },
@@ -342,4 +359,13 @@ test("an unknown crossSessionInbound resolves to accept with one warning", () =>
   } finally {
     warn.mock.restore();
   }
+});
+
+test("claudeAccounts hysteresisPercent is clamped at load and a missing key resolves to the default", () => {
+  writeConfig({ claudeAccounts: { hysteresisPercent: 99 } });
+  assert.deepEqual(loadConfig().claudeAccounts, { hysteresisPercent: 50 });
+  writeConfig({ claudeAccounts: { hysteresisPercent: -3 } });
+  assert.deepEqual(loadConfig().claudeAccounts, { hysteresisPercent: 0 });
+  writeConfig({ claudeAccounts: { thresholdPercent: 90 } });
+  assert.equal(loadConfig().claudeAccounts?.hysteresisPercent, undefined);
 });
