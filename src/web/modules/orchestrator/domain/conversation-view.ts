@@ -29,6 +29,26 @@ export type ConversationEntry =
       answerNote: string | null;
     };
 
+export const ANSWERED_DECISION_CAP = 20;
+
+function answeredSortKey(item: DecisionItem): [number, number] {
+  return [
+    Date.parse(item.answeredAt ?? item.createdAt),
+    Date.parse(item.createdAt),
+  ];
+}
+
+function newestAnswered(items: readonly DecisionItem[]): DecisionItem[] {
+  return items
+    .filter((d) => d.state === "answered")
+    .sort((a, b) => {
+      const [aAt, aCreated] = answeredSortKey(a);
+      const [bAt, bCreated] = answeredSortKey(b);
+      return bAt - aAt || bCreated - aCreated;
+    })
+    .slice(0, ANSWERED_DECISION_CAP);
+}
+
 export interface ConversationViewInput {
   messages: readonly ConversationMessage[];
   decisions: readonly DecisionItem[];
@@ -43,7 +63,7 @@ export interface ConversationViewInput {
  *
  * @remarks
  * Messages keep their order. A decision goes before the first message that is later than
- * it, so a message with no time never moves a decision and a tie keeps the message first.
+ * it, so a message with no time never moves a decision and a tie keeps the message first. Every open decision stays, and only the newest 20 answered decisions do; an item in both lists counts as answered.
  */
 export function conversationView(
   input: ConversationViewInput,
@@ -53,8 +73,16 @@ export function conversationView(
     orchestrator: input.orchestratorName,
     system: "Dispatch",
   } as const;
-  const decisions = input.decisions
-    .filter((d) => d.orchestratorId === input.orchestratorId)
+  const own = input.decisions.filter(
+    (d) => d.orchestratorId === input.orchestratorId,
+  );
+  const answeredIds = new Set(
+    own.filter((d) => d.state === "answered").map((d) => d.id),
+  );
+  const decisions = [
+    ...own.filter((d) => d.state === "open" && !answeredIds.has(d.id)),
+    ...newestAnswered(own),
+  ]
     .map((item) => ({
       time: Date.parse(item.createdAt),
       entry: {
