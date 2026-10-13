@@ -561,3 +561,27 @@ This entry adds to the screens above. It does not change the text of an earlier 
 - **Screen 3.** In Part 2, a settings sheet of Screen 6 takes the Policy and Orchestrators tabs, and the panel goes away. The Terminal and Decisions tabs of Screen 3 are covered by the Terminal tab and the decision messages of Screen 6.
 - **Screen 4.** The attention queue and the progress rows stay. In Part 1b, the dashboard gets a link "Open command centre" to Screen 6.
 - **Decision kind `plan`.** A plan decision shows its entries as a table (Order, Ticket, Playbook, Size) and the options "Approve the plan" and "Do not approve". It has no other answer.
+
+### 2026-10-13 (LOCAL-104)
+
+This entry adds to the screens above. It does not change the text of an earlier section.
+
+- **Screen 6, route (Data list, entry of 2026-10-11).** The keyed route `/boards/<KEY>/orchestrator` replaces `/orchestrator?board=<KEY>`. The optional path part `/<orchestrator id>` replaces the `orchestrator` search parameter. The default is the main orchestrator.
+- **Screen 6, flat route.** `/orchestrator` and `/orchestrator/<orchestrator id>` only redirect. They take the board from the `board` search parameter, then replace the history entry with the keyed route and drop `board` from the search. They render no page.
+- **Entry point.** The board header button reads "Orchestrator" when the board has an orchestrator. With none, it reads "Add orchestrator" from 768 px and "Orchestrator" below 768 px. Both open Screen 6. The dashboard link "Open command centre" sits in the dashboard page header. The sidebar has no row for Screen 6.
+- **Screen 6, controls from 768 px.** The controls sit in the page header: the stale badge, the switcher, "Start", "Stop" or "Resume", and "Settings". A control alert shows under them.
+- **Screen 6, controls below 768 px.** The page header holds no controls. The same controls sit inline at the top of the page body, above the compact node. The compact node has no eyebrow "Orchestrator". A control alert shows under the controls.
+- **Screen 6, narrow tabs.** The tabs "Branches" and "Conversation" follow the compact node. The Conversation tab is 480 px high. It holds the pane with its own tabs "Conversation" and "Terminal". The terminal frame stays mounted across both tab levels.
+- **Screen 6, tab reset.** The page tab, the pane tab and the focus request live in one store. They return to "Branches" and "Conversation" when the user leaves the page.
+- **Screen 6, state badge.** The state badge sits in the orchestrator node, not with the controls. It reads "Starting", "Stopping", "Stopped" or the label of the session state.
+- **Screen 6, node count.** One branch reads "1 branch, 0 need you". The branch count includes the older shipped branches that the page hides. The need-you count covers only the visible branches.
+- **Screen 6, tile states and details.** Two more badges show: "Budget reached" and "Resume failed". The stuck session states show their own labels. The detail lines "Needs your answer", "Stopped at the usage limit" and "Budget reached" are new. A done branch with no time reads "Awaiting ship".
+- **Screen 6, tile times.** A time reads "HH:MM" on the current day and "<day> <month> HH:MM" on another day. The clock has 24 hours.
+- **Screen 6, older shipped.** The page hides a shipped branch when it shipped more than 24 hours ago. The count in "Show <n> older shipped" is the number of hidden branches.
+- **Screen 6, planned tile.** A planned branch with no card is not a button. It takes focus with Tab and the arrow keys. It has no open action.
+- **Screen 6, Open terminal.** On a tile, "Open terminal" goes to the board page. It does not select the card.
+- **Screen 6, message time.** A message shows its age, for example "5m ago". It does not show a clock time.
+- **Screen 6, answered decisions.** The conversation shows every open decision of the orchestrator. It shows only the 20 newest answered decisions, by answer time, then by creation time.
+- **Screen 6, "Not sent" line.** A refused send because of the session state shows as the result line next to the button, with no alert and no "Try again". In the comment box it reads "Not sent. <orchestrator name> is now at <state label>. Open the terminal." The same applies to the inline reply of a tile, with the card id.
+- **Screen 6, Enter on the node.** Enter selects the Conversation page tab and the Conversation pane tab, then moves focus to the comment box. Only a plain Enter on the node itself does this. With no orchestrator record, Enter does nothing.
+- **Screen 6, unknown orchestrator.** A path with an orchestrator id that the board does not have shows "Canvas did not load: no orchestrator <id> on this board." with "Try again".
