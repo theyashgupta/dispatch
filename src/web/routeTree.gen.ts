@@ -16,12 +16,14 @@ import { Route as BoardsIndexRouteImport } from './routes/boards.index'
 import { Route as DashboardChar123IdChar125RouteImport } from './routes/dashboard.{-$id}'
 import { Route as ErrorsChar123IdChar125RouteImport } from './routes/errors.{-$id}'
 import { Route as InboxChar123IdChar125RouteImport } from './routes/inbox.{-$id}'
+import { Route as OrchestratorChar123IdChar125RouteImport } from './routes/orchestrator.{-$id}'
 import { Route as PullRequestsChar123IdChar125RouteImport } from './routes/pull-requests.{-$id}'
 import { Route as SessionsChar123IdChar125RouteImport } from './routes/sessions.{-$id}'
 import { Route as BoardsKeyIndexRouteImport } from './routes/boards.$key.index'
 import { Route as BoardsKeySettingsRouteImport } from './routes/boards.$key.settings'
 import { Route as BoardsKeyDashboardChar123IdChar125RouteImport } from './routes/boards.$key.dashboard.{-$id}'
 import { Route as BoardsKeyInboxChar123IdChar125RouteImport } from './routes/boards.$key.inbox.{-$id}'
+import { Route as BoardsKeyOrchestratorChar123IdChar125RouteImport } from './routes/boards.$key.orchestrator.{-$id}'
 import { Route as BoardsKeySessionsChar123IdChar125RouteImport } from './routes/boards.$key.sessions.{-$id}'
 
 const AccountsChar123IdChar125LazyRouteImport =
@@ -127,6 +129,12 @@ const MeetingsChar123IdChar125LazyRoute =
   } as any).lazy(() =>
     import('./routes/meetings.{-$id}.lazy').then((d) => d.Route),
   )
+const OrchestratorChar123IdChar125Route =
+  OrchestratorChar123IdChar125RouteImport.update({
+    id: '/orchestrator/{-$id}',
+    path: '/orchestrator/{-$id}',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const PlaybooksChar123IdChar125LazyRoute =
   PlaybooksChar123IdChar125LazyRouteImport.update({
     id: '/playbooks/{-$id}',
@@ -235,6 +243,16 @@ const BoardsKeyInboxChar123IdChar125Route =
   } as any).lazy(() =>
     import('./routes/boards.$key.inbox.{-$id}.lazy').then((d) => d.Route),
   )
+const BoardsKeyOrchestratorChar123IdChar125Route =
+  BoardsKeyOrchestratorChar123IdChar125RouteImport.update({
+    id: '/boards/$key/orchestrator/{-$id}',
+    path: '/boards/$key/orchestrator/{-$id}',
+    getParentRoute: () => rootRouteImport,
+  } as any).lazy(() =>
+    import('./routes/boards.$key.orchestrator.{-$id}.lazy').then(
+      (d) => d.Route,
+    ),
+  )
 const BoardsKeySessionsChar123IdChar125Route =
   BoardsKeySessionsChar123IdChar125RouteImport.update({
     id: '/boards/$key/sessions/{-$id}',
@@ -249,6 +267,7 @@ export interface FileRoutesByFullPath {
   '/dashboard/{-$id}': typeof DashboardChar123IdChar125Route
   '/errors/{-$id}': typeof ErrorsChar123IdChar125Route
   '/inbox/{-$id}': typeof InboxChar123IdChar125Route
+  '/orchestrator/{-$id}': typeof OrchestratorChar123IdChar125Route
   '/pull-requests/{-$id}': typeof PullRequestsChar123IdChar125Route
   '/sessions/{-$id}': typeof SessionsChar123IdChar125Route
   '/accounts/{-$id}': typeof AccountsChar123IdChar125LazyRoute
@@ -271,6 +290,7 @@ export interface FileRoutesByFullPath {
   '/boards/$key/': typeof BoardsKeyIndexRoute
   '/boards/$key/dashboard/{-$id}': typeof BoardsKeyDashboardChar123IdChar125Route
   '/boards/$key/inbox/{-$id}': typeof BoardsKeyInboxChar123IdChar125Route
+  '/boards/$key/orchestrator/{-$id}': typeof BoardsKeyOrchestratorChar123IdChar125Route
   '/boards/$key/sessions/{-$id}': typeof BoardsKeySessionsChar123IdChar125Route
 }
 export interface FileRoutesByTo {
@@ -278,6 +298,7 @@ export interface FileRoutesByTo {
   '/dashboard/{-$id}': typeof DashboardChar123IdChar125Route
   '/errors/{-$id}': typeof ErrorsChar123IdChar125Route
   '/inbox/{-$id}': typeof InboxChar123IdChar125Route
+  '/orchestrator/{-$id}': typeof OrchestratorChar123IdChar125Route
   '/pull-requests/{-$id}': typeof PullRequestsChar123IdChar125Route
   '/sessions/{-$id}': typeof SessionsChar123IdChar125Route
   '/accounts/{-$id}': typeof AccountsChar123IdChar125LazyRoute
@@ -300,6 +321,7 @@ export interface FileRoutesByTo {
   '/boards/$key': typeof BoardsKeyIndexRoute
   '/boards/$key/dashboard/{-$id}': typeof BoardsKeyDashboardChar123IdChar125Route
   '/boards/$key/inbox/{-$id}': typeof BoardsKeyInboxChar123IdChar125Route
+  '/boards/$key/orchestrator/{-$id}': typeof BoardsKeyOrchestratorChar123IdChar125Route
   '/boards/$key/sessions/{-$id}': typeof BoardsKeySessionsChar123IdChar125Route
 }
 export interface FileRoutesById {
@@ -308,6 +330,7 @@ export interface FileRoutesById {
   '/dashboard/{-$id}': typeof DashboardChar123IdChar125Route
   '/errors/{-$id}': typeof ErrorsChar123IdChar125Route
   '/inbox/{-$id}': typeof InboxChar123IdChar125Route
+  '/orchestrator/{-$id}': typeof OrchestratorChar123IdChar125Route
   '/pull-requests/{-$id}': typeof PullRequestsChar123IdChar125Route
   '/sessions/{-$id}': typeof SessionsChar123IdChar125Route
   '/accounts/{-$id}': typeof AccountsChar123IdChar125LazyRoute
@@ -330,6 +353,7 @@ export interface FileRoutesById {
   '/boards/$key/': typeof BoardsKeyIndexRoute
   '/boards/$key/dashboard/{-$id}': typeof BoardsKeyDashboardChar123IdChar125Route
   '/boards/$key/inbox/{-$id}': typeof BoardsKeyInboxChar123IdChar125Route
+  '/boards/$key/orchestrator/{-$id}': typeof BoardsKeyOrchestratorChar123IdChar125Route
   '/boards/$key/sessions/{-$id}': typeof BoardsKeySessionsChar123IdChar125Route
 }
 export interface FileRouteTypes {
@@ -339,6 +363,7 @@ export interface FileRouteTypes {
     | '/dashboard/{-$id}'
     | '/errors/{-$id}'
     | '/inbox/{-$id}'
+    | '/orchestrator/{-$id}'
     | '/pull-requests/{-$id}'
     | '/sessions/{-$id}'
     | '/accounts/{-$id}'
@@ -361,6 +386,7 @@ export interface FileRouteTypes {
     | '/boards/$key/'
     | '/boards/$key/dashboard/{-$id}'
     | '/boards/$key/inbox/{-$id}'
+    | '/boards/$key/orchestrator/{-$id}'
     | '/boards/$key/sessions/{-$id}'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -368,6 +394,7 @@ export interface FileRouteTypes {
     | '/dashboard/{-$id}'
     | '/errors/{-$id}'
     | '/inbox/{-$id}'
+    | '/orchestrator/{-$id}'
     | '/pull-requests/{-$id}'
     | '/sessions/{-$id}'
     | '/accounts/{-$id}'
@@ -390,6 +417,7 @@ export interface FileRouteTypes {
     | '/boards/$key'
     | '/boards/$key/dashboard/{-$id}'
     | '/boards/$key/inbox/{-$id}'
+    | '/boards/$key/orchestrator/{-$id}'
     | '/boards/$key/sessions/{-$id}'
   id:
     | '__root__'
@@ -397,6 +425,7 @@ export interface FileRouteTypes {
     | '/dashboard/{-$id}'
     | '/errors/{-$id}'
     | '/inbox/{-$id}'
+    | '/orchestrator/{-$id}'
     | '/pull-requests/{-$id}'
     | '/sessions/{-$id}'
     | '/accounts/{-$id}'
@@ -419,6 +448,7 @@ export interface FileRouteTypes {
     | '/boards/$key/'
     | '/boards/$key/dashboard/{-$id}'
     | '/boards/$key/inbox/{-$id}'
+    | '/boards/$key/orchestrator/{-$id}'
     | '/boards/$key/sessions/{-$id}'
   fileRoutesById: FileRoutesById
 }
@@ -427,6 +457,7 @@ export interface RootRouteChildren {
   DashboardChar123IdChar125Route: typeof DashboardChar123IdChar125Route
   ErrorsChar123IdChar125Route: typeof ErrorsChar123IdChar125Route
   InboxChar123IdChar125Route: typeof InboxChar123IdChar125Route
+  OrchestratorChar123IdChar125Route: typeof OrchestratorChar123IdChar125Route
   PullRequestsChar123IdChar125Route: typeof PullRequestsChar123IdChar125Route
   SessionsChar123IdChar125Route: typeof SessionsChar123IdChar125Route
   AccountsChar123IdChar125LazyRoute: typeof AccountsChar123IdChar125LazyRoute
@@ -449,6 +480,7 @@ export interface RootRouteChildren {
   BoardsKeyIndexRoute: typeof BoardsKeyIndexRoute
   BoardsKeyDashboardChar123IdChar125Route: typeof BoardsKeyDashboardChar123IdChar125Route
   BoardsKeyInboxChar123IdChar125Route: typeof BoardsKeyInboxChar123IdChar125Route
+  BoardsKeyOrchestratorChar123IdChar125Route: typeof BoardsKeyOrchestratorChar123IdChar125Route
   BoardsKeySessionsChar123IdChar125Route: typeof BoardsKeySessionsChar123IdChar125Route
 }
 
@@ -536,6 +568,13 @@ declare module '@tanstack/react-router' {
       path: '/meetings/{-$id}'
       fullPath: '/meetings/{-$id}'
       preLoaderRoute: typeof MeetingsChar123IdChar125LazyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/orchestrator/{-$id}': {
+      id: '/orchestrator/{-$id}'
+      path: '/orchestrator/{-$id}'
+      fullPath: '/orchestrator/{-$id}'
+      preLoaderRoute: typeof OrchestratorChar123IdChar125RouteImport
       parentRoute: typeof rootRouteImport
     }
     '/playbooks/{-$id}': {
@@ -636,6 +675,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BoardsKeyInboxChar123IdChar125RouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/boards/$key/orchestrator/{-$id}': {
+      id: '/boards/$key/orchestrator/{-$id}'
+      path: '/boards/$key/orchestrator/{-$id}'
+      fullPath: '/boards/$key/orchestrator/{-$id}'
+      preLoaderRoute: typeof BoardsKeyOrchestratorChar123IdChar125RouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/boards/$key/sessions/{-$id}': {
       id: '/boards/$key/sessions/{-$id}'
       path: '/boards/$key/sessions/{-$id}'
@@ -651,6 +697,7 @@ const rootRouteChildren: RootRouteChildren = {
   DashboardChar123IdChar125Route: DashboardChar123IdChar125Route,
   ErrorsChar123IdChar125Route: ErrorsChar123IdChar125Route,
   InboxChar123IdChar125Route: InboxChar123IdChar125Route,
+  OrchestratorChar123IdChar125Route: OrchestratorChar123IdChar125Route,
   PullRequestsChar123IdChar125Route: PullRequestsChar123IdChar125Route,
   SessionsChar123IdChar125Route: SessionsChar123IdChar125Route,
   AccountsChar123IdChar125LazyRoute: AccountsChar123IdChar125LazyRoute,
@@ -674,6 +721,8 @@ const rootRouteChildren: RootRouteChildren = {
   BoardsKeyDashboardChar123IdChar125Route:
     BoardsKeyDashboardChar123IdChar125Route,
   BoardsKeyInboxChar123IdChar125Route: BoardsKeyInboxChar123IdChar125Route,
+  BoardsKeyOrchestratorChar123IdChar125Route:
+    BoardsKeyOrchestratorChar123IdChar125Route,
   BoardsKeySessionsChar123IdChar125Route:
     BoardsKeySessionsChar123IdChar125Route,
 }

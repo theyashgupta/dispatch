@@ -94,6 +94,9 @@
   --color-destructive-fill: var(--destructive-fill);
   --color-on-danger: var(--on-danger);
   --color-scrim: var(--scrim);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger-soft: var(--danger-soft);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -134,6 +137,14 @@
       var(--text) 0 3px,
       transparent 3px 6px
     );
+  }
+  .canvas-dots {
+    background-image: radial-gradient(
+      circle,
+      color-mix(in srgb, var(--text-muted) 35%, transparent) 1px,
+      transparent 1.5px
+    );
+    background-size: 16px 16px;
   }
   .segment-dots {
     background-image: radial-gradient(

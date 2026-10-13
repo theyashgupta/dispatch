@@ -87,6 +87,11 @@ const PAGE_HEADER_VIEWS: Partial<Record<Page, ComponentType>> = {
       default: m.MeetingsHeaderView,
     })),
   ),
+  orchestrator: lazy(() =>
+    import("@/modules/orchestrator").then((m) => ({
+      default: m.CentreHeaderView,
+    })),
+  ),
   playbooks: lazy(() =>
     import("@/modules/playbooks").then((m) => ({
       default: m.PlaybooksHeaderView,
