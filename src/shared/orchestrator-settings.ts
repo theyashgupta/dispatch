@@ -20,7 +20,6 @@ export function legacyPanelRedirect(search: {
   };
 }
 
-/** Build the hash that opens the settings sheet of a board on one tab. */
 export function settingsHash(
   board: string,
   tab: OrchestratorSettingsTab,

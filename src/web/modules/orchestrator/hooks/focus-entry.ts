@@ -19,7 +19,6 @@ export function focusCommentBox(): void {
   });
 }
 
-/** Move focus to the Settings button of the command centre, on the next frame. */
 export function focusSettingsButton(): void {
   requestAnimationFrame(() => {
     document.getElementById(CENTRE_SETTINGS_BUTTON_ID)?.focus();
