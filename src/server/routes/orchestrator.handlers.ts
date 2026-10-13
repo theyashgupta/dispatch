@@ -17,6 +17,7 @@ import {
   scopeTargetOf,
 } from "../services/orchestration/boards.js";
 import {
+  cardProgress,
   cardWithMembers,
   eventsAfter,
   groupProgress,
@@ -160,6 +161,13 @@ export const getGroupProgressHandler: ToolHandler = (
 ) => {
   const { id } = parseOrThrow(cardParamsSchema, req.params);
   const progress = groupProgress(scopedCard(caller, call, id));
+  call.result = id;
+  res.status(200).json(progress);
+};
+
+export const getCardProgressHandler: ToolHandler = (req, res, caller, call) => {
+  const { id } = parseOrThrow(cardParamsSchema, req.params);
+  const progress = cardProgress(scopedCard(caller, call, id));
   call.result = id;
   res.status(200).json(progress);
 };

@@ -26,6 +26,7 @@ const SERVER: Record<string, ServerSide> = {
   get_card: { params: schemas.cardParamsSchema },
   list_sessions: { query: schemas.listSessionsQuerySchema },
   get_group_progress: { params: schemas.cardParamsSchema },
+  get_card_progress: { params: schemas.cardParamsSchema },
   read_pane_tail: {
     params: schemas.sessionCardParamsSchema,
     query: schemas.paneQuerySchema,
@@ -89,6 +90,7 @@ const VALID: Record<string, Record<string, unknown>> = {
   get_card: { id: ID },
   list_sessions: { live: true },
   get_group_progress: { id: "GROUP-4" },
+  get_card_progress: { id: ID },
   read_pane_tail: { cardId: ID, lines: 200 },
   list_events: { since: 0, limit: 200 },
   get_policy: {},

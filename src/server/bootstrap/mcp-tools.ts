@@ -104,6 +104,14 @@ export const MCP_TOOLS: readonly McpTool[] = [
     path: "/groups/:id/progress",
   },
   {
+    name: "get_card_progress",
+    description:
+      "Get the progress of one ticket card that start_card started: the phases from its PRD, the gate state of each phase, the loop engine state and the last status marker. A group card or a card that start_card did not start is refused. This tool changes nothing.",
+    input: idParam,
+    method: "GET",
+    path: "/cards/:id/progress",
+  },
+  {
     name: "read_pane_tail",
     description:
       "Read the last lines of the terminal of a session. The line count is 1 to 200, and the default is 50.",

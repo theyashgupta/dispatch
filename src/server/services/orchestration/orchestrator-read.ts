@@ -41,6 +41,22 @@ export function groupProgress(card: Card): {
   return { cardId: card.id, loopProgress: card.loopProgress ?? null };
 }
 
+/** The loop progress and last marker of a launched ticket card, or the typed 400 for any other card. */
+export function cardProgress(card: Card): {
+  cardId: string;
+  loopProgress: LoopProgress | null;
+  lastMarker: string | null;
+} {
+  if (card.source === "group" || card.launch === undefined) {
+    throw new ValidationError("not-launched-card");
+  }
+  return {
+    cardId: card.id,
+    loopProgress: card.loopProgress ?? null,
+    lastMarker: card.lastMarker ?? null,
+  };
+}
+
 /**
  * The last `lines` lines of the card's live terminal, without the blank rows below the cursor.
  *

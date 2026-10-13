@@ -24,6 +24,7 @@ import {
   createTicketHandler,
   getBoardWorkspaceHandler,
   getCardHandler,
+  getCardProgressHandler,
   getGroupProgressHandler,
   getPolicyHandler,
   getRulebookHandler,
@@ -217,6 +218,10 @@ orchestratorRouter.get("/sessions", tool("list_sessions", listSessionsHandler));
 orchestratorRouter.get(
   "/groups/:id/progress",
   tool("get_group_progress", getGroupProgressHandler),
+);
+orchestratorRouter.get(
+  "/cards/:id/progress",
+  tool("get_card_progress", getCardProgressHandler),
 );
 orchestratorRouter.get(
   "/sessions/:cardId/pane",

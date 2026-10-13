@@ -307,6 +307,7 @@ const TOOL_ROUTES: [method: string, route: string, tool: string][] = [
   ["GET", "/cards/:id", "get_card"],
   ["GET", "/sessions", "list_sessions"],
   ["GET", "/groups/:id/progress", "get_group_progress"],
+  ["GET", "/cards/:id/progress", "get_card_progress"],
   ["GET", "/sessions/:cardId/pane", "read_pane_tail"],
   ["GET", "/events", "list_events"],
   ["GET", "/policy", "get_policy"],
@@ -334,7 +335,7 @@ const TOOL_ROUTES: [method: string, route: string, tool: string][] = [
   ["POST", "/cards/:cardId/start", "start_card"],
 ];
 
-void test("every one of the 29 orchestrator routes answers 401 with no token and records one tool_call row", async () => {
+void test("every one of the 30 orchestrator routes answers 401 with no token and records one tool_call row", async () => {
   const mounted = (
     orchestratorRouter.stack as {
       route?: { path: string; methods: Record<string, boolean> };
@@ -346,7 +347,7 @@ void test("every one of the 29 orchestrator routes answers 401 with no token and
         )
       : [],
   );
-  assert.equal(TOOL_ROUTES.length, 29);
+  assert.equal(TOOL_ROUTES.length, 30);
   assert.deepEqual(
     TOOL_ROUTES.map(([method, route]) => `${method} ${route}`).sort(),
     mounted.sort(),
