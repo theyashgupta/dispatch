@@ -114,7 +114,7 @@ function ConversationBody({
   useEffect(() => {
     const region = scrollRef.current;
     if (region !== null) region.scrollTop = region.scrollHeight;
-  }, [lastId, page, pane, stale, sendResult, sendFailure]);
+  }, [lastId, state, page, pane, stale, sendResult, sendFailure]);
 
   useEffect(() => {
     if (!takeCommentFocus()) return;
