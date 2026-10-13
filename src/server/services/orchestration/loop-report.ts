@@ -1,5 +1,6 @@
 import { boardRepository as store } from "../../store/board-repository.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
+import { isLoopCard } from "../../../shared/running-group.js";
 import { ValidationError } from "../domain/errors.js";
 import { refreshLoopProgress } from "./loop-progress-reader.js";
 
@@ -12,7 +13,7 @@ export interface LoopGateReport {
 }
 
 /**
- * Records a loop gate report as a `loop_gate` event for the reporting group card and refreshes its progress.
+ * Records a loop gate report as a `loop_gate` event for the reporting loop card and refreshes its progress.
  *
  * @remarks The report is only a trigger: progress comes from the loop files, so a claim no file holds changes nothing.
  */
@@ -21,7 +22,7 @@ export function reportLoopGate(
   report: LoopGateReport,
 ): void {
   const card = store.getCard(entry.cardId);
-  if (card === undefined || card.source !== "group") {
+  if (card === undefined || !isLoopCard(card)) {
     throw new ValidationError("not-group-card");
   }
   store.appendOrchestrationEvent({

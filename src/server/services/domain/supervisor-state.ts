@@ -63,7 +63,7 @@ const RULE_LINE = /^\s*─{3,}/;
 const MODE_ROW = /^[!#&]/;
 const NEEDS_INPUT_MARKER = /^\s*(?:⏺\s*)?DISPATCH_STATUS:\s*NEEDS_INPUT\b/;
 const HANDOFF_LINE = /^\s*(⏺\s*)?HANDOFF_READY\s+[\w.-]+\s*$/;
-const COMPLETE_PROMISE = /<promise>ROADMAP COMPLETE\b/;
+const COMPLETE_PROMISE = /<promise>(ROADMAP|RALPH) COMPLETE\b/;
 const API_ERROR_HEAD = /^\s*⏺\s*API Error\b/;
 const LIMIT_RESET_LINE = /limit\b.*\bresets?\s+\S/i;
 

@@ -11,6 +11,11 @@ import type {
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import { loopFilePath } from "../domain/loop-progress.js";
+import {
+  featureStateFile,
+  isPrdModel,
+  resumeFilePath,
+} from "../domain/prd-progress.js";
 import { effectivePolicy } from "../domain/orchestrator-rules.js";
 import type { ContinueDuty } from "../domain/supervisor-plan.js";
 import { scopeTargetOf } from "./boards.js";
@@ -90,6 +95,15 @@ export function continueText(
   const slug = card.loopProgress?.slug;
   if (!slug) return `${lead} Continue from where you stopped.`;
   const root = rootOf(card, session);
+  const prdFile = card.loopProgress?.prdFile;
+  const stateFile =
+    prdFile === undefined ? null : featureStateFile(slug, prdFile);
+  if (stateFile !== null) {
+    return `${lead} Read ${path.join(root, stateFile)} and ${path.join(root, resumeFilePath(slug, prdFile))}, then continue the loop from the lowest phase with no gate=pass line.`;
+  }
+  if (isPrdModel(card.loopProgress)) {
+    return `${lead} Continue from where you stopped.`;
+  }
   return `${lead} Read ${path.join(root, loopFilePath(slug, "progress.md"))} and ${path.join(root, loopFilePath(slug, "resume.md"))}, then continue the loop from the recorded position.`;
 }
 

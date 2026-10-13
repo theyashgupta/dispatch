@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { parseBoardKey } from "../../../shared/board-key.js";
-import type { BoardKey, BoardPolicy, Card } from "../../../shared/types.js";
+import type {
+  BoardKey,
+  BoardPolicy,
+  Card,
+  Config,
+} from "../../../shared/types.js";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { startedGroup } from "../../test-support/group-fixtures.js";
 import {
@@ -19,7 +24,7 @@ const { tempRepoWithWorkspace } =
 const { setOrchestrationConfig } = await import("../infra/config-holder.js");
 const { seedPlaybooks } = await import("../infra/playbooks.js");
 const { runningLoops } = await import("./boards.js");
-const { sessionStarter } = await import("./start-session.js");
+const { sessionStarter, startSession } = await import("./start-session.js");
 const { startOrchestratorCard } = await import("./orchestrator-cards.js");
 
 const SBX = parseBoardKey("SBX") as BoardKey;
@@ -405,4 +410,50 @@ void test("two parallel starts of one card with different playbooks start one se
       return Promise.resolve();
     };
   }
+});
+
+const FLB = parseBoardKey("FLB") as BoardKey;
+const blockedRoot = path.join(env.root, "not-a-folder");
+fs.writeFileSync(blockedRoot, "");
+await store.createBoard({
+  key: FLB,
+  name: "Failing starts",
+  workspaceRoot: blockedRoot,
+  repositories: [],
+  linearTeamKeys: [],
+});
+
+async function failedStart(launched: boolean): Promise<Card> {
+  const card = await store.createLocalCard(FLB, "failing start", "");
+  if (launched) {
+    await store.setOrchestratorFields(card.id, {
+      launch: { playbook: PLAYBOOK, direction: "" },
+    });
+  }
+  await startSession(card.id, "", {} as Config);
+  return store.getCard(card.id)!;
+}
+
+const startFailedRows = (cardId: string) =>
+  store
+    .listOrchestrationEvents(FLB, 0, 500)
+    .filter(
+      (e) =>
+        e.cardId === cardId &&
+        e.kind === "group_state" &&
+        e.data.state === "start_failed",
+    );
+
+void test("a failed start of a launched ticket writes one start_failed group_state row naming the step", async () => {
+  const card = await failedStart(true);
+  assert.ok(card.startError);
+  const added = startFailedRows(card.id);
+  assert.equal(added.length, 1);
+  assert.equal(added[0].data.reason, `start failed at ${card.startError.step}`);
+});
+
+void test("a failed start of a ticket with no launch writes no group_state row", async () => {
+  const card = await failedStart(false);
+  assert.ok(card.startError);
+  assert.equal(startFailedRows(card.id).length, 0);
 });

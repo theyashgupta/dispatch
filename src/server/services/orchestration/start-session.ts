@@ -17,6 +17,7 @@ import {
   updateLastUsedPlaybook,
 } from "../infra/config-holder.js";
 import { ConflictError, ValidationError } from "../domain/errors.js";
+import { recordGroupState } from "./group-state-events.js";
 import { launchableCard } from "./card-move.js";
 import { restatRepos } from "./workspaces.js";
 import {
@@ -272,10 +273,20 @@ export async function startSession(
       if (reserved != null) {
         await store.rollbackReservedSession(cardId, reserved.sessionId);
       }
-      await store.setStartError(
-        cardId,
-        toStartError(err, currentStep?.name ?? "starting", wantsNewSession),
+      const startError = toStartError(
+        err,
+        currentStep?.name ?? "starting",
+        wantsNewSession,
       );
+      await store.setStartError(cardId, startError);
+      if (card.source !== "group") {
+        recordGroupState(
+          store.getCard(cardId),
+          "start_failed",
+          `start failed at ${startError.step}`,
+          null,
+        );
+      }
     }
   } finally {
     store.endStart(cardId);
