@@ -2,14 +2,20 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { MutationObserver, QueryClient } from "@tanstack/react-query";
 import { DEFAULT_BOARD_KEY as LOCAL } from "../../shared/board-key.js";
-import { getOpenDecisions, postAction } from "./attention-actions-api.js";
+import {
+  getAnsweredDecisions,
+  getOpenDecisions,
+  postAction,
+} from "./attention-actions-api.js";
 import {
   answerDecisionMutationOptions,
+  answeredDecisionsQueryOptions,
   attentionActionsKeys,
   loopReplyMutationOptions,
   openDecisionsQueryOptions,
   orchestrationKey,
   resumeLoopMutationOptions,
+  retryResumeMutationOptions,
 } from "./attention-actions-queries.js";
 
 const realFetch = globalThis.fetch;
@@ -178,4 +184,43 @@ test("a refusal without a body reads the status text, and a network failure reso
     error: "offline",
     reason: null,
   });
+});
+
+test("the answered decisions query reads the answered decisions of the board every 3 s", async () => {
+  const options = answeredDecisionsQueryOptions(LOCAL);
+  assert.deepEqual(options.queryKey, [
+    "orchestration",
+    "LOCAL",
+    "decisions",
+    "answered",
+  ]);
+  assert.equal(options.refetchInterval, 3000);
+  stubFetch({ status: 200, body: { items: [{ id: "d2" }] } });
+  assert.deepEqual(await newClient().fetchQuery(options), [{ id: "d2" }]);
+  assert.equal(calls[0]?.url, "/api/decisions?board=LOCAL&state=answered");
+});
+
+test("getAnsweredDecisions throws on a failure status", async () => {
+  stubFetch({ status: 500, body: {} });
+  await assert.rejects(
+    getAnsweredDecisions(LOCAL),
+    /getAnsweredDecisions failed: 500/,
+  );
+});
+
+test("Try resume again posts to the card resume route and refreshes the orchestration reads", async () => {
+  const client = newClient();
+  client.setQueryData(orchestrationKey(LOCAL), []);
+  stubFetch({ status: 200, body: {} });
+  const result = await new MutationObserver(
+    client,
+    retryResumeMutationOptions(client, LOCAL),
+  ).mutate("GROUP-4");
+  assert.deepEqual(result, { ok: true, result: null });
+  assert.equal(calls[0]?.url, "/api/cards/GROUP-4/resume");
+  assert.equal(calls[0]?.init?.method, "POST");
+  assert.equal(
+    client.getQueryState(orchestrationKey(LOCAL))?.isInvalidated,
+    true,
+  );
 });

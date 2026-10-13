@@ -22,6 +22,16 @@ export async function getOpenDecisions(
   return result.data.items;
 }
 
+export async function getAnsweredDecisions(
+  board: BoardKey,
+): Promise<DecisionItem[]> {
+  const result = await http<{ items: DecisionItem[] }>(
+    `/api/decisions?board=${encodeURIComponent(board)}&state=answered`,
+  );
+  if (!result.ok) throw httpError("getAnsweredDecisions", result);
+  return result.data.items;
+}
+
 /**
  * Send one user action as a JSON POST and resolve it as an outcome.
  *
@@ -79,4 +89,8 @@ export function sendLoopInput(
 /** Resume a loop that waits at needs_input, as the user: POST /api/sessions/:cardId/resume-loop. */
 export function resumeLoop(cardId: string): Promise<ActionOutcome> {
   return postAction(`/api/sessions/${encodeURIComponent(cardId)}/resume-loop`);
+}
+
+export function retryResume(cardId: string): Promise<ActionOutcome> {
+  return postAction(`/api/cards/${encodeURIComponent(cardId)}/resume`, {});
 }

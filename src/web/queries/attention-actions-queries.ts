@@ -8,8 +8,10 @@ import {
 import type { BoardKey } from "../../shared/types.js";
 import {
   answerDecision,
+  getAnsweredDecisions,
   getOpenDecisions,
   resumeLoop,
+  retryResume,
   sendLoopInput,
 } from "./attention-actions-api.js";
 
@@ -21,7 +23,11 @@ export function orchestrationKey(board: string) {
 export const attentionActionsKeys = {
   decisions: (board: BoardKey) =>
     [...orchestrationKey(board), "decisions"] as const,
+  answered: (board: BoardKey) =>
+    [...orchestrationKey(board), "decisions", "answered"] as const,
 };
+
+const DECISIONS_POLL_MS = 3000;
 
 export interface AnswerVariables {
   id: string;
@@ -38,6 +44,25 @@ export function openDecisionsQueryOptions(board: BoardKey) {
 
 export function useOpenDecisionsQuery(board: BoardKey) {
   return useQuery(openDecisionsQueryOptions(board));
+}
+
+/**
+ * Build the answered decisions query options of the command centre: the answered decisions, refetched every 3 s.
+ *
+ * @remarks
+ * The graph reads the approved plan from an answered item, and an answer arrives from the orchestrator side with no stream event, so the poll is the live feed, as for the open decisions.
+ */
+export function answeredDecisionsQueryOptions(board: BoardKey) {
+  return queryOptions({
+    queryKey: attentionActionsKeys.answered(board),
+    queryFn: () => getAnsweredDecisions(board),
+    staleTime: 0,
+    refetchInterval: DECISIONS_POLL_MS,
+  });
+}
+
+export function useAnsweredDecisionsQuery(board: BoardKey) {
+  return useQuery(answeredDecisionsQueryOptions(board));
 }
 
 /** Build the mutation options of a decision answer, which refreshes the open decisions after it settles. */
@@ -88,4 +113,19 @@ export function resumeLoopMutationOptions(
 
 export function useResumeLoopMutation(board: BoardKey) {
   return useMutation(resumeLoopMutationOptions(useQueryClient(), board));
+}
+
+export function retryResumeMutationOptions(
+  queryClient: QueryClient,
+  board: BoardKey,
+) {
+  return {
+    mutationFn: (cardId: string) => retryResume(cardId),
+    onSettled: () =>
+      queryClient.invalidateQueries({ queryKey: orchestrationKey(board) }),
+  };
+}
+
+export function useRetryResumeMutation(board: BoardKey) {
+  return useMutation(retryResumeMutationOptions(useQueryClient(), board));
 }
