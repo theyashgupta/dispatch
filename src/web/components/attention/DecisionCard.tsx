@@ -9,6 +9,14 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Field } from "@/components/ui/field";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
 import type { DecisionView } from "../../../shared/decision-view.js";
 
@@ -16,6 +24,31 @@ interface DecisionCardProps {
   view: DecisionView;
   disabled: boolean;
   onAnswer: (optionId: string, note: string | null) => Promise<boolean>;
+}
+
+export function PlanTable({ rows }: { rows: DecisionView["planRows"] }) {
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Order</TableHead>
+          <TableHead>Ticket</TableHead>
+          <TableHead>Playbook</TableHead>
+          <TableHead>Size</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {rows.map((row) => (
+          <TableRow key={`${row.order}:${row.ref}`}>
+            <TableCell>{row.order}</TableCell>
+            <TableCell className="font-mono">{row.ref}</TableCell>
+            <TableCell>{row.playbook}</TableCell>
+            <TableCell>{row.size}</TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  );
 }
 
 export function DecisionCard({ view, disabled, onAnswer }: DecisionCardProps) {
@@ -42,6 +75,7 @@ export function DecisionCard({ view, disabled, onAnswer }: DecisionCardProps) {
             ))}
           </ul>
         )}
+        {view.planRows.length > 0 && <PlanTable rows={view.planRows} />}
         {view.options.map((option) => (
           <Button
             key={option.id}
