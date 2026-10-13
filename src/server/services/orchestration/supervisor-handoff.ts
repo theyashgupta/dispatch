@@ -11,6 +11,7 @@ import {
   loopFilePath,
   parseEngineFile,
 } from "../domain/loop-progress.js";
+import { isPrdModel, resumeFilePath } from "../domain/prd-progress.js";
 import { paneBusy, paneReady } from "../domain/supervisor-state.js";
 import { readLoopFile } from "./loop-progress-reader.js";
 import { setHandoffReady } from "./orchestrator-session.js";
@@ -53,26 +54,43 @@ export function handoffRequestText(
   slug: string,
   root: string,
   hard: boolean,
+  prdFile?: string,
+  single = prdFile !== undefined,
 ): string {
   const engine = path.join(root, ENGINE_FILE);
+  const resume = path.join(root, resumeFilePath(slug, prdFile, single));
+  const steps = [
+    `Invoke the session-handoff skill. Write its resume prompt to ${resume}. The prompt must tell the next session to write its own session id into the session_id line of ${engine} before any phase work.`,
+  ];
+  if (!single) {
+    steps.push(
+      `Update ${path.join(root, loopFilePath(slug, "progress.md"))} with the exact current unit and phase.`,
+    );
+  }
+  steps.push(
+    `As the very last action, set the session_id line in ${engine} to handoff-pending.`,
+    `Print the line HANDOFF_READY ${slug} and end your turn without starting new work.`,
+  );
   return [
     hard
       ? `${REQUEST_TITLE} (hard limit). Your context is at the hard limit. Hand off now: do not start or wait for more work. Record where you are, then:`
       : `${REQUEST_TITLE}. Your context is high. Do not interrupt in-flight work. Let running background agents and shells finish and record the current phase gate first. Then, at that safe point:`,
-    `1. Invoke the session-handoff skill. Write its resume prompt to ${path.join(root, loopFilePath(slug, "resume.md"))}. The prompt must tell the next session to write its own session id into the session_id line of ${engine} before any phase work.`,
-    `2. Update ${path.join(root, loopFilePath(slug, "progress.md"))} with the exact current unit and phase.`,
-    `3. As the very last action, set the session_id line in ${engine} to handoff-pending.`,
-    `4. Print the line HANDOFF_READY ${slug} and end your turn without starting new work.`,
+    ...steps.map((step, i) => `${i + 1}. ${step}`),
     "The resume prompt must restate the marker rule (end a stop for a human with its own line DISPATCH_STATUS: NEEDS_INPUT - <reason>, and the finished loop with DISPATCH_STATUS: DONE - <summary>) and the handoff rule (hand off only when asked, or when the status line passes 80 percent).",
   ].join("\n");
 }
 
 /** The first prompt of the fresh session after a handoff. */
-export function resumePromptText(slug: string, root: string): string {
+export function resumePromptText(
+  slug: string,
+  root: string,
+  prdFile?: string,
+  single = prdFile !== undefined,
+): string {
   const engine = path.join(root, ENGINE_FILE);
   return [
     `Resume the ${slug} loop. First write your own session id (the basename of your newest transcript file) into the session_id line of ${engine}.`,
-    `Then read ${path.join(root, loopFilePath(slug, "resume.md"))} and follow it.`,
+    `Then read ${path.join(root, resumeFilePath(slug, prdFile, single))} and follow it.`,
     "When you stop to wait for a human, end that message with its own line DISPATCH_STATUS: NEEDS_INPUT - <reason>; when the loop is finished, end with DISPATCH_STATUS: DONE - <summary>.",
     "Hand off context only when asked, or when the status line passes 80 percent; never on your own estimate.",
   ].join(" ");
@@ -182,7 +200,13 @@ export async function sendHandoffRequest(
     session,
     isHiddenCard(card)
       ? orchestratorHandoffRequestText(slug, hard)
-      : handoffRequestText(slug, rootOf(card, session), hard),
+      : handoffRequestText(
+          slug,
+          rootOf(card, session),
+          hard,
+          card.loopProgress?.prdFile,
+          isPrdModel(card.loopProgress),
+        ),
     hard ? "handoff-hard" : "handoff",
   );
   record(card, session, { action: "handoff_request", hard, ...data, result });
@@ -279,7 +303,12 @@ export async function runFreshSession(
           owner.id,
           card.boardKey ?? DEFAULT_BOARD_KEY,
         )
-      : resumePromptText(slug!, root),
+      : resumePromptText(
+          slug!,
+          root,
+          card.loopProgress?.prdFile,
+          isPrdModel(card.loopProgress),
+        ),
     "resume",
     SEND_TIMING,
     newest,
