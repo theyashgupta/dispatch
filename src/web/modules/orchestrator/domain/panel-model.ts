@@ -121,6 +121,15 @@ export function startErrorCopy(reason: string): string {
 
 export const actionErrorCopy = actionFailedText;
 
+/** The error line of a start that failed in the background, or null when the record shows none. */
+export function startFailureFor(
+  record: OrchestratorView | null,
+): string | null {
+  return record?.state === "stopped" && record.session?.startError
+    ? startErrorCopy(record.session.startError)
+    : null;
+}
+
 const ACTION_NAMES: Record<ControlKind, string> = {
   start: "Start",
   stop: "Stop",

@@ -10,6 +10,7 @@ import {
   STALE_REASON,
   terminalFor,
   terminalSrcFor,
+  startFailureFor,
   SUPERVISOR_OFF_REASON,
   STOP_TOOLTIP,
   type OrchestratorView,
@@ -242,4 +243,23 @@ test("the centre control of an extra record follows the same rules as the main r
   const expected = controlFor(main("running", { state: "working" }), on);
   assert.deepEqual(controlFor(extra, on), expected);
   assert.equal(controlFor(main("stopped", null, "extra"), on)?.kind, "start");
+});
+
+test("a stopped record whose start failed in the background shows the error copy and Start", () => {
+  const failed = main("stopped", {
+    startError: "the launch failed.",
+    hasTmuxSession: false,
+  });
+  assert.equal(
+    startFailureFor(failed),
+    "The orchestrator did not start: the launch failed.",
+  );
+  assert.equal(controlOf([failed])?.kind, "start");
+});
+
+test("no start failure shows for a running record, a stopped record with no error or no record", () => {
+  assert.equal(startFailureFor(main("running", { startError: "x" })), null);
+  assert.equal(startFailureFor(main("stopped", { startError: null })), null);
+  assert.equal(startFailureFor(main("stopped", null)), null);
+  assert.equal(startFailureFor(null), null);
 });

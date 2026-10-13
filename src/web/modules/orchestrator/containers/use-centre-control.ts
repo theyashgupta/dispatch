@@ -3,6 +3,7 @@ import type { BoardKey } from "../../../../shared/types.js";
 import {
   controlFor,
   failureCopy,
+  startFailureFor,
   type ControlKind,
   type OrchestratorView,
 } from "@/modules/orchestrator/domain/panel-model";
@@ -43,13 +44,18 @@ export function useCentreControl(
     if (!result.ok) setFailure({ kind, reason: result.reason });
   }
 
+  const backgroundFailure = startFailureFor(record);
+
   return {
     control,
     run,
     failure:
-      failure === null ? null : failureCopy(failure.kind, failure.reason),
+      failure === null
+        ? backgroundFailure
+        : failureCopy(failure.kind, failure.reason),
     retryFailed: () => {
       if (failure !== null) void run(failure.kind);
+      else if (backgroundFailure !== null) void run("start");
     },
     pending: lifecycle.isPending,
   };
