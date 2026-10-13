@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   forgetTurnState,
   onLimitSignal,
@@ -11,6 +12,9 @@ import {
 } from "./session-turn.js";
 import { setHooksRuntime } from "../infra/config-holder.js";
 
+const PANES = new URL("../../test-support/fixtures/panes/", import.meta.url);
+const pane = (name: string): string =>
+  readFileSync(new URL(name, PANES), "utf8");
 const IDLE_PANE = "> \n? for shortcuts";
 const BUSY_PANE = "* Working... (esc to interrupt)";
 const LIMIT_A =
@@ -117,4 +121,11 @@ void test("a pane signals a limit once when it enters a surface, again only afte
   turnStateOf("sig", "s", IDLE_PANE);
   turnStateOf("sig", "s", LIMIT_B);
   assert.deepEqual(signals, [null, LIMIT_A, LIMIT_B]);
+});
+
+void test("a recorded post-menu screen reads idle while the live surfaces still read limit", () => {
+  assert.equal(paneTurnState(pane("limit-cancelled.txt")), "idle");
+  assert.equal(paneTurnState(pane("auto-continue.txt")), "limit");
+  assert.equal(paneTurnState(pane("auto-continue-3.txt")), "limit");
+  assert.equal(paneTurnState(pane("limit-menu.txt")), "limit");
 });

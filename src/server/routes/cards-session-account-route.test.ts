@@ -16,11 +16,21 @@ const env = isolateEnv();
 const fake = installFakeTmux(env);
 const accounts = await import("../services/orchestration/claude-accounts.js");
 const { setHooksRuntime } = await import("../services/infra/config-holder.js");
+const { recordTurnEvent } =
+  await import("../services/orchestration/session-turn.js");
 const { store } = await import("../store/board.store.js");
 const { cardsRouter } = await import("./cards.route.js");
 const { withCardLock } =
   await import("../services/orchestration/run-claude.js");
 setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
+
+const CANCELLED_PANE = fs.readFileSync(
+  new URL(
+    "../test-support/fixtures/panes/limit-cancelled.txt",
+    import.meta.url,
+  ),
+  "utf8",
+);
 
 const ID_A = "11111111-1111-4111-8111-111111111111";
 const ID_UNREGISTERED = "33333333-3333-4333-8333-333333333333";
@@ -167,4 +177,12 @@ void test("an explicit sessionId the card does not have is 409 no-session and mo
   assert.deepEqual([res.status, res.body], [409, { error: "no-session" }]);
   assert.equal(sessionOf(card)?.claudeAccountId, undefined);
   assert.equal(sessionOf(card)?.pendingClaudeAccountId, undefined);
+});
+
+void test("a session on the cancelled post-menu limit screen with a hook limit is 200 moved", async () => {
+  const card = await liveCard("sa-cancelled", CANCELLED_PANE);
+  recordTurnEvent(card, sessionOf(card)!.id, "StopFailure", "rate_limit");
+  const res = await post(card, { accountId: ID_A });
+  assert.deepEqual([res.status, res.body], [200, { outcome: "moved" }]);
+  assert.equal(sessionOf(card)?.claudeAccountId, ID_A);
 });
