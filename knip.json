@@ -25,6 +25,5 @@
     "tmux",
     "swiftc"
   ],
-  "ignoreDependencies": ["tailwindcss"],
-  "ignore": ["src/web/modules/orchestrator/domain/conversation-view.ts"]
+  "ignoreDependencies": ["tailwindcss"]
 }
