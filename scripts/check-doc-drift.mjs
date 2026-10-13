@@ -210,7 +210,7 @@ const LOOP_FORMAT_FILES = [
   /^src\/server\/test-support\/loop-fixtures\.ts$/,
   /^src\/server\/services\/orchestration\/g19-manual-run-fixture\.test\.ts$/,
   /^src\/shared\/(attention-queue|loop-view)\.test\.ts$/,
-  /^src\/web\/modules\/dashboard\/domain\/(activity-rows|attention-rows|progress-rows|time-left)\.test\.ts$/,
+  /^src\/web\/modules\/dashboard\/domain\/(activity-rows|attention-rows|header-strip|progress-rows|ticket-tiles|time-left|track-nodes)\.test\.ts$/,
   /^src\/web\/modules\/orchestrator\/domain\/centre-graph\.test\.ts$/,
 ];
 const LOOP_FORMAT_PATTERNS = new Set([
