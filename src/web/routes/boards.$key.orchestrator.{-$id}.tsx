@@ -1,9 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { z } from "zod";
-import { SETTINGS_TABS } from "../../shared/orchestrator-settings.js";
+import { ORCHESTRATOR_SETTINGS_TABS } from "../../shared/orchestrator-settings.js";
 
 const searchSchema = z.looseObject({
-  settings: z.enum(SETTINGS_TABS).optional().catch(undefined),
+  settings: z.enum(ORCHESTRATOR_SETTINGS_TABS).optional().catch(undefined),
 });
 
 export const Route = createFileRoute("/boards/$key/orchestrator/{-$id}")({

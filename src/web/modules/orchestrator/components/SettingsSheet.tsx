@@ -8,14 +8,14 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CENTRE_SETTINGS_BUTTON_ID } from "@/modules/orchestrator/domain/centre-page-state";
-import type { SettingsTab } from "../../../../shared/orchestrator-settings.js";
+import { focusSettingsButton } from "@/modules/orchestrator/hooks/focus-entry";
+import type { OrchestratorSettingsTab } from "../../../../shared/orchestrator-settings.js";
 
 interface SettingsSheetProps {
   open: boolean;
   onClose: () => void;
-  tab: SettingsTab;
-  onTabChange: (tab: SettingsTab) => void;
+  tab: OrchestratorSettingsTab;
+  onTabChange: (tab: OrchestratorSettingsTab) => void;
   boardName: string;
   staleBadge: string | null;
   orchestratorsLabel: string;
@@ -44,9 +44,10 @@ export function SettingsSheet({
       <SheetContent
         side="right"
         className="w-(--panel-width) max-w-screen gap-0 sm:max-w-(--panel-width)"
+        onInteractOutside={(event) => event.preventDefault()}
         onCloseAutoFocus={(event) => {
           event.preventDefault();
-          document.getElementById(CENTRE_SETTINGS_BUTTON_ID)?.focus();
+          focusSettingsButton();
         }}
       >
         <SheetHeader>
@@ -62,7 +63,7 @@ export function SettingsSheet({
         </SheetHeader>
         <Tabs
           value={tab}
-          onValueChange={(next) => onTabChange(next as SettingsTab)}
+          onValueChange={(next) => onTabChange(next as OrchestratorSettingsTab)}
           className="min-h-0 flex-1 gap-0"
         >
           <TabsList

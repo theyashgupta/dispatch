@@ -1,6 +1,10 @@
-import { useNavigate, useSearch } from "@tanstack/react-router";
+import { useEffect, useRef, useState } from "react";
+import { useLocation, useNavigate, useRouter } from "@tanstack/react-router";
 import { staleText } from "../../../../shared/stale-text.js";
-import type { SettingsTab } from "../../../../shared/orchestrator-settings.js";
+import {
+  ORCHESTRATOR_SETTINGS_TABS,
+  type OrchestratorSettingsTab,
+} from "../../../../shared/orchestrator-settings.js";
 import type { Card } from "../../../../shared/types.js";
 import { CentreRegionAlert } from "@/modules/orchestrator/components/CentreRegionAlert";
 import { SettingsSheet } from "@/modules/orchestrator/components/SettingsSheet";
@@ -18,31 +22,54 @@ const ROUTE = "/boards/$key/orchestrator/{-$id}";
 
 export function SettingsSheetContainer() {
   const { boardKey, stale, panel, snapshot, records } = useCentreSelection();
-  const { settings } = useSearch({ from: ROUTE });
   const navigate = useNavigate({ from: ROUTE });
+  const router = useRouter();
+  const { settings, index } = useLocation({
+    select: (l) => ({
+      settings: ORCHESTRATOR_SETTINGS_TABS.find(
+        (tab) => tab === l.search.settings,
+      ),
+      index: l.state.__TSR_index,
+    }),
+  });
   const boardName = useBoardRecordQuery(boardKey).data?.name ?? boardKey;
+  const closedAt = useRef<number | null>(null);
+  const [lastTab, setLastTab] = useState<OrchestratorSettingsTab>("policy");
+  if (settings !== undefined && settings !== lastTab) setLastTab(settings);
 
-  function setSettings(next: SettingsTab | undefined) {
+  useEffect(() => {
+    if (settings === undefined) closedAt.current = index;
+  }, [settings, index]);
+
+  function setSettings(next: OrchestratorSettingsTab | undefined) {
     void navigate({
       search: (prev) => ({ ...prev, settings: next }),
       replace: true,
     });
   }
 
+  function close() {
+    if (closedAt.current !== null && index === closedAt.current + 1) {
+      router.history.back();
+    } else {
+      setSettings(undefined);
+    }
+  }
+
   return (
     <SettingsSheet
       open={settings !== undefined}
-      onClose={() => setSettings(undefined)}
-      tab={settings ?? "policy"}
+      onClose={close}
+      tab={settings ?? lastTab}
       onTabChange={setSettings}
       boardName={boardName}
-      staleBadge={staleText(stale, panel.dataUpdatedAt)}
+      staleBadge={staleText(stale, snapshot.dataUpdatedAt)}
       orchestratorsLabel={orchestratorsTabLabel(
         panel.data === undefined ? null : records.length,
       )}
       policy={<PolicyContainer key={boardKey} board={boardKey} />}
       orchestrators={
-        panel.isError ? (
+        panel.data === undefined && panel.isError ? (
           <CentreRegionAlert
             message={regionErrorText("Orchestrators", panel.error.message)}
             onRetry={() => void panel.refetch()}
