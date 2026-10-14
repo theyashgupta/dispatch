@@ -239,6 +239,16 @@ export function validatePolicyForm(values: PolicyFormValues): PolicyFormErrors {
   return errors;
 }
 
+export function serverFieldErrors(code: string | undefined): PolicyFormErrors {
+  if (code === "invalid-memoryFloorMb") {
+    return { memoryFloorMb: POLICY_ERRORS.memoryFloorMb };
+  }
+  if (code === "invalid-swapCeilingMb") {
+    return { swapCeilingMb: POLICY_ERRORS.swapCeilingMb };
+  }
+  return {};
+}
+
 /** True when a field of the form differs from the saved values. */
 export function isPolicyDirty(
   values: PolicyFormValues,

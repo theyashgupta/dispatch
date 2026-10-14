@@ -338,6 +338,7 @@ test("a refused policy save leaves the board list as it was", async () => {
   assert.deepEqual(result, {
     ok: false,
     reason: "the loop model is not a supported model",
+    code: "invalid-loopModel",
   });
   const list = client.getQueryData<{ boards: { policy: BoardPolicy }[] }>(
     boardListKeys.list,

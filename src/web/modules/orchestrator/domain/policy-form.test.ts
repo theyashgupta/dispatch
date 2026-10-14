@@ -19,6 +19,7 @@ import {
   POLICY_ERRORS,
   policyFormValues,
   policyPayload,
+  serverFieldErrors,
   SHIP_RIGHTS_OPTIONS,
   USAGE_LIMIT_OPTIONS,
   validatePolicyForm,
@@ -247,6 +248,17 @@ test("the server codes of the memory fields map to their field copy", () => {
     refusalText("invalid-swapCeilingMb", null),
     "the swap ceiling has to be a whole number from 256 to 65536",
   );
+});
+
+test("a refused memory code shows its field error and any other code shows none", () => {
+  assert.deepEqual(serverFieldErrors("invalid-memoryFloorMb"), {
+    memoryFloorMb: POLICY_ERRORS.memoryFloorMb,
+  });
+  assert.deepEqual(serverFieldErrors("invalid-swapCeilingMb"), {
+    swapCeilingMb: POLICY_ERRORS.swapCeilingMb,
+  });
+  assert.deepEqual(serverFieldErrors("invalid-concurrencyCap"), {});
+  assert.deepEqual(serverFieldErrors(undefined), {});
 });
 
 test("the form values and the payload keep the group playbook, a name or null", () => {
