@@ -15,6 +15,7 @@ const env = isolateEnv();
 const { store } = await import("../../store/board.store.js");
 const { initialPassMemory, runSupervisorPass } =
   await import("./supervisor-pass.js");
+const { recordMemory } = await import("../../test-support/memory-fixtures.js");
 type GroupStartOutcome = import("./group-launch.js").GroupStartOutcome;
 const { dropWatcher, ensureWatcher, watcherNames } =
   await import("./supervisor-registry.js");
@@ -224,6 +225,28 @@ test("a failed start of a queued group puts it back in the queue and records the
       },
     ],
   );
+});
+
+test("a queued group waits while memory is low, writes no event, and starts on the next pass after it recovers", async () => {
+  const board = await newBoard();
+  const dep = await doneGroup(board, "dep");
+  const queued = await queuedGroup(board, "held", [dep.id]);
+  const h = harness();
+  const eventsBefore = store.listOrchestrationEvents(board, 0, 500).length;
+  recordMemory(500, 1000);
+  try {
+    await h.pass();
+    assert.deepEqual(h.started, []);
+    assert.equal(store.getCard(queued.id)?.startQueued, true);
+    assert.equal(
+      store.listOrchestrationEvents(board, 0, 500).length,
+      eventsBefore,
+    );
+  } finally {
+    recordMemory(4000, 1000);
+  }
+  await h.pass();
+  assert.deepEqual(h.started, [queued.id]);
 });
 
 test("a queued group starts when every PR of its dependency is merged", async () => {

@@ -61,6 +61,7 @@ void test("the send rule holds for every session state, and only the typing-wron
     "idle",
     "handoff_ready",
     "roadmap_complete",
+    "paused",
   ];
   for (const sessionState of blocked)
     assert.equal(mayWake({ ...IDLE, sessionState }), false, sessionState);

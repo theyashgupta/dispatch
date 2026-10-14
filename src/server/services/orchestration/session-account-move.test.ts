@@ -14,7 +14,7 @@ const { store } = await import("../../store/board.store.js");
 const { upsertAccount, accountDir } = await import("./claude-accounts.js");
 const { moveSessionAccount } = await import("./session-account-move.js");
 const { recordTurnEvent } = await import("./session-turn.js");
-const { withCardLock } = await import("./run-claude.js");
+const { withCardLock } = await import("./card-lock.js");
 const { accountEnvLine } = await import("../domain/claude-launch.js");
 const { resolveBinaryPath } = await import("../../adapters/resolve-binary.js");
 const { setHooksRuntime } = await import("../infra/config-holder.js");
@@ -263,6 +263,24 @@ void test("a start, relaunch or move in flight returns busy before any tmux call
   } finally {
     release();
     await held;
+  }
+  assert.deepEqual(calls(), []);
+  assert.equal(accountOf(cardId, sessionId), "default");
+});
+
+void test("a paused card returns busy before any tmux call", async () => {
+  const { cardId, sessionId } = await sessionCard("move-paused");
+  fake.reset();
+  await store.markCardPaused(cardId, sessionId, {
+    at: "2026-10-13T00:00:00.000Z",
+    by: "user",
+    sessionId,
+    pids: [],
+  });
+  try {
+    assert.equal(await moveSessionAccount(cardId, ACCOUNT_A), "busy");
+  } finally {
+    await store.clearCardPaused(cardId);
   }
   assert.deepEqual(calls(), []);
   assert.equal(accountOf(cardId, sessionId), "default");

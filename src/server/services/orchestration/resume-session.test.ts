@@ -14,9 +14,12 @@ const env = await isolateTmuxEnv();
 const { projectsDirOf } = await import("../../adapters/transcript.js");
 const { killTtyd } = await import("../../adapters/ttyd.js");
 const { store } = await import("../../store/board.store.js");
-const { resumeSession } = await import("./resume-session.js");
+const { reconnectTerminal, resumeSession } =
+  await import("./resume-session.js");
+const { recordMemory } = await import("../../test-support/memory-fixtures.js");
 const { applyHookEvent } = await import("./hook-events.js");
 const tmux = await import("../../adapters/tmux.js");
+const { pauseTools } = await import("./pause-card.js");
 const { setHooksRuntime } = await import("../infra/config-holder.js");
 setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
 
@@ -120,6 +123,18 @@ void test(
     const sessionId = store.getCard(card.id)!.activeSessionId!;
     await store.markSessionLost(card.id, sessionId);
     assert.equal(store.getCard(card.id)?.claudeSessionId, undefined);
+    const realTools = { ...pauseTools };
+    const continued: { pids: number[]; signal: string; alive: boolean }[] = [];
+    pauseTools.panePids = () =>
+      Promise.resolve(new Map([[tmuxSession, [4242]]]));
+    pauseTools.signalTree = async (pids, signal) => {
+      continued.push({
+        pids,
+        signal,
+        alive: await tmux.hasSession(`=${tmuxSession}`),
+      });
+      return pids;
+    };
     try {
       await resumeSession(card.id);
       await waitFor(
@@ -139,7 +154,11 @@ void test(
       assert.equal(store.getCard(card.id)?.claudeSessionId, undefined);
       assert.equal(store.getCard(card.id)?.sessionLost, true);
       assert.match(store.getCard(card.id)?.resumeError ?? "", /^Resume failed/);
+      assert.deepEqual(continued, [
+        { pids: [4242], signal: "SIGCONT", alive: true },
+      ]);
     } finally {
+      Object.assign(pauseTools, realTools);
       killTtyd(tmuxSession);
       await env.killServer();
     }
@@ -398,6 +417,43 @@ void test(
       killTtyd(lost.tmuxSession);
       await env.killServer();
     }
+  },
+);
+
+void test(
+  "a reconnect whose pane is gone does not relaunch under memory pressure and shows the reason",
+  { skip: !env.canRunRealTmux },
+  async () => {
+    const argvFile = path.join(env.root, "claude-argv-memory.txt");
+    writeFakeRepl(env, argvFile);
+    await store.load();
+    const card = await store.createLocalCard(
+      DEFAULT_BOARD_KEY,
+      "reconnect memory",
+      "",
+    );
+    const branch = `memorytest-${process.pid}`;
+    const cwd = path.join(env.root, "worktree-memory");
+    fs.mkdirSync(cwd, { recursive: true });
+    await store.completeStart(card.id, undefined, {
+      workspacePath: cwd,
+      tmuxSession: `dsp-${branch}`,
+      branch,
+    });
+    recordMemory(812, 1000);
+    try {
+      await reconnectTerminal(card.id);
+    } finally {
+      recordMemory(2048, 1000);
+    }
+    assert.equal(
+      store.getCard(card.id)?.resumeError,
+      "Resume failed: free memory 812 MB is below the 1024 MB floor",
+    );
+    assert.equal(store.getCard(card.id)?.sessionLost, true);
+    assert.equal(store.getCard(card.id)?.tmuxSession, undefined);
+    assert.equal(store.isStarting(card.id), false);
+    assert.equal(readArgv(argvFile), null, "claude was not launched");
   },
 );
 

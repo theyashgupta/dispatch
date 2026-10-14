@@ -21,6 +21,9 @@ const { setOrchestrationConfig } =
   await import("../services/infra/config-holder.js");
 const { tunnelEmitter } = await import("../services/orchestration/tunnel.js");
 const { unwindGroup } = await import("../services/orchestration/unwind.js");
+const { recordSample } =
+  await import("../services/orchestration/memory-governor.js");
+const { memorySample } = await import("../test-support/memory-fixtures.js");
 
 function key(value: string): BoardKey {
   const parsed = parseBoardKey(value);
@@ -373,4 +376,20 @@ test("a tunnel change frame reaches the clients of both boards", async () => {
   );
   assert.equal(local.frames().filter((f) => f === frame).length, 1);
   assert.equal(acme.frames().filter((f) => f === frame).length, 1);
+});
+
+test("a client gets a memory frame on connect and one per sample on every board", async () => {
+  const local = await connect("?board=LOCAL");
+  const acme = await connect("?board=ACME");
+  const memory = (s: Stream) =>
+    s.frames().filter((f) => f.startsWith("event: memory"));
+  await local.until(() => memory(local).length === 1, "memory on connect");
+  const sample = memorySample({ freeMb: 700, swapUsedMb: 4200 });
+  recordSample(sample);
+  const frame = `event: memory\ndata: ${JSON.stringify({ supported: true, sample, stale: false })}`;
+  await Promise.all(
+    [local, acme].map((s) =>
+      s.until(() => s.frames().includes(frame), "memory sample frame"),
+    ),
+  );
 });

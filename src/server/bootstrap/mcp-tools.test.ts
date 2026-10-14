@@ -23,9 +23,11 @@ const EXPECTED = [
   "list_playbooks",
   "list_sessions",
   "move_card",
+  "pause_card",
   "read_pane_tail",
   "read_state",
   "request_handoff",
+  "resume_card",
   "resume_loop",
   "send_input",
   "start_card",
@@ -50,7 +52,7 @@ const accepts = (name: string, input: unknown) =>
   assert.equal(z.object(byName(name).input).safeParse(input).success, true);
 
 describe("mcp tool table", () => {
-  it("holds exactly the 30 tools", () => {
+  it("holds exactly the 32 tools", () => {
     assert.deepEqual(MCP_TOOLS.map((t) => t.name).sort(), EXPECTED);
   });
 
@@ -119,6 +121,8 @@ describe("mcp tool table", () => {
     refuses("request_handoff", { cardId: good, hard: "yes" });
     refuses("resume_loop", { cardId: bad });
     refuses("stop_session", {});
+    refuses("pause_card", {});
+    refuses("resume_card", {});
     refuses("start_ship", { cardId: bad });
     refuses("get_ship_state", { cardId: bad });
     refuses("create_decision_item", {
@@ -160,6 +164,8 @@ describe("mcp tool table", () => {
       request_handoff: `/sessions/${id}/handoff`,
       resume_loop: `/sessions/${id}/resume`,
       stop_session: `/sessions/${id}/stop`,
+      pause_card: `/sessions/${id}/pause`,
+      resume_card: `/sessions/${id}/unpause`,
       start_ship: `/groups/${id}/ship`,
       get_ship_state: `/groups/${id}/ship`,
       create_decision_item: "/decisions",

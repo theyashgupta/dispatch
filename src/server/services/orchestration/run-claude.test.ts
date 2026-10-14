@@ -41,7 +41,7 @@ void test(
     };
     const typed = async () => {
       await waitFor(
-        () => Promise.resolve(readArgv(argvFile) != null),
+        () => Promise.resolve((readArgv(argvFile) ?? []).some((a) => a !== "")),
         5000,
         "the relaunch line to reach the fake claude",
       );
@@ -156,6 +156,19 @@ void test(
         assert.equal(await runClaude(card.id), "busy", "a start in flight");
       } finally {
         store.endStart(card.id);
+      }
+
+      const activeSessionId = store.getCard(card.id)?.activeSessionId as string;
+      await store.markCardPaused(card.id, activeSessionId, {
+        at: "2026-10-13T00:00:00.000Z",
+        by: "user",
+        sessionId: activeSessionId,
+        pids: [],
+      });
+      try {
+        assert.equal(await runClaude(card.id), "busy", "a paused card");
+      } finally {
+        await store.clearCardPaused(card.id);
       }
 
       const orphan = await store.createLocalCard(

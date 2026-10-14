@@ -21,6 +21,7 @@ const {
   stopSupervisedTmux,
 } = await import("../../test-support/supervised-session.js");
 const hasTmux = (await resolveBinaryPath("tmux")) !== null;
+const { recordMemory } = await import("../../test-support/memory-fixtures.js");
 
 await setupSupervisedBoard();
 after(async () => {
@@ -257,6 +258,44 @@ void test(
     assert.equal(loop.session().state, "needs_input");
     assert.equal(loop.session().stateReason, "resume_failed");
     assert.equal(loop.userTexts().length, 0);
+  },
+);
+
+void test(
+  "under memory pressure a resume neither resumes nor relaunches and sets needs_input with the reason",
+  { skip: !hasTmux },
+  async () => {
+    const loop = await loopCard("resume-memory", {});
+    const calls: string[] = [];
+    recordMemory(812, 1000);
+    try {
+      await runActions(
+        loop.card(),
+        loop.session(),
+        [{ kind: "resume" }],
+        "tmux: pane at shell prompt",
+        deps({
+          resume: (cardId) => {
+            calls.push(`resume ${cardId}`);
+            return Promise.resolve();
+          },
+          relaunch: (cardId) => {
+            calls.push(`relaunch ${cardId}`);
+            return Promise.resolve("launched");
+          },
+          atShellPrompt: () => Promise.resolve(true),
+        }),
+      );
+    } finally {
+      recordMemory(2048, 1000);
+    }
+    assert.deepEqual(calls, []);
+    assert.equal(loop.session().state, "needs_input");
+    assert.equal(loop.session().stateReason, "resume_failed");
+    assert.equal(
+      loop.actions().at(-1)?.data.evidence,
+      "resume: free memory 812 MB is below the 1024 MB floor",
+    );
   },
 );
 

@@ -1,8 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import type { EventEmitter } from "node:events";
 import { isolateEnv } from "../test-support/fixtures.js";
 import type { Card } from "../../shared/types.js";
 import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
+import { startedGroup } from "../test-support/group-fixtures.js";
 
 isolateEnv();
 const { redactCard } = await import("./board.store.js");
@@ -722,4 +724,192 @@ void test("a stale mark shows on the wire summary and setSessionAccount clears i
       ?.claudeAccountId,
     "default",
   );
+});
+
+const markOf = (sessionId: string, pids = [101]) => ({
+  at: "2026-10-13T00:00:00.000Z",
+  by: "user" as const,
+  sessionId,
+  pids,
+});
+
+type Released = { type: string; pausedPids?: number[]; pausedAt?: string };
+
+function collect(
+  store: EventEmitter,
+  type: string,
+): { events: Released[]; stop: () => void } {
+  const events: Released[] = [];
+  const onActivity = (e: Released) => {
+    if (e.type === type) events.push(e);
+  };
+  store.on("activity", onActivity);
+  return { events, stop: () => store.off("activity", onActivity) };
+}
+
+void test("markCardPaused writes the mark for the active live session and answers true", async () => {
+  const { store, cardId, sessionId } = await parkedCardWithSession("mark-ok");
+  assert.equal(
+    await store.markCardPaused(cardId, sessionId, markOf(sessionId, [])),
+    true,
+  );
+  assert.deepEqual(store.getCard(cardId)!.paused, markOf(sessionId, []));
+  await store.setPausedPids(cardId, [101, 102]);
+  assert.deepEqual(store.getCard(cardId)!.paused?.pids, [101, 102]);
+  await store.clearCardPaused(cardId);
+  assert.equal(store.getCard(cardId)!.paused, null);
+});
+
+void test("markCardPaused refuses a lost card, a changed session and an unknown card", async () => {
+  const { store, cardId, sessionId } = await parkedCardWithSession("mark-no");
+  assert.equal(
+    await store.markCardPaused(
+      cardId,
+      "other-session",
+      markOf("other-session"),
+    ),
+    false,
+  );
+  assert.equal(
+    await store.markCardPaused("missing", sessionId, markOf(sessionId)),
+    false,
+  );
+  await store.markSessionLost(cardId, sessionId);
+  assert.equal(
+    await store.markCardPaused(cardId, sessionId, markOf(sessionId)),
+    false,
+  );
+  assert.equal(store.getCard(cardId)!.paused ?? null, null);
+});
+
+void test("losing the only session clears the paused mark", async () => {
+  const { store, cardId, sessionId } =
+    await parkedCardWithSession("lost-paused");
+  await store.markCardPaused(cardId, sessionId, markOf(sessionId, [101, 102]));
+  const lost = collect(store, "session_lost");
+  await store.markSessionLost(cardId, sessionId);
+  lost.stop();
+  const card = store.getCard(cardId)!;
+  assert.equal(card.sessionLost, true);
+  assert.equal(card.paused, null);
+  assert.equal(lost.events.length, 1);
+  assert.deepEqual(lost.events[0].pausedPids, [101, 102]);
+  assert.equal(lost.events[0].pausedAt, "2026-10-13T00:00:00.000Z");
+});
+
+void test("losing the only session of an unpaused card emits session_lost without pausedPids", async () => {
+  const { store, cardId, sessionId } =
+    await parkedCardWithSession("lost-unpaused");
+  const lost = collect(store, "session_lost");
+  await store.markSessionLost(cardId, sessionId);
+  lost.stop();
+  assert.equal(lost.events.length, 1);
+  assert.equal(lost.events[0].pausedPids, undefined);
+});
+
+void test("losing one session keeps the paused mark while a sibling is live", async () => {
+  const { store, cardId, sessionId } =
+    await parkedCardWithSession("sibling-paused");
+  const reserved = await store.reserveNewSession(
+    cardId,
+    store.getCard(cardId)!.identifier,
+  );
+  await store.completeStart(cardId, reserved!.sessionId, {
+    workspacePath: "/tmp/ws-sibling-paused-2",
+    tmuxSession: "dsp-sibling-paused-2",
+    branch: "sibling-paused-2",
+  });
+  const active = store.getCard(cardId)!.activeSessionId!;
+  await store.markCardPaused(cardId, active, markOf(active));
+  await store.markSessionLost(cardId, sessionId);
+  const card = store.getCard(cardId)!;
+  assert.equal(card.sessionLost, false);
+  assert.deepEqual(card.paused, markOf(active));
+});
+
+void test("losing the paused session while a sibling is live clears the mark and emits its pids", async () => {
+  const { store, cardId, sessionId } = await parkedCardWithSession(
+    "sibling-lost-paused",
+  );
+  const reserved = await store.reserveNewSession(
+    cardId,
+    store.getCard(cardId)!.identifier,
+  );
+  await store.completeStart(cardId, reserved!.sessionId, {
+    workspacePath: "/tmp/ws-sibling-lost-paused-2",
+    tmuxSession: "dsp-sibling-lost-paused-2",
+    branch: "sibling-lost-paused-2",
+  });
+  const active = store.getCard(cardId)!.activeSessionId!;
+  assert.notEqual(active, sessionId);
+  await store.markCardPaused(cardId, active, markOf(active, [101, 102]));
+  const lost = collect(store, "session_lost");
+  await store.markSessionLost(cardId, active);
+  lost.stop();
+  const card = store.getCard(cardId)!;
+  assert.equal(card.sessionLost, false);
+  assert.equal(card.activeSessionId, sessionId);
+  assert.equal(card.paused, null);
+  assert.equal(lost.events.length, 1);
+  assert.deepEqual(lost.events[0].pausedPids, [101, 102]);
+  assert.equal(lost.events[0].pausedAt, "2026-10-13T00:00:00.000Z");
+});
+
+void test("unwinding a paused group clears the mark and emits its pids on group_unwound", async () => {
+  const { store } = await import("./board.store.js");
+  const { g } = await startedGroup(store);
+  await store.markCardPaused(
+    g.id,
+    g.activeSessionId!,
+    markOf(g.activeSessionId!, [201, 202]),
+  );
+  const unwound = collect(store, "group_unwound");
+  const res = await store.unwindGroup(g.id, "todo");
+  unwound.stop();
+  assert.equal(res.ok, true);
+  assert.equal(store.getCard(g.id), undefined);
+  assert.equal(unwound.events.length, 1);
+  assert.deepEqual(unwound.events[0].pausedPids, [201, 202]);
+  assert.equal(unwound.events[0].pausedAt, "2026-10-13T00:00:00.000Z");
+  assert.equal(res.ok && res.row.card.paused, null);
+});
+
+void test("resetCard clears the paused mark and emits its pids", async () => {
+  const { store, cardId, sessionId } =
+    await parkedCardWithSession("reset-paused");
+  await store.markCardPaused(cardId, sessionId, markOf(sessionId, [101, 102]));
+  const reset = collect(store, "session_reset");
+  await store.resetCard(cardId);
+  reset.stop();
+  assert.equal(store.getCard(cardId)!.paused, null);
+  assert.deepEqual(reset.events[0].pausedPids, [101, 102]);
+  assert.equal(reset.events[0].pausedAt, "2026-10-13T00:00:00.000Z");
+});
+
+void test("finishCleanup clears the paused mark and emits its pids", async () => {
+  const { store, cardId, sessionId } =
+    await parkedCardWithSession("cleanup-paused");
+  await store.markCardPaused(cardId, sessionId, markOf(sessionId, [101, 102]));
+  const cleanup = collect(store, "cleanup");
+  await store.finishCleanup(cardId, sessionId);
+  cleanup.stop();
+  assert.equal(store.getCard(cardId)!.paused, null);
+  assert.deepEqual(cleanup.events[0].pausedPids, [101, 102]);
+  assert.equal(cleanup.events[0].pausedAt, "2026-10-13T00:00:00.000Z");
+});
+
+void test("completeStart keeps the paused mark", async () => {
+  const { store, cardId, sessionId } =
+    await parkedCardWithSession("start-paused");
+  const reserved = await store.reserveNewSession(
+    cardId,
+    store.getCard(cardId)!.identifier,
+  );
+  await store.markCardPaused(cardId, sessionId, markOf(sessionId));
+  await store.completeStart(cardId, reserved!.sessionId, {
+    workspacePath: "/tmp/ws-start-paused-2",
+    tmuxSession: "dsp-start-paused-2",
+    branch: "start-paused-2",
+  });
+  assert.deepEqual(store.getCard(cardId)!.paused, markOf(sessionId));
 });

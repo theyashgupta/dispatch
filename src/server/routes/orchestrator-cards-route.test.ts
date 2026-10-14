@@ -25,6 +25,7 @@ const { sessionStarter } =
 const { tempRepoWithWorkspace } =
   await import("../test-support/git-fixtures.js");
 const { startedGroup } = await import("../test-support/group-fixtures.js");
+const { recordMemory } = await import("../test-support/memory-fixtures.js");
 
 const SBX = parseBoardKey("SBX") as BoardKey;
 const OTH = parseBoardKey("OTH") as BoardKey;
@@ -368,6 +369,57 @@ void test("start_card at the cap answers 403 policy-refused, then starts once a 
   const { reply } = await startCard(card.id, { playbook: PLAYBOOK });
   assert.equal(reply.status, 202);
   await setCap(10);
+});
+
+void test("start_card under memory pressure answers 409 memory-pressure, writes nothing, then starts once memory recovers", async () => {
+  await setCap(10);
+  const card = await store.createLocalCard(SBX, "memory pressure", "");
+  const startsBefore = starts.length;
+  recordMemory(812, 1000);
+  try {
+    const refused = await startCard(card.id, { playbook: PLAYBOOK });
+    assertRefused(refused, 409, "memory-pressure");
+    assert.equal(
+      refused.reply.body.reason,
+      "free memory 812 MB is below the 1024 MB floor",
+    );
+    assert.equal(starts.length, startsBefore);
+    assert.equal(store.getCard(card.id)?.launch, undefined);
+    assert.equal(store.getCard(card.id)?.ownerOrchestrator, undefined);
+  } finally {
+    recordMemory(2048, 1000);
+  }
+  const { reply } = await startCard(card.id, { playbook: PLAYBOOK });
+  assert.equal(reply.status, 202, JSON.stringify(reply.body));
+});
+
+void test("start_card checks memory before the concurrency cap", async () => {
+  await launchedRunning();
+  const loops = (await call("GET", "/orchestrator/policy", TOKEN)).body
+    .runningLoops as number;
+  const card = await store.createLocalCard(SBX, "memory before cap", "");
+  const startsBefore = starts.length;
+  try {
+    await setCap(loops);
+    recordMemory(812, 1000);
+    const pressured = await startCard(card.id, { playbook: PLAYBOOK });
+    assertRefused(pressured, 409, "memory-pressure");
+    assert.equal(
+      pressured.reply.body.reason,
+      "free memory 812 MB is below the 1024 MB floor",
+    );
+    recordMemory(2048, 1000);
+    assertRefused(
+      await startCard(card.id, { playbook: PLAYBOOK }),
+      403,
+      "policy-refused",
+    );
+    assert.equal(starts.length, startsBefore);
+    assert.equal(store.getCard(card.id)?.launch, undefined);
+  } finally {
+    await setCap(10);
+    recordMemory(2048, 1000);
+  }
 });
 
 void test("start_group at the cap counts a launched card that runs", async () => {

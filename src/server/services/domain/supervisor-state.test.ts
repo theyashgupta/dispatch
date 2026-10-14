@@ -24,6 +24,7 @@ function input(over: Partial<DetectInput>): DetectInput {
     now: 0,
     tmuxAlive: true,
     atShellPrompt: false,
+    paused: null,
     pane: "",
     engineSessionId: "3f0c2a7e-5d1b-4c3e-9a2f-1b2c3d4e5f60",
     completion: "running",
@@ -217,6 +218,84 @@ void test("15 minutes of no transcript growth while working gives stale", () => 
 void test("growth inside the 15 minutes restarts the stale clock", () => {
   const ds = feed(pane("working.txt"), 20, {}, (i) => (i < 10 ? 4096 : 5000));
   assert.ok(ds.every((d) => d.state === "working"));
+});
+
+void test("a paused input gives paused and resets the growth clock to now", () => {
+  const memory = { ...initialMemory("working"), lastGrowthAt: 0 };
+  const d = detectState(
+    input({
+      now: 10 * MINUTE,
+      pane: pane("working.txt"),
+      paused: {
+        at: "2026-10-13T00:00:00.000Z",
+        by: "user",
+        sessionId: "session-1",
+        pids: [101],
+      },
+      memory,
+    }),
+  );
+  assert.equal(d.state, "paused");
+  assert.equal(d.evidence, "paused by user");
+  assert.equal(d.memory.lastGrowthAt, 10 * MINUTE);
+  assert.deepEqual(d.memory.idleSamples, []);
+});
+
+void test("a paused input wins over the shell prompt check", () => {
+  const d = detectState(
+    input({
+      atShellPrompt: true,
+      paused: {
+        at: "2026-10-13T00:00:00.000Z",
+        by: "memory",
+        sessionId: "session-1",
+        pids: [101],
+      },
+    }),
+  );
+  assert.equal(d.state, "paused");
+  assert.equal(d.evidence, "paused by memory");
+});
+
+void test("a dead tmux session is lost even when the card is marked paused", () => {
+  const d = detectState(
+    input({
+      tmuxAlive: false,
+      paused: {
+        at: "2026-10-13T00:00:00.000Z",
+        by: "user",
+        sessionId: "session-1",
+        pids: [101],
+      },
+    }),
+  );
+  assert.equal(d.state, "lost");
+});
+
+void test("the first sample after a pause is not stale", () => {
+  const paused = detectState(
+    input({
+      now: 30 * MINUTE,
+      pane: pane("working.txt"),
+      paused: {
+        at: "2026-10-13T00:00:00.000Z",
+        by: "user",
+        sessionId: "session-1",
+        pids: [101],
+      },
+      transcript: { size: 4096, lastAssistantText: null },
+      memory: { ...initialMemory("working"), lastGrowthAt: 0 },
+    }),
+  );
+  const after = detectState(
+    input({
+      now: 30 * MINUTE + 1000,
+      pane: pane("working.txt"),
+      transcript: { size: 4096, lastAssistantText: null },
+      memory: paused.memory,
+    }),
+  );
+  assert.equal(after.state, "working");
 });
 
 void test("an idle session whose last assistant message asks a question needs input", () => {

@@ -10,7 +10,7 @@ import {
   groupTitleBodySchema,
   linearStateBodySchema,
   moveBodySchema,
-  resumeTargetParamsSchema,
+  cardIdParamsSchema,
   openEditorBodySchema,
   sessionBodySchema,
   startBodySchema,
@@ -303,12 +303,12 @@ test("attachmentParamsSchema checks the card id and the file name", () => {
   }
 });
 
-test("resumeTargetParamsSchema accepts a card id and rejects a bad one", () => {
-  assert.deepEqual(resumeTargetParamsSchema.parse({ id: "LOCAL-1" }), {
+test("cardIdParamsSchema accepts a card id and rejects a bad one", () => {
+  assert.deepEqual(cardIdParamsSchema.parse({ id: "LOCAL-1" }), {
     id: "LOCAL-1",
   });
   for (const params of [{ id: "a.b" }, { id: "../x" }, { id: 5 }, {}]) {
-    assert.equal(firstCode(resumeTargetParamsSchema, params), "invalid-id");
+    assert.equal(firstCode(cardIdParamsSchema, params), "invalid-id");
   }
 });
 

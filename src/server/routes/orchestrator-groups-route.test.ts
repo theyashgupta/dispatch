@@ -24,6 +24,7 @@ const { boardsRouter } = await import("./boards.route.js");
 const { groupStarter } =
   await import("../services/orchestration/orchestrator-groups.js");
 const { createPlaybook } = await import("../services/infra/playbooks.js");
+const { recordMemory } = await import("../test-support/memory-fixtures.js");
 
 const SBX = parseBoardKey("SBX") as BoardKey;
 const OTH = parseBoardKey("OTH") as BoardKey;
@@ -463,6 +464,28 @@ void test("start_group at the cap is refused with the reason and writes nothing"
   assert.equal(starts.length, startsBefore);
   assert.equal(store.getCard(card.id)?.startQueued, false);
   assert.equal(store.getCard(card.id)?.tmuxSession, undefined);
+});
+
+void test("start_group under memory pressure answers 409 memory-pressure, starts nothing, then starts once memory recovers", async () => {
+  await setPolicy({ concurrencyCap: 10, budgetPerGroup: null });
+  const card = await newGroup();
+  const startsBefore = starts.length;
+  recordMemory(2048, 9000);
+  try {
+    const { reply } = await call(`/groups/${card.id}/start`);
+    assert.equal(reply.status, 409, JSON.stringify(reply.body));
+    assert.deepEqual(reply.body, {
+      error: "memory-pressure",
+      reason: "swap used 9000 MB is above the 8192 MB ceiling",
+    });
+    assert.equal(starts.length, startsBefore);
+    assert.equal(store.getCard(card.id)?.tmuxSession, undefined);
+  } finally {
+    recordMemory(2048, 1000);
+  }
+  const { reply } = await call(`/groups/${card.id}/start`);
+  assert.equal(reply.status, 202, JSON.stringify(reply.body));
+  assert.equal(starts.length, startsBefore + 1);
 });
 
 void test("start_group over budget is refused with the budget reason", async () => {

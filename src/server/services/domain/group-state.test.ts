@@ -32,6 +32,7 @@ void test("supervisor states map to loop_error and usage_limit, every other give
     "permission_prompt",
     "handoff_ready",
     "roadmap_complete",
+    "paused",
   ];
   for (const s of loopError)
     assert.equal(groupStateOfSupervisor(s), "loop_error");

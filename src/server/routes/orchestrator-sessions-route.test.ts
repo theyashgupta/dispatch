@@ -31,6 +31,7 @@ const {
   stopSupervisedTmux,
 } = await import("../test-support/supervised-session.js");
 const hasTmux = (await resolveBinaryPath("tmux")) !== null;
+const { recordMemory } = await import("../test-support/memory-fixtures.js");
 
 const OTH = parseBoardKey("OTH") as BoardKey;
 const FAST = { readyMs: 2_000, settleMs: 300, confirmMs: 1_500, pollMs: 100 };
@@ -142,6 +143,7 @@ const KEYLESS: SupervisorState[] = [
   "usage_limit_dialog",
   "usage_limit_wait",
   "shell_prompt",
+  "paused",
 ];
 
 void test(
@@ -225,6 +227,54 @@ void test(
       await setPolicy({ budgetPerGroup: null });
     }
     await refused(s, route, { text: "" }, 400, { error: "invalid-text" });
+    assert.deepEqual(s.userTexts(), []);
+  },
+);
+
+void test(
+  "send_input and stop_session are refused for a card with the paused mark, and an unpaused control card is not",
+  { skip: !hasTmux },
+  async () => {
+    const s = await start("input-paused");
+    const id = s.card().id;
+    await setState(s, "working");
+    await store.markCardPaused(id, s.session().id, {
+      at: "2026-10-13T00:00:00.000Z",
+      by: "user",
+      sessionId: s.session().id,
+      pids: [101],
+    });
+    const refusal = {
+      error: "session-state-refused",
+      reason: "session is paused",
+    };
+    await refused(s, `/sessions/${id}/input`, { text: "x" }, 409, refusal);
+    await refused(s, `/sessions/${id}/stop`, undefined, 409, refusal);
+    assert.deepEqual(s.userTexts(), []);
+    await store.clearCardPaused(id);
+    const control = await call(`/sessions/${id}/input`, { text: "go on" });
+    assert.equal(control.status, 200, JSON.stringify(control.body));
+    assert.deepEqual(s.userTexts(), ["go on"]);
+  },
+);
+
+void test(
+  "resume_loop is refused for a card with the paused mark",
+  { skip: !hasTmux },
+  async () => {
+    const s = await start("resume-paused", { group: true });
+    const id = s.card().id;
+    await setState(s, "needs_input", "stop_session");
+    await store.markCardPaused(id, s.session().id, {
+      at: "2026-10-13T00:00:00.000Z",
+      by: "user",
+      sessionId: s.session().id,
+      pids: [101],
+    });
+    await refused(s, `/sessions/${id}/resume`, undefined, 409, {
+      error: "session-state-refused",
+      reason: "session is paused",
+    });
     assert.deepEqual(s.userTexts(), []);
   },
 );
@@ -396,6 +446,29 @@ void test(
       ["working", "needs_input"],
       ["needs_input", "working"],
     ]);
+  },
+);
+
+void test(
+  "resume_loop under memory pressure answers 409 memory-pressure and sends nothing, then resumes once memory recovers",
+  { skip: !hasTmux },
+  async () => {
+    const s = await start("resume-memory", { group: true });
+    const id = s.card().id;
+    await setPolicy({ concurrencyCap: 10, budgetPerGroup: null });
+    await setState(s, "needs_input", "stop_session");
+    recordMemory(812, 1000);
+    try {
+      await refused(s, `/sessions/${id}/resume`, undefined, 409, {
+        error: "memory-pressure",
+        reason: "free memory 812 MB is below the 1024 MB floor",
+      });
+    } finally {
+      recordMemory(2048, 1000);
+    }
+    const resumed = await call(`/sessions/${id}/resume`);
+    assert.equal(resumed.status, 200, JSON.stringify(resumed.body));
+    assert.equal(s.session().state, "working");
   },
 );
 

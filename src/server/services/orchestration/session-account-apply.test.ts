@@ -28,7 +28,7 @@ const { applyHookEvent } = await import("./hook-events.js");
 const { recordTurnEvent } = await import("./session-turn.js");
 const { removeAccountAndLogout, listAccountSessions } =
   await import("./claude-account-ops.js");
-const { withCardLock } = await import("./run-claude.js");
+const { withCardLock } = await import("./card-lock.js");
 const { setHooksRuntime } = await import("../infra/config-holder.js");
 setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
 
