@@ -2,10 +2,11 @@ import type { PolicyPayload } from "@/modules/orchestrator/domain/policy-form";
 import type {
   Board,
   BoardKey,
+  OrchestratorConversation,
   OrchestratorScope,
   OrchestratorPolicyOverride,
 } from "../../../../shared/types.js";
-import { http, type ApiFailure } from "@/lib/http";
+import { http, httpError, type ApiFailure } from "@/lib/http";
 import type { ScopeStep } from "@/modules/orchestrator/domain/ownership";
 import {
   refusalReason,
@@ -73,6 +74,18 @@ export async function getOrchestrators(
   return result.data.orchestrators;
 }
 
+/** Read the conversation of one orchestrator: GET /api/boards/:key/orchestrators/:id/conversation. */
+export async function getOrchestratorConversation(
+  board: BoardKey,
+  id: string,
+): Promise<OrchestratorConversation> {
+  const result = await http<OrchestratorConversation>(
+    `${boardUrl(board)}/${encodeURIComponent(id)}/conversation`,
+  );
+  if (!result.ok) throw httpError("getOrchestratorConversation", result);
+  return result.data;
+}
+
 /** Add the main orchestrator record of a board: POST /api/boards/:key/orchestrators. */
 export function addMainOrchestrator(board: BoardKey): Promise<ActionResult> {
   return send(boardUrl(board), {
@@ -99,19 +112,14 @@ export function runLifecycle(
 }
 
 /**
- * Start the main orchestrator, adding its record first on a board that has none.
+ * Add the main orchestrator to a board that has none, then start it.
  *
  * @remarks
  * A refused add stops the saga, so a board never gets a start call without a record.
  */
-export async function startMain(
-  board: BoardKey,
-  hasRecord: boolean,
-): Promise<ActionResult> {
-  if (!hasRecord) {
-    const added = await addMainOrchestrator(board);
-    if (!added.ok) return added;
-  }
+export async function startMain(board: BoardKey): Promise<ActionResult> {
+  const added = await addMainOrchestrator(board);
+  if (!added.ok) return added;
   return runLifecycle(board, "main", "start");
 }
 

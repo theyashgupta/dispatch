@@ -84,6 +84,12 @@ export const chainSettingsBodySchema = z.strictObject(
       .min(CLAUDE_ACCOUNTS_BOUNDS.minDwellMinutes.min, "invalid-settings")
       .max(CLAUDE_ACCOUNTS_BOUNDS.minDwellMinutes.max, "invalid-settings")
       .optional(),
+    hysteresisPercent: z
+      .number("invalid-settings")
+      .int("invalid-settings")
+      .min(CLAUDE_ACCOUNTS_BOUNDS.hysteresisPercent.min, "invalid-settings")
+      .max(CLAUDE_ACCOUNTS_BOUNDS.hysteresisPercent.max, "invalid-settings")
+      .optional(),
   },
   "invalid-settings",
 );

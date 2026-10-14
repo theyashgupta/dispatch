@@ -6,6 +6,7 @@ import { run } from "./exec.js";
 
 const USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const USAGE_TIMEOUT_MS = 10_000;
+const MAX_DATE_MS = 8.64e15;
 const HOUR_MS = 60 * 60 * 1000;
 const WINDOW_LENGTH_MS: Record<string, number> = {
   session: 5 * HOUR_MS,
@@ -19,28 +20,48 @@ export interface UsageFetchResult {
   body: unknown;
 }
 
-function parseAccessToken(raw: string): string | null {
+/**
+ * Parse a credential text into the OAuth access token and the login expiry as an ISO string.
+ *
+ * @remarks The login expiry is the refresh token's `refreshTokenExpiresAt`; anything but a finite
+ * positive number reads as unknown (`null`). The short-lived access token expiry is not used.
+ */
+export function parseCredential(
+  raw: string,
+): { token: string; loginExpiresAt: string | null } | null {
   try {
     const parsed = JSON.parse(raw.trim()) as {
-      claudeAiOauth?: { accessToken?: unknown };
+      claudeAiOauth?: {
+        accessToken?: unknown;
+        refreshTokenExpiresAt?: unknown;
+      };
     };
-    const token = parsed?.claudeAiOauth?.accessToken;
-    return typeof token === "string" && token.length > 0 ? token : null;
+    const oauth = parsed?.claudeAiOauth;
+    const token = oauth?.accessToken;
+    if (typeof token !== "string" || token.length === 0) return null;
+    const ms = oauth?.refreshTokenExpiresAt;
+    const loginExpiresAt =
+      typeof ms === "number" && ms > 0 && ms <= MAX_DATE_MS
+        ? new Date(ms).toISOString()
+        : null;
+    return { token, loginExpiresAt };
   } catch {
     return null;
   }
 }
 
 /**
- * Read an account's OAuth access token into memory: the macOS keychain item for the given service
- * (with the OS username, then without, since Claude Code substitutes a fixed name for unusual
- * usernames), then the config dir's credentials file. The value is returned to exactly one caller
- * and never logged.
+ * Read an account's OAuth token and login expiry into memory.
+ *
+ * @remarks Sources in order: the macOS keychain item for the service (with the OS username, then
+ * without, since Claude Code substitutes a fixed name for unusual usernames), then the config dir's
+ * credentials file. Both values come from the first source that holds a token, and the token is
+ * never logged.
  */
-export async function readAccessToken(
+export async function readCredential(
   keychainService: string,
   configDir: string,
-): Promise<string | null> {
+): Promise<{ token: string; loginExpiresAt: string | null } | null> {
   if (process.platform === "darwin") {
     const attempts = [
       ["-s", keychainService, "-a", os.userInfo().username, "-w"],
@@ -53,8 +74,8 @@ export async function readAccessToken(
           ["find-generic-password", ...args],
           { timeout: 5_000 },
         );
-        const token = parseAccessToken(stdout);
-        if (token) return token;
+        const credential = parseCredential(stdout);
+        if (credential) return credential;
       } catch {}
     }
   }
@@ -63,7 +84,7 @@ export async function readAccessToken(
       path.join(configDir, ".credentials.json"),
       "utf8",
     );
-    return parseAccessToken(raw);
+    return parseCredential(raw);
   } catch {
     return null;
   }

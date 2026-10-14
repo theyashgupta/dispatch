@@ -12,6 +12,7 @@ const {
   checkHandoffCancel,
   checkHandoffThreshold,
   handoffRequestText,
+  resumePromptText,
   runFreshSession,
 } = await import("./supervisor-handoff.js");
 const { escapeLimit } = await import("./supervisor-limit.js");
@@ -78,6 +79,23 @@ async function loopSession(title: string, engineId: string) {
     engine: ENGINE(engineId),
   });
   return { ...s, project, first, engine };
+}
+
+const DEMO_PRD = "repo/.planning/prds/demo.md";
+
+/** Start a launched ticket card whose one-unit progress names a PRD, with an active engine. */
+async function launchedTicket(title: string) {
+  const s = await startSupervised({ tmpRoot: env.root, title });
+  await store.setOrchestratorFields(s.card().id, {
+    launch: { direction: "ship it" },
+  });
+  await store.setLoopProgress(s.card().id, {
+    ...LOOP_PROGRESS,
+    slug: "demo-feature",
+    prdFile: DEMO_PRD,
+    engine: ENGINE("conv-first"),
+  });
+  return s;
 }
 
 async function waitUntil(check: () => boolean, ms = 20_000): Promise<void> {
@@ -245,6 +263,117 @@ void test("the hard request says to hand off now and the soft one still says not
     assert.ok(text.includes("HANDOFF_READY sbx-loop"));
     assert.ok(text.includes("/root/.claude/ralph-loop.local.md"));
   }
+});
+
+void test("the single PRD request names the feature folder resume file and has no progress ledger step", () => {
+  for (const hard of [true, false]) {
+    const text = handoffRequestText("demo-feature", "/root", hard, DEMO_PRD);
+    assert.ok(text.includes("/root/repo/.planning/demo-feature/resume.md"));
+    assert.ok(text.includes("/root/.claude/ralph-loop.local.md"));
+    assert.ok(text.includes("HANDOFF_READY demo-feature"));
+    assert.ok(!text.includes("progress.md"));
+    assert.ok(!text.includes(".roadmap"));
+    assert.deepEqual(
+      text
+        .split("\n")
+        .slice(1, 4)
+        .map((line) => line.slice(0, 2)),
+      ["1.", "2.", "3."],
+    );
+    assert.ok(
+      text.endsWith(
+        "The resume prompt must restate the marker rule (end a stop for a human with its own line DISPATCH_STATUS: NEEDS_INPUT - <reason>, and the finished loop with DISPATCH_STATUS: DONE - <summary>) and the handoff rule (hand off only when asked, or when the status line passes 80 percent).",
+      ),
+    );
+  }
+});
+
+void test("a single loop with no PRD file keeps the resume file in its planning folder", () => {
+  const text = handoffRequestText("demo", "/root", false, undefined, true);
+  assert.ok(text.includes("/root/.planning/demo/resume.md"));
+  assert.ok(!text.includes("progress.md"));
+  assert.ok(!text.includes(".roadmap"));
+  assert.ok(
+    resumePromptText("demo", "/root", undefined, true).includes(
+      "Then read /root/.planning/demo/resume.md and follow it.",
+    ),
+  );
+});
+
+void test("the single PRD request falls back to the root planning folder when the PRD has no planning folder", () => {
+  const text = handoffRequestText(
+    "demo-feature",
+    "/root",
+    false,
+    "prds/demo.md",
+  );
+  assert.ok(text.includes("/root/.planning/demo-feature/resume.md"));
+});
+
+void test("the resume prompt names the feature folder for a single PRD and the group folder otherwise", () => {
+  assert.ok(
+    resumePromptText("demo-feature", "/root", DEMO_PRD).includes(
+      "Then read /root/repo/.planning/demo-feature/resume.md and follow it.",
+    ),
+  );
+  assert.ok(
+    resumePromptText("sbx-loop", "/root").includes(
+      "Then read /root/.roadmap/sbx-loop/resume.md and follow it.",
+    ),
+  );
+});
+
+void test(
+  "a launched ticket card with a one-unit loop gets exactly one handoff request naming the feature folder",
+  { skip: !hasTmux },
+  async () => {
+    const s = await launchedTicket("handoff-launched");
+    await store.setSessionMetersIfSession(s.card().id, s.name, METERS(51));
+    await checkHandoffThreshold(s.card(), s.session(), POLICY);
+    await checkHandoffThreshold(s.card(), s.session(), POLICY);
+    const sent = s.userTexts();
+    assert.equal(sent.length, 1);
+    const file = sent[0].replace(/^Read /, "").replace(/ and follow it\.$/, "");
+    const request = fs.readFileSync(file, "utf8");
+    assert.ok(
+      request.includes(
+        path.join(s.root, "repo/.planning/demo-feature/resume.md"),
+      ),
+    );
+    assert.ok(request.includes("HANDOFF_READY demo-feature"));
+    assert.ok(!request.includes("progress.md"));
+    assert.equal(
+      s.actions().filter((e) => e.data.action === "handoff_request").length,
+      1,
+    );
+  },
+);
+
+void test("a ticket card with no launch and no loop progress gets no handoff request", async () => {
+  const card = await store.createLocalCard(SBX, "handoff-plain", "");
+  await store.completeStart(card.id, undefined, {
+    workspacePath: env.root,
+    tmuxSession: "dsp-handoff-plain",
+    branch: "handoff-plain",
+  });
+  const live = store.getCard(card.id)!;
+  const session = live.sessions!.find((x) => x.id === live.activeSessionId)!;
+  await store.setSessionMetersIfSession(
+    card.id,
+    session.tmuxSession ?? "",
+    METERS(85),
+  );
+  await checkHandoffThreshold(
+    store.getCard(card.id)!,
+    store.getCard(card.id)!.sessions!.find((x) => x.id === session.id)!,
+    POLICY,
+  );
+  assert.deepEqual(
+    store
+      .listOrchestrationEvents(SBX, 0, 500)
+      .filter((e) => e.cardId === card.id),
+    [],
+  );
 });
 
 void test(

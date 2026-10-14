@@ -131,3 +131,50 @@ void test("a unit report without phase is accepted", async () => {
   assert.equal(res.status, 202);
   assert.equal(rows().length, before + 1);
 });
+
+async function ticketToken(launched: boolean, name: string) {
+  const card = await store.createLocalCard(DEFAULT_BOARD_KEY, name, "");
+  await store.completeStart(card.id, undefined, {
+    workspacePath: `/tmp/ws-${card.id}`,
+    tmuxSession: `dsp-${card.id}`,
+    branch: card.id,
+  });
+  if (launched) {
+    await store.setOrchestratorFields(card.id, {
+      launch: { playbook: "Write code directly", direction: "" },
+    });
+  }
+  const live = store.getCard(card.id)!;
+  const token = `${name}-token-0123456789`;
+  registerHookToken(token, live.id, live.activeSessionId!);
+  return { live, token };
+}
+
+void test("a report from a launched ticket card session answers 202 and records one loop_gate row", async () => {
+  const { live, token } = await ticketToken(true, "loops-launched");
+  const before = rows().length;
+
+  const res = await post(token, GOOD);
+
+  assert.equal(res.status, 202);
+  const all = rows();
+  assert.equal(all.length, before + 1);
+  const row = all[all.length - 1];
+  assert.equal(row.kind, "loop_gate");
+  assert.equal(row.cardId, live.id);
+  assert.equal(row.sessionId, live.activeSessionId);
+});
+
+void test("a report from a ticket card with no launch answers 400 not-group-card and records nothing", async () => {
+  const { token } = await ticketToken(false, "loops-plain");
+  const before = rows().length;
+
+  const res = await post(token, GOOD);
+
+  assert.equal(res.status, 400);
+  assert.equal(
+    ((await res.json()) as { error: string }).error,
+    "not-group-card",
+  );
+  assert.equal(rows().length, before);
+});

@@ -14,10 +14,12 @@ const EXPECTED = [
   "create_ticket",
   "get_board_workspace",
   "get_card",
+  "get_card_progress",
   "get_group_progress",
   "get_policy",
   "get_rulebook",
   "get_ship_state",
+  "list_accounts",
   "list_cards",
   "list_events",
   "list_playbooks",
@@ -26,6 +28,7 @@ const EXPECTED = [
   "pause_card",
   "read_pane_tail",
   "read_state",
+  "release_prep",
   "request_handoff",
   "resume_card",
   "resume_loop",
@@ -52,7 +55,7 @@ const accepts = (name: string, input: unknown) =>
   assert.equal(z.object(byName(name).input).safeParse(input).success, true);
 
 describe("mcp tool table", () => {
-  it("holds exactly the 32 tools", () => {
+  it("holds exactly the 35 tools", () => {
     assert.deepEqual(MCP_TOOLS.map((t) => t.name).sort(), EXPECTED);
   });
 
@@ -88,6 +91,7 @@ describe("mcp tool table", () => {
     refuses("get_card", { id: bad });
     refuses("get_card", { id: "x".repeat(201) });
     refuses("get_group_progress", {});
+    refuses("get_card_progress", {});
     refuses("read_pane_tail", { cardId: good, lines: 201 });
     refuses("list_cards", { column: "nowhere" });
     refuses("list_sessions", { live: "yes" });
@@ -144,14 +148,17 @@ describe("mcp tool table", () => {
       get_card: `/cards/${id}`,
       list_sessions: "/sessions",
       get_group_progress: `/groups/${id}/progress`,
+      get_card_progress: `/cards/${id}/progress`,
       read_pane_tail: `/sessions/${id}/pane`,
       list_events: "/events",
       get_policy: "/policy",
       get_board_workspace: "/board-workspace",
       list_playbooks: "/playbooks",
+      list_accounts: "/accounts",
       get_rulebook: "/rulebook",
       start_card: `/cards/${id}/start`,
       create_ticket: "/tickets",
+      release_prep: "/releases",
       update_ticket: `/tickets/${id}`,
       move_card: `/tickets/${id}/move`,
       add_comment: `/tickets/${id}/comments`,

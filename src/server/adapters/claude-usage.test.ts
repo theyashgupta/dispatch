@@ -109,23 +109,26 @@ void test("mapUsageResponse maps the enterprise spend budget when there are no r
   );
 });
 
-void test("readAccessToken tries the keychain service first, then the credentials file, never throws", async () => {
+void test("readCredential tries the keychain service first, then the credentials file, never throws", async () => {
   const dir = path.join(env.root, "usage-dir");
   fs.mkdirSync(dir, { recursive: true });
   if (process.platform === "darwin") {
     assert.equal(
-      await usage.readAccessToken("Claude Code-credentials", dir),
+      (await usage.readCredential("Claude Code-credentials", dir))?.token ??
+        null,
       "sk-ant-oat01-FAKE-HOME-ACCT",
     );
     process.env.FAKE_SECURITY_DENY_ACCOUNT = "1";
     assert.equal(
-      await usage.readAccessToken("Claude Code-credentials", dir),
+      (await usage.readCredential("Claude Code-credentials", dir))?.token ??
+        null,
       "sk-ant-oat01-FAKE-HOME",
     );
     delete process.env.FAKE_SECURITY_DENY_ACCOUNT;
   }
   assert.equal(
-    await usage.readAccessToken("Claude Code-credentials-nope", dir),
+    (await usage.readCredential("Claude Code-credentials-nope", dir))?.token ??
+      null,
     null,
   );
   fs.writeFileSync(
@@ -135,14 +138,80 @@ void test("readAccessToken tries the keychain service first, then the credential
     }),
   );
   assert.equal(
-    await usage.readAccessToken("Claude Code-credentials-nope", dir),
+    (await usage.readCredential("Claude Code-credentials-nope", dir))?.token ??
+      null,
     "sk-ant-oat01-FAKE-FILE",
   );
   fs.writeFileSync(path.join(dir, ".credentials.json"), "garbage");
   assert.equal(
-    await usage.readAccessToken("Claude Code-credentials-nope", dir),
+    (await usage.readCredential("Claude Code-credentials-nope", dir))?.token ??
+      null,
     null,
   );
+});
+
+void test("parseCredential reads only a finite positive refreshTokenExpiresAt number", () => {
+  const body = (value: unknown): string =>
+    JSON.stringify({
+      claudeAiOauth: { accessToken: "x", refreshTokenExpiresAt: value },
+    });
+  assert.deepEqual(usage.parseCredential(body(1760000000000)), {
+    token: "x",
+    loginExpiresAt: new Date(1760000000000).toISOString(),
+  });
+  for (const raw of [
+    JSON.stringify({ claudeAiOauth: { accessToken: "x" } }),
+    body(0),
+    body(-5),
+    body("1760000000000"),
+    body(true),
+    body(null),
+    body(1e16),
+  ]) {
+    assert.deepEqual(usage.parseCredential(raw), {
+      token: "x",
+      loginExpiresAt: null,
+    });
+  }
+  for (const raw of [
+    "not json",
+    JSON.stringify({ claudeAiOauth: { refreshTokenExpiresAt: 1760000000000 } }),
+    JSON.stringify({ claudeAiOauth: { accessToken: "" } }),
+  ]) {
+    assert.equal(usage.parseCredential(raw), null);
+  }
+});
+
+void test("readCredential returns the token and the login expiry from one credentials file and nothing else", async () => {
+  const dir = path.join(env.root, "usage-dir-credential");
+  fs.mkdirSync(dir, { recursive: true });
+  const service = `dispatch-test-none-${Math.random().toString(36).slice(2)}`;
+  assert.equal(await usage.readCredential(service, dir), null);
+  fs.writeFileSync(
+    path.join(dir, ".credentials.json"),
+    JSON.stringify({
+      claudeAiOauth: {
+        accessToken: "sk-ant-oat01-FAKE-FILE",
+        refreshToken: "sk-ant-ort01-FAKE",
+        expiresAt: 1,
+        refreshTokenExpiresAt: 1760000000000,
+      },
+    }),
+  );
+  assert.deepEqual(await usage.readCredential(service, dir), {
+    token: "sk-ant-oat01-FAKE-FILE",
+    loginExpiresAt: new Date(1760000000000).toISOString(),
+  });
+  fs.writeFileSync(
+    path.join(dir, ".credentials.json"),
+    JSON.stringify({
+      claudeAiOauth: { accessToken: "sk-ant-oat01-FAKE-FILE" },
+    }),
+  );
+  assert.deepEqual(await usage.readCredential(service, dir), {
+    token: "sk-ant-oat01-FAKE-FILE",
+    loginExpiresAt: null,
+  });
 });
 
 void test("fetchUsage honours DISPATCH_USAGE_URL at call time and sends the bearer token there", async () => {

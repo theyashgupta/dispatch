@@ -77,7 +77,22 @@ void test("a card without a board key uses the default board key", () => {
   assert.equal(events[0]?.boardKey, DEFAULT_BOARD_KEY);
 });
 
-void test("a non group card throws not-group-card and appends nothing", () => {
+void test("a launched ticket card appends exactly one loop_gate event", () => {
+  const events = install(
+    card({
+      source: "linear",
+      launch: { playbook: "Write code directly", direction: "" },
+    }),
+  );
+
+  reportLoopGate(ENTRY, REPORT);
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.cardId, "card-1");
+  assert.equal(events[0]?.kind, "loop_gate");
+});
+
+void test("a ticket card with no launch throws not-group-card and appends nothing", () => {
   const events = install(card({ source: "linear" }));
 
   assert.throws(

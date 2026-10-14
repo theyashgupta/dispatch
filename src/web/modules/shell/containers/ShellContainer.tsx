@@ -151,6 +151,7 @@ const PAGE_TITLES: Record<Page, string> = {
   flow: "Flow",
   boards: "Boards",
   dashboard: "Dashboard",
+  orchestrator: "Orchestrator",
   "board-settings": "Board settings",
 };
 
@@ -550,6 +551,7 @@ export function ShellContainer({
           toastOptions={{
             closeButtonAriaLabel: "Dismiss",
             classNames: {
+              toast: "pointer-events-auto",
               description: "text-destructive-text!",
               actionButton: "bg-primary! text-primary-foreground!",
             },

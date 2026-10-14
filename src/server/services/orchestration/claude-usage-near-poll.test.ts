@@ -8,7 +8,7 @@ const env = isolateEnv();
 const usage = await import("./claude-usage.js");
 
 let status = 200;
-let percent = 85;
+const percent = 85;
 let hits = 0;
 const server = http.createServer((_req, res) => {
   hits += 1;
@@ -26,25 +26,25 @@ void test.after(() => {
   env.cleanup();
 });
 
-void test("the account in use reads again only while a bucket is above 80 percent, and a 429 keeps its backoff (U2-08)", async () => {
+void test("the account in use is read again only when it is due, and a 429 holds the tick and the manual refresh", async () => {
   await usage.refreshUsage("default");
   assert.equal(hits, 1);
-  assert.equal(await usage.refreshInUseIfNearLimit(), true);
+  await usage.runUsageTick();
+  assert.equal(hits, 1);
+  await usage.runUsageTick(Date.now() + 2 * 60 * 60 * 1000);
   assert.equal(hits, 2);
 
-  percent = 50;
-  assert.equal(await usage.refreshInUseIfNearLimit(), true);
-  assert.equal(hits, 3);
-  assert.equal(await usage.refreshInUseIfNearLimit(), false);
-  assert.equal(hits, 3);
-
-  percent = 85;
-  await usage.refreshUsage("default");
   status = 429;
-  assert.equal(await usage.refreshInUseIfNearLimit(), true);
+  await usage.refreshUsage("default");
   assert.equal(usage.getUsage("default").status, "rate-limited");
-  assert.equal(await usage.refreshInUseIfNearLimit(), false);
-  assert.equal(hits, 5);
+  assert.equal(hits, 3);
+  await usage.runUsageTick(Date.now() + 60 * 1000);
+  assert.equal(hits, 3);
+  assert.deepEqual(await usage.refreshUsageManually("default"), {
+    ok: false,
+    error: "too-soon",
+  });
+  assert.equal(hits, 3);
 });
 
 void test("the general refresh listener sees every account with its snapshot", async () => {

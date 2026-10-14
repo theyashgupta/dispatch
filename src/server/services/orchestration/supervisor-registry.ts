@@ -1,5 +1,6 @@
 import type { Card, Session, SupervisorState } from "../../../shared/types.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
+import { isLoopCard } from "../../../shared/running-group.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import type { PaneSample } from "../../adapters/markers/watcher.js";
 import { paneAtPrompt, sessionEnvHas } from "../../adapters/tmux.js";
@@ -148,7 +149,7 @@ function loopOf(card: Card, now: number): LoopFacts | null {
     };
   }
   const progress = card.loopProgress;
-  if (card.source !== "group" || progress === undefined) return null;
+  if (!isLoopCard(card) || progress === undefined) return null;
   const { currentUnit, currentPhase } = progress.summary;
   return {
     engineActive: progress.engine?.active === true && !progress.engine.closed,
@@ -250,7 +251,7 @@ export async function supervisePane(
   if (watcher.running || wakeInFlight(card)) return;
   watcher.running = true;
   try {
-    if (card.source === "group" && !watcher.progressRead) {
+    if (isLoopCard(card) && !watcher.progressRead) {
       await refreshLoopProgress(card.id);
       watcher.progressRead = true;
     }

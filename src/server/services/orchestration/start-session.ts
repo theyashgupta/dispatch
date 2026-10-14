@@ -18,6 +18,7 @@ import {
   updateLastUsedPlaybook,
 } from "../infra/config-holder.js";
 import { ConflictError, ValidationError } from "../domain/errors.js";
+import { recordGroupState } from "./group-state-events.js";
 import { launchableCard } from "./card-move.js";
 import { getBoard } from "./boards.js";
 import { restatRepos } from "./workspaces.js";
@@ -149,6 +150,7 @@ export async function startSession(
     crossSessionInbound?: CrossSessionInbound;
     newSession?: boolean;
     inheritFrom?: string;
+    account?: string;
   },
 ): Promise<void> {
   if (store.isStarting(cardId)) return;
@@ -259,6 +261,7 @@ export async function startSession(
       warnings,
       inheritBaseRef: reserved?.parentBranch,
       launchIntent,
+      requestedAccountId: opts?.account,
     };
 
     const done: SagaStep[] = [];
@@ -303,10 +306,20 @@ export async function startSession(
       if (reserved != null) {
         await store.rollbackReservedSession(cardId, reserved.sessionId);
       }
-      await store.setStartError(
-        cardId,
-        toStartError(err, currentStep?.name ?? "starting", wantsNewSession),
+      const startError = toStartError(
+        err,
+        currentStep?.name ?? "starting",
+        wantsNewSession,
       );
+      await store.setStartError(cardId, startError);
+      if (card.source !== "group") {
+        recordGroupState(
+          store.getCard(cardId),
+          "start_failed",
+          `start failed at ${startError.step}`,
+          null,
+        );
+      }
     }
   } finally {
     store.endStart(cardId);
@@ -320,6 +333,7 @@ export interface CardStartInput {
   newSession?: boolean | undefined;
   inheritFrom?: string | undefined;
   workspace?: NonNullable<Card["workspace"]> | undefined;
+  account?: string | undefined;
 }
 
 export const sessionStarter: { start: typeof startSession } = {
@@ -435,6 +449,7 @@ export async function commitCardStart(
     crossSessionInbound: input.crossSessionInbound,
     newSession: input.newSession,
     inheritFrom: input.inheritFrom,
+    account: input.account,
   });
 }
 

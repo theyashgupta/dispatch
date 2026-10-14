@@ -76,7 +76,11 @@ void test("continueText names the loop progress and resume files for the restart
   const { card, session } = await startedCard("continue");
   await store.setLoopProgress(card().id, LOOP_PROGRESS);
   const root = rootOf(card(), session());
-  const text = continueText(card(), session(), "restart");
+  const text = continueText(
+    { ...card(), source: "group" },
+    session(),
+    "restart",
+  );
   assert.ok(text.startsWith("The loop stopped without a marker."));
   assert.ok(
     text.includes(
@@ -88,6 +92,81 @@ void test("continueText names the loop progress and resume files for the restart
       path.join(root, loopFilePath(LOOP_PROGRESS.slug, "resume.md")),
     ),
   );
+});
+
+const DUTIES = [
+  "restart",
+  "api_error",
+  "sleep_cut",
+  "resume",
+  "usage_limit",
+] as const;
+
+void test("continueText names the feature state and resume files for a single PRD loop", () => {
+  const card = {
+    workspacePath: "/root",
+    loopProgress: {
+      ...LOOP_PROGRESS,
+      slug: "demo-feature",
+      prdFile: "repo/.planning/prds/demo.md",
+    },
+  } as unknown as Card;
+  for (const duty of DUTIES) {
+    const text = continueText(card, {} as Session, duty);
+    assert.ok(
+      text.includes(
+        "Read /root/repo/.planning/demo-feature/state.md and /root/repo/.planning/demo-feature/resume.md, then continue the loop from the lowest phase with no gate=pass line.",
+      ),
+      duty,
+    );
+    assert.ok(!text.includes(".roadmap"), duty);
+  }
+});
+
+void test("continueText keeps the group text for a group loop", () => {
+  const group = {
+    source: "group",
+    workspacePath: "/root",
+    loopProgress: LOOP_PROGRESS,
+  };
+  for (const duty of DUTIES) {
+    const text = continueText(group as unknown as Card, {} as Session, duty);
+    assert.ok(
+      text.endsWith(
+        "Read /root/.roadmap/sbx-loop/progress.md and /root/.roadmap/sbx-loop/resume.md, then continue the loop from the recorded position.",
+      ),
+      duty,
+    );
+  }
+});
+
+void test("continueText only asks to continue for a single loop with no usable feature folder", () => {
+  for (const prdFile of ["../x/.planning/prds/demo.md", "repo/prds/demo.md"]) {
+    const card = {
+      workspacePath: "/root",
+      loopProgress: { ...LOOP_PROGRESS, prdFile },
+    };
+    for (const duty of DUTIES) {
+      const text = continueText(card as unknown as Card, {} as Session, duty);
+      assert.ok(text.endsWith(" Continue from where you stopped."), duty);
+      assert.ok(!text.includes(".roadmap"), duty);
+    }
+  }
+});
+
+void test("continueText only asks to continue for a launched ticket card whose loop has no PRD file", () => {
+  const card = {
+    source: "local",
+    launch: { direction: "x" },
+    workspacePath: "/root",
+    loopProgress: { ...LOOP_PROGRESS, slug: "demo", roadmapFile: "" },
+  } as unknown as Card;
+  assert.equal(card.loopProgress?.prdFile, undefined);
+  for (const duty of DUTIES) {
+    const text = continueText(card, {} as Session, duty);
+    assert.ok(text.endsWith(" Continue from where you stopped."), duty);
+    assert.ok(!text.includes(".roadmap"), duty);
+  }
 });
 
 void test("continueText without a loop only asks to continue", async () => {

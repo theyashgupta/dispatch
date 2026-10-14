@@ -23,12 +23,14 @@ export const PAGES = [
   "flow",
   "boards",
   "dashboard",
+  "orchestrator",
   "board-settings",
 ] as const;
 
 export const KEYED_PAGES = [
   "board",
   "dashboard",
+  "orchestrator",
   "inbox",
   "sessions",
   "board-settings",
@@ -66,7 +68,12 @@ function parseBoardsPath(segments: string[]): Route {
   if (key === undefined || key === "") return { page: "boards" };
   const board = decode(key);
   if (child === "settings") return { page: "board-settings", board };
-  if (child === "dashboard" || child === "inbox" || child === "sessions") {
+  if (
+    child === "dashboard" ||
+    child === "orchestrator" ||
+    child === "inbox" ||
+    child === "sessions"
+  ) {
     const id = tail.join("/");
     return id === ""
       ? { page: child, board }

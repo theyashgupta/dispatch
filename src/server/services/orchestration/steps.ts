@@ -147,6 +147,7 @@ export interface SagaContext {
   createdWorktrees: { repoPath: string; worktreePath: string }[];
   createdBranches: { repoPath: string; branch: string }[];
   tmuxSessionCreated: boolean;
+  requestedAccountId?: string;
   /** The Claude account the REPL launched on, set by the start-claude step for `completeStart`. */
   claudeAccountId?: string;
   hookSilent?: boolean;
@@ -868,7 +869,9 @@ const startClaude: SagaStep = {
   name: "starting claude",
   statusText: "Starting Claude…",
   async run(ctx) {
-    const account = await resolveLaunchAccount(getActiveAccountId());
+    const account = await resolveLaunchAccount(
+      ctx.requestedAccountId ?? getActiveAccountId(),
+    );
     ctx.claudeAccountId = account.id;
     await launchClaude({
       cardId: ctx.card.id,

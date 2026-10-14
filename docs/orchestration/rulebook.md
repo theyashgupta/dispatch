@@ -23,7 +23,7 @@ A line that starts with "Dispatch wake:" comes from Dispatch. Read the board wit
 End every turn with `wait_for_event`. Use these values:
 
 - Set kinds to `decision_answered`, `group_state` and `intake_submitted`.
-- Add `supervisor_state` and set cardIds to the ids of the running single cards.
+- The `group_state` events cover the groups and the single cards that you started with `start_card`.
 - Set timeoutSeconds to 55.
 - When the call times out, call it again.
 
@@ -122,6 +122,8 @@ When the user answers `reject`, raise a decision item of kind `ruling` that asks
 
 Before each start, call `get_policy`. Read the concurrency cap and the count of running loops.
 
+Before each start, also call `list_accounts`. It gives each account with its state and its usage windows. For a long loop, such as a PRD + Ralph Loop card or a group, choose the account with the most weekly headroom: the lowest percent in its weekly window, with a state that is not `limited` or `login-expired`. Pass that account id to `start_card` as `account`. Omit `account` to use the active account. Never choose usage credits.
+
 The count includes running groups and running cards that an orchestrator started. A card or group in Agent done does not count.
 
 Start work in these ways:
@@ -137,6 +139,7 @@ Start work in these ways:
 - The card is in Done or Inbox.
 - The card is running.
 - The playbook is the Board Orchestrator playbook.
+- The account is not in `list_accounts` (400 `unknown-account`).
 
 `start_card` answers when the start began, not when the worktree exists. After it, confirm that the session of the card appears with `read_state` or `list_sessions` before you treat the card as started.
 
@@ -216,9 +219,9 @@ Read handoffPercent and handoffHardPercent in `get_policy`. The defaults are 50 
 
 Read the context percent from the status line. Use `read_pane_tail` to see it.
 
-For a group at the handoff percent, call `request_handoff`. The supervisor resumes the group after HANDOFF_READY.
+For a group or a single card at the handoff percent, call `request_handoff`. The supervisor resumes the loop after HANDOFF_READY. The supervisor also sends the request itself at the handoff percent.
 
-A single card has no Dispatch resume yet. Give a single card one PRD of work. If its context passes the hard percent, raise a decision item.
+Read the progress of a group with `get_group_progress`. Read the progress of a single card with `get_card_progress`. It gives the phases of the PRD, the gate of each phase, the engine state and the last status marker.
 
 ### Usage limits
 
@@ -226,7 +229,7 @@ Never select usage credits.
 
 When usageLimit is `wait`, the supervisor waits for the reset and then continues.
 
-After a limit, check `get_group_progress` for a group. Call `read_pane_tail` for every session. Do this before any `send_input`.
+After a limit, check `get_group_progress` for a group or `get_card_progress` for a single card. Call `read_pane_tail` for every session. Do this before any `send_input`.
 
 ### Stalls
 
@@ -290,7 +293,7 @@ To fix a failed check, call `send_input` with the fix instruction to the group s
 
 With shipRights `none`, call `create_decision_item`. Name the branches so the user can ship them.
 
-A single card in Agent done: `start_ship` works on group cards only. Raise a decision item that names the branch of the card. The user ships it.
+Ship a single card that `start_card` started in the same way. When it is in Agent done, call `start_ship` with its session branch as the one branch, in plan order with the groups. The flow checks that the branch is ahead of its base and that the worktree is clean. A single card that `start_card` did not start is refused with `not-group-card`; raise a decision item that names its branch, and the user ships it.
 
 ## 10. Release procedure
 
@@ -308,13 +311,15 @@ A release has these parts:
 
 A release needs no approval from the user.
 
-The orchestrator has no release tool. Call `create_decision_item` one time. Name these items:
+Prepare a release in these steps:
 
-- The version, chosen by the numbering rule.
-- The features in the release.
-- The merged PRs.
+1. Choose the bump by the numbering rule. Choose major only when the user names it.
+2. Call `release_prep` with the bump, the features in the release and the merged PR numbers. It reads the version of the base branch and creates a release card in To Do with the next version.
+3. Call `start_card` on the release card with the Release playbook. The release session commits the version bump, drafts the notes and records the demo, then reports done.
+4. When the release card is in Agent done, call `start_ship` with its session branch, the bump branch.
+5. When the bump PR merged, call `get_policy`. Then call `send_input` and tell the release session that the bump PR merged and what the shipRights of the board are now. The session publishes only on the shipRights in that message, not on the copy in the release card.
 
-The user then starts the release.
+The release session publishes only when the shipRights of the board are `merge`. Else it asks the user to publish. The session never publishes by hand: when the Publish workflow fails, it asks the user. No tool publishes, and no tool reads the vault.
 
 ## 11. Ask the user
 

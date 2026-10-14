@@ -17,18 +17,19 @@ export function isActiveCard(card: Card): boolean {
   );
 }
 
-/**
- * True for a group that holds a loop slot on the client.
- *
- * @remarks The server count also includes a start in flight, which the client cannot see.
- */
-export function isRunningGroup(card: Card): boolean {
-  return card.source === "group" && isActiveCard(card);
-}
-
 /** True when the card has loop progress with at least one unit. */
 export function hasLoopProgress(
   card: Card,
 ): card is Card & { loopProgress: LoopProgress } {
   return (card.loopProgress?.units.length ?? 0) > 0;
+}
+
+/** True for a group card or a ticket card that an orchestrator launched. */
+export function isLoopCard(card: Card): boolean {
+  return card.source === "group" || card.launch !== undefined;
+}
+
+/** True for a loop card with a live session or a provisioning step. */
+export function isRunningLoopCard(card: Card): boolean {
+  return isLoopCard(card) && isActiveCard(card);
 }

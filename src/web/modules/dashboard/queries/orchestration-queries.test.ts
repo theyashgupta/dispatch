@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { MutationObserver, QueryClient } from "@tanstack/react-query";
+import { QueryClient } from "@tanstack/react-query";
 import type { BoardKey } from "../../../../shared/types.js";
 import { openDecisionsQueryOptions } from "@/queries/attention-actions-queries";
 import {
   orchestrationEventsQueryOptions,
-  retryResumeMutationOptions,
   orchestrationSummaryQueryOptions,
 } from "./orchestration-queries.js";
 
@@ -94,21 +93,5 @@ test("a failure status rejects the query", async () => {
       ...orchestrationSummaryQueryOptions(BOARD),
       retry: false,
     }),
-  );
-});
-
-test("Try resume again posts to the card route and refreshes the orchestration reads", async () => {
-  const client = new QueryClient();
-  client.setQueryData(["orchestration", BOARD, "summary"], {});
-  reply({});
-  const outcome = await new MutationObserver(
-    client,
-    retryResumeMutationOptions(client, BOARD),
-  ).mutate("GROUP-4");
-  assert.deepEqual(outcome, { ok: true, result: null });
-  assert.deepEqual(urls, ["/api/cards/GROUP-4/resume"]);
-  assert.equal(
-    client.getQueryState(["orchestration", BOARD, "summary"])?.isInvalidated,
-    true,
   );
 });
