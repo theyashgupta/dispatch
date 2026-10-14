@@ -318,7 +318,7 @@ The checks 1 to 3 use no git call. The check 4 reads one file and runs before an
 
 ## Tool reference
 
-This section is the reference for the 30 tools. Each tool calls one route under `/api/orchestrator/`. Each call is checked against the board scope and, for a write, the policy (D-6), and is recorded as a `tool_call` row in `orchestration_events`. A tool call on a card that another orchestrator owns (D-7) returns 403 `other-owner`.
+This section is the reference for the 32 tools. Each tool calls one route under `/api/orchestrator/`. Each call is checked against the board scope and, for a write, the policy (D-6), and is recorded as a `tool_call` row in `orchestration_events`. A tool call on a card that another orchestrator owns (D-7) returns 403 `other-owner`.
 
 | Family    | Tools                                                                                                                                                                   | Notes                                                                                    |
 | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
@@ -327,7 +327,7 @@ This section is the reference for the 30 tools. Each tool calls one route under 
 | Tickets   | `create_ticket`, `update_ticket`, `move_card`, `add_comment`                                                                                                            | `update_ticket` closes F25                                                               |
 | Groups    | `create_base_branch`, `create_group`, `start_group`                                                                                                                     | `create_group` takes members, optional repos, playbook, direction and `dependsOn`        |
 | Cards     | `start_card`                                                                                                                                                            | starts one ticket card with a playbook and a direction                                   |
-| Sessions  | `send_input`, `approve_roadmap`, `request_handoff`, `resume_loop`, `stop_session`                                                                                       | `send_input` returns `confirmed` or `unconfirmed` (D-4); `resume_loop` per Key rules     |
+| Sessions  | `send_input`, `approve_roadmap`, `request_handoff`, `resume_loop`, `stop_session`, `pause_card`, `resume_card`                                                          | `send_input` returns `confirmed` or `unconfirmed` (D-4); `resume_loop` per Key rules     |
 | Ship      | `start_ship`, `get_ship_state`                                                                                                                                          | D-8                                                                                      |
 | Decisions | `create_decision_item`                                                                                                                                                  | the user answers; the answer returns as an event                                         |
 | Wait      | `wait_for_event`                                                                                                                                                        | blocks until an event matches a filter or a time limit passes                            |
@@ -495,6 +495,21 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 - Input: `cardId` (card id).
 - Description: "Stop the session of a card. A card outside your board is refused."
 - Refusals: 403 `policy-refused` with `reason` `user must resume`. 409 `ship-running`, `no-live-session`, `session-busy`, `session-state-refused` (as for `send_input`).
+
+### `pause_card`
+
+- Route: `POST /sessions/:cardId/pause`. It answers 200 with `{ paused: true }`.
+- Input: `cardId` (card id).
+- Description: "Pause the loop of a card: stop its processes in place. The server never resumes it; call resume_card."
+- A pause records `by: user`, so the memory governor of the server never resumes it. Only `resume_card` or the user resumes the card.
+- Refusals: 403 `other-board` or `other-owner` (as for `stop_session`). 409 `already-paused`, `not-pausable` with `reason` `not a loop`, `orchestrator session`, `start in progress`, `no live session`, `no shell session` or `process read failed`, and `busy`.
+
+### `resume_card`
+
+- Route: `POST /sessions/:cardId/unpause`. It answers 200 with `{ resumed: true }`.
+- Input: `cardId` (card id).
+- Description: "Resume a paused loop. Refused while memory is low."
+- Refusals: 403 `other-board` or `other-owner` (as for `stop_session`). 409 `memory-pressure` with `reason` `free memory <free> MB is below the <floor> MB floor` or `swap used <used> MB is above the <ceiling> MB ceiling`, checked first, then `not-paused`, `busy`, and `unpause-incomplete` with `reason` `a command typed while paused owns the terminal` or `the shell did not hand the terminal back`.
 
 ### `start_ship`
 
