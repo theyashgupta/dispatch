@@ -118,8 +118,8 @@ and roles only, it does not restate the layering policy.
 | Frontend routes     | `web/routes/__root.tsx`, `web/routes/board.{-$id}.lazy.tsx`, `web/modules/shell/containers/ShellContainer.tsx`                                                                                                                                                                                                                                  | Hash routes own the URL and its params. The router context gives the query client and the app store to every container. The root route renders the shell view with module views in its slots: the page, the detail panel and the card action dialogs.                                                                |
 | Frontend modules    | `web/modules/board/views/BoardView.tsx`, `web/modules/board/containers/BoardContainer.tsx`, `web/modules/detail/containers/DetailPanelContainer.tsx`, `web/modules/shell/components/AppSidebar.tsx`                                                                                                                                             | One folder per feature under `web/modules/`, with the layers views, containers, components, hooks, domain and queries. A module never imports a sibling module. [frontend-architecture.md](standards/frontend-architecture.md) has the layer rules.                                                                  |
 | Frontend boards     | `web/modules/boards/views/BoardsView.tsx`, `web/modules/boards/containers/BoardsContainer.tsx`, `web/modules/boards/containers/BoardFormContainer.tsx`, `web/modules/shell/components/SidebarBoards.tsx`                                                                                                                                        | The boards page (list, create, edit, archive, restore) and the sidebar Boards section. The path key selects the board on the keyed pages (`/boards/<key>`, `/boards/<key>/inbox` and so on). The `board` search parameter selects it on the other pages.                                                             |
-| Orchestrator panel  | `web/modules/orchestrator/views/OrchestratorEntryView.tsx`, `web/modules/orchestrator/containers/OrchestratorPanelContainer.tsx`, `web/modules/orchestrator/containers/PolicyContainer.tsx`, `web/modules/orchestrator/containers/OrchestratorsContainer.tsx`                                                                                   | The header entry button and the orchestrator panel with the tabs Terminal, Decisions, Policy and Orchestrators. The policy form is the only place where a user changes a board policy.                                                                                                                               |
-| Frontend dashboard  | `web/routes/dashboard.{-$id}.lazy.tsx`, `web/modules/dashboard/views/DashboardView.tsx`, `web/modules/dashboard/views/DashboardHeaderView.tsx`, `web/modules/dashboard/containers/use-dashboard-data.ts`                                                                                                                                        | The `/dashboard` page of the selected board. Each section container reads its inputs through `use-dashboard-data.ts` and shows its own loading, error and empty state. The shell page header shows the title and the stale badge.                                                                                    |
+| Orchestrator centre | `web/modules/orchestrator/views/OrchestratorEntryView.tsx`, `web/modules/orchestrator/views/CentreView.tsx`, `web/modules/orchestrator/containers/SettingsSheetContainer.tsx`, `web/modules/orchestrator/containers/PolicyContainer.tsx`, `web/modules/orchestrator/containers/OrchestratorsContainer.tsx`                                      | The header entry button opens the command centre page of the board. The settings sheet on the centre has the tabs Policy and Orchestrators. The policy form is the only place where a user changes a board policy.                                                                                                   |
+| Frontend dashboard  | `web/routes/dashboard.{-$id}.lazy.tsx`, `web/modules/dashboard/views/DashboardView.tsx`, `web/modules/dashboard/containers/use-dashboard-data.ts`                                                                                                                                                                                               | The `/dashboard` page of the selected board. Each section container reads its inputs through `use-dashboard-data.ts` and shows its own loading, error and empty state. The header strip at the top of the page shows the title, the sync state and the stale text.                                                   |
 | Frontend shared     | `web/components/ui/button.tsx`, `web/components/ui/hooks/use-app-store.ts`, `web/components/ThemeProvider.tsx`, `web/queries/board-snapshot-queries.ts`                                                                                                                                                                                         | The shadcn primitives and app-wide hooks, the shared components, the queries that two or more modules read (the board snapshot and its SSE stream), and the design tokens in `web/styles/tokens.css`.                                                                                                                |
 
 ## API
@@ -145,6 +145,7 @@ Mount prefix: `/api/orchestrator`.
 | GET    | `/api/orchestrator/cards/:id`                      | Orchestrator token | Tool `get_card`: read one card of the board with its members.                                       |
 | GET    | `/api/orchestrator/sessions`                       | Orchestrator token | Tool `list_sessions`: list the sessions of the board, only the live ones when asked.                |
 | GET    | `/api/orchestrator/groups/:id/progress`            | Orchestrator token | Tool `get_group_progress`: read the loop progress of one group card.                                |
+| GET    | `/api/orchestrator/cards/:id/progress`             | Orchestrator token | Tool `get_card_progress`: read the loop progress of one ticket card that `start_card` started.      |
 | GET    | `/api/orchestrator/sessions/:cardId/pane`          | Orchestrator token | Tool `read_pane_tail`: read the last lines of the terminal of a session.                            |
 | GET    | `/api/orchestrator/events`                         | Orchestrator token | Tool `list_events`: list the board events after a cursor, oldest first.                             |
 | GET    | `/api/orchestrator/policy`                         | Orchestrator token | Tool `get_policy`: read the policy of the caller with the running loop count and the group costs.   |
@@ -166,13 +167,15 @@ Mount prefix: `/api/orchestrator`.
 | POST   | `/api/orchestrator/sessions/:cardId/unpause`       | Orchestrator token | Tool `resume_card`: continue a paused loop, refused while memory is low.                            |
 | POST   | `/api/orchestrator/decisions`                      | Orchestrator token | Tool `create_decision_item`: raise a decision item for the user to answer.                          |
 | POST   | `/api/orchestrator/events/wait`                    | Orchestrator token | Tool `wait_for_event`: hold the call until a board event matches or the time limit passes.          |
-| POST   | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `start_ship`: start the ship flow of a finished group card.                                    |
+| POST   | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `start_ship`: start the ship flow of a finished group card or a launched single card.          |
 | GET    | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `get_ship_state`: read the stored ship flow of a group card.                                   |
 | GET    | `/api/orchestrator/state`                          | Orchestrator token | Tool `read_state`: read the saved state of the calling orchestrator.                                |
 | PUT    | `/api/orchestrator/state`                          | Orchestrator token | Tool `write_state`: replace the saved state of the calling orchestrator.                            |
 | GET    | `/api/orchestrator/playbooks`                      | Orchestrator token | Tool `list_playbooks`: list the playbooks with the name, the when line and the source.              |
 | GET    | `/api/orchestrator/rulebook`                       | Orchestrator token | Tool `get_rulebook`: read the orchestration rule book.                                              |
+| GET    | `/api/orchestrator/accounts`                       | Orchestrator token | Tool `list_accounts`: list the Claude accounts with state and usage windows, from the cached meter. |
 | POST   | `/api/orchestrator/cards/:cardId/start`            | Orchestrator token | Tool `start_card`: start the session of one ticket card with a playbook and a direction.            |
+| POST   | `/api/orchestrator/releases`                       | Orchestrator token | Tool `release_prep`: create a To Do release card with the next version from the base branch.        |
 
 ### `routes/board.route.ts`
 
@@ -2833,9 +2836,8 @@ the no-hooks branch of every launch site pass the same env: the builder is the s
 variable is added, so one branch cannot drift.
 
 **Usage is polled, never refreshed.** `services/orchestration/claude-usage.ts` reads each account's
-access token into memory only, calls the OAuth usage endpoint every 15 minutes (the cadence the
-reference implementation settled on because tighter polling 429s), and caches a status-tagged
-snapshot. A 401 or 403 keeps the last windows and marks them `stale`; Dispatch does not rotate the
+access token into memory only, calls the OAuth usage endpoint on the adaptive plan in Account Chain, Cadence,
+and caches a status-tagged snapshot. A 401 or 403 keeps the last windows and marks them `stale`; Dispatch does not rotate the
 refresh token, because a second rotator races the live REPL and logs both out. The manual refresh
 route is limited to one call per account per 30 seconds. Every window on the wire also carries a
 derived period (`periodStart`, `periodEnd`): the known window length back from the reset for
@@ -2933,9 +2935,10 @@ the user must turn them on.
 `defaultPosition`. The migration from version 1 puts Default first and the added accounts after it
 by creation time. The runtime state is in `chain-state.json` next to it
 (`account-chain-state.ts`): the state, buckets and `limitedUntil` of each account, `inUseSince`, the
-exhausted record and the last 50 moves. A corrupt file reads as empty and does not stop the boot.
-The settings are in `config.json` under `claudeAccounts`: `autoMove` (default false),
-`thresholdPercent` (default 100, range 50 to 100) and `minDwellMinutes` (default 15, range 0 to 240).
+exhausted record, the last 50 moves and `loginExpiryNotified`. A corrupt file reads as empty and does
+not stop the boot. The settings are in `config.json` under `claudeAccounts`: `autoMove` (default
+false), `thresholdPercent` (default 100, range 50 to 100), `minDwellMinutes` (default 15, range 0 to 240) and `hysteresisPercent` (default 10, range 0 to 50). The config reader clamps a stored value to
+its range.
 
 **States.** `account-state.ts#deriveAccountState` gives each account one state. The first
 rule that applies sets the state:
@@ -2952,6 +2955,15 @@ rule that applies sets the state:
 selects the first account whose state is `available`, `near-limit` or `unknown` and whose
 `limitedUntil` is not in the future. When no account qualifies, the chain is exhausted and the
 result is the earliest `limitedUntil`. The selection never takes a `login-expired` account.
+
+**Hysteresis.** `account-selection.ts#filterByHysteresis` limits the candidates of a usage trigger.
+The binding bucket of an account is its bucket with the highest percent. A candidate passes only
+when its binding bucket is below `thresholdPercent` minus `hysteresisPercent`. An `unknown` account
+or an account with no buckets does not pass. When `hysteresisPercent` is 0, the filter keeps every
+candidate. The filter applies to trigger 1 and to the return check only. A limit surface, a
+`StopFailure`, Switch now and the exhausted check do not use it. When no candidate passes on a usage
+trigger, the sessions stay on the account in use. If the chain without the filter is exhausted, the
+controller records the exhausted chain as before.
 
 **Triggers.** `account-chain.ts` is the controller. It runs one task at a time in a queue. A manual
 switch through `PUT /accounts/active` runs in the same queue, so it never overlaps a chain move. A
@@ -2970,9 +2982,45 @@ A limit surface whose printed time passed in the last 5 hours is a stale surface
 read shows every bucket below the threshold. The controller ignores it
 (`account-state.ts#isStaleSurface`).
 
-**Cadence.** `claude-usage.ts` reads each account at boot and each 15 minutes. While a bucket of the
-account in use is above 80 percent, it reads that account each 2 minutes. A 429 response uses the
-`Retry-After` backoff.
+**Cadence.** The usage endpoint `/api/oauth/usage` allows about 28 to 30 requests per rolling
+hour. At steady state the plan keeps each account at 20 reads per hour or fewer. An urgent climb
+to the threshold can reach about 30 reads in one rolling hour (see Known Residuals). `claude-usage.ts` reads each
+account at boot, through the same tick. Then a tick each 15 s reads each account whose planned time
+is past, and ticks never overlap. `usage-poll-plan.ts#planNextPoll` sets the next planned time after each read:
+
+- The first good read plans 300 s. Each read with no move multiplies the interval by 1.5.
+- The ceiling is 300 s for the account in use and 600 s for an idle account.
+- A move of 1 point or more halves the interval. The floor is 180 s and the ceiling above still
+  applies.
+- Urgent mode plans 60 s. It applies only to the account in use, when its binding bucket moved up 1
+  point or more and is 15 points or less below the threshold. Urgent mode stops at the threshold
+  and in the hour after a 429.
+- When an account becomes the account in use, its next read is planned within 300 s, unless it is
+  held or in the hour after a 429.
+- A limited account plans 600 s and waits at least 600 s, also after jitter. A 401 or 403 read, or
+  no token, plans 600 s.
+- Jitter changes each delay by up to 10 percent. Jitter never makes a delay longer than 600 s, or
+  longer than 1800 s in the hour after a 429.
+- The next read is never later than the next reset plus 60 s. This rule wins over the 600 s minimum
+  of a limited account. The floor wins over this rule.
+
+A 429 response holds the account for `Retry-After` plus 900 s. When `Retry-After` is missing or 0,
+the hold is 300 s plus 900 s. The hold is at most 24 hours plus 900 s. The hour after a 429
+starts when the hold ends. In that hour, the floor is 360 s for each delay, and each read multiplies
+the interval by 1.5 up to 1800 s.
+
+All usage reads go through `claude-usage.ts#refreshUsage`. The callers are the tick (`poll`), the
+manual refresh (`manual`), the limit surface check (`limit-surface`), the timer reads
+(`fresh-read`) and the login (`login`). Inside a hold, each caller gets the cached snapshot and the
+server sends no request. A call during a read of the same account shares that read. A manual
+refresh is limited to one call per account each 30 s. The planned times apply only to the tick.
+`DISPATCH_USAGE_TIME_SCALE` divides the tick and every planned time, for tests only.
+
+**Request log.** `usage-request-log.ts#appendUsageRequest` writes one JSON line for each request to
+`usage-requests.jsonl` in the data folder. A line has `ts`, `account`, `caller`, `status` (the HTTP
+status or `network`) and `nextInMs`. A line never holds a token or a header. Before the file goes
+past 1 MB, the writer renames it to `usage-requests.jsonl.1` and replaces the older copy. A write
+failure does not stop the read. A read without a token sends no request and writes no line.
 
 **Stability.** After a chain move, a usage trigger does not move the sessions again for
 `minDwellMinutes`. Triggers 2 and 3 are hard signals and override the dwell. A limited account stays
@@ -2999,8 +3047,9 @@ true to false, the controller removes each pending move that it queued.
 **Return.** Each limited account has a timer at `limitedUntil` plus 2 minutes, or 15 minutes from
 now when the time is unknown or past. The timer reads the usage again. The controller accepts only
 a good read that it took after the timer fired. If the read is not good, or the account is
-`unknown` or `login-expired`, the timer is set again 15 minutes on. If the account is no longer limited and ranks
-above the account in use, the sessions return to it with the failover policy. If it is still
+`unknown` or `login-expired`, the timer is set again 15 minutes on. If the account is no longer limited, passes the
+hysteresis rule and ranks above the account in use, the sessions return to it with the failover
+policy. If it does not pass the hysteresis rule, the timer is set again 15 minutes on. If it is still
 limited, the timer is set again. A usage read that clears the account does not cancel the timer,
 so a usage read never starts a return.
 
@@ -3023,6 +3072,16 @@ then `Continue.`; on the options menu it selects the stop option, or the wait op
 option shows, and then sends `Continue.`. A session with no limit surface on the screen gets no
 key. No key path selects a credits option.
 
+**Login expiry.** The usage read also reads `claudeAiOauth.refreshTokenExpiresAt` (epoch ms) from
+the same credential text as the token (`claude-usage.ts#readCredential`). The value stays in memory.
+The usage snapshot carries it as `loginExpiresAt`. A missing, non-number, zero or negative value
+gives no `loginExpiresAt`. The access token field `expiresAt` is not used. The server never writes,
+copies or refreshes a credential. When `loginExpiresAt` is 3 days away or less, or is in the past,
+the controller sends one `login-expiring` event (`login-expiry.ts#shouldWarnLoginExpiry`). It
+stores the value in `loginExpiryNotified` for that account, so a restart sends no second event. A
+new login gives a new value, so it sends a new event. The account row shows the expiry date, with
+the warning tone when the date is 3 days away or less.
+
 **Pin.** `accountPinned` on a session keeps it on its account. Automatic moves and "Switch now" skip
 it. A manual move still moves it: `POST /cards/:id/session/account`, and `PUT /accounts/active`
 with `applyToRunning`. `PUT /cards/:id/session/account-pin` sets the pin. Setting the pin removes
@@ -3030,7 +3089,7 @@ the pending move of the session, and a pending move that the chain queued checks
 before it runs.
 
 **Routes.** `GET /accounts` returns each account in chain order with `position`, `state`,
-`buckets`, `limitedUntil` and `inUse`, the sessions with `pinned`, and `chain` with the settings, the
+`buckets`, `limitedUntil`, `inUse` and `usage` (with `loginExpiresAt` when known), the sessions with `pinned`, and `chain` with the settings, the
 exhausted record, the history (newest first) and `inUseSince`. `PUT /accounts/chain/order` takes
 every account id once and returns 400 `invalid-order` otherwise. `PUT /accounts/chain/settings`
 returns 400 `invalid-settings` for a value out of range. `POST /accounts/chain/switch-now` returns
@@ -3042,10 +3101,13 @@ a new dwell and skips pinned sessions. It returns `{ ok: false, error: "no-eligi
 when no other account qualifies. "Switch now" calls it.
 
 **Records.** `account-chain-records.ts#recordChainEvent` writes one activity row and sends one push
-notification for each failover, return and exhausted chain. The kinds are `account_failover`,
-`account_return` and `account_chain_exhausted`. For a failover or a return, the row `reason` is the
-JSON text of `src/shared/account-chain.ts#buildChainReason`. It holds the trigger, the labels of the
-two accounts and the number of sessions. The trigger is `usage`, `surface`, `rate-limit`, `reset`,
+notification for each failover, return, exhausted chain and login warning. The kinds are
+`account_failover`, `account_return`, `account_chain_exhausted` and `account_login_expiring`. The
+reason of `account_login_expiring` is the JSON text of
+`src/shared/account-chain.ts#buildLoginExpiryReason`: the account label and the expiry time. For a
+failover or a return, the row `reason` is the JSON text of
+`src/shared/account-chain.ts#buildChainReason`. It holds the trigger, the labels of the two accounts
+and the number of sessions. The trigger is `usage`, `surface`, `rate-limit`, `reset`,
 `switch-now` or `held`. A `held` row is an offer that `autoMove` false holds back, and its number
 is 0. For a move, the number is the sessions moved plus the sessions queued. It is null when the
 move step failed. `parseChainReason` reads the row. It also reads an older row in the form
@@ -5451,6 +5513,22 @@ system uptime and the wall clock. If the wall clock moves forward by a large ste
 taken, the gate can find a live slot to be dead. This can occur on Linux early in a boot. It does
 not occur on macOS.
 
+### Account chain follow-ups from claude-swap (LOCAL-107)
+
+LOCAL-107 adopted the claude-swap usage budget, 429 backoff, hysteresis and login warning. Two
+claude-swap items are not in the chain:
+
+- Consume-first order: select the account whose weekly bucket resets first, so the allowance that
+  expires first is used first. The chain uses position order only.
+- Weekly pace and projection in the chain: use the weekly pace to predict when an account becomes
+  limited. The chain uses the threshold only.
+
+The urgent mode reads the account in use each 60 s while it climbs 1 point or more per read and is
+15 points or less below the threshold. A climb of 1 point per read from 70 to the threshold can
+give about 30 reads in one rolling hour, which is the endpoint limit. The ticket sets the 60 s value.
+A 429 in that case holds the account, and a hard signal still moves the sessions. A cap on urgent
+reads per hour is a follow-up.
+
 ## Verification Gates
 
 Dev tooling plus one small `node:test` suite. Each gate answers one narrow, mechanically-checkable
@@ -5840,6 +5918,8 @@ Scenario 5 (tests/e2e/scenario-5-wake.e2e.ts) proves that the server wakes the o
 
 Scenario 6 (tests/e2e/scenario-6-intake-judgment.e2e.ts) proves that the orchestrator judges an intake and starts three loops inside a cap of 2. The board has four tickets (a quick fix, a single feature and two related tickets), the policy **Ask me for each roadmap** and a cap of 2. The fake orchestrator reads the rule book and the playbooks, raises one plan decision item and waits for it. The test answers the plan through `POST /api/decisions/:id/answer`. The orchestrator then calls `start_card` for the quick fix with "Write code directly" and for the single feature with "PRD + Ralph Loop", and creates a group of the two related tickets with "Roadmap Loop". The test checks that the accepted `start_card` and `start_group` rows are in that order, that each card and the group carry their playbook, and that the first `start_group` answers 403 `policy-refused` and starts no session. The test then makes the quick fix card reach Agent done with a Stop hook, which frees a slot, and checks that the second `start_group` starts the group. A watcher checks that no more than 2 cards or groups hold a slot at any time. The scenario types no key into any pane, and a static check of its own files enforces that.
 
+Scenario 6 part B (tests/e2e/scenario-6b-ship-order.e2e.ts) proves the ship order and the release version. The board has a cap of 3, the ship rights **merge** and a sample repository with `package.json` version `1.2.3`. The test calls the orchestrator routes with a minted token and starts a quick fix with "Write code directly", a single feature with "PRD + Ralph Loop" and a group of two tickets, and checks that `start_ship` of the running feature answers 409 `card-not-done`. Each session commits on its branch and sends the done Stop hook, and the feature card carries seeded loop files with every phase passed and a closed engine. The test checks one `agent_done` `group_state` event and one wake line for the feature, and that `get_card_progress` and the card read show its phases. It then ships the quick fix, the feature and the group one at a time and checks that the fake `gh` log creates and merges their PRs in that order and that the bare origin `main` holds the three files. `release_prep` with bump `minor` creates `Release v1.3.0` in To Do, and a second call answers 409 `release-exists`. A watcher checks that no more than 3 cards or groups hold a slot at any time.
+
 Scenario 8 (tests/e2e/scenario-8-memory-pause.e2e.ts) proves that the memory governor pauses and resumes loops end to end. The sandbox sets `DISPATCH_MEMORY_SAMPLE_FILE` through the `memorySampleFile` option of `startSandbox`, so the test drives swap by rewriting a JSON sample file that the server reads every 15 s. The board has three loops started through `start_card` 2 s apart, a swap ceiling of 8192 MB and the supervisor off. The test sets swap to 9000 MB and checks that only the newest loop gets a `by: "memory"` mark, that one `pause` row carries the reason, and that a child process of its pane is in state T. A rise to 9100 MB, which is under 256 MB of growth, must pause nothing more. The test then pauses the second loop as the user and sets swap to 6000 MB, and checks that the first memory-paused loop resumes with one `resume` row, that none of its processes stay stopped, and that the user-paused loop stays paused through three more readings. The scenario types no key into any pane.
 
 The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
@@ -5862,8 +5942,9 @@ root (`card.workspacePath`): the one `.roadmap/<slug>/progress.md`, the roadmap 
 that `progress.md` line 1 names (else the only `ROADMAP*.md`), the loop engine file
 `.claude/ralph-loop.local.md` (else its `.done` copy), and for each unit its PRD and the
 `state.md` and `attempts.md` files of `<repo>/.planning/<slug>-unit-<n>/`. The pure parsers are in
-`loop-progress.ts`. The result is `Card.loopProgress`. A tracked card is a group card that is not
-in Done and has a `workspacePath`.
+`loop-progress.ts`. The result is `Card.loopProgress`. A tracked card is a loop card
+(a group card, or a ticket card that `start_card` started) that is not in Done and has a
+`workspacePath`. For a ticket card the reader reads its single PRD loop.
 
 **Refresh.** The reader reads a tracked card when a watched folder changes (300 ms debounce per
 card) and every 60 s. The watched folders are the session root, `.claude/`, `.roadmap/<slug>/`
@@ -6146,7 +6227,7 @@ reads the identity or writes, `assertAheadAndClean` resolves the base once. The 
 `branch-not-ahead`) and the worktree must be clean (409 `worktree-dirty`). A failed git call of
 these two checks answers 409 `no-workspace`. A group with loop progress keeps the D-8 rules.
 
-**MCP server.** `dispatch mcp` serves the 32 tools over stdio. `bootstrap/cli.ts` reads and checks
+**MCP server.** `dispatch mcp` serves the 35 tools over stdio. `bootstrap/cli.ts` reads and checks
 `DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and
 `bootstrap/mcp-tools.ts` holds the zod input and the description of each tool. The dependency
 cruiser rule `mcp-server-isolated` refuses an import of `routes`, `services`, `store`, `adapters`
@@ -6291,26 +6372,35 @@ two racing calls make one ticket, and a failed create frees the index. No tool c
 text.
 
 **User session routes.** `routes/session-input.route.ts` holds `POST /api/sessions/:cardId/input` and
-`POST /api/sessions/:cardId/resume-loop` for the panel. They use the same send and state checks as
+`POST /api/sessions/:cardId/resume-loop` for the dashboard and the command centre. They use the same send and state checks as
 `send_input` and `resume_loop`, but a user may reply to a loop that stopped on `budget` or `usage_stop`,
 and `resume-loop` runs no cap or budget check. They are state changing user routes, so
 `refuseOrchestratorTokenOnUserRoute` refuses an orchestrator token on them.
 
-**Panel.** The `orchestrator` web module (`web/modules/orchestrator/`) adds the panel to Screen 3. The route
-`/board/{-$id}` takes the search value `panel=orchestrator`, and `SidePanelLayout` shows the panel
-beside the board as a resizable pane, or as a sheet on a narrow screen. The entry button is in the
-page header (Screen 5): "Add orchestrator" on a board with no record and "Orchestrator" with one, and
-it reads only the `Board` that the board list holds. The panel has four tabs:
+**Command centre.** The `orchestrator` web module (`web/modules/orchestrator/`) holds the command centre. The
+route `/boards/$key/orchestrator/{-$id}` shows it. The entry button is in the page header (Screen 5).
+Its label is "Add orchestrator" on a board with no record. Its label is "Orchestrator" on a board with a
+record. It reads only the `Board` that the board list holds.
 
-- Terminal: the ttyd frame of the hidden card of the main (`/sessions/<session id>/terminal/`), and the
-  header with the state badge and one control. The control is Start, Stop, or Resume (only at `lost` and
-  `shell_prompt`), and it calls the lifecycle routes. Every control is off while the board stream is down.
-- `Decisions (n)`: open decision items with their options, and the loops at `needs_input` or
-  `permission_prompt`. A reply goes through the user session routes, and an answer through
-  `POST /api/decisions/:id/answer`. The "Other answer" field shows on no `roadmap_approval` or
-  `ticket_proposal` item (a gate: approve or reject only); on other kinds it sends the typed text as
-  `note` with the recommended option id, else the first option id.
+The toolbar of the centre shows one control for the selected record. It is Start on a board with no
+record. It is also Start on a stopped record, unless the session state is `lost` or `shell_prompt`. It is
+Stop on a running record. It is Resume when the session state is `lost` or `shell_prompt`, also on a
+stopped record. The control calls the lifecycle routes. The toolbar shows no control while the
+record starts or stops. Every control is off while the board stream is down. Start is also off while the
+board policy has the supervisor off. Stop is off while the session state is `permission_prompt`,
+`usage_limit_dialog` or `usage_limit_wait`.
+
+A stopped record can hold a start error from a background start. The toolbar then shows the alert "The
+orchestrator did not start: <reason>." with a retry button. The retry button runs Start.
+
+The conversation pane answers a decision item through `POST /api/decisions/:id/answer`. A `roadmap_approval`,
+`ticket_proposal` or `plan` item is a gate. A gate has no "Other answer" field. It offers its options
+only. Any other kind shows the field. The field sends the typed text as `note` with the recommended
+option id. If no option is recommended, it sends the first option id.
+
+The settings sheet on the centre has two tabs:
+
 - Policy: the board policy form, saved through `PUT /api/boards/:key/policy`. The model lists are in
   `shared/orchestrator-models.ts`, and the route refuses any other model with 400.
-- `Orchestrators (n)`: the main and the extras, with the form to add an extra, edit its override and move
+- Orchestrators: the main and the extras, with the form to add an extra, edit its override and move
   groups.

@@ -94,6 +94,9 @@
   --color-destructive-fill: var(--destructive-fill);
   --color-on-danger: var(--on-danger);
   --color-scrim: var(--scrim);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn-soft: var(--warn-soft);
+  --color-danger-soft: var(--danger-soft);
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
@@ -123,24 +126,33 @@
   --shadow-card-multi: var(--shadow-ring-multi);
   --shadow-card-attention-float: var(--shadow-ring-attention-float);
   --shadow-card-multi-float: var(--shadow-ring-multi-float);
+  --shadow-glow-current: var(--glow-current);
   --default-transition-duration: var(--motion-hover);
   --default-transition-timing-function: var(--easing-enter);
 }
 
 @layer components {
-  .segment-stripes {
+  .segment-hatch-danger {
     background-image: repeating-linear-gradient(
-      45deg,
-      var(--text) 0 3px,
-      transparent 3px 6px
+      135deg,
+      var(--danger-soft) 0 6px,
+      transparent 6px 12px
     );
   }
-  .segment-dots {
+  .canvas-dots {
     background-image: radial-gradient(
       circle,
-      var(--destructive) 1px,
+      color-mix(in srgb, var(--text-muted) 35%, transparent) 1px,
       transparent 1.5px
     );
-    background-size: 5px 5px;
+    background-size: 16px 16px;
+  }
+  .dot-grid {
+    background-image: radial-gradient(
+      circle,
+      var(--dot-grid) 1px,
+      transparent 1.5px
+    );
+    background-size: 16px 16px;
   }
 }

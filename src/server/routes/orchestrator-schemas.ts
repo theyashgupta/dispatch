@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  ACCOUNT_ID_MAX,
   CARD_ID_MAX,
   DECISION_ID_RE,
   DECISION_LABEL_MAX,
@@ -14,6 +15,10 @@ import {
   PLAN_ENTRIES_MAX,
   PLAN_PLAYBOOK_MAX,
   PLAN_REF_MAX,
+  RELEASE_BUMPS,
+  RELEASE_FEATURE_MAX,
+  RELEASE_FEATURES_MAX,
+  RELEASE_PRS_MAX,
   SESSION_INPUT_MAX,
   SHIP_BODY_MAX,
   SHIP_TITLE_MAX,
@@ -108,6 +113,33 @@ export const createTicketBodySchema = z.strictObject(
   },
 );
 
+/** The body of `release_prep`: the bump, 1 to 20 feature lines and the pull request numbers of the release. */
+export const releasePrepBodySchema = z.strictObject(
+  {
+    repository: z.string("invalid-repos").min(1, "invalid-repos").optional(),
+    bump: z.enum(RELEASE_BUMPS, "invalid-bump"),
+    features: z
+      .array(
+        z
+          .string("invalid-features")
+          .min(1, "invalid-features")
+          .max(RELEASE_FEATURE_MAX, "invalid-features")
+          .refine((f) => !/[\r\n]/.test(f), "invalid-features")
+          .refine(markerFree, MARKER_ERROR),
+        "invalid-features",
+      )
+      .min(1, "invalid-features")
+      .max(RELEASE_FEATURES_MAX, "invalid-features"),
+    prs: z
+      .array(
+        z.number("invalid-prs").int("invalid-prs").positive("invalid-prs"),
+        "invalid-prs",
+      )
+      .max(RELEASE_PRS_MAX, "invalid-prs"),
+  },
+  { error: unknownFieldError() },
+);
+
 export const updateTicketBodySchema = z
   .object(
     {
@@ -200,6 +232,11 @@ export const startCardBodySchema = z.object(
       .optional(),
     folder: z.string("invalid-folder").min(1, "invalid-folder").optional(),
     repos: reposField,
+    account: z
+      .string("invalid-account")
+      .min(1, "invalid-account")
+      .max(ACCOUNT_ID_MAX, "invalid-account")
+      .optional(),
   },
   "invalid-playbook",
 );

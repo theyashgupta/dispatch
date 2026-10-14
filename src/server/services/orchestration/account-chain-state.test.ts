@@ -57,6 +57,7 @@ void test("chain state round trips every field", async () => {
       earliestResetAt: "2026-10-02T00:00:00.000Z",
     },
     moves: [move(1)],
+    loginExpiryNotified: { [ID]: "2026-10-04T00:00:00.000Z" },
   };
   await chain.writeChainState(state);
   assert.deepEqual(await chain.readChainState(), state);
@@ -109,5 +110,30 @@ void test("entries with an unknown state, a bad limitedUntil or a bad shape are 
   assert.deepEqual(await chain.readChainState(), {
     ...chain.emptyChainState(),
     accounts: { default: good },
+  });
+});
+
+void test("a file without loginExpiryNotified reads it as empty, and a non-string entry is dropped", async () => {
+  const base = { accounts: {}, inUseSince: null, exhausted: null, moves: [] };
+  fs.writeFileSync(chain.CHAIN_STATE_PATH, JSON.stringify(base));
+  assert.deepEqual((await chain.readChainState()).loginExpiryNotified, {});
+
+  for (const bad of [null, [], "x", 5]) {
+    fs.writeFileSync(
+      chain.CHAIN_STATE_PATH,
+      JSON.stringify({ ...base, loginExpiryNotified: bad }),
+    );
+    assert.deepEqual((await chain.readChainState()).loginExpiryNotified, {});
+  }
+
+  fs.writeFileSync(
+    chain.CHAIN_STATE_PATH,
+    JSON.stringify({
+      ...base,
+      loginExpiryNotified: { a: "2026-10-04T00:00:00.000Z", b: 5, c: null },
+    }),
+  );
+  assert.deepEqual((await chain.readChainState()).loginExpiryNotified, {
+    a: "2026-10-04T00:00:00.000Z",
   });
 });

@@ -1,5 +1,7 @@
 export const SWITCH_NOW_REASON = "switch-now";
 
+export const LOGIN_EXPIRY_WARN_MS = 3 * 24 * 60 * 60 * 1000;
+
 const LEGACY_HELD_SUFFIX = ", not moved";
 const LEGACY_MANUAL_SUFFIX = ", switched now";
 
@@ -80,6 +82,40 @@ export function parseChainReason(reason: string | null): ChainReason | null {
   return match
     ? { trigger, from: match[1], to: match[2], sessions: null }
     : null;
+}
+
+/**
+ * Encode the account label and expiry of a login-expiring activity row as its `reason` text.
+ */
+export function buildLoginExpiryReason(
+  label: string,
+  expiresAt: string,
+): string {
+  return JSON.stringify({ label, expiresAt });
+}
+
+/**
+ * Read the account label and expiry of a login-expiring activity row, or `null` when the reason is
+ * not the JSON form.
+ *
+ * @remarks A row written before the JSON form holds the bare ISO expiry and reads as `null`.
+ */
+export function parseLoginExpiryReason(
+  reason: string | null,
+): { label: string; expiresAt: string } | null {
+  if (reason === null || !reason.startsWith("{")) return null;
+  try {
+    const value = JSON.parse(reason) as {
+      label?: unknown;
+      expiresAt?: unknown;
+    };
+    return typeof value.label === "string" &&
+      typeof value.expiresAt === "string"
+      ? { label: value.label, expiresAt: value.expiresAt }
+      : null;
+  } catch {
+    return null;
+  }
 }
 
 /**

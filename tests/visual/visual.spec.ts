@@ -17,10 +17,60 @@ const SETUP_STATUS = {
   node: { ok: true, version: "22.22.0", floor: "22.22" },
   storage: { ok: true, path: "/home/visual/.dispatch/board.db" },
 };
+const at = (minutesAgo: number) =>
+  new Date(now - minutesAgo * 60_000).toISOString();
+const SEEDED_DECISION_PREFIX = "dec-";
+const CONVERSATION = {
+  status: "ok",
+  truncated: false,
+  messages: [
+    {
+      id: "m1",
+      at: at(40),
+      role: "user",
+      text: "Start the billing migration after the schema unit ships.",
+    },
+    {
+      id: "m2",
+      at: at(38),
+      role: "orchestrator",
+      text: "Started GROUP-21 at unit 2. I will ask before the cutover.",
+    },
+    {
+      id: "m3",
+      at: at(20),
+      role: "system",
+      text: "GROUP-22 failed the Phase 5 gate.",
+    },
+  ],
+};
+
+const centreRoutes = async (page: Page) => {
+  await page.route(
+    "**/api/boards/ORC/orchestrators/orch-main/conversation",
+    (route) => route.fulfill({ json: CONVERSATION }),
+  );
+  await page.route(
+    (url) => url.pathname === "/api/decisions",
+    async (route) => {
+      const response = await route.fetch();
+      const { items } = (await response.json()) as {
+        items: { id: string }[];
+      };
+      await route.fulfill({
+        response,
+        json: {
+          items: items.filter((i) => i.id.startsWith(SEEDED_DECISION_PREFIX)),
+        },
+      });
+    },
+  );
+};
 
 const screens: {
   name: string;
   url: string;
+  routes?: (page: Page) => Promise<unknown>;
   ready: (page: Page) => Promise<void>;
 }[] = [
   {
@@ -44,10 +94,12 @@ const screens: {
   {
     name: "settings",
     url: `${seeded}/#/settings`,
-    ready: (page) =>
-      expect(
+    ready: async (page) => {
+      await expect(
         page.getByRole("heading", { name: "Settings", level: 1 }),
-      ).toBeVisible(),
+      ).toBeVisible();
+      await expect(page.getByText("Checking", { exact: true })).toHaveCount(0);
+    },
   },
   {
     name: "card-panel",
@@ -70,14 +122,6 @@ const screens: {
       ).toBeVisible(),
   },
   {
-    name: "orchestrator-panel",
-    url: `${orchestrated}/#/boards/ORC?panel=orchestrator&tab=decisions`,
-    ready: (page) =>
-      expect(
-        page.getByText(/Retry the Phase 5 gate now/).first(),
-      ).toBeVisible(),
-  },
-  {
     name: "dashboard",
     url: `${orchestrated}/#/boards/ORC/dashboard`,
     ready: (page) =>
@@ -90,6 +134,36 @@ const screens: {
     url: `${orchestrated}/#/boards/ORC`,
     ready: (page) =>
       expect(page.getByText("Plain todo ticket").first()).toBeVisible(),
+  },
+  {
+    name: "command-centre",
+    url: `${orchestrated}/#/boards/ORC/orchestrator`,
+    routes: centreRoutes,
+    ready: async (page) => {
+      if ((page.viewportSize()?.width ?? 0) < 768)
+        await page.getByRole("tab", { name: "Conversation" }).first().click();
+      await expect(
+        page.getByText(/Started GROUP-21 at unit 2/).first(),
+      ).toBeVisible();
+      await expect(
+        page.getByText(/Retry the Phase 5 gate now/).first(),
+      ).toBeVisible();
+    },
+  },
+  {
+    name: "centre-settings",
+    url: `${orchestrated}/#/boards/ORC/orchestrator?settings=policy`,
+    routes: centreRoutes,
+    ready: async (page) => {
+      await expect(
+        page
+          .getByRole("dialog")
+          .getByRole("heading", { name: "Orchestrator settings" }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("dialog").getByRole("tab", { name: "Policy" }),
+      ).toHaveAttribute("aria-selected", "true");
+    },
   },
   {
     name: "sidebar-boards",
@@ -137,6 +211,12 @@ const screens: {
   {
     name: "setup-wizard",
     url: `http://127.0.0.1:${seededPort + 1}/#/boards/LOCAL`,
+    routes: (page) =>
+      page.route("**/api/setup", (route) =>
+        route.request().method() === "GET"
+          ? route.fulfill({ json: SETUP_STATUS })
+          : route.fallback(),
+      ),
     ready: (page) => expect(page.getByRole("dialog")).toBeVisible(),
   },
   {
@@ -158,13 +238,7 @@ for (const theme of ["dark", "light"] as const) {
           await page.addInitScript((value) => {
             localStorage.setItem("dsp.theme", value);
           }, theme);
-          if (screen.name === "setup-wizard") {
-            await page.route("**/api/setup", (route) =>
-              route.request().method() === "GET"
-                ? route.fulfill({ json: SETUP_STATUS })
-                : route.fallback(),
-            );
-          }
+          await screen.routes?.(page);
           await page.route("**/api/**", (route) =>
             route.request().method() === "GET" && screen.name !== "gallery"
               ? route.fallback()

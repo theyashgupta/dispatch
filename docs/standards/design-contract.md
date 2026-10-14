@@ -41,6 +41,11 @@ own rendered content — never copied from these products.
 | Card title, description body — `--font-body`             | 13px                    | >=1600px, 1024-1599px, 768-1023px, <768px | Held, unchanged. The 410-character fixture title truncates to one line via the existing card CSS at every breakpoint.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | `type-scale-hold`                                        | 13px / 12px / 11px held | >=1600px, 1024-1599px, 768-1023px, <768px | v3.4 density confirmation. `--font-body` (13px), `--font-label` (12px) and `--font-micro` (11px) hold unchanged under the landed density (`card-padding` 6px/8px, `inter-card-gap` 6px, `column-header-height` 28px) at every breakpoint: card title `fontSize` 13px, column header `fontSize` 12px, count chip `fontSize` 11px, read live. The 288-char fixture title never overflows its card (`scrollWidth <= clientWidth`). Density came from spacing and line-height per the `### Density scale (v3.4)` rows below, not from smaller text, the locked decision this row records.                                                                                                                                                                                                                                                                                                                                            |
 
+**Record, 2026-10-13 (LOCAL-106).** Two sizes are added for the dashboard only.
+`--font-page-title` is 26px, for the "Project map" title. `--font-rail-headline` is 18px, for the
+headline of a rail card. Both use `--weight-semibold`. The section labels of the dashboard use
+`--font-micro` (11px) in upper case with wide tracking.
+
 ## Weight
 
 | Token or rule                                                                                    | Value | Checked at                                | Note                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -326,6 +331,25 @@ transitions (`background-color`, `border-color`, `color`, `box-shadow`), each ov
 `var(--motion-hover)` with `var(--easing-enter)`; see the record under `## Motion`. The
 background-tier-only hover rule, the `focus-ring` treatment and every other row stay in force.
 
+**Record, 2026-10-13 (LOCAL-106).** The dashboard gets three soft tints. Each tint uses the
+`--accent-soft` recipe: 16 percent of a state token mixed over `transparent`. The tints refer to
+their state token through `var()`, so each tint follows the theme of its state token and needs no
+light value.
+
+| Token           | Value                                                      | Use on the dashboard                                 |
+| --------------- | ---------------------------------------------------------- | ---------------------------------------------------- |
+| `--ok-soft`     | `color-mix(in srgb, var(--status-ok) 16%, transparent)`    | done state tint, no dashboard component uses it yet  |
+| `--warn-soft`   | `color-mix(in srgb, var(--status-stale) 16%, transparent)` | needs input tile and pill                            |
+| `--danger-soft` | `color-mix(in srgb, var(--status-down) 16%, transparent)`  | stuck tile hatch, stuck pill, Needs your call card   |
+| `--dot-grid`    | `color-mix(in srgb, var(--text-muted) 18%, transparent)`   | the dots of the page background (`dot-grid` utility) |
+
+The command centre (LOCAL-104) defined the same three tints on the status tokens first. The dashboard uses those definitions, so each tint has one definition in `tokens.css`.
+
+Only `--text` and the state text role of the tint (`--accent-text`, `--status-ok`,
+`--status-stale`, `--destructive-text`) go on a soft tint. Muted text does not go on a soft tint:
+in dark, `--text-muted` measures 4.06:1 to 4.47:1 on these tints, which is below the floor. The
+`segment-hatch-danger` utility draws 6px bands of `--danger-soft` at 135 degrees for a stuck tile.
+
 ## Elevation
 
 | Token or rule                                     | Value                                                                                                                                                   | Checked at                                          | Note                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -390,6 +414,11 @@ this ladder: a pressed card sits below its own resting `--surface-card` tier in 
 below `--surface-column`, since the darken is always relative to the element's own starting
 background, never a fixed rank position.
 
+**Record, 2026-10-13 (LOCAL-106).** `--glow-current` is the only shadow on the dashboard. It marks
+the current node of a loop track: a 4px `--accent-soft` spread plus a 16px blur of 45 percent
+`--accent`. The theme exposes it as `shadow-glow-current`. The glow carries no state alone: the
+current node also has an accent ring, the text "You are here" and a "Phase n of m" line.
+
 ## Contrast floor
 
 | Token or rule                  | Value                                            | Checked at                                          | Note                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -438,6 +467,12 @@ instrument's `RESIDUALS` allowlist is now permanently empty by design, proven li
 reintroduction leg that hard-fails at the exact former residual ratios rather than silently
 absorbing them, and any future failing pair is a hard failure with nowhere to hide.
 
+**Record, 2026-10-13 (LOCAL-106).** `scripts/contrast-113.mjs` measures `--text` and the state
+text role on each soft tint (`--accent-soft`, `--ok-soft`, `--warn-soft`, `--danger-soft`) over
+`--surface-card` and `--surface-column`. Each theme now reports 236 pairs, 0 failing, 0 residual
+(220 before this change). The lowest new pair is 4.82:1 in dark (`--destructive-text` on
+`--danger-soft` over `--surface-card`).
+
 ## Motion
 
 **SUPERSEDED BY v3.4: "Nothing changes" no longer holds.** This budget replaces the v2.9 flat
@@ -471,6 +506,13 @@ with a control: a switch with no lock reads 36 running transitions, a switch wit
 No springs, no bounce: motion stays budgeted, not decorative. The table above is what each named
 interaction gets, not a license to add more; a future motion absent from this table is a new
 proposal for this document, not an assumed extension of it.
+
+**Record, 2026-10-13 (LOCAL-106).** `--motion-node-breathe` is 2.4s. The `node-breathe` keyframes
+change the box shadow of the current track node from `--glow-current` to a 2px `--accent-soft`
+spread and back. The node uses the animation only through the Tailwind `motion-safe` variant
+(`prefers-reduced-motion: no-preference`). The `prefers-reduced-motion: reduce` block in
+`tokens.css` stays the only reduced-motion block; it also stops this animation. The line numbers
+of that block in the `reduced-motion-mechanism` row above are history.
 
 ## Chrome dimensions
 

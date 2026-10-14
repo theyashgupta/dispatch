@@ -8,9 +8,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 import type {
   ActivityActorFilter,
   ActivityRow,
+  ActivityTone,
 } from "@/modules/dashboard/domain/activity-rows";
 import type { SectionState } from "@/modules/dashboard/domain/section-state";
 import { DashboardSection } from "./DashboardSection";
@@ -22,8 +24,16 @@ const ACTORS: { value: ActivityActorFilter; label: string }[] = [
   { value: "you", label: "You" },
 ];
 
+const DOT: Record<ActivityTone, string> = {
+  danger: "bg-(--destructive)",
+  warn: "bg-(--status-stale)",
+  ok: "bg-(--status-ok)",
+  muted: "bg-(--text-muted)",
+};
+
 interface ActivitySectionProps {
   state: SectionState;
+  title: string;
   rows: ActivityRow[];
   total: number;
   hasMore: boolean;
@@ -38,6 +48,7 @@ interface ActivitySectionProps {
 
 export function ActivitySection({
   state,
+  title,
   rows,
   total,
   hasMore,
@@ -51,7 +62,8 @@ export function ActivitySection({
 }: ActivitySectionProps) {
   return (
     <DashboardSection
-      title="Activity log"
+      title={title}
+      label="Activity log"
       count={total}
       state={state}
       onRetry={onRetry}
@@ -110,11 +122,31 @@ export function ActivitySection({
                       className="flex-nowrap items-baseline border-0 border-b last:border-b-0"
                     >
                       <ItemContent className="min-w-0 flex-row gap-3">
-                        <span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">
-                          {row.time}
+                        <span
+                          aria-hidden="true"
+                          className={cn(
+                            "size-2 shrink-0 self-center rounded-full",
+                            DOT[row.tone],
+                          )}
+                        />
+                        <span className="min-w-0 text-sm wrap-anywhere text-foreground">
+                          {row.emphasis === null ? (
+                            row.line
+                          ) : (
+                            <>
+                              {row.line.slice(0, row.emphasis.start)}
+                              <strong className="font-semibold">
+                                {row.line.slice(
+                                  row.emphasis.start,
+                                  row.emphasis.end,
+                                )}
+                              </strong>
+                              {row.line.slice(row.emphasis.end)}
+                            </>
+                          )}
                         </span>
-                        <span className="min-w-0 text-base wrap-anywhere text-foreground">
-                          {row.line}
+                        <span className="ms-auto shrink-0 font-mono text-xs text-muted-foreground tabular-nums">
+                          {row.time}
                         </span>
                       </ItemContent>
                     </Item>

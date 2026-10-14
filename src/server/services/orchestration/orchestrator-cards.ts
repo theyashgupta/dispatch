@@ -5,6 +5,7 @@ import { ConflictError, ValidationError } from "../domain/errors.js";
 import { checkCap } from "../domain/orchestrator-policy.js";
 import type { OrchestratorIdentity } from "../domain/orchestrator-scope.js";
 import { playbookExists } from "../infra/playbooks.js";
+import { isLaunchableAccount } from "./claude-accounts.js";
 import {
   callerPolicy,
   getBoard,
@@ -27,6 +28,7 @@ interface CardStartRequest {
   direction?: string | undefined;
   folder?: string | undefined;
   repos?: { path: string; base: string }[] | undefined;
+  account?: string | undefined;
 }
 
 /**
@@ -53,6 +55,12 @@ export async function startOrchestratorCard(
   if (!(await playbookExists(input.playbook))) {
     throw new ValidationError("unknown-playbook");
   }
+  if (
+    input.account !== undefined &&
+    !(await isLaunchableAccount(input.account))
+  ) {
+    throw new ValidationError("unknown-account");
+  }
   const board = getBoard(caller.boardKey);
   let workspace: NonNullable<Card["workspace"]> | undefined;
   if (input.repos !== undefined || !card.workspace?.repos.length) {
@@ -68,6 +76,7 @@ export async function startOrchestratorCard(
     extraDirection: direction,
     playbook: input.playbook,
     workspace,
+    account: input.account,
   };
   await withCapLock(async () => {
     const current = store.getCard(card.id);

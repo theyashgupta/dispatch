@@ -106,7 +106,7 @@ To open the policy form of a board:
 1. If the board does not exist, create it (see "Create a board").
 2. Select the board in the **Boards** section (see "Switch boards").
 3. Open the board page.
-4. Choose **Orchestrator**, or **Add orchestrator** when the board has none. The panel has four tabs: **Terminal**, **Decisions**, **Policy** and **Orchestrators**.
+4. Choose **Orchestrator**, or **Add orchestrator** when the board has none. The command centre opens. Choose **Settings** to open the settings sheet. The sheet has two tabs: **Policy** and **Orchestrators**. The terminal and the decisions are on the command centre.
 5. Open **Policy**. The form is called **Policy for** and the board name.
 
 Only you can change the policy. The orchestrator reads it. No tool can change it.
@@ -160,11 +160,11 @@ A session that starts without hooks gets no settings file, so this value does no
 ## Add and start an orchestrator
 
 1. Select the board in the **Boards** section. Open the board page. Every board has its own button. `LOCAL` has one too, and its supervisor starts **Off**.
-2. Choose **Add orchestrator** in the page header. When the board already has an orchestrator, the button reads **Orchestrator**. The orchestrator panel opens as a side panel over the board. Its header shows the board name.
-3. Make sure the supervisor is **On** in the **Policy** tab. With the supervisor **Off**, the panel shows: "Turn on the supervisor in Policy to start an orchestrator."
-4. Choose **Start orchestrator**.
+2. Choose **Add orchestrator** in the page header. When the board already has an orchestrator, the button reads **Orchestrator**. The command centre opens (see "The command centre"). Choose **Settings** to open the settings sheet at the right of the command centre. The sheet opens at the **Policy** tab.
+3. Make sure the supervisor is **On** in the **Policy** tab. With the supervisor **Off**, the button **Start** of the command centre is off. The command centre shows this line under the button: "Turn on the supervisor in Policy to start an orchestrator."
+4. Close the settings sheet. Choose **Start** in the controls of the command centre.
 
-When the board has no orchestrator record, **Start orchestrator** first adds the main orchestrator. The record has the id `main` and the name "Main orchestrator". Then it starts the orchestrator.
+When the board has no orchestrator record, **Start** first adds the main orchestrator. The record has the id `main` and the name "Main orchestrator". Then it starts the orchestrator.
 
 The orchestrator can create a board with the tool `create_board`. It gives a name, and the tool answers the key and the link. The tool `get_board_workspace` lists all boards.
 
@@ -180,31 +180,31 @@ The start does these things:
 - It passes the model of the **Orchestrator model** field to Claude.
 - It limits the tools. Claude gets the read tools `Read`, `Glob` and `Grep`, and the Dispatch tools. The tools `Bash`, `Write`, `Edit` and `NotebookEdit` are off.
 
-The panel header shows the state of the session as a badge. The badge uses the session states of a loop. These are the values you see most:
+The orchestrator node of the command centre shows the state of the session as a badge. The badge uses the session states of a loop. These are the values you see most:
 
 - **Starting** (with a spinner). The start runs.
 - **Working**. The orchestrator runs. This is the healthy state. The **Stop** button shows.
 - **Idle**. The session runs and waits.
 - **Needs input**, **Permission prompt**, **Usage limit dialog** and **Waiting for usage reset**. The session waits. Open the **Terminal** tab.
-- **Session lost** and **Claude exited**. The session ended. **Resume orchestrator** shows.
+- **Session lost** and **Claude exited**. The session ended. **Resume** shows.
 
 When the orchestrator waits at its prompt, Dispatch wakes it. Dispatch types one line that starts with "Dispatch wake:" when you answer its decision item, when one of its groups reaches Agent done, needs input, fails to start, ships, stops its ship flow, hits a loop error or a usage limit, and when the **Wake timer (minutes)** of the policy runs out. Dispatch never types while the orchestrator works, types at most one line in 20 seconds, and never wakes a stopped orchestrator.
 
 The hidden card and the MCP configuration file do not show in the UI. To confirm a start, check these signs:
 
 1. The badge reads **Working** and the **Stop** button shows.
-2. The **Terminal** tab shows the live terminal.
-3. The **Activity log** of the dashboard shows a row such as "Supervisor: a card is now Working".
+2. The **Terminal** tab of the pane shows the live terminal.
+3. The **Changed since** card of the dashboard shows a row such as "Supervisor: a card is now Working".
 
-The start can fail. The panel then shows the line "The orchestrator did not start: <reason>." The reason names the step and the last text of the Claude pane. Dispatch waits about 30 seconds for Claude to be ready, so the badge can read **Starting** for some time before the line shows. Choose **Try again** beside the line to start again. The board now has a main orchestrator, so the page header button reads **Orchestrator**.
+The start can fail. The controls of the command centre then show the line "The orchestrator did not start: <reason>." The reason names the step and the last text of the Claude pane. Dispatch waits about 30 seconds for Claude to be ready, so the badge can read **Starting** for some time before the line shows. Choose **Try again** beside the line to start again. The board now has a main orchestrator, so the page header button of the board reads **Orchestrator**.
 
-The **Terminal** tab shows the live terminal. The panel buttons depend on the state:
+The **Terminal** tab of the pane shows the live terminal. The buttons of the command centre depend on the state:
 
-- **Start orchestrator** starts a stopped orchestrator. It shows when the orchestrator is stopped, also after a failed start.
+- **Start** starts a stopped orchestrator. It shows when the orchestrator is stopped, also after a failed start.
 - **Stop** interrupts the current turn. The session stays open. The button is off when the session shows a permission prompt, the usage limit dialog or the wait for the usage reset.
-- **Resume orchestrator** shows when the session is lost or Claude exited. It starts Claude again in the open session, or it starts the session again.
+- **Resume** shows when the session is lost or Claude exited. It starts Claude again in the open session, or it starts the session again.
 
-The **Decisions** tab lists the open decision items of the board. The **Orchestrators** tab lists the orchestrators. The **Last wake** column, after **Policy**, shows the reasons and the time of the last wake, for example "timer 15 min at 14:05", or **None** when the orchestrator has not woken. An extra orchestrator needs a scope of groups or tickets, and it needs the main orchestrator first. Choose **Add extra orchestrator** to add one.
+The **Conversation** tab of the pane lists the open decision items of the orchestrator. The **Orchestrators** tab of the settings sheet lists the orchestrators. The **Last wake** column, after **Policy**, shows the reasons and the time of the last wake, for example "timer 15 min at 14:05", or **None** when the orchestrator has not woken. An extra orchestrator needs a scope of groups or tickets, and it needs the main orchestrator first. Choose **Add extra orchestrator** to add one.
 
 ## How the orchestrator judges and starts work
 
@@ -230,6 +230,12 @@ The cards that the orchestrator starts count against **Loops at once** together 
 A line that you type in the **Terminal** tab of the orchestrator is a direction. The orchestrator handles it like a new intake.
 
 Dispatch updates a seeded playbook file that you never edited at the next start of Dispatch. Dispatch keeps a file that you edited.
+
+When a single card that the orchestrator started reaches Agent done, the orchestrator ships it. It calls `start_ship` with the session branch of the card. The ship checks are the same as for a group. The ship rights of the board decide what the flow does. With **None, I ship**, the orchestrator raises a decision item and you ship the branch.
+
+The orchestrator can prepare a release. It calls `release_prep` with the bump, the features and the merged pull requests. Dispatch reads the version of the base branch and creates a card **Release v<next version>** in **To Do**. The orchestrator starts that card with the **Release** playbook. The release session bumps the version, drafts the notes and records the demo. When the bump pull request is merged, the orchestrator tells the session, and the session publishes only when the **Ship rights** are **Open and merge PRs**. Else it asks you to publish.
+
+Before it starts a long loop, the orchestrator calls `list_accounts`. It chooses the account with the most weekly headroom and starts the card on that account. It never chooses usage credits. The start dialog that you use is unchanged.
 
 ## Groups and loops
 
@@ -266,35 +272,247 @@ The loop also reports each phase gate and unit gate to Dispatch. The report uses
 ### How progress shows
 
 - The boards page **Loops** column shows each running loop as a group id and a percent.
-- The dashboard section **Progress per group** shows one row for each group that has a loop.
-- The dashboard section **Activity log** shows the gate events.
+- The dashboard section **Progress per group** shows one row for each group that has a loop. It also shows each single card that the orchestrator started, with the phases of its PRD.
+- The dashboard section **Changed since** shows the gate events.
 
 ## The dashboard
 
 Open the dashboard from the sidebar row **Dashboard** (group **Work**), or from the palette command **Go to Dashboard**. The sidebar row and the palette command show only when the board has a main orchestrator. The dashboard shows the board that is selected in the **Boards** section.
 
-The page has six sections in a fixed order. Each section shows its own loading state and its own error. A section error has the button **Try again**. The other sections stay.
+The page has the title "Project map" on a dot-grid background. Each section shows its own loading state and its own error. A section error has the button **Try again**. The other sections stay.
 
-1. **Attention queue.** Each item that needs you, oldest wait first. With no item it shows "Nothing needs you."
-2. **Progress per group.** One row for each group that has a loop. With no loop it shows "No loops on this board yet. Start a group from the board to see its progress here." The count of the section reads "<n> of <cap> loops running". A row shows these items:
-   - The group id, the loop slug and the session state badge.
-   - The context percent, for example "Context 38%".
-   - The session age and an estimate of the time left. The estimate reads "Estimate after 2 gates" until two gates passed.
-   - A text label such as "Unit 2 of 3, phase 4 of 9". A complete loop shows "3 of 3 units built, awaiting ship".
-   - A bar with one segment for each unit.
-   - The last gate line: "Phase 3 gate passed 12:41" or "Phase 4 gate failed 13:05, attempt 1 of 2".
-3. **Tickets by column.** The cards of the board for each column, with the count of cards that an orchestrator created (**By orchestrator**). The link **Open board** goes to the board. Choose **Show cards** to list the cards. The filters **Group** and **Column** limit them.
-4. **Activity log.** One row for each recorded event, newest first. The orchestrator rows are tool calls and raised decisions. The supervisor rows are actions, session state changes, loop gates, PR changes and a wake of the machine. Your rows are the decisions that you answer and the goals that you submit. A policy save, a board change and a press of **Start orchestrator** write no row of their own. The filters **Actor** (**All**, **Orchestrator**, **Supervisor**, **You**) and **Group** limit the rows. The log shows 20 rows. Choose **Show more** for 20 more. With no event it shows "No activity on this board yet."
-5. **PRs and merge order.** One block for each group in ship order. See the section "Ship flow". With no PR it shows "No PRs yet."
-6. **Cost and usage.** The cost of each group against its budget, and the usage meters of the Claude account. With no cost it shows "No cost yet." See the section "Budgets and usage limits".
+Under the title, one status line shows these items:
 
-Each segment of the progress bar has a glyph and a text name (done, current, pending or failed gate). The bar reads without color.
+- "Synced HH:MM". When the stream is down, it reads "Data from <time>".
+- "<n> of <cap> loops running".
+- "<n> gates passed today". The count is the number of loop phases whose gate passed on the local calendar day.
+- "$<amount> spent". This is a running total of the group costs. It is not a daily figure.
+- The link "<n> need a call". With zero rows it reads "nothing needs you" and its dot is muted. The link moves focus to the **Needs your call** card.
 
-When the connection to the server drops, the dashboard keeps the last data. A badge beside the title reads "Data from <time>". The reply, resume and decision buttons are off, with the reason "Reconnecting. Actions are off until the board stream is back."
+At 1024 px and wider, the sections show in this order:
+
+1. The status line.
+2. **Progress per group**, full width.
+3. **Left on this board**, full width.
+4. Two columns. The main column holds **Tickets by column** and then **PRs and merge order**. The rail holds **Next step**, **Needs your call**, **Changed since** and **Cost and usage**.
+
+Below 1024 px, the sections show in this order: the status line, **Needs your call**, **Progress per group**, **Left on this board**, **Tickets by column**, **PRs and merge order**, **Next step**, **Changed since** and **Cost and usage**. Each section shows once in the page. The section headings are small uppercase labels. A screen reader still reads the names "Attention queue", "Progress per group", "Left on this board", "Tickets by column", "PRs and merge order", "Next step", "Activity log" and "Cost and usage".
+
+- **Progress per group.** Each loop is a milestone track with one node for each unit. With no units it shows "No loop progress". The session badges and the last gate text stay on the track header. A node has one of these states:
+  - Done. The node has a check glyph and the state line "Done HH:MM" or "Done".
+  - Current. The node has an accent ring, a glow, the pill "You are here" and a phase sub-bar. The state line reads "Phase n of m". The glow moves only when the system allows motion.
+  - Failed gate. The node has an X glyph and the state line "Gate failed".
+  - Pending. The node is an outline. The state line reads "Next" for the first pending node and "Later" for the other nodes.
+- **Left on this board.** The count of open cards and one pill for each open card. An open card is a card that is not in **Agent done**, **In review** or **Done**. A pill shows the card id and a glyph. The order is stuck, needs input, current, not started. With no open card it shows "Nothing open."
+- **Tickets by column.** The filters **Group** and **Column** are above the tiles and stay visible. The section shows one tile for each card that the filters select. With no match it shows "No cards match." The link **Open board** stays on the section header. The collapsible **Show column counts** holds the table of column counts, with the count of cards that an orchestrator created (**By orchestrator**). Below 768 px, it holds a list. A tile shows these items:
+  - The card id in a mono font and the title.
+  - A state pill with a glyph and the column label, or "Stuck: <reason>".
+  - A footer line when there is data: the last gate text, "Depends on <ids>" or "Shipped HH:MM".
+- **Next step.** For the first running loop that has a current unit, it shows "<group id> unit <n>: <unit title>" and "Phase <n> of <m>: <phase name>". With no such loop it shows "No loop running" and "Start a group from the board."
+- **Needs your call.** Each item that needs you, oldest wait first. With no item it shows "Nothing needs you." The card has a red tint only when it holds at least one item. The recommended decision option is bold. See the section "The attention queue".
+- **Changed since <time>.** The time is the time of the oldest row on the shown page. A row has a dot, the change text with the card id in bold, and the time on the right. The dot colors are red, amber, green and grey:
+  - Red is for a failed gate, a loop error, a failed start or a stopped ship.
+  - Amber is for needs input and a usage limit.
+  - Green is for a passed gate, agent done and shipped.
+  - Grey is for the other rows.
+- **PRs and merge order.** One block for each group in ship order. See the section "Ship flow". With no PR it shows "No PRs yet."
+- **Cost and usage.** The cost of each group against its budget, and the usage meters of the Claude account, as compact rows. With no cost it shows "No cost yet." See the section "Budgets and usage limits".
+
+**Changed since** shows one row for each recorded event, newest first. The orchestrator rows are tool calls and raised decisions. The supervisor rows are actions, session state changes, loop gates, PR changes and a wake of the machine. Your rows are the decisions that you answer and the goals that you submit. A policy save, a board change and a press of **Start orchestrator** write no row of their own. The filters **Actor** (**All**, **Orchestrator**, **Supervisor**, **You**) and **Group** limit the rows. The log shows 20 rows. Choose **Show more** for 20 more. With no match it shows "No activity matches." With no event it shows "No activity on this board yet."
+
+Each node and each tile state has a glyph and a text. The page reads without color.
+
+When the connection to the server drops, the dashboard keeps the last data. The status line reads "Data from <time>". The reply, resume and decision buttons are off, with the reason "Reconnecting. Actions are off until the board stream is back."
+
+## The command centre
+
+The command centre shows one orchestrator of a board as one page. It has the orchestrator, one branch for each ticket and group that it runs, and a conversation with it. The page reads the conversation and the decision items every 3 seconds. The branches follow the board stream.
+
+### Open the command centre
+
+- Choose **Orchestrator** in the page header of the board. When the board has no orchestrator, the button reads **Add orchestrator** from 768 px wide. On a narrower screen it reads **Orchestrator**. Both buttons open the command centre.
+- Choose **Open command centre** next to the **Project map** title of the dashboard.
+- Open `/boards/<key>/orchestrator` for the main orchestrator. Open `/boards/<key>/orchestrator/<orchestrator id>` for another orchestrator.
+- The address `/orchestrator?board=<key>` only redirects to `/boards/<key>/orchestrator`. The same applies to `/orchestrator/<orchestrator id>?board=<key>`.
+
+The sidebar has no row for the command centre.
+
+### The orchestrator node
+
+The node is the card at the top left of the canvas. It shows these items:
+
+- The heading "Orchestrator", the name and the state badge. The badge reads **Starting**, **Stopping**, **Stopped** or the label of the session state.
+- "Context <n>%" and "$<cost> today". Each shows only when Dispatch has the value.
+- The count line "<n> branches, <m> need you". One branch reads "1 branch, 0 need you".
+
+The count <n> includes the older shipped branches that the page hides. The count <m> is the size of the band **Needs you**.
+
+### The bands and the tiles
+
+The branches stand in five bands, in this order: **Needs you**, **Running**, **Planned**, **Done** and **Shipped**. Each band heading shows its count. A band with no branch shows only the heading. A branch belongs to the orchestrator that owns its card. A hidden card and a group member are not branches.
+
+- **Needs you** holds a branch at Needs input, Usage limit, Budget reached or Resume failed. It also holds a branch in a stuck session state.
+- **Running** holds a branch with a session that works.
+- **Planned** holds a branch with no session. It comes from the plan, also when its card does not exist yet.
+- **Done** holds a branch at Agent done.
+- **Shipped** holds a shipped branch.
+
+The stuck session states are **No progress**, **Permission prompt**, **API error**, **Session lost** and **Claude exited**.
+
+The newest approved plan of the orchestrator sets the planned branches and their order. A newer open plan adds only the tickets that the approved plan lacks, after them. A rejected plan adds nothing.
+
+A tile shows these items:
+
+- The card id, the state badge and the title.
+- A detail line. See the list below.
+- "Playbook <name>", "Context <n>%" and "$<cost>". A planned branch with no session shows "Not started" in place of the meters.
+
+The detail line reads as follows:
+
+- Running: "Unit <n> of <m>, phase <p> of <q>", or "Phase <p> of <q>". A group with no phase reads "Group of <n> tickets".
+- Planned: "Plan order <n>, size <size>".
+- Needs input: "Needs your answer". Usage limit: "Stopped at the usage limit". Budget reached: "Budget reached".
+- Done: "Done <time>, awaiting ship".
+- Shipped: "Shipped <time>, PR <number>".
+
+A time reads "HH:MM" on the current day. On another day it reads "<day> <month> HH:MM". The clock has 24 hours.
+
+At 768 px wide and more, the canvas draws a line from the node to each tile. The line is dashed for a planned branch. Choose a tile to open its card. A planned branch with no card has nothing to open.
+
+### Tile actions
+
+A tile shows only the actions that fit its state. The actions are the same as in the attention queue.
+
+| Action               | When it shows                                                                               |
+| -------------------- | ------------------------------------------------------------------------------------------- |
+| Inline reply         | The field "Reply to <card id>" and **Send reply**. The state is Needs input or No progress. |
+| **Resume loop**      | The loop stopped at the usage limit or at the budget.                                       |
+| **Try resume again** | The state is Resume failed.                                                                 |
+| **Open terminal**    | A stuck session state, or Resume failed.                                                    |
+
+How the actions work:
+
+- A reply shows the count "<n> of 500 characters. A longer reply goes as a file." The result shows next to the buttons: "Delivered" or "Not confirmed. Check the terminal."
+- When the session changed state, a reply shows "Not sent. <card id> is now at <state label>. Open the terminal."
+- A failed action shows an alert, for example "Reply failed: <message>." The alert has the button **Try again**.
+- A result and an alert hide when the branch changes state. A reply draft stays when you change a tab.
+- **Open terminal** goes to the board page.
+- The page hides a branch that shipped more than 24 hours ago. Choose **Show <n> older shipped** under the bands to show it. The link then reads **Hide older shipped**.
+
+### Orchestrator controls
+
+From 768 px wide, the controls sit in the page header. Below 768 px, they sit above the node in the page. The controls are:
+
+- A badge "Data from <time>". It shows only while the connection is down.
+- The switcher. It has the hidden label "Orchestrator". It shows only when the board has more than one orchestrator. Each option reads "<name> (Main)" or "<name> (Extra)". Choose an option to open that orchestrator.
+- **Start**, **Stop** or **Resume**. One of them shows at a time. The state badge is part of the node and not of the controls.
+- **Settings**. It opens the settings sheet at the **Policy** tab.
+
+The rules of the buttons depend on the state of the session:
+
+- **Start** shows for a stopped orchestrator. It is off when the supervisor is **Off**. Then the reason reads "Turn on the supervisor in Policy to start an orchestrator."
+- **Stop** shows for a running orchestrator. It interrupts the current turn. The session stays open. It is off at a permission prompt, at a usage limit and at a shell prompt.
+- **Resume** shows when the session is lost or Claude exited.
+- No button shows while the orchestrator starts or stops.
+- A failed button shows an alert with the reason and the button **Try again**.
+
+### The settings sheet
+
+The settings sheet holds the policy of the board and the orchestrators of the board. It opens at the right of the command centre. Its title is "Orchestrator settings".
+
+To open the settings sheet:
+
+- Choose **Settings** in the controls. The sheet opens at the **Policy** tab. Dispatch adds one history entry, so Back closes the sheet.
+- Open a link that has `settings=policy` or `settings=orchestrators`. The sheet opens at that tab. Any other value opens no sheet.
+- Choose **Change budget** in the attention queue of the dashboard. The sheet opens at the **Policy** tab.
+
+The sheet has two tabs:
+
+- **Policy**. It shows the form **Policy for** and the board name (see "Board policy").
+- **Orchestrators**. It shows the table of the orchestrators and the dialogs to add one, to edit its overrides and to move groups. The tab label shows the count, for example "Orchestrators (2)". While the list loads, the label reads "Orchestrators".
+
+A tab change does not add a history entry.
+
+To close the sheet, choose the X button or press Escape. Back also closes it. A click on the dimmed page does not close the sheet, so an unsaved policy edit stays. Focus then returns to **Settings**. When a dialog is open, Escape closes the dialog first. A second Escape closes the sheet.
+
+An old board link that has `panel=orchestrator` opens the command centre of the main orchestrator. With `tab=policy` or `tab=orchestrators`, the sheet opens at that tab. With `tab=terminal`, `tab=decisions` or no tab, the sheet stays closed.
+
+While the board stream is down, the sheet header shows the badge "Data from <time>". When the list of orchestrators does not load, the **Orchestrators** tab shows the line "Orchestrators did not load: <error message>." with the button **Try again**.
+
+From 768 px wide, the sheet has the width of the detail panel. Below 768 px, the sheet fills the full width of the screen.
+
+### The pane
+
+From 768 px wide, the pane stands at the right of the canvas. It is 360 px wide, and 420 px wide from 1280 px. It has two tabs:
+
+- **Conversation**. This tab opens first.
+- **Terminal**. It shows the live terminal of the orchestrator session. The terminal stays open when you change tabs.
+
+### The conversation
+
+The tab lists the messages and the decisions of the orchestrator in time order. Tool calls do not show. The list scrolls to the newest entry when a new entry comes.
+
+A message shows an author, an age and the text. The author reads "You", the name of the orchestrator or "Dispatch". The age reads, for example, "5m ago". The text keeps its line breaks. It has no markdown.
+
+A decision message shows the badge **Decision** or **Question**. A roadmap approval, a ticket proposal and a plan are a **Decision**. All other kinds are a **Question**.
+
+- An open decision shows the same card as the attention queue. It has the question, the option buttons and the badge **Recommended**. A question also has the field "Or type an answer" and **Send answer**.
+- A plan shows a table before the options. The table heads are **Order**, **Ticket**, **Playbook** and **Size**. The options are "Approve the plan" and "Do not approve".
+- An answered decision shows the question, the plan table and the line "Answered: <option label>". A typed answer shows below the line.
+- A failed answer shows "Decision answer failed: <message>." with the button **Try again**.
+
+The tab shows every open decision of the orchestrator. It shows only the 20 newest answered decisions.
+
+### The comment box
+
+The comment box sits under the messages. It sends text to the orchestrator session.
+
+- The field has the hidden label and the placeholder "Message the orchestrator".
+- The line under the field reads "<n> of 500 characters. A longer reply goes as a file."
+- The button **Send** is off when the field is empty or has only spaces. It is also off while Dispatch sends and while the connection is down.
+- The result shows next to **Send**: "Delivered" or "Not confirmed. Check the terminal." After "Delivered" the field clears. After any other result the text stays.
+- When the session changed state, the result reads "Not sent. <orchestrator name> is now at <state label>. Open the terminal."
+- A failed send shows the alert "Message failed: <message>." with the button **Try again**. The text stays.
+- Dispatch refuses a text that starts with a mode character of Claude (`/`, `!`, `#`, `&` or `@`) or that has only control characters. The alert reads "Message failed: the text is empty or starts with a mode character." Change the first character and send again.
+- When the orchestrator has no session, **Send** sends no message. The alert "Message failed: <orchestrator name> has no session. Start it first." shows under the field. The text stays.
+
+### Narrow screens
+
+Below 768 px, the page has one column:
+
+1. The controls: the switcher, **Start**, **Stop** or **Resume**, and **Settings**.
+2. The node in a compact form. It has no heading "Orchestrator".
+3. Two tabs: **Branches** and **Conversation**. **Branches** opens first.
+
+The tab **Branches** shows the bands as a list, with the same tiles and actions. It has no lines between the node and the tiles. The tab **Conversation** is 480 px high. It holds the pane with its own tabs **Conversation** and **Terminal**.
+
+Enter on the node selects the tab **Conversation** and the pane tab **Conversation**. Then it moves focus to the comment box. When you leave the page, the tabs return to their first values.
+
+### States
+
+| State   | What shows                                                                                                                                                                                 |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Empty   | "This board has no orchestrator." and **Start**. A board with no branch shows "No tickets or groups yet. Ask the orchestrator in the conversation." An empty pane shows "No messages yet." |
+| Loading | Three grey blocks. The hidden text reads "Loading command centre".                                                                                                                         |
+| Error   | An alert in the region that did not load, for example "Canvas did not load: <message>." The other region stays. The alert has the button **Try again**.                                    |
+| Stale   | The last data stays. The badge "Data from <time>" shows. The line "Reconnecting. Actions are off until the board stream is back." shows above the canvas and above the comment box.        |
+
+- A path with an unknown orchestrator id shows "Canvas did not load: no orchestrator <id> on this board."
+- When Dispatch cannot read the transcript, the pane shows "The conversation is not available." and the link **Open the terminal.** The link opens the **Terminal** tab. The decision messages still show.
+- While the connection is down, these controls are off: **Reply**, **Resume loop**, **Try resume again**, **Start**, **Stop**, **Resume**, the decision buttons and **Send**. **Settings**, **Open terminal** and the tiles stay on.
+
+### Keyboard
+
+- Tab goes through the page header, the node, the tiles in band order, and then the pane.
+- The down arrow and the up arrow move focus to the next tile and to the previous tile. The node is the first stop.
+- Home moves focus to the node. End moves focus to the last tile.
+- Enter on a tile opens its card.
+- Enter on the node moves focus to the comment box. With no orchestrator, Enter does nothing.
+- The reply field and the buttons inside a tile take Tab. The arrow keys do not move focus away from them.
 
 ## The attention queue
 
-The attention queue is the first section of the dashboard. Dispatch builds it from the sessions, the last gate of each group and the open decision items. An item leaves the queue when its cause ends.
+The attention queue is the card **Needs your call** on the dashboard. Dispatch builds it from the sessions, the last gate of each group and the open decision items. An item leaves the queue when its cause ends.
 
 Each item shows the group id, a badge, the wait time ("waiting 34 min", "waiting 5 h" or "waiting 3 d") and the actions of its kind.
 
@@ -466,7 +684,7 @@ The field **Budget per group (USD)** sets a cost limit for each group. The cost 
 - The supervisor checks the cost when the last gate of a loop changes.
 - When the cost has reached the budget, the session moves to **Needs input** with the reason "budget". The supervisor sends no key to the loop.
 - The attention queue shows "Budget reached: $<cost> of $<budget>." with **Resume loop**, **Change budget** and **Open terminal**.
-- **Change budget** opens the **Policy** tab.
+- **Change budget** opens the **Policy** tab of the settings sheet on the command centre.
 - When you raise the budget above the cost, or remove it, the supervisor clears the budget reason within one minute. The item then becomes a normal **Needs input** item with a reply field.
 
 The section **Cost and usage** shows a bar for each group. The text reads "$12.40 of $20.00, 62%". At 80 percent or more it reads "$17.10 of $20.00, 86%, near budget" and shows a warning glyph. Above 100 percent it reads "$25.00 of $20.00, 125%, over budget". With no budget it reads "$12.40, no budget". When an orchestrator override sets the budget, the text ends with "budget set by <name>".
@@ -522,11 +740,13 @@ When the loop shows the state **Handing off** and the engine file says `handoff-
 
 If a repeated handoff request arrives in the first five minutes after the resume, the supervisor sends one line that cancels it.
 
+The supervisor also hands off a single PRD loop at the handoff percent. The loop writes its resume prompt in its feature folder.
+
 An orchestrator uses the same thresholds. Its request tells it to call `write_state` with the full state and `handoffReady` set to true. Then it prints `HANDOFF_READY <orchestrator id>`. The fresh session starts with a prompt to call `read_state` first.
 
 ## Ship flow
 
-The ship flow merges the branches of a finished group in order. It runs when the main orchestrator calls the `start_ship` tool for a group. The field **Ship rights** decides what it may do.
+The ship flow merges the branches of a finished group in order. It runs when the main orchestrator calls the `start_ship` tool for a group, or for a single card that it started. The field **Ship rights** decides what it may do.
 
 | Ship rights            | What the flow does                                                                                               |
 | ---------------------- | ---------------------------------------------------------------------------------------------------------------- |
@@ -565,7 +785,7 @@ When a branch fails, the flow stops. The block shows "Stopped at <step>: <reason
 
 ## Playbook reference
 
-A playbook is a markdown file with a name. Dispatch gives its text to Claude when a session starts. Dispatch seeds seven playbooks on the first boot of a machine. Each seeded playbook is a file in the `playbooks` folder of the Dispatch data folder. Dispatch seeds a name once. If you delete a seeded playbook, it stays deleted. Open **Playbooks** in the sidebar, group **System**, to edit, copy or delete playbooks.
+A playbook is a markdown file with a name. Dispatch gives its text to Claude when a session starts. Dispatch seeds eight playbooks on the first boot of a machine. Each seeded playbook is a file in the `playbooks` folder of the Dispatch data folder. Dispatch seeds a name once. If you delete a seeded playbook, it stays deleted. Open **Playbooks** in the sidebar, group **System**, to edit, copy or delete playbooks.
 
 Every seeded playbook has one input: the extra direction. It is the optional text that you type in the start dialog. The token `{extra}` in the playbook marks where the text goes. When you type nothing, Dispatch removes the block that holds the token.
 
@@ -638,6 +858,13 @@ Every seeded playbook has one input: the extra direction. It is the optional tex
   - Act on another board.
   - Answer its own decision item or approve a permission prompt.
   - Delete a branch, a worktree or a card that it did not create.
+
+### Release
+
+- **File:** `release.md`
+- **When to use:** you do not pick this playbook. The orchestrator starts it on the card that `release_prep` made.
+- **Inputs:** the extra direction.
+- **What it does:** it tells Claude to read the release card, bump the version in `package.json`, run the check command and commit the bump. Then it tells Claude to draft the release notes and record the demo. Claude never pushes, tags or opens a pull request. When the orchestrator says that the bump pull request merged, the orchestrator also names the current ship rights. Claude publishes the release only when those ship rights are merge, and never by hand. Else Claude asks you to publish.
 
 ### The tags key
 

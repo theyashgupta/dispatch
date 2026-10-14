@@ -698,6 +698,47 @@ void test(
 );
 
 void test(
+  "request_handoff on a launched ticket card sends the feature folder request and refuses one with no progress",
+  { skip: !hasTmux },
+  async () => {
+    const s = await start("handoff-launched");
+    await store.setOrchestratorFields(s.card().id, {
+      launch: { direction: "ship it" },
+    });
+    await store.setLoopProgress(s.card().id, {
+      ...LOOP_PROGRESS,
+      slug: "demo-feature",
+      prdFile: "repo/.planning/prds/demo.md",
+    });
+    const reply = await call(`/sessions/${s.card().id}/handoff`, {});
+    assert.equal(reply.status, 202, JSON.stringify(reply.body));
+    assert.deepEqual(reply.body, { result: "confirmed" });
+    const [sent] = s.userTexts();
+    const file = /^Read (\S+) and follow it\.$/.exec(sent ?? "")?.[1] ?? "";
+    const request = fs.readFileSync(file, "utf8");
+    assert.ok(
+      request.includes(
+        path.join(s.root, "repo/.planning/demo-feature/resume.md"),
+      ),
+    );
+    assert.ok(!request.includes("progress.md"));
+
+    const bare = await store.createLocalCard(SBX, "handoff-no-progress", "");
+    await store.completeStart(bare.id, undefined, {
+      workspacePath: env.root,
+      tmuxSession: "dsp-handoff-no-progress",
+      branch: "handoff-no-progress",
+    });
+    await store.setOrchestratorFields(bare.id, {
+      launch: { direction: "ship it" },
+    });
+    const refusedReply = await call(`/sessions/${bare.id}/handoff`, {});
+    assert.equal(refusedReply.status, 409, JSON.stringify(refusedReply.body));
+    assert.equal(refusedReply.body.error, "no-loop");
+  },
+);
+
+void test(
   "approve_roadmap at the rules level sends the approval with no decision item",
   { skip: !hasTmux },
   async () => {

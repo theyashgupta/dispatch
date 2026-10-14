@@ -46,6 +46,7 @@ test("the route table holds exactly the shell and source pages", () => {
     "flow",
     "inbox",
     "meetings",
+    "orchestrator",
     "playbooks",
     "pull-requests",
     "sessions",
@@ -124,7 +125,14 @@ test("routeHash encodes a boards id whole like other pages", () => {
 test("the keyed pages are exactly the board-scoped ones", () => {
   assert.deepEqual(
     [...KEYED_PAGES],
-    ["board", "dashboard", "inbox", "sessions", "board-settings"],
+    [
+      "board",
+      "dashboard",
+      "orchestrator",
+      "inbox",
+      "sessions",
+      "board-settings",
+    ],
   );
   assert.equal(isKeyedPage("inbox"), true);
   assert.equal(isKeyedPage("tickets"), false);
@@ -170,6 +178,26 @@ test("a keyed dashboard and sessions hash without an id carry no id", () => {
   });
 });
 
+test("a keyed orchestrator hash carries the board and an optional orchestrator id", () => {
+  assert.deepEqual(parseRoute("#/boards/NIMBUS/orchestrator"), {
+    page: "orchestrator",
+    board: "NIMBUS",
+  });
+  assert.deepEqual(parseRoute("#/boards/NIMBUS/orchestrator/o1"), {
+    page: "orchestrator",
+    board: "NIMBUS",
+    id: "o1",
+  });
+});
+
+test("a flat orchestrator hash carries no board", () => {
+  assert.deepEqual(parseRoute("#/orchestrator"), { page: "orchestrator" });
+  assert.deepEqual(parseRoute("#/orchestrator/o1"), {
+    page: "orchestrator",
+    id: "o1",
+  });
+});
+
 test("an unknown child under a board maps to that board", () => {
   assert.deepEqual(parseRoute("#/boards/NIMBUS/xyz"), {
     page: "board",
@@ -202,6 +230,8 @@ test("routeHash round-trips every keyed page with a board", () => {
     { page: "board-settings", board: "NIMBUS" },
     { page: "dashboard", board: "NIMBUS" },
     { page: "dashboard", board: "NIMBUS", id: "d1" },
+    { page: "orchestrator", board: "NIMBUS" },
+    { page: "orchestrator", board: "NIMBUS", id: "o1" },
     { page: "inbox", board: "NIMBUS" },
     { page: "inbox", board: "NIMBUS", id: "a/b c" },
     { page: "sessions", board: "NIMBUS" },
@@ -235,6 +265,7 @@ test("a keyed page without a board keeps its legacy hash", () => {
   assert.equal(routeHash({ page: "inbox" }), "#/inbox");
   assert.equal(routeHash({ page: "dashboard", id: "d1" }), "#/dashboard/d1");
   assert.equal(routeHash({ page: "sessions" }), "#/sessions");
+  assert.equal(routeHash({ page: "orchestrator" }), "#/orchestrator");
   assert.equal(routeHash({ page: "board" }), "#/board");
 });
 

@@ -23,12 +23,15 @@ import {
   createDecisionItemHandler,
   createGroupHandler,
   createTicketHandler,
+  releasePrepHandler,
   getBoardWorkspaceHandler,
   getCardHandler,
+  getCardProgressHandler,
   getGroupProgressHandler,
   getPolicyHandler,
   getRulebookHandler,
   getShipStateHandler,
+  listAccountsHandler,
   listPlaybooksHandler,
   listCardsHandler,
   listEventsHandler,
@@ -223,6 +226,10 @@ orchestratorRouter.get(
   tool("get_group_progress", getGroupProgressHandler),
 );
 orchestratorRouter.get(
+  "/cards/:id/progress",
+  tool("get_card_progress", getCardProgressHandler),
+);
+orchestratorRouter.get(
   "/sessions/:cardId/pane",
   tool("read_pane_tail", readPaneTailHandler),
 );
@@ -234,6 +241,7 @@ orchestratorRouter.get(
 );
 orchestratorRouter.post("/boards", tool("create_board", createBoardHandler));
 orchestratorRouter.post("/tickets", tool("create_ticket", createTicketHandler));
+orchestratorRouter.post("/releases", tool("release_prep", releasePrepHandler));
 orchestratorRouter.patch(
   "/tickets/:id",
   tool("update_ticket", updateTicketHandler),
@@ -305,6 +313,7 @@ orchestratorRouter.get(
   "/playbooks",
   tool("list_playbooks", listPlaybooksHandler),
 );
+orchestratorRouter.get("/accounts", tool("list_accounts", listAccountsHandler));
 orchestratorRouter.get("/rulebook", tool("get_rulebook", getRulebookHandler));
 orchestratorRouter.post(
   "/cards/:cardId/start",

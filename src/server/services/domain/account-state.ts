@@ -14,7 +14,7 @@ export type DerivedAccountState = Pick<
   "state" | "limitedUntil"
 >;
 
-export const NEAR_LIMIT_PERCENT = 80;
+const NEAR_LIMIT_PERCENT = 80;
 const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SURFACE_TIME =

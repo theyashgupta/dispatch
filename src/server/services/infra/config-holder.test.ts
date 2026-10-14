@@ -102,6 +102,7 @@ test("claude accounts settings default when the key is absent", () => {
     autoMove: false,
     thresholdPercent: 100,
     minDwellMinutes: 15,
+    hysteresisPercent: 10,
   });
 });
 
@@ -115,6 +116,7 @@ test("claude accounts settings merge partial keys over the defaults", () => {
     autoMove: true,
     thresholdPercent: 100,
     minDwellMinutes: 30,
+    hysteresisPercent: 10,
   });
 });
 
@@ -139,6 +141,7 @@ test("updateClaudeAccountsSettings writes only the claudeAccounts key and keeps 
     autoMove: true,
     thresholdPercent: 80,
     minDwellMinutes: 15,
+    hysteresisPercent: 10,
   });
 });
 
@@ -166,5 +169,6 @@ test("updateClaudeAccountsSettings never makes a wrong-typed stored key live", (
     autoMove: false,
     thresholdPercent: 100,
     minDwellMinutes: 5,
+    hysteresisPercent: 10,
   });
 });

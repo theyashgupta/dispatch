@@ -3,12 +3,12 @@ import { LoadingButton } from "@/components/LoadingButton";
 import { NumberSettingSection } from "@/components/NumberSettingSection";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { THRESHOLD_MAX } from "@/modules/accounts/domain/chain-settings";
+import { CLAUDE_ACCOUNTS_BOUNDS } from "../../../../shared/types.js";
 
 const TERMS_TEXT =
   "Anthropic's terms do not address automatic moves between your own accounts. Automatic moves are off by default.";
 
-export interface ChainThresholdControl {
+export interface ChainNumberControl {
   draft: string;
   invalid: boolean;
   saving: boolean;
@@ -28,7 +28,8 @@ interface ChainSettingsProps {
   autoMove: boolean;
   autoMovePending: boolean;
   autoMoveErrorText: string | null;
-  threshold: ChainThresholdControl;
+  threshold: ChainNumberControl;
+  hysteresis: ChainNumberControl;
   switchNow: ChainSwitchNowControl;
   onAutoMoveChange: (value: boolean) => void;
 }
@@ -38,6 +39,7 @@ export function ChainSettings({
   autoMovePending,
   autoMoveErrorText,
   threshold,
+  hysteresis,
   switchNow,
   onAutoMoveChange,
 }: ChainSettingsProps) {
@@ -69,11 +71,11 @@ export function ChainSettings({
         id="chain-threshold"
         label="Move threshold (percent)"
         ariaLabel="Automatic move threshold in percent"
-        max={THRESHOLD_MAX}
-        hint="An account counts as limited once any usage window reaches this percent. 50 to 100."
+        max={CLAUDE_ACCOUNTS_BOUNDS.thresholdPercent.max}
+        hint={`An account counts as limited once any usage window reaches this percent. ${CLAUDE_ACCOUNTS_BOUNDS.thresholdPercent.min} to ${CLAUDE_ACCOUNTS_BOUNDS.thresholdPercent.max}.`}
         value={threshold.draft}
         invalid={threshold.invalid}
-        invalidText="Enter a whole number between 50 and 100."
+        invalidText={`Enter a whole number from ${CLAUDE_ACCOUNTS_BOUNDS.thresholdPercent.min} to ${CLAUDE_ACCOUNTS_BOUNDS.thresholdPercent.max}, above the hysteresis.`}
         saveErrorText={threshold.saveErrorText}
         saveLabel="Save threshold"
         saving={threshold.saving}
@@ -81,6 +83,24 @@ export function ChainSettings({
         inlineAction
         onChange={threshold.onChange}
         onSave={threshold.onSave}
+      />
+
+      <NumberSettingSection
+        id="chain-hysteresis"
+        label="Hysteresis (points)"
+        ariaLabel="Hysteresis in percentage points"
+        max={CLAUDE_ACCOUNTS_BOUNDS.hysteresisPercent.max}
+        hint={`A usage move and a return pick only an account this many points below the threshold. ${CLAUDE_ACCOUNTS_BOUNDS.hysteresisPercent.min} to ${CLAUDE_ACCOUNTS_BOUNDS.hysteresisPercent.max}.`}
+        value={hysteresis.draft}
+        invalid={hysteresis.invalid}
+        invalidText={`Enter a whole number from ${CLAUDE_ACCOUNTS_BOUNDS.hysteresisPercent.min} to ${CLAUDE_ACCOUNTS_BOUNDS.hysteresisPercent.max}, below the threshold.`}
+        saveErrorText={hysteresis.saveErrorText}
+        saveLabel="Save hysteresis"
+        saving={hysteresis.saving}
+        savedText={hysteresis.savedText}
+        inlineAction
+        onChange={hysteresis.onChange}
+        onSave={hysteresis.onSave}
       />
 
       <div className="flex flex-wrap items-center gap-2">

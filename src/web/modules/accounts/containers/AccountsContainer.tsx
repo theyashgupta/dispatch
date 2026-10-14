@@ -7,9 +7,13 @@ import { AccountSwitchContainer } from "./AccountSwitchContainer";
 import { AddAccountContainer } from "./AddAccountContainer";
 import { RemoveAccountContainer } from "./RemoveAccountContainer";
 import { RunningSessionsContainer } from "./RunningSessionsContainer";
+import { useNow } from "@/modules/accounts/hooks/use-now";
 import { useAccountsQuery } from "@/queries/accounts-queries";
 
+const EXPIRY_TICK_MS = 60_000;
+
 export function AccountsContainer() {
+  const now = useNow(EXPIRY_TICK_MS);
   const accounts = useAccountsQuery();
   const { refetch } = accounts;
   const [addTarget, setAddTarget] = useState<{
@@ -28,6 +32,7 @@ export function AccountsContainer() {
       <AccountsList
         accounts={accounts.data?.accounts ?? []}
         activeId={accounts.data?.activeId ?? ""}
+        now={now}
         loaded={!accounts.isPending}
         failed={accounts.isError}
         addDisabled={addTarget?.account !== undefined}

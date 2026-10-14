@@ -112,6 +112,7 @@ async function begin(autoMove: boolean) {
     autoMove,
     thresholdPercent: 100,
     minDwellMinutes: 0,
+    hysteresisPercent: 0,
   });
   recorded.length = 0;
   notices.length = 0;
@@ -358,4 +359,41 @@ void test("the default sink writes the activity row to the board with the accoun
   });
   assert.equal(row?.source, "accounts");
   assert.equal(row?.cardId, null);
+});
+
+void test("a login-expiring event records account_login_expiring with the label and expiry as JSON reason and sends one push naming the label and date", async () => {
+  recorded.length = 0;
+  notices.length = 0;
+  const expiresAt = new Date(Date.now() + 2 * 86_400_000).toISOString();
+  await recordChainEvent(
+    { kind: "login-expiring", account: ID_A, expiresAt },
+    fakeRecord,
+  );
+  assert.deepEqual(recorded, [
+    {
+      type: "account_login_expiring",
+      reason: `{"label":"work@example.com","expiresAt":"${expiresAt}"}`,
+    },
+  ]);
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0]?.title, "Claude login expires soon");
+  assert.ok(notices[0]?.body.includes("work@example.com"));
+  assert.ok(notices[0]?.body.includes(new Date(expiresAt).toLocaleString()));
+  assert.equal(notices[0]?.url, "/#/accounts");
+});
+
+void test("a login-expiring event for a past expiry sends the expired copy", async () => {
+  recorded.length = 0;
+  notices.length = 0;
+  const expiresAt = new Date(Date.now() - 86_400_000).toISOString();
+  await recordChainEvent(
+    { kind: "login-expiring", account: ID_A, expiresAt },
+    fakeRecord,
+  );
+  assert.equal(notices.length, 1);
+  assert.equal(notices[0]?.title, "Claude login expired");
+  assert.equal(
+    notices[0]?.body,
+    `work@example.com login expired on ${new Date(expiresAt).toLocaleString()}. Log in again.`,
+  );
 });

@@ -358,6 +358,33 @@ void test("an agent_done group event wakes its owner and the main, other states 
   ]);
 });
 
+void test("an agent_done event on a launched ticket card wakes the main with the card identifier", async () => {
+  reset();
+  const ticket = await store.createLocalCard(SBX, "launched ticket", "");
+  await store.setOrchestratorFields(ticket.id, {
+    launch: { playbook: "Write code directly", direction: "" },
+  });
+  await store.setBoardOrchestrators(
+    SBX,
+    records().filter((r) => r.role !== "main"),
+  );
+  const main = await addOrch("m-launched", "main");
+  store.appendOrchestrationEvent({
+    boardKey: SBX,
+    cardId: ticket.id,
+    sessionId: null,
+    kind: "group_state",
+    data: { state: "agent_done", reason: "x" },
+    ts: new Date().toISOString(),
+  });
+  drive(main, IDLE, T0);
+  await settle(() => sent.length > 0);
+  assert.deepEqual(
+    sent.map((s) => [s.id, s.text]),
+    [[main.id, lineOf(`${ticket.identifier} agent_done`)]],
+  );
+});
+
 void test("the wake row names the orchestrator", async () => {
   reset();
   const o = await addOrch("m-named", "main");

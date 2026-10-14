@@ -159,6 +159,18 @@ void test("the ROADMAP COMPLETE promise with progress not complete is not roadma
   }
 });
 
+void test("the RALPH COMPLETE promise of a single PRD loop is roadmap_complete only with completion complete", () => {
+  const text = pane("roadmap-complete.txt").replace(
+    /<promise>ROADMAP COMPLETE[^<]*<\/promise>/,
+    "<promise>RALPH COMPLETE demo-feature</promise>",
+  );
+  assert.ok(text.includes("RALPH COMPLETE demo-feature"));
+  const done = feed(text, 3, { completion: "complete" }).map((d) => d.state);
+  assert.ok(done.includes("roadmap_complete"));
+  const running = feed(text, 3, { completion: "running" }).map((d) => d.state);
+  assert.ok(!running.includes("roadmap_complete"));
+});
+
 void test("one idle sample is not idle; three equal samples 60 s apart are", () => {
   const states = feed(pane("idle.txt"), 3).map((d) => d.state);
   assert.deepEqual(states, ["working", "working", "idle"]);

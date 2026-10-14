@@ -1,12 +1,7 @@
 import { activeSessionView } from "../../../../shared/active-session.js";
 import type { AttentionItem } from "../../../../shared/attention-queue.js";
-import {
-  REPLY_COPY,
-  type DecisionView,
-  type ReplyResult,
-} from "../../../../shared/decision-view.js";
-import { routeHash } from "../../../../shared/route.js";
-import { SESSION_STATES } from "../../../../shared/session-states.js";
+import type { DecisionView } from "../../../../shared/decision-view.js";
+import { settingsHash } from "../../../../shared/orchestrator-settings.js";
 import {
   DEFAULT_CLAUDE_ACCOUNT_ID,
   type BoardKey,
@@ -21,11 +16,6 @@ export type AttentionBadge =
   { kind: "state"; state: SupervisorState } | { kind: "label"; label: string };
 
 export type AttentionAction = "resume" | "retry_resume";
-
-export const ACTION_LABELS: Record<AttentionAction, string> = {
-  resume: "Resume loop",
-  retry_resume: "Try resume again",
-};
 
 export type AttentionRow =
   | { type: "decision"; id: string; view: DecisionView }
@@ -172,9 +162,7 @@ function itemRow(item: AttentionItem, ctx: AttentionContext): AttentionRow {
     body: bodyOf(item, ctx),
     action: ACTIONS[item.kind] ?? null,
     changeBudgetHref:
-      item.kind === "budget_stop"
-        ? `${routeHash({ page: "board", board: ctx.boardKey })}?panel=orchestrator&tab=policy`
-        : null,
+      item.kind === "budget_stop" ? settingsHash(ctx.boardKey, "policy") : null,
   };
 }
 
@@ -192,18 +180,3 @@ export function attentionRows(
 
 export const ACTIONS_OFF =
   "Reconnecting. Actions are off until the board stream is back.";
-
-/** The line under a reply after the send, for a confirmed or unconfirmed send or a refusal. */
-export function replyResultText(
-  outcome:
-    | { ok: true; result: ReplyResult | null }
-    | { ok: false; error: string; reason: string | null },
-  title: string,
-  state: SupervisorState | undefined,
-): string | null {
-  if (outcome.ok) return REPLY_COPY[outcome.result ?? "unconfirmed"];
-  if (outcome.error !== "session-state-refused") return null;
-  const label =
-    state === undefined ? "another state" : SESSION_STATES[state].label;
-  return `Not sent. ${title} is now at ${label}. Open the terminal.`;
-}

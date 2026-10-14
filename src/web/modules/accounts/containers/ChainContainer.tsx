@@ -5,7 +5,11 @@ import type {
 } from "../../../../shared/types.js";
 import { ChainPanel } from "@/modules/accounts/components/ChainPanel";
 import { moveChainOrder } from "@/modules/accounts/domain/chain-order";
-import { parseThreshold } from "@/modules/accounts/domain/chain-settings";
+import {
+  parseHysteresis,
+  parseThreshold,
+} from "@/modules/accounts/domain/chain-settings";
+import { useChainNumberSetting } from "@/modules/accounts/hooks/use-chain-number-setting";
 import { accountName } from "../../../../shared/session-account-view.js";
 import { useNow } from "@/modules/accounts/hooks/use-now";
 import {
@@ -32,16 +36,25 @@ export function ChainContainer({ accounts, chain }: ChainContainerProps) {
   const switchOnce = useSingleFlight(switchNow.mutate);
   const [orderError, setOrderError] = useState<string | null>(null);
   const [autoMoveError, setAutoMoveError] = useState<string | null>(null);
-  const [thresholdError, setThresholdError] = useState<string | null>(null);
-  const [thresholdDraft, setThresholdDraft] = useState<string | null>(null);
-  const [thresholdSaved, setThresholdSaved] = useState(false);
   const [switchNote, setSwitchNote] = useState<{
     tone: "error" | "info";
     text: string;
   } | null>(null);
 
-  const draft = thresholdDraft ?? String(chain.settings.thresholdPercent);
-  const threshold = parseThreshold(draft);
+  const threshold = useChainNumberSetting({
+    field: "thresholdPercent",
+    saved: chain.settings.thresholdPercent,
+    parse: (draft) => parseThreshold(draft, chain.settings.hysteresisPercent),
+    settingsOnce,
+    saving: settings.isPending,
+  });
+  const hysteresis = useChainNumberSetting({
+    field: "hysteresisPercent",
+    saved: chain.settings.hysteresisPercent,
+    parse: (draft) => parseHysteresis(draft, chain.settings.thresholdPercent),
+    settingsOnce,
+    saving: settings.isPending,
+  });
 
   const changeOrder = (from: number, to: number) => {
     const ids = accounts.map((account) => account.id);
@@ -62,23 +75,6 @@ export function ChainContainer({ accounts, chain }: ChainContainerProps) {
         onError: () => setAutoMoveError("Couldn't save the setting."),
       },
     );
-
-  const saveThreshold = () => {
-    if (threshold === null) return;
-    setThresholdSaved(false);
-    settingsOnce(
-      { thresholdPercent: threshold },
-      {
-        onSuccess: (result) => {
-          setThresholdError(result.ok ? null : result.error);
-          if (!result.ok) return;
-          setThresholdDraft(null);
-          setThresholdSaved(true);
-        },
-        onError: () => setThresholdError("Couldn't save the setting."),
-      },
-    );
-  };
 
   const runSwitchNow = () => {
     setSwitchNote(null);
@@ -108,18 +104,8 @@ export function ChainContainer({ accounts, chain }: ChainContainerProps) {
       orderErrorText={orderError}
       autoMovePending={settings.isPending}
       autoMoveErrorText={autoMoveError}
-      threshold={{
-        draft,
-        invalid: threshold === null,
-        saving: settings.isPending,
-        saveErrorText: thresholdError,
-        savedText: thresholdSaved ? "Saved" : undefined,
-        onChange: (value) => {
-          setThresholdDraft(value);
-          setThresholdSaved(false);
-        },
-        onSave: saveThreshold,
-      }}
+      threshold={threshold}
+      hysteresis={hysteresis}
       switchNow={{
         pending: switchNow.isPending,
         note: switchNote,

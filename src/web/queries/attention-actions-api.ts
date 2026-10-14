@@ -7,18 +7,19 @@ export type ActionOutcome =
   | { ok: false; error: string; reason: string | null };
 
 /**
- * Fetch the open decisions of a board: GET /api/decisions?board=:key&state=open.
+ * Fetch the decisions of a board in one state: GET /api/decisions?board=:key&state=:state.
  *
  * @remarks
  * Throws on any non-2xx.
  */
-export async function getOpenDecisions(
+export async function getDecisions(
   board: BoardKey,
+  state: "open" | "answered",
 ): Promise<DecisionItem[]> {
   const result = await http<{ items: DecisionItem[] }>(
-    `/api/decisions?board=${encodeURIComponent(board)}&state=open`,
+    `/api/decisions?board=${encodeURIComponent(board)}&state=${state}`,
   );
-  if (!result.ok) throw httpError("getOpenDecisions", result);
+  if (!result.ok) throw httpError("getDecisions", result);
   return result.data.items;
 }
 
@@ -79,4 +80,9 @@ export function sendLoopInput(
 /** Resume a loop that waits at needs_input, as the user: POST /api/sessions/:cardId/resume-loop. */
 export function resumeLoop(cardId: string): Promise<ActionOutcome> {
   return postAction(`/api/sessions/${encodeURIComponent(cardId)}/resume-loop`);
+}
+
+/** Try the resume of a dead session again: POST /api/cards/:id/resume. */
+export function retryResume(cardId: string): Promise<ActionOutcome> {
+  return postAction(`/api/cards/${encodeURIComponent(cardId)}/resume`, {});
 }

@@ -13,7 +13,6 @@ export type ConversationEntry =
       kind: "message";
       id: string;
       at: string | null;
-      role: ConversationMessage["role"];
       author: string;
       text: string;
     }
@@ -21,13 +20,14 @@ export type ConversationEntry =
       kind: "decision";
       id: string;
       at: string;
-      decisionKind: DecisionItem["kind"];
       badge: "Decision" | "Question";
       view: DecisionView;
       state: "open" | "answered";
-      answerLabel: string | null;
+      answerText: string | null;
       answerNote: string | null;
     };
+
+export const ANSWERED_DECISION_CAP = 20;
 
 export interface ConversationViewInput {
   messages: readonly ConversationMessage[];
@@ -39,7 +39,7 @@ export interface ConversationViewInput {
 }
 
 /**
- * Merge the transcript messages and the decision items of one orchestrator into one timeline.
+ * Merge the transcript messages, the open decisions and the newest ANSWERED_DECISION_CAP answered decisions of one orchestrator into one timeline.
  *
  * @remarks
  * Messages keep their order. A decision goes before the first message that is later than
@@ -53,26 +53,46 @@ export function conversationView(
     orchestrator: input.orchestratorName,
     system: "Dispatch",
   } as const;
-  const decisions = input.decisions
-    .filter((d) => d.orchestratorId === input.orchestratorId)
-    .map((item) => ({
-      time: Date.parse(item.createdAt),
-      entry: {
-        kind: "decision",
-        id: item.id,
-        at: item.createdAt,
-        decisionKind: item.kind,
-        badge: GATE_KINDS.includes(item.kind) ? "Decision" : "Question",
-        view: decisionView(item, input.orchestratorNames, input.now),
-        state: item.state,
-        answerLabel:
-          item.state === "answered"
-            ? (item.options.find((o) => o.id === item.answer?.optionId)
-                ?.label ?? null)
-            : null,
-        answerNote: item.answer?.note ?? null,
-      } satisfies ConversationEntry,
-    }))
+  const own = input.decisions.filter(
+    (d) => d.orchestratorId === input.orchestratorId,
+  );
+  const answered = own.filter((d) => d.state === "answered");
+  const answeredIds = new Set(answered.map((d) => d.id));
+  const answeredAt = (d: DecisionItem) =>
+    Date.parse(d.answeredAt ?? d.createdAt);
+  const newestAnswered = [...answered]
+    .sort(
+      (a, b) =>
+        answeredAt(b) - answeredAt(a) ||
+        Date.parse(b.createdAt) - Date.parse(a.createdAt),
+    )
+    .slice(0, ANSWERED_DECISION_CAP);
+  const decisions = [
+    ...own.filter((d) => d.state === "open" && !answeredIds.has(d.id)),
+    ...newestAnswered,
+  ]
+    .map((item) => {
+      const label =
+        item.options.find((o) => o.id === item.answer?.optionId)?.label ?? null;
+      return {
+        time: Date.parse(item.createdAt),
+        entry: {
+          kind: "decision",
+          id: item.id,
+          at: item.createdAt,
+          badge: GATE_KINDS.includes(item.kind) ? "Decision" : "Question",
+          view: decisionView(item, input.orchestratorNames, input.now),
+          state: item.state,
+          answerText:
+            item.state === "answered"
+              ? label === null
+                ? "Answered"
+                : `Answered: ${label}`
+              : null,
+          answerNote: item.answer?.note ?? null,
+        } satisfies ConversationEntry,
+      };
+    })
     .sort((a, b) => a.time - b.time);
   const entries: ConversationEntry[] = [];
   let next = 0;
@@ -88,7 +108,6 @@ export function conversationView(
       kind: "message",
       id: message.id,
       at: message.at,
-      role: message.role,
       author: authors[message.role],
       text: message.text,
     });
