@@ -19,6 +19,7 @@ import {
   type SendResult,
 } from "./supervisor-send.js";
 import { assertMemoryHeadroom } from "./memory-governor.js";
+import { pauseCard, unpauseCard } from "./pause-card.js";
 
 export const sessionTools: {
   send: typeof sendConfirmed;
@@ -321,5 +322,31 @@ export async function stopSession(
       "stop_session",
       `stop_session by orchestrator ${caller.orchestratorId}`,
     );
+  });
+}
+
+/**
+ * Pause the loop of a card on behalf of an orchestrator.
+ *
+ * @remarks `by: "user"` keeps the memory governor from resuming the card.
+ */
+export async function orchestratorPauseCard(
+  caller: OrchestratorIdentity,
+  card: Card,
+): Promise<void> {
+  await pauseCard(card.id, {
+    by: "user",
+    reason: `paused by orchestrator ${caller.orchestratorId}`,
+  });
+}
+
+/** Resume a paused loop on behalf of an orchestrator, refused while memory is low. */
+export async function orchestratorResumeCard(
+  caller: OrchestratorIdentity,
+  card: Card,
+): Promise<void> {
+  assertMemoryHeadroom(card.boardKey);
+  await unpauseCard(card.id, {
+    reason: `resumed by orchestrator ${caller.orchestratorId}`,
   });
 }

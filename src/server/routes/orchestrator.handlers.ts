@@ -50,6 +50,8 @@ import {
 } from "../services/orchestration/orchestrator-session.js";
 import {
   approveGroupPlan,
+  orchestratorPauseCard,
+  orchestratorResumeCard,
   requestHandoff,
   resumeLoop,
   sendInput,
@@ -411,6 +413,27 @@ export const stopSessionHandler: ToolHandler = async (
   await stopSession(caller, scopedCard(caller, call, cardId));
   call.result = "stopped";
   res.status(200).json({ stopped: true });
+};
+
+/** Pause the loop of a card in place. */
+export const pauseCardHandler: ToolHandler = async (req, res, caller, call) => {
+  const { cardId } = parseOrThrow(sessionCardParamsSchema, req.params);
+  await orchestratorPauseCard(caller, scopedCard(caller, call, cardId));
+  call.result = "paused";
+  res.status(200).json({ paused: true });
+};
+
+/** Resume a paused loop, refused while memory is low. */
+export const resumeCardHandler: ToolHandler = async (
+  req,
+  res,
+  caller,
+  call,
+) => {
+  const { cardId } = parseOrThrow(sessionCardParamsSchema, req.params);
+  await orchestratorResumeCard(caller, scopedCard(caller, call, cardId));
+  call.result = "resumed";
+  res.status(200).json({ resumed: true });
 };
 
 /** Raise a decision item for the user to answer. */

@@ -270,6 +270,21 @@ export const MCP_TOOLS: readonly McpTool[] = [
     path: "/sessions/:cardId/stop",
   },
   {
+    name: "pause_card",
+    description:
+      "Pause the loop of a card: stop its processes in place. The server never resumes it; call resume_card.",
+    input: cardIdParam,
+    method: "POST",
+    path: "/sessions/:cardId/pause",
+  },
+  {
+    name: "resume_card",
+    description: "Resume a paused loop. Refused while memory is low.",
+    input: cardIdParam,
+    method: "POST",
+    path: "/sessions/:cardId/unpause",
+  },
+  {
     name: "start_ship",
     description:
       "Start the ship steps of a finished group card for its branches in stack order. A board with no ship rights is refused.",
