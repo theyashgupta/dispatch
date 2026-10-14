@@ -43,6 +43,11 @@ beforeEach(async () => {
       listCards: () => [...cards.values()],
     }),
   );
+  await memoryPauseStep({
+    supported: true,
+    stale: false,
+    sample: memorySample(),
+  });
   await memoryPauseStep({ supported: false });
 });
 
@@ -232,6 +237,7 @@ test("swap above the ceiling pauses the newest loop card with the exact reason",
       {
         by: "memory",
         reason: "swap used 9000 MB is above the 8192 MB ceiling",
+        swapMb: 9000,
       },
     ],
   ]);
@@ -401,4 +407,64 @@ test("with only non-candidate cards nothing is paused", async () => {
   loopCard("plain", "2026-10-13T10:00:00.000Z", { source: "local" });
   await step(9000);
   assert.deepEqual(paused, []);
+});
+
+async function restartWith(swapUsedMb: number): Promise<void> {
+  const stop = startMemoryGovernor(() =>
+    Promise.resolve(memorySample({ swapUsedMb })),
+  );
+  stop();
+  await new Promise((r) => setImmediate(r));
+}
+
+function restartBoard(): void {
+  loopCard("held", "2026-10-13T07:00:00.000Z", {
+    paused: { ...MEMORY_MARK, sessionId: "held-session", swapMb: 9000 },
+  });
+  loopCard("mine", "2026-10-13T08:00:00.000Z", {
+    paused: { ...MEMORY_MARK, by: "user", sessionId: "mine-session" },
+  });
+  loopCard("free", "2026-10-13T09:00:00.000Z");
+}
+
+test("after a restart with swap under the ceiling the first reading resumes the governor-paused loop only", async (t) => {
+  t.mock.method(console, "info", () => {});
+  recordTools();
+  restartBoard();
+  await restartWith(8000);
+  assert.deepEqual(resumed, [
+    [
+      "held",
+      {
+        reason:
+          "swap used 8000 MB is not above the 8192 MB ceiling after a restart",
+      },
+    ],
+  ]);
+  assert.deepEqual(paused, []);
+});
+
+test("after a restart with swap over the ceiling nothing new is paused until swap grows 256 MB past the persisted reading", async (t) => {
+  t.mock.method(console, "info", () => {});
+  recordTools();
+  restartBoard();
+  await restartWith(9100);
+  await step(9255);
+  assert.equal(paused.length, 0);
+  assert.deepEqual(resumed, []);
+  await step(9256);
+  assert.deepEqual(
+    paused.map(([id]) => id),
+    ["free"],
+  );
+});
+
+test("the restart rebuild runs once, so later readings under the ceiling use the resume floor", async (t) => {
+  t.mock.method(console, "info", () => {});
+  recordTools();
+  restartBoard();
+  await restartWith(9100);
+  await step(8000);
+  await step(8000);
+  assert.deepEqual(resumed, []);
 });

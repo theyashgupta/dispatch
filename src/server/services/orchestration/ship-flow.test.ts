@@ -398,6 +398,33 @@ void test("startShip refuses a group with no loop progress outside Agent done an
   assert.deepEqual(calls, []);
 });
 
+void test("startShip refuses a Done card as already-shipped with the PR number it carries and makes no git call", async () => {
+  const stack = await newStack();
+  const done = { ...(await noLoopCard(stack)), column: "done" as const };
+  await storeRunning(stack, { pr: 42 });
+  const flow = { ...store.getCard(done.id)!.shipFlow!, state: "done" as const };
+  await store.setShipFlow(done.id, flow);
+  const cases: [Card, number | undefined][] = [
+    [done, undefined],
+    [{ ...done, shipFlow: flow }, 42],
+  ];
+  for (const [card, pr] of cases) {
+    await assert.rejects(
+      startShipFlow(CALLER, card, {
+        repository: stack.repo,
+        branches: [branchInput("unit-1")],
+      }),
+      (err: HttpError) => {
+        assert.equal(err.status, 409);
+        assert.equal(err.code, "already-shipped");
+        assert.equal(err.details?.pr, pr);
+        return true;
+      },
+    );
+  }
+  assert.deepEqual(calls, []);
+});
+
 void test("startShip passes the branch check for the card branch, else the identifier, and stops at branch-not-ahead", async () => {
   const stack = await newStack();
   await store.setCardWorkspace(stack.card.id, {

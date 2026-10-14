@@ -498,6 +498,8 @@ export interface Card {
     by: PausedBy;
     sessionId: string;
     pids: number[];
+    reason?: string;
+    swapMb?: number;
   } | null;
 
   /**
