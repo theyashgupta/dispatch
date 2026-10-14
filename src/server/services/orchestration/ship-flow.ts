@@ -194,6 +194,20 @@ function isGroupLoop(
   return card.source === "group" && hasLoopProgress(card);
 }
 
+/**
+ * Get the `pr` detail of an already-shipped refusal of a Done card, or no detail when the card carries no PR number.
+ *
+ * @remarks The ship flow is read first, because Done cleanup clears the detected `prs` of the card.
+ */
+function donePr(card: Card): { pr: number } | undefined {
+  const pr =
+    card.shipFlow?.branches
+      .map((b) => b.pr)
+      .filter((n) => n !== null)
+      .at(-1) ?? card.prs?.[0]?.number;
+  return pr === undefined ? undefined : { pr };
+}
+
 /** Throw the typed 409 when a flow on the board runs or is being started. */
 function assertNoRunningFlow(boardKey: BoardKey): void {
   const running = store
@@ -236,6 +250,9 @@ function assertShippable(
     card.loopProgress.units.some((u) => !FINISHED_STATUSES.has(u.status))
   ) {
     throw new ConflictError("loop-not-finished");
+  }
+  if (!isGroupLoop(card) && card.column === "done") {
+    throw new ConflictError("already-shipped", donePr(card));
   }
   if (!isGroupLoop(card) && card.column !== "agent_done") {
     throw new ConflictError("card-not-done");
