@@ -10,6 +10,7 @@ import {
   switcherOptions,
 } from "@/modules/orchestrator/domain/centre-page-state";
 import { STALE_REASON } from "@/modules/orchestrator/domain/centre-model";
+import { useCentreAlertSlot } from "@/modules/orchestrator/hooks/use-centre-pane";
 import { useCentreControl } from "./use-centre-control";
 import { useCentreSelection } from "./use-centre-selection";
 
@@ -24,6 +25,7 @@ export function CentreControlsContainer({
     useCentreSelection();
   const navigate = useNavigate();
   const wide = !useMediaQuery(NARROW_QUERY);
+  const [alertSlot] = useCentreAlertSlot();
   const { control, run, failure, retryFailed, pending } = useCentreControl(
     boardKey,
     record,
@@ -44,6 +46,7 @@ export function CentreControlsContainer({
   return (
     <CentreToolbar
       inline={inline}
+      alertSlot={alertSlot}
       staleBadge={staleText(stale, snapshot.dataUpdatedAt)}
       switcher={
         showSwitcher(records)

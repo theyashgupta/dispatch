@@ -16,6 +16,13 @@ const DEFAULTS: CentrePaneState = {
 const useCentrePaneState = createModuleState<CentrePaneState>(DEFAULTS);
 
 /**
+ * Read and set the element below the pane tabs where the header toolbar shows its failure alert at 768 px and wider.
+ *
+ * @remarks The header and the pane render in different slots, so the toolbar portals its alert into this element and the alert never covers the tabs.
+ */
+export const useCentreAlertSlot = createModuleState<HTMLElement | null>(null);
+
+/**
  * Read the shared page tab, pane tab and comment focus request of the command centre, with their setters.
  *
  * @remarks

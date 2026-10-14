@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -14,6 +15,7 @@ import { CentreAlertBar } from "@/modules/orchestrator/components/CentreAlertBar
 
 interface CentreToolbarProps {
   inline: boolean;
+  alertSlot: HTMLElement | null;
   staleBadge: string | null;
   switcher: {
     options: readonly { value: string; label: string }[];
@@ -31,14 +33,22 @@ interface CentreToolbarProps {
 
 export function CentreToolbar({
   inline,
+  alertSlot,
   staleBadge,
   switcher,
   controls,
   onSettings,
   alert,
 }: CentreToolbarProps) {
+  const alertBar = alert !== null && (
+    <CentreAlertBar
+      message={alert.message}
+      retryDisabled={alert.retryDisabled}
+      onRetry={alert.onRetry}
+    />
+  );
   return (
-    <div className="relative flex min-w-0 flex-1 flex-wrap items-center gap-(--space-sm)">
+    <div className="flex min-w-0 flex-1 flex-wrap items-center gap-(--space-sm)">
       {staleBadge !== null && (
         <Badge tone="neutral" role="status">
           {staleBadge}
@@ -75,21 +85,16 @@ export function CentreToolbar({
           Settings
         </Button>
       </div>
-      {alert !== null && (
-        <div
-          className={
-            inline
-              ? "w-full"
-              : "absolute top-full right-0 z-10 mt-(--space-xs) w-max max-w-120 rounded-md border bg-popover px-3 py-2 shadow-md"
-          }
-        >
-          <CentreAlertBar
-            message={alert.message}
-            retryDisabled={alert.retryDisabled}
-            onRetry={alert.onRetry}
-          />
-        </div>
-      )}
+      {alertBar &&
+        (inline ? (
+          <div className="w-full">{alertBar}</div>
+        ) : (
+          alertSlot !== null &&
+          createPortal(
+            <div className="px-(--space-lg) pb-(--space-sm)">{alertBar}</div>,
+            alertSlot,
+          )
+        ))}
     </div>
   );
 }
