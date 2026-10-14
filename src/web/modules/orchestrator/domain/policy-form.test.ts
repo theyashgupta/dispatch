@@ -4,6 +4,7 @@ import {
   DEFAULT_BOARD_KEY,
   defaultBoardPolicy,
 } from "../../../../shared/board-key.js";
+import { refusalText } from "../../../../shared/decision-view.js";
 import {
   crossSessionInboundFromSelect,
   crossSessionInboundOptions,
@@ -167,10 +168,12 @@ test("the payload holds the thirteen policy fields with numbers, null and the st
     "handoffHardPercent",
     "handoffPercent",
     "loopModel",
+    "memoryFloorMb",
     "orchestratorModel",
     "roadmapApproval",
     "shipRights",
     "supervisor",
+    "swapCeilingMb",
     "usageLimit",
     "wakeMinutes",
   ]);
@@ -180,6 +183,70 @@ test("the payload holds the thirteen policy fields with numbers, null and the st
   assert.equal(policyPayload(saved).loopModel, null);
   assert.equal(policyPayload(saved).budgetPerGroup, null);
   assert.equal(policyPayload(saved).orchestratorModel, "claude-opus-5-5");
+});
+
+test("the memory floor accepts 0 to 65536 and refuses the rest", () => {
+  const table: [string, boolean][] = [
+    ["0", true],
+    ["1024", true],
+    ["65536", true],
+    ["-1", false],
+    ["65537", false],
+    ["1.5", false],
+    ["", false],
+  ];
+  for (const [text, ok] of table) {
+    const errors = validatePolicyForm(edit({ memoryFloorMb: text }));
+    assert.equal(errors.memoryFloorMb === undefined, ok, text);
+    if (!ok)
+      assert.equal(
+        errors.memoryFloorMb,
+        "Enter a whole number from 0 to 65536.",
+      );
+  }
+});
+
+test("the swap ceiling accepts 256 to 65536 and refuses the rest", () => {
+  const table: [string, boolean][] = [
+    ["256", true],
+    ["8192", true],
+    ["65536", true],
+    ["255", false],
+    ["65537", false],
+    ["abc", false],
+    ["", false],
+  ];
+  for (const [text, ok] of table) {
+    const errors = validatePolicyForm(edit({ swapCeilingMb: text }));
+    assert.equal(errors.swapCeilingMb === undefined, ok, text);
+    if (!ok)
+      assert.equal(
+        errors.swapCeilingMb,
+        "Enter a whole number from 256 to 65536.",
+      );
+  }
+});
+
+test("the memory fields fill from the policy and reach the payload as numbers", () => {
+  assert.equal(saved.memoryFloorMb, "1024");
+  assert.equal(saved.swapCeilingMb, "8192");
+  const payload = policyPayload(
+    edit({ memoryFloorMb: "0", swapCeilingMb: "65536" }),
+  );
+  assert.equal(payload.memoryFloorMb, 0);
+  assert.equal(payload.swapCeilingMb, 65536);
+  assert.equal(isPolicyDirty(edit({ memoryFloorMb: "512" }), saved), true);
+});
+
+test("the server codes of the memory fields map to their field copy", () => {
+  assert.equal(
+    refusalText("invalid-memoryFloorMb", null),
+    "the free memory floor has to be a whole number from 0 to 65536",
+  );
+  assert.equal(
+    refusalText("invalid-swapCeilingMb", null),
+    "the swap ceiling has to be a whole number from 256 to 65536",
+  );
 });
 
 test("the form values and the payload keep the group playbook, a name or null", () => {

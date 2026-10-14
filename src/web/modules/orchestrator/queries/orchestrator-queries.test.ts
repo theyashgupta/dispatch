@@ -247,6 +247,8 @@ const policy: PolicyPayload = {
   groupPlaybook: null,
   crossSessionInbound: null,
   wakeMinutes: 15,
+  memoryFloorMb: 1024,
+  swapCeilingMb: 8192,
 };
 
 function body(index: number): unknown {
@@ -298,7 +300,7 @@ test("the conversation query reads one orchestrator every 3 s", async () => {
   );
 });
 
-test("Save policy puts the thirteen fields and no credits value, then updates the board list", async () => {
+test("Save policy puts the fifteen fields and no credits value, then updates the board list", async () => {
   const client = newClient();
   const stored = { key: LOCAL, policy: { ...policy, concurrencyCap: 4 } };
   client.setQueryData(boardListKeys.list, {
@@ -313,7 +315,7 @@ test("Save policy puts the thirteen fields and no credits value, then updates th
   assert.equal(result.ok, true);
   assert.equal(calls[0]?.url, "/api/boards/LOCAL/policy");
   assert.equal(calls[0]?.init?.method, "PUT");
-  assert.equal(Object.keys(body(0) as object).length, 13);
+  assert.equal(Object.keys(body(0) as object).length, 15);
   assert.equal((body(0) as BoardPolicy).crossSessionInbound, "accept");
   assert.equal(/credit/i.test(calls[0]?.init?.body as string), false);
   const list = client.getQueryData<{ boards: { policy: BoardPolicy }[] }>(

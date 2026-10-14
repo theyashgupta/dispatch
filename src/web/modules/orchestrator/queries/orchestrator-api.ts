@@ -2,7 +2,6 @@ import type { PolicyPayload } from "@/modules/orchestrator/domain/policy-form";
 import type {
   Board,
   BoardKey,
-  BoardPolicy,
   OrchestratorConversation,
   OrchestratorScope,
   OrchestratorPolicyOverride,
@@ -148,7 +147,7 @@ function jsonInit(method: string, body: unknown): RequestInit {
   return { method, headers: JSON_HEADERS, body: JSON.stringify(body) };
 }
 
-/** Save the board policy: PUT /api/boards/:key/policy with the ten policy fields. */
+/** Save the board policy: PUT /api/boards/:key/policy with the policy fields. */
 export async function saveBoardPolicy(
   board: BoardKey,
   policy: PolicyPayload,
