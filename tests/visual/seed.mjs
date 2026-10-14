@@ -437,7 +437,7 @@ function seedOrchestrated(db) {
   );
   for (const c of cards) insertCard.run(c.id, JSON.stringify(c));
 
-  const decision = (id, cardId, question, minutesAgo, recommended) => ({
+  const decision = (id, cardId, question, minutesAgo, recommended, labelA) => ({
     id,
     boardKey: "ORC",
     cardId,
@@ -445,7 +445,7 @@ function seedOrchestrated(db) {
     kind: "ruling",
     question,
     options: [
-      { id: "a", label: "Option A" },
+      { id: "a", label: labelA },
       { id: "b", label: "Option B" },
     ],
     recommendedOptionId: recommended,
@@ -461,6 +461,7 @@ function seedOrchestrated(db) {
       "Retry the Phase 5 gate now, or send GROUP-22 a fix instruction first?",
       12,
       "a",
+      "Retry the Phase 5 gate now, then send GROUP-22 the fix after",
     ),
     decision(
       "dec-orc-2",
@@ -468,6 +469,7 @@ function seedOrchestrated(db) {
       "Backfill in one pass, or in batches of 10 000 rows?",
       30,
       null,
+      "Option A",
     ),
   ];
   const insertDecision = db.prepare(
