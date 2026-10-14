@@ -9,6 +9,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { CENTRE_SETTINGS_BUTTON_ID } from "@/modules/orchestrator/domain/centre-page-state";
 import { PanelAlertBar } from "@/modules/orchestrator/components/PanelAlertBar";
 
 interface CentreToolbarProps {
@@ -64,7 +65,13 @@ export function CentreToolbar({
           </>
         )}
         {controls}
-        <Button type="button" variant="outline" size="sm" onClick={onSettings}>
+        <Button
+          id={CENTRE_SETTINGS_BUTTON_ID}
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onSettings}
+        >
           Settings
         </Button>
       </div>
@@ -73,7 +80,7 @@ export function CentreToolbar({
           className={
             inline
               ? "w-full"
-              : "absolute top-full right-0 z-10 mt-(--space-xs) w-max max-w-120"
+              : "absolute top-full right-0 z-10 mt-(--space-xs) w-max max-w-120 rounded-md border bg-popover px-3 py-2 shadow-md"
           }
         >
           <PanelAlertBar

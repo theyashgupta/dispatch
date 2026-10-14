@@ -1,5 +1,6 @@
 import { CentreContainer } from "@/modules/orchestrator/containers/CentreContainer";
 import { CentrePaneContainer } from "@/modules/orchestrator/containers/CentrePaneContainer";
+import { SettingsSheetContainer } from "@/modules/orchestrator/containers/SettingsSheetContainer";
 
 export function CentreView() {
   return (
@@ -18,6 +19,7 @@ export function CentreView() {
           <CentrePaneContainer />
         </aside>
       </div>
+      <SettingsSheetContainer />
     </div>
   );
 }

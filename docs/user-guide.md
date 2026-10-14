@@ -106,7 +106,7 @@ To open the policy form of a board:
 1. If the board does not exist, create it (see "Create a board").
 2. Select the board in the **Boards** section (see "Switch boards").
 3. Open the board page.
-4. Choose **Orchestrator**, or **Add orchestrator** when the board has none. The command centre opens. Choose **Settings** to open the orchestrator panel. The panel has four tabs: **Terminal**, **Decisions**, **Policy** and **Orchestrators**.
+4. Choose **Orchestrator**, or **Add orchestrator** when the board has none. The command centre opens. Choose **Settings** to open the settings sheet. The sheet has two tabs: **Policy** and **Orchestrators**. The terminal and the decisions are on the command centre.
 5. Open **Policy**. The form is called **Policy for** and the board name.
 
 Only you can change the policy. The orchestrator reads it. No tool can change it.
@@ -159,11 +159,11 @@ A session that starts without hooks gets no settings file, so this value does no
 ## Add and start an orchestrator
 
 1. Select the board in the **Boards** section. Open the board page. Every board has its own button. `LOCAL` has one too, and its supervisor starts **Off**.
-2. Choose **Add orchestrator** in the page header. When the board already has an orchestrator, the button reads **Orchestrator**. The command centre opens (see "The command centre"). Choose **Settings** to open the orchestrator panel as a side panel over the board. Its header shows the board name.
-3. Make sure the supervisor is **On** in the **Policy** tab. With the supervisor **Off**, the panel shows: "Turn on the supervisor in Policy to start an orchestrator."
-4. Choose **Start orchestrator**.
+2. Choose **Add orchestrator** in the page header. When the board already has an orchestrator, the button reads **Orchestrator**. The command centre opens (see "The command centre"). Choose **Settings** to open the settings sheet at the right of the command centre. The sheet opens at the **Policy** tab.
+3. Make sure the supervisor is **On** in the **Policy** tab. With the supervisor **Off**, the button **Start** of the command centre is off. The command centre shows this line under the button: "Turn on the supervisor in Policy to start an orchestrator."
+4. Close the settings sheet. Choose **Start** in the controls of the command centre.
 
-When the board has no orchestrator record, **Start orchestrator** first adds the main orchestrator. The record has the id `main` and the name "Main orchestrator". Then it starts the orchestrator.
+When the board has no orchestrator record, **Start** first adds the main orchestrator. The record has the id `main` and the name "Main orchestrator". Then it starts the orchestrator.
 
 The orchestrator can create a board with the tool `create_board`. It gives a name, and the tool answers the key and the link. The tool `get_board_workspace` lists all boards.
 
@@ -179,31 +179,31 @@ The start does these things:
 - It passes the model of the **Orchestrator model** field to Claude.
 - It limits the tools. Claude gets the read tools `Read`, `Glob` and `Grep`, and the Dispatch tools. The tools `Bash`, `Write`, `Edit` and `NotebookEdit` are off.
 
-The panel header shows the state of the session as a badge. The badge uses the session states of a loop. These are the values you see most:
+The orchestrator node of the command centre shows the state of the session as a badge. The badge uses the session states of a loop. These are the values you see most:
 
 - **Starting** (with a spinner). The start runs.
 - **Working**. The orchestrator runs. This is the healthy state. The **Stop** button shows.
 - **Idle**. The session runs and waits.
 - **Needs input**, **Permission prompt**, **Usage limit dialog** and **Waiting for usage reset**. The session waits. Open the **Terminal** tab.
-- **Session lost** and **Claude exited**. The session ended. **Resume orchestrator** shows.
+- **Session lost** and **Claude exited**. The session ended. **Resume** shows.
 
 When the orchestrator waits at its prompt, Dispatch wakes it. Dispatch types one line that starts with "Dispatch wake:" when you answer its decision item, when one of its groups reaches Agent done, needs input, fails to start, ships, stops its ship flow, hits a loop error or a usage limit, and when the **Wake timer (minutes)** of the policy runs out. Dispatch never types while the orchestrator works, types at most one line in 20 seconds, and never wakes a stopped orchestrator.
 
 The hidden card and the MCP configuration file do not show in the UI. To confirm a start, check these signs:
 
 1. The badge reads **Working** and the **Stop** button shows.
-2. The **Terminal** tab shows the live terminal.
+2. The **Terminal** tab of the pane shows the live terminal.
 3. The **Changed since** card of the dashboard shows a row such as "Supervisor: a card is now Working".
 
-The start can fail. The panel then shows the line "The orchestrator did not start: <reason>." The reason names the step and the last text of the Claude pane. Dispatch waits about 30 seconds for Claude to be ready, so the badge can read **Starting** for some time before the line shows. Choose **Try again** beside the line to start again. The board now has a main orchestrator, so the page header button reads **Orchestrator**.
+The start can fail. The controls of the command centre then show the line "The orchestrator did not start: <reason>." The reason names the step and the last text of the Claude pane. Dispatch waits about 30 seconds for Claude to be ready, so the badge can read **Starting** for some time before the line shows. Choose **Try again** beside the line to start again. The board now has a main orchestrator, so the page header button of the board reads **Orchestrator**.
 
-The **Terminal** tab shows the live terminal. The panel buttons depend on the state:
+The **Terminal** tab of the pane shows the live terminal. The buttons of the command centre depend on the state:
 
-- **Start orchestrator** starts a stopped orchestrator. It shows when the orchestrator is stopped, also after a failed start.
+- **Start** starts a stopped orchestrator. It shows when the orchestrator is stopped, also after a failed start.
 - **Stop** interrupts the current turn. The session stays open. The button is off when the session shows a permission prompt, the usage limit dialog or the wait for the usage reset.
-- **Resume orchestrator** shows when the session is lost or Claude exited. It starts Claude again in the open session, or it starts the session again.
+- **Resume** shows when the session is lost or Claude exited. It starts Claude again in the open session, or it starts the session again.
 
-The **Decisions** tab lists the open decision items of the board. The **Orchestrators** tab lists the orchestrators. The **Last wake** column, after **Policy**, shows the reasons and the time of the last wake, for example "timer 15 min at 14:05", or **None** when the orchestrator has not woken. An extra orchestrator needs a scope of groups or tickets, and it needs the main orchestrator first. Choose **Add extra orchestrator** to add one.
+The **Conversation** tab of the pane lists the open decision items of the orchestrator. The **Orchestrators** tab of the settings sheet lists the orchestrators. The **Last wake** column, after **Policy**, shows the reasons and the time of the last wake, for example "timer 15 min at 14:05", or **None** when the orchestrator has not woken. An extra orchestrator needs a scope of groups or tickets, and it needs the main orchestrator first. Choose **Add extra orchestrator** to add one.
 
 ## How the orchestrator judges and starts work
 
@@ -405,15 +405,40 @@ From 768 px wide, the controls sit in the page header. Below 768 px, they sit ab
 - A badge "Data from <time>". It shows only while the connection is down.
 - The switcher. It has the hidden label "Orchestrator". It shows only when the board has more than one orchestrator. Each option reads "<name> (Main)" or "<name> (Extra)". Choose an option to open that orchestrator.
 - **Start**, **Stop** or **Resume**. One of them shows at a time. The state badge is part of the node and not of the controls.
-- **Settings**. It opens the orchestrator panel of the board at the **Policy** tab.
+- **Settings**. It opens the settings sheet at the **Policy** tab.
 
-The rules of the buttons follow the orchestrator panel:
+The rules of the buttons depend on the state of the session:
 
 - **Start** shows for a stopped orchestrator. It is off when the supervisor is **Off**. Then the reason reads "Turn on the supervisor in Policy to start an orchestrator."
 - **Stop** shows for a running orchestrator. It interrupts the current turn. The session stays open. It is off at a permission prompt, at a usage limit and at a shell prompt.
 - **Resume** shows when the session is lost or Claude exited.
 - No button shows while the orchestrator starts or stops.
 - A failed button shows an alert with the reason and the button **Try again**.
+
+### The settings sheet
+
+The settings sheet holds the policy of the board and the orchestrators of the board. It opens at the right of the command centre. Its title is "Orchestrator settings".
+
+To open the settings sheet:
+
+- Choose **Settings** in the controls. The sheet opens at the **Policy** tab. Dispatch adds one history entry, so Back closes the sheet.
+- Open a link that has `settings=policy` or `settings=orchestrators`. The sheet opens at that tab. Any other value opens no sheet.
+- Choose **Change budget** in the attention queue of the dashboard. The sheet opens at the **Policy** tab.
+
+The sheet has two tabs:
+
+- **Policy**. It shows the form **Policy for** and the board name (see "Board policy").
+- **Orchestrators**. It shows the table of the orchestrators and the dialogs to add one, to edit its overrides and to move groups. The tab label shows the count, for example "Orchestrators (2)". While the list loads, the label reads "Orchestrators".
+
+A tab change does not add a history entry.
+
+To close the sheet, choose the X button or press Escape. Back also closes it. A click on the dimmed page does not close the sheet, so an unsaved policy edit stays. Focus then returns to **Settings**. When a dialog is open, Escape closes the dialog first. A second Escape closes the sheet.
+
+An old board link that has `panel=orchestrator` opens the command centre of the main orchestrator. With `tab=policy` or `tab=orchestrators`, the sheet opens at that tab. With `tab=terminal`, `tab=decisions` or no tab, the sheet stays closed.
+
+While the board stream is down, the sheet header shows the badge "Data from <time>". When the list of orchestrators does not load, the **Orchestrators** tab shows the line "Orchestrators did not load: <error message>." with the button **Try again**.
+
+From 768 px wide, the sheet has the width of the detail panel. Below 768 px, the sheet fills the full width of the screen.
 
 ### The pane
 
@@ -658,7 +683,7 @@ The field **Budget per group (USD)** sets a cost limit for each group. The cost 
 - The supervisor checks the cost when the last gate of a loop changes.
 - When the cost has reached the budget, the session moves to **Needs input** with the reason "budget". The supervisor sends no key to the loop.
 - The attention queue shows "Budget reached: $<cost> of $<budget>." with **Resume loop**, **Change budget** and **Open terminal**.
-- **Change budget** opens the **Policy** tab.
+- **Change budget** opens the **Policy** tab of the settings sheet on the command centre.
 - When you raise the budget above the cost, or remove it, the supervisor clears the budget reason within one minute. The item then becomes a normal **Needs input** item with a reply field.
 
 The section **Cost and usage** shows a bar for each group. The text reads "$12.40 of $20.00, 62%". At 80 percent or more it reads "$17.10 of $20.00, 86%, near budget" and shows a warning glyph. Above 100 percent it reads "$25.00 of $20.00, 125%, over budget". With no budget it reads "$12.40, no budget". When an orchestrator override sets the budget, the text ends with "budget set by <name>".

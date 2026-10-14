@@ -2,10 +2,7 @@ import {
   actionFailedText,
   refusalText,
 } from "../../../../shared/decision-view.js";
-import type {
-  OrchestratorView,
-  SupervisorState,
-} from "../../../../shared/types.js";
+import type { OrchestratorView } from "../../../../shared/types.js";
 
 export type {
   OrchestratorSessionView,
@@ -25,31 +22,6 @@ export interface PanelControl {
 export type TerminalMode =
   "empty" | "not-running" | "resume" | "connecting" | "live" | "unavailable";
 
-export interface PanelInput {
-  orchestrators: readonly OrchestratorView[];
-  supervisor: "on" | "off";
-  stale: boolean;
-  pending: ControlKind | null;
-  decisionCount: number;
-  loaded?: boolean;
-}
-
-export interface PanelModel {
-  main: OrchestratorView | null;
-  stateKey: SupervisorState | null;
-  transition: "Starting" | "Stopping" | null;
-  control: PanelControl | null;
-  terminal: TerminalMode;
-  terminalSrc: string | null;
-  startFailure: string | null;
-  tabs: {
-    terminal: string;
-    decisions: string;
-    policy: string;
-    orchestrators: string;
-  };
-}
-
 export const STALE_REASON =
   "Reconnecting. Actions are off until the board stream is back.";
 export const SUPERVISOR_OFF_REASON =
@@ -65,12 +37,16 @@ const STOP_BLOCKED_STATES: readonly string[] = [
   "shell_prompt",
 ];
 
-type ControlInput = Pick<PanelInput, "supervisor" | "stale" | "pending">;
+interface ControlInput {
+  supervisor: "on" | "off";
+  stale: boolean;
+  pending: ControlKind | null;
+}
 
 /**
  * Pick the Start, Stop or Resume control that one orchestrator record shows, or null while it changes state.
  *
- * @remarks A null record is a board with no orchestrator, which shows Start. The panel and the command centre share this rule.
+ * @remarks A null record is a board with no orchestrator, which shows Start.
  */
 export function controlFor(
   main: OrchestratorView | null,
@@ -135,46 +111,6 @@ export function terminalSrcFor(
     : null;
 }
 
-/**
- * Derive what the panel header, terminal and tabs show from the panel data.
- *
- * @remarks
- * Only the main orchestrator drives the header. Resume shows only at `lost` and
- * `shell_prompt`, where Start and Stop do not show. Every control is off while the board stream is
- * down or an action is in flight, and none shows when the orchestrator list never loaded.
- */
-export function panelModel(input: PanelInput): PanelModel {
-  const main = input.orchestrators.find((o) => o.role === "main") ?? null;
-  const loaded = input.loaded !== false;
-  const terminal = loaded ? terminalFor(main) : "unavailable";
-  return {
-    main,
-    stateKey: main?.session?.state ?? null,
-    transition:
-      main?.state === "starting" ||
-      (main?.state === "running" && main.session?.state == null)
-        ? "Starting"
-        : main?.state === "stopping"
-          ? "Stopping"
-          : null,
-    control: loaded ? controlFor(main, input) : null,
-    terminal,
-    terminalSrc: terminalSrcFor(terminal, main),
-    startFailure:
-      main?.state === "stopped" && main.session?.startError
-        ? startErrorCopy(main.session.startError)
-        : null,
-    tabs: {
-      terminal: "Terminal",
-      decisions: `Decisions (${input.decisionCount})`,
-      policy: "Policy",
-      orchestrators: loaded
-        ? `Orchestrators (${input.orchestrators.length})`
-        : "Orchestrators",
-    },
-  };
-}
-
 /** Turn a server refusal code and optional reason into the reason text of an error line. */
 export const refusalReason = refusalText;
 
@@ -185,14 +121,13 @@ export function startErrorCopy(reason: string): string {
 
 export const actionErrorCopy = actionFailedText;
 
-/** The error line of a failed panel load. */
-export function loadErrorCopy(message: string): string {
-  return `The orchestrator panel did not load: ${stripPeriod(message)}.`;
-}
-
-/** The text of the Stale badge for a formatted last update time. */
-export function staleBadgeText(time: string): string {
-  return `State from ${time}`;
+/** The error line of a start that failed in the background, or null when the record shows none. */
+export function startFailureFor(
+  record: OrchestratorView | null,
+): string | null {
+  return record?.state === "stopped" && record.session?.startError
+    ? startErrorCopy(record.session.startError)
+    : null;
 }
 
 const ACTION_NAMES: Record<ControlKind, string> = {
