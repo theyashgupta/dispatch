@@ -70,6 +70,8 @@ const SERVER: Record<string, ServerSide> = {
   },
   resume_loop: { params: schemas.sessionCardParamsSchema },
   stop_session: { params: schemas.sessionCardParamsSchema },
+  pause_card: { params: schemas.sessionCardParamsSchema },
+  resume_card: { params: schemas.sessionCardParamsSchema },
   start_ship: {
     params: schemas.sessionCardParamsSchema,
     body: schemas.shipBodySchema,
@@ -129,6 +131,8 @@ const VALID: Record<string, Record<string, unknown>> = {
   request_handoff: { cardId: ID, hard: true },
   resume_loop: { cardId: ID },
   stop_session: { cardId: ID },
+  pause_card: { cardId: ID },
+  resume_card: { cardId: ID },
   start_ship: { cardId: ID, repository: "/r", branches: [BRANCH] },
   get_ship_state: { cardId: ID },
   create_decision_item: {
@@ -229,6 +233,8 @@ const REFUSED: [string, Record<string, unknown>][] = [
   ["request_handoff", { cardId: ID, hard: "yes" }],
   ["resume_loop", { cardId: "" }],
   ["stop_session", { cardId: "" }],
+  ["pause_card", { cardId: "" }],
+  ["resume_card", { cardId: "" }],
   ["start_ship", { cardId: ID, repository: "/r", branches: [] }],
   [
     "start_ship",

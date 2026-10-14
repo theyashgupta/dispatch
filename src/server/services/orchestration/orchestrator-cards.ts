@@ -21,6 +21,7 @@ import {
 } from "./orchestrator-groups.js";
 import { ORCHESTRATOR_PLAYBOOK } from "./orchestrator-session.js";
 import { commitCardStart, prepareCardStart } from "./start-session.js";
+import { assertMemoryHeadroom } from "./memory-governor.js";
 
 interface CardStartRequest {
   playbook: string;
@@ -82,6 +83,7 @@ export async function startOrchestratorCard(
     if (!current || isRunningCard(current) || isLiveSessionCard(current)) {
       throw new ConflictError("already-started");
     }
+    assertMemoryHeadroom(caller.boardKey);
     const config = await prepareCardStart(card.id, start);
     enforce(
       checkCap({

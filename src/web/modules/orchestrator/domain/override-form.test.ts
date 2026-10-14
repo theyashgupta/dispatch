@@ -24,6 +24,8 @@ const board: BoardPolicy = {
   groupPlaybook: null,
   crossSessionInbound: null,
   wakeMinutes: 15,
+  memoryFloorMb: 1024,
+  swapCeilingMb: 4096,
 };
 
 function values(options: { value: string }[]): string[] {

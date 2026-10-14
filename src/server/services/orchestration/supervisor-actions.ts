@@ -10,6 +10,7 @@ import {
   declineKeys,
   type SupervisorAction,
 } from "../domain/supervisor-plan.js";
+import { memoryCheck } from "./memory-governor.js";
 import { resumeSession } from "./resume-session.js";
 import { runClaude, type RunClaudeOutcome } from "./run-claude.js";
 import { sendConfirmed, waitFor } from "./supervisor-send.js";
@@ -127,6 +128,8 @@ async function resume(
     session.tmuxSession !== undefined &&
     (await deps.atShellPrompt(`=${session.tmuxSession}:`))
   ) {
+    const memory = memoryCheck(card.boardKey ?? DEFAULT_BOARD_KEY);
+    if (!memory.ok) return failed(memory.reason);
     const outcome = await deps.relaunch(card.id);
     if (outcome !== "launched") return failed(`run claude ${outcome}`);
   } else {
@@ -134,7 +137,9 @@ async function resume(
   }
   const live = store.getCard(card.id);
   const resumed = live?.sessions?.find((s) => s.id === session.id);
-  if (!live || !resumed?.tmuxSession) return failed("no session");
+  if (!live || !resumed?.tmuxSession) {
+    return failed(live?.resumeError ?? "no session");
+  }
   const target = `=${resumed.tmuxSession}:`;
   const up = await waitFor(
     async () => !(await deps.atShellPrompt(target)),

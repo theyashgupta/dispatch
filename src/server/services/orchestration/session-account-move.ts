@@ -24,7 +24,7 @@ import {
   type LimitSurface,
 } from "../domain/limit-surface.js";
 import { readRegistry, resolveLaunchAccount } from "./claude-accounts.js";
-import { withCardLock } from "./run-claude.js";
+import { withCardLock } from "./card-lock.js";
 import { forgetTurnState, paneTurnState, turnStateOf } from "./session-turn.js";
 import {
   awaitReplReady,

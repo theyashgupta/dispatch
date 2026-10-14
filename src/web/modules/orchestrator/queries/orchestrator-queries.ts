@@ -1,3 +1,4 @@
+import type { PolicyPayload } from "@/modules/orchestrator/domain/policy-form";
 import {
   queryOptions,
   useMutation,
@@ -8,7 +9,6 @@ import {
 import type {
   BoardKey,
   BoardList,
-  BoardPolicy,
   OrchestratorPolicyOverride,
 } from "../../../../shared/types.js";
 import { getDecisions } from "@/queries/attention-actions-api";
@@ -200,7 +200,7 @@ export function savePolicyMutationOptions(
   board: BoardKey,
 ) {
   return {
-    mutationFn: (policy: BoardPolicy) => saveBoardPolicy(board, policy),
+    mutationFn: (policy: PolicyPayload) => saveBoardPolicy(board, policy),
     onSuccess: (outcome: Awaited<ReturnType<typeof saveBoardPolicy>>) => {
       if (!outcome.ok) return;
       queryClient.setQueryData<BoardList>(boardListKeys.list, (list) =>

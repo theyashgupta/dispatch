@@ -46,6 +46,7 @@ sections are scaffolded here and filled by the later Phase 10 migration plans.
   - [GitHub Source](#github-source)
   - [Sentry Source](#sentry-source)
   - [SSE Transport](#sse-transport)
+  - [Memory Scheduler](#memory-scheduler)
   - [Startup Preflight](#startup-preflight)
   - [Cleanup Lifecycle](#cleanup-lifecycle)
   - [Cleanup Mirror Chokepoint](#cleanup-mirror-chokepoint)
@@ -162,6 +163,8 @@ Mount prefix: `/api/orchestrator`.
 | POST   | `/api/orchestrator/sessions/:cardId/handoff`       | Orchestrator token | Tool `request_handoff`: ask a session loop to hand off its context.                                 |
 | POST   | `/api/orchestrator/sessions/:cardId/resume`        | Orchestrator token | Tool `resume_loop`: resume a loop that `stop_session` or a supervisor give-up stopped.              |
 | POST   | `/api/orchestrator/sessions/:cardId/stop`          | Orchestrator token | Tool `stop_session`: press Escape in a session pane and park it at Needs input.                     |
+| POST   | `/api/orchestrator/sessions/:cardId/pause`         | Orchestrator token | Tool `pause_card`: stop the processes of a loop in place with a user pause mark.                    |
+| POST   | `/api/orchestrator/sessions/:cardId/unpause`       | Orchestrator token | Tool `resume_card`: continue a paused loop, refused while memory is low.                            |
 | POST   | `/api/orchestrator/decisions`                      | Orchestrator token | Tool `create_decision_item`: raise a decision item for the user to answer.                          |
 | POST   | `/api/orchestrator/events/wait`                    | Orchestrator token | Tool `wait_for_event`: hold the call until a board event matches or the time limit passes.          |
 | POST   | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `start_ship`: start the ship flow of a finished group card or a launched single card.          |
@@ -275,6 +278,8 @@ Mount prefix: `/api`.
 | POST   | `/api/cards/:id/move`                | User | Move a card to a column.                                                                  |
 | POST   | `/api/cards/:id/start`               | User | Start a Claude session on a card.                                                         |
 | POST   | `/api/cards/:id/resume`              | User | Resume the lost session of a card.                                                        |
+| POST   | `/api/cards/:id/pause`               | User | Stop the process tree of a loop card's session and mark the card paused.                  |
+| POST   | `/api/cards/:id/unpause`             | User | Continue the process tree of a paused card and clear the mark.                            |
 | POST   | `/api/cards/:id/terminal`            | User | Make sure the terminal of a live session is available.                                    |
 | POST   | `/api/cards/:id/run-claude`          | User | Start Claude in a live session whose terminal is at a shell prompt.                       |
 | POST   | `/api/cards/:id/session/account`     | User | Move a session to another Claude account, or queue the move.                              |
@@ -324,6 +329,14 @@ Mount prefix: `/api`.
 | Method | Path          | Auth | Purpose                                                  |
 | ------ | ------------- | ---- | -------------------------------------------------------- |
 | GET    | `/api/stream` | User | Open the server-sent event stream of the board snapshot. |
+
+### `routes/system.route.ts`
+
+Mount prefix: `/api`.
+
+| Method | Path                 | Auth | Purpose                                         |
+| ------ | -------------------- | ---- | ----------------------------------------------- |
+| GET    | `/api/system/memory` | User | Read the latest machine memory reading (macOS). |
 
 ### `routes/hooks.route.ts`
 
@@ -3793,7 +3806,7 @@ event merging, the client replaces its state wholesale, but two connections at d
 depths (e.g. desktop + a tunneled phone) now legitimately see different card sets. Each
 durably-inserted event also rides the SAME connection as a distinct NAMED
 `event: activity\ndata: <ActivityEvent JSON>\n\n` frame (on every store `"activity"`), alongside the
-unnamed board `data:` frame and the named `ping` heartbeat. The stream is un-buffered (`X-Accel-Buffering: no`, `Cache-Control: no-cache`, and NO
+unnamed board `data:` frame and the named `ping` heartbeat. The named `tunnel` and `memory` frames go to every client whatever its board (see [Memory Scheduler](#memory-scheduler)). The stream is un-buffered (`X-Accel-Buffering: no`, `Cache-Control: no-cache`, and NO
 compression on this route — compression would buffer and break liveness) and resync-on-connect (a
 windowed snapshot is written the instant a client connects, at the `doneLimit` it requested). The
 payload is a `BoardSnapshot` only (cards + syncedAt) — it NEVER carries the Linear API key or any
@@ -3899,6 +3912,20 @@ click: the button rendered from `selectedCard` (which DID include the pinned car
 (only Done is `doneLimit`-capped), so the gap this fix closes cannot occur there, and re-validating
 column/`groupId` from the live board rather than a moments-old hydrated snapshot is the safer
 freshness guarantee for the point where a start actually gets requested.
+
+### Memory Scheduler
+
+**Sampler (LOCAL-110).** `adapters/memory-sampler.ts` runs `vm_stat` and `sysctl -n vm.swapusage vm.loadavg` through the exec chokepoint and returns one `MemorySample`: free MB (free plus inactive pages, page size from the `vm_stat` header), compressor MB, swap used and swap total MB, and the 1-minute load average. Off macOS, or on a command or parse failure, it returns null. `services/orchestration/memory-governor.ts` reads it at boot and every 15 seconds (an unref'd timer started in `bootstrap/index.ts`) and keeps the latest sample. A failed read keeps the previous sample, and a sample older than 60 seconds is reported as `stale`.
+
+**Wire shape.** `GET /api/system/memory` and the named `memory` frame of `GET /api/stream` carry the same `SystemMemory` body: `{ supported: false }` when there is no sample (Linux, or before the first read), else `{ supported: true, sample, stale }`. The frame is sent on connect after the board and tunnel frames, and to every client after each sample. Memory is not a field of the board snapshot: the snapshot is per board and rebuilt on each board change, while the reading is per machine and changes every 15 seconds.
+
+**Admission gate.** `assertMemoryHeadroom(boardKey)` in the governor checks the latest reading against the board's `memoryFloorMb` and `swapCeilingMb` through the pure `admitStart` (`services/domain/memory-admission.ts`) and throws the 409 `{ error: "memory-pressure", reason }`. The reason is `free memory <n> MB is below the <floor> MB floor` or `swap used <n> MB is above the <ceiling> MB ceiling`, the free-memory check first. No reading or a stale reading admits, so a sampler fault never blocks every start. The gate runs on the human card start, the human group start (`createAndStartGroup`, before the group card exists; `createGroup` itself stays ungated because the orchestrator `create_group` tool creates without starting), the human resume of a lost session (`beginResume`, so the route answers the 409), and the orchestrator `start_card`, `start_group` and `resume_loop` (inside the cap lock, before the cap check). `resumeSession` checks again before it relaunches claude, so a Reconnect on a dead pane does not relaunch under pressure either: the session stays lost and the card shows `Resume failed: <reason>`. The supervisor's `resume` action checks before its shell-prompt relaunch, and its plain resume goes through `resumeSession`; either refusal sets `needs_input` with `resume_failed` and evidence that carries the reason. Nothing retries it when memory recovers.
+
+**Pause and unpause.** `services/orchestration/pause-card.ts` stops a loop card in place. `pauseCard` and `unpauseCard` run under the per-card lock (`card-lock.ts#withCardLock`, shared with Run Claude and the account move), so two pauses, two unpauses, or a pause and a relaunch never interleave; a second caller answers 409 `busy`. The lock also answers `busy` for a paused card, so Run Claude, the account move and the orchestrator and user resume-loop paths never type into a stopped pane (resume-loop answers `session-state-refused`, reason `session is paused`), and a stored `needs_input` does not hold against a `paused` detection. `pauseCard` writes the mark first, `paused: { at, by, sessionId, pids }` with empty pids (`by` is `memory` or `user`), through `markCardPaused`, a compare-and-set that refuses when the card is lost or its active session is not the one pause read. It then sends SIGSTOP to the pane process tree of that session (the pane roots first, then their descendants, with one re-scan for children forked in between), stores the signalled pids with `setPausedPids`, and logs one `supervisor_action` event with `action: "pause"`. When the signal fails or stops nothing, pause continues what it stopped, removes the mark and answers 409 `not-pausable` with reason `process read failed` or `no live session`. A legacy session whose pane root is claude itself has no shell and answers reason `no shell session`, because tmux continues a stopped pane root. `unpauseCard` continues the stored pids first (this works when `ps` or tmux fails and reaches children reparented to pid 1), then the live tree. The pane shell takes the terminal while claude is stopped, so unpause waits up to 1 s for the shell to own the terminal, types `C-u`, `fg` and Enter to the exact target `=<session>:`, and checks within 1 s that the shell let go, with one retry. If the shell still holds the terminal, the mark stays and unpause answers 409 `unpause-incomplete`. With no live pane, unpause only continues the stored pids and clears the mark, and it logs `action: "resume"`. The tree signal skips any per-pid error and never signals pid 0, pid 1, the server or its parent. Whenever the store clears a mark outside unpause (lost session, reset, Done cleanup, unwind), the emitted event carries `pausedPids`, and one listener, `onPausedPidsReleased`, registered in bootstrap before boot reconcile, continues them. Every session kill sends SIGCONT first, to the live tree and to the stored pids of a card paused in that session, because a stopped process ignores SIGHUP and SIGTERM. A start of a new session on a paused card answers 409 `card-paused`. The supervisor reports a paused card as the `paused` state: a lost session wins over paused, the growth clock resets so the pause time does not count as no progress. Paused loops still count in the concurrency cap. `POST /api/cards/:id/pause` and `POST /api/cards/:id/unpause` answer 200 with the redacted card. A repeat answers 409 `already-paused` or `not-paused`, a card that cannot pause answers 409 `{ error: "not-pausable", reason }` (`not a loop`, `orchestrator session`, `start in progress`, `no live session`, `no shell session` or `process read failed`), and an unknown id answers 404.
+
+**Automatic pause and resume.** After each recorded sample, `memoryPauseStep` in the governor builds the candidates from `activeSession` and `pauseRefusal` in `pause-card.ts`: a loop card with a live active session that is memory-paused in any column, or is unpaused, outside Agent done and Done, and passes the pausable rule. A user-paused loop is not a candidate. The step takes the lowest `swapCeilingMb` among the boards of those candidates and passes the reading to the pure `decideMemoryPause` (`services/domain/memory-pause.ts`). When swap used is above that ceiling, it pauses the newest unpaused loop by session start, with the reason `swap used <n> MB is above the <ceiling> MB ceiling`. A pause needs swap to have grown 256 MB past the swap of the last pause in the same run, because SIGSTOP frees no memory and the next reading would otherwise pause every loop in turn. The resume floor is the ceiling minus 1024 MB, and never below half the ceiling. The run ends only when swap falls below the floor; a reading from the floor up to the ceiling keeps the run and resets the low count. Resume needs two readings in a row below the floor; it then continues the memory-paused loop with the oldest session start, with the reason `swap used <n> MB is below <floor> MB`. A loop paused by the user is never resumed by this rule. A refused pause or resume (for example 409 `busy`) does not advance the run, so the next sample tries again, and the governor logs the same refusal once. A 409 `not-pausable` on a pause or `unpause-incomplete` on a resume also puts that card on a 5 minute cooldown: the decision skips it as the pause or resume target, and it still counts for the ceiling. A successful action on the card clears its cooldown. A failed read keeps the previous sample and the run until that sample is stale. A stale reading, no reading at all and Linux fail open: nothing is paused or resumed and the run resets. The environment variable `DISPATCH_MEMORY_SAMPLE_FILE` is a test seam: when set, `readMemory` reads one sample from that JSON file instead of running `vm_stat`, so a scenario on any platform can drive swap. The reader logs `[memory] sampling from file <path>` once, accepts only a regular file of at most 4096 bytes, and checks the five fields with zod as finite numbers that are not negative.
+
+**Known limit.** The gate reads one 15 second sample and does not count the starts it admits, so a burst of starts between two samples can all pass; the concurrency cap still bounds the burst. The supervisor's held-group start skips the group for that pass, with no event. Run Claude on a hand-opened session and the user's resume of a loop at `needs_input` are not gated.
 
 ### Startup Preflight
 
@@ -5897,6 +5924,8 @@ Scenario 6 (tests/e2e/scenario-6-intake-judgment.e2e.ts) proves that the orchest
 
 Scenario 6 part B (tests/e2e/scenario-6b-ship-order.e2e.ts) proves the ship order and the release version. The board has a cap of 3, the ship rights **merge** and a sample repository with `package.json` version `1.2.3`. The test calls the orchestrator routes with a minted token and starts a quick fix with "Write code directly", a single feature with "PRD + Ralph Loop" and a group of two tickets, and checks that `start_ship` of the running feature answers 409 `card-not-done`. Each session commits on its branch and sends the done Stop hook, and the feature card carries seeded loop files with every phase passed and a closed engine. The test checks one `agent_done` `group_state` event and one wake line for the feature, and that `get_card_progress` and the card read show its phases. It then ships the quick fix, the feature and the group one at a time and checks that the fake `gh` log creates and merges their PRs in that order and that the bare origin `main` holds the three files. `release_prep` with bump `minor` creates `Release v1.3.0` in To Do, and a second call answers 409 `release-exists`. A watcher checks that no more than 3 cards or groups hold a slot at any time.
 
+Scenario 8 (tests/e2e/scenario-8-memory-pause.e2e.ts) proves that the memory governor pauses and resumes loops end to end. The sandbox sets `DISPATCH_MEMORY_SAMPLE_FILE` through the `memorySampleFile` option of `startSandbox`, so the test drives swap by rewriting a JSON sample file that the server reads every 15 s. The board has three loops started through `start_card` 2 s apart, a swap ceiling of 8192 MB and the supervisor off. The test sets swap to 9000 MB and checks that only the newest loop gets a `by: "memory"` mark, that one `pause` row carries the reason, and that a child process of its pane is in state T. A rise to 9100 MB, which is under 256 MB of growth, must pause nothing more. The test then pauses the second loop as the user and sets swap to 6000 MB, and checks that the first memory-paused loop resumes with one `resume` row, that none of its processes stay stopped, and that the user-paused loop stays paused through three more readings. The scenario types no key into any pane.
+
 The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
 ## Orchestration Initiative
@@ -6070,7 +6099,8 @@ phase, send waits of 1.5 s, 10 s and 10 s, a ready wait of 60 s, and a reset wai
 user route; no orchestrator route or tool changes a policy. The `groupPlaybook` field (a playbook name
 or null) is one of these fields. A save that omits `groupPlaybook` keeps the stored value, and a save
 with null clears it. `wakeMinutes` (whole number, 0 to 1440, else 400 `invalid-wakeMinutes`) is optional
-the same way. The store reads each stored policy as the defaults of `defaultBoardPolicy` with
+the same way, and so are `memoryFloorMb` (0 to 65536, default 1024, else 400 `invalid-memoryFloorMb`)
+and `swapCeilingMb` (256 to 65536, default 8192, else 400 `invalid-swapCeilingMb`). The store reads each stored policy as the defaults of `defaultBoardPolicy` with
 the stored values over them, so a board saved before a new field gets its default. A stored policy
 that is JSON `null` or an array reads as the defaults alone.
 
@@ -6201,7 +6231,7 @@ reads the identity or writes, `assertAheadAndClean` resolves the base once. The 
 `branch-not-ahead`) and the worktree must be clean (409 `worktree-dirty`). A failed git call of
 these two checks answers 409 `no-workspace`. A group with loop progress keeps the D-8 rules.
 
-**MCP server.** `dispatch mcp` serves the 33 tools over stdio. `bootstrap/cli.ts` reads and checks
+**MCP server.** `dispatch mcp` serves the 35 tools over stdio. `bootstrap/cli.ts` reads and checks
 `DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and
 `bootstrap/mcp-tools.ts` holds the zod input and the description of each tool. The dependency
 cruiser rule `mcp-server-isolated` refuses an import of `routes`, `services`, `store`, `adapters`

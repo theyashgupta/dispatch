@@ -9,6 +9,7 @@ import { boardRefusal, mapBoardUnavailable } from "./boards.js";
 import { recordGroupState } from "./group-state-events.js";
 import { startSession } from "./start-session.js";
 import { restatRepos } from "./workspaces.js";
+import { assertMemoryHeadroom } from "./memory-governor.js";
 
 interface GroupInput {
   title: string;
@@ -112,6 +113,22 @@ export async function createGroup(
 }
 
 export type GroupStartOutcome = { ok: true } | { ok: false; reason: string };
+
+/**
+ * Create a group from the start dialog and start its session in the background.
+ *
+ * @remarks The memory check runs before the group card exists, so a refusal leaves no group.
+ */
+export async function createAndStartGroup(
+  board: BoardKey,
+  input: GroupInput,
+  opts: { extraDirection?: string; playbook?: string },
+): Promise<Card> {
+  assertMemoryHeadroom(board);
+  const card = await createGroup(board, input);
+  void startGroup(card.id, opts);
+  return card;
+}
 
 /**
  * Start the session of a group card and resolve how the start ended.

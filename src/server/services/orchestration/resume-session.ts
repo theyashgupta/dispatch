@@ -1,8 +1,10 @@
 import path from "node:path";
 import {
+  type Card,
   DEFAULT_CLAUDE_ACCOUNT_ID,
   type ResumeTarget,
 } from "../../../shared/types.js";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import { hasSession, killSession } from "../../adapters/tmux.js";
 import { resolveLaunchAccount } from "./claude-accounts.js";
@@ -11,11 +13,23 @@ import {
   recordNewestConversation,
   recordResumeTarget,
 } from "./resume-target.js";
+import { continueSession } from "./pause-card.js";
 import { registerHookToken } from "./hook-tokens.js";
 import { REATTACH_STATUS_CLEAR_MS } from "./start-session.js";
 import { ensureTerminal } from "./terminal.js";
+import { assertMemoryHeadroom, memoryCheck } from "./memory-governor.js";
 
 const ACCOUNT_STEP = "resolving Claude account";
+const MEMORY_STEP = "checking memory";
+
+/**
+ * Refuse a resume with the 409 `memory-pressure` when memory is low, else relaunch the session in
+ * the background.
+ */
+export function beginResume(card: Card): void {
+  assertMemoryHeadroom(card.boardKey ?? DEFAULT_BOARD_KEY);
+  void resumeSession(card.id);
+}
 
 /**
  * Reconnect a card's terminal, relaunching the session when its tmux pane is gone.
@@ -116,6 +130,10 @@ export async function resumeSession(cardId: string): Promise<void> {
       return;
     }
 
+    killTarget = null;
+    const memory = memoryCheck(card.boardKey ?? DEFAULT_BOARD_KEY);
+    if (!memory.ok)
+      throw new StartStepError(MEMORY_STEP, memory.reason, "config");
     const recorded = card.sessions?.find((s) => s.id === sessionId);
     const account = await resolveLaunchAccount(
       recorded?.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID,
@@ -157,7 +175,10 @@ export async function resumeSession(cardId: string): Promise<void> {
     );
     await ensureTerminal(cardId, sessionId, session);
   } catch (err) {
-    if (killTarget != null) await killSession(`=${killTarget}`);
+    if (killTarget != null) {
+      await continueSession(killTarget);
+      await killSession(`=${killTarget}`);
+    }
     if (
       attempted !== undefined &&
       err instanceof StartStepError &&
@@ -169,7 +190,8 @@ export async function resumeSession(cardId: string): Promise<void> {
     await store.recordResumeFailure(
       cardId,
       sessionId,
-      err instanceof StartStepError && err.step === ACCOUNT_STEP
+      err instanceof StartStepError &&
+        (err.step === ACCOUNT_STEP || err.step === MEMORY_STEP)
         ? err.stderr
         : undefined,
     );

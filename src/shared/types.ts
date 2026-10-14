@@ -62,6 +62,8 @@ export interface ActivityEvent {
   source: string | null;
   ts: string;
   boardKey?: BoardKey;
+  pausedPids?: number[];
+  pausedAt?: string;
 }
 
 /**
@@ -491,6 +493,12 @@ export interface Card {
   terminalError?: TerminalError | null;
   /** Fixed resume-failure copy rendered by the session-lost UI; null/absent when no resume has failed. */
   resumeError?: string | null;
+  paused?: {
+    at: string;
+    by: PausedBy;
+    sessionId: string;
+    pids: number[];
+  } | null;
 
   /**
    * Transient wire-visible in-flight flag for a running Sync-to-Linear attempt. Follows the
@@ -1103,6 +1111,21 @@ export type TunnelState =
   | { status: "on"; url: string; code: string }
   | { status: "error"; message: string }
   | { status: "binary-missing"; installHint: string };
+
+export type PausedBy = "memory" | "user";
+
+export interface MemorySample {
+  at: string;
+  freeMb: number;
+  compressorMb: number;
+  swapUsedMb: number;
+  swapTotalMb: number;
+  load1: number;
+}
+
+export type SystemMemory =
+  | { supported: false }
+  | { supported: true; sample: MemorySample; stale: boolean };
 
 /**
  * The single-source-of-truth update-check snapshot shared by `dispatch update`, `dispatch doctor`,
@@ -1813,6 +1836,8 @@ export interface BoardPolicy {
   groupPlaybook: string | null;
   wakeMinutes: number;
   crossSessionInbound: CrossSessionInbound | null;
+  memoryFloorMb: number;
+  swapCeilingMb: number;
 }
 
 export type OrchestratorPolicyOverride = Partial<
@@ -2074,7 +2099,8 @@ export type SupervisorState =
   | "api_error"
   | "stale"
   | "lost"
-  | "shell_prompt";
+  | "shell_prompt"
+  | "paused";
 
 export type SupervisorStateReason =
   | "usage_stop"

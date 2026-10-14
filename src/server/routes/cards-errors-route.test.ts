@@ -36,6 +36,7 @@ const { ATTACHMENTS_DIR } = await import("../services/infra/paths.js");
 const express = (await import("express")).default;
 const { cardsRouter } = await import("./cards.route.js");
 const { httpErrorHandler } = await import("./error-handler.js");
+const { recordMemory } = await import("../test-support/memory-fixtures.js");
 
 await store.load();
 const fullPath = process.env.PATH;
@@ -643,6 +644,99 @@ test("POST /cards/:id/resume answers each guard in order", async (t) => {
     );
   } finally {
     store.endStart(lost);
+  }
+});
+
+test("card start, group start and resume answer 409 memory-pressure under pressure and change nothing", async (t) => {
+  const id = await local("memory start");
+  const a = await local("memory a");
+  const b = await local("memory b");
+  const lost = craft(t, {
+    workspacePath: "/w",
+    sessionLost: true,
+    activeSessionId: "s1",
+    sessions: [{ id: "s1" }] as Card["sessions"],
+  });
+  const start = t.mock.method(sessionStarter, "start", () => Promise.resolve());
+  const cardsBefore = store.listCards(DEFAULT_BOARD_KEY).length;
+  const refusals: [number, number, string][] = [
+    [812, 1000, "free memory 812 MB is below the 1024 MB floor"],
+    [2048, 9000, "swap used 9000 MB is above the 8192 MB ceiling"],
+  ];
+  try {
+    for (const [freeMb, swapUsedMb, reason] of refusals) {
+      const refusal = JSON.stringify({ error: "memory-pressure", reason });
+      recordMemory(freeMb, swapUsedMb);
+      await expectReply(call("POST", `/cards/${id}/start`, {}), 409, refusal);
+      await expectReply(
+        call("POST", "/cards/group", { title: "pressured", memberIds: [a, b] }),
+        409,
+        refusal,
+      );
+      await expectReply(call("POST", `/cards/${lost}/resume`), 409, refusal);
+    }
+  } finally {
+    recordMemory(2048, 1000);
+  }
+  assert.equal(start.mock.callCount(), 0);
+  assert.equal(store.isStarting(lost), false);
+  assert.equal(store.listCards(DEFAULT_BOARD_KEY).length, cardsBefore);
+  for (const member of [id, a, b]) {
+    assert.equal(store.getCard(member)?.column, "todo");
+    assert.equal(store.getCard(member)?.groupId, undefined);
+  }
+});
+
+test("card start and group start under the memory thresholds pass the gate and reach the workspace check", async () => {
+  const id = await local("memory ok");
+  const a = await local("memory ok a");
+  const b = await local("memory ok b");
+  recordMemory(2048, 1000);
+  await expectReply(
+    call("POST", `/cards/${id}/start`, {}),
+    400,
+    '{"error":"No workspace selected for this ticket","variant":"config"}',
+  );
+  await expectReply(
+    call("POST", "/cards/group", { title: "roomy", memberIds: [a, b] }),
+    400,
+    '{"error":"No workspace selected for this group","variant":"config"}',
+  );
+});
+
+test("card start reads the board's own memory policy", async () => {
+  const id = await local("memory policy");
+  const policy = store.getBoard(DEFAULT_BOARD_KEY)!.policy;
+  try {
+    await store.setBoardPolicy(DEFAULT_BOARD_KEY, {
+      ...policy,
+      memoryFloorMb: 0,
+      swapCeilingMb: 65536,
+    });
+    recordMemory(10, 60000);
+    await expectReply(
+      call("POST", `/cards/${id}/start`, {}),
+      400,
+      '{"error":"No workspace selected for this ticket","variant":"config"}',
+    );
+    await store.setBoardPolicy(DEFAULT_BOARD_KEY, {
+      ...policy,
+      memoryFloorMb: 65536,
+      swapCeilingMb: 8192,
+    });
+    recordMemory(2048, 1000);
+    await expectReply(
+      call("POST", `/cards/${id}/start`, {}),
+      409,
+      '{"error":"memory-pressure","reason":"free memory 2048 MB is below the 65536 MB floor"}',
+    );
+  } finally {
+    await store.setBoardPolicy(DEFAULT_BOARD_KEY, {
+      ...policy,
+      memoryFloorMb: 1024,
+      swapCeilingMb: 8192,
+    });
+    recordMemory(2048, 1000);
   }
 });
 

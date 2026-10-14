@@ -54,6 +54,8 @@ void test("the default policy has the D-6 values and the supervisor off only on 
     groupPlaybook: null,
     wakeMinutes: 15,
     crossSessionInbound: null,
+    memoryFloorMb: 1024,
+    swapCeilingMb: 8192,
   });
   const acme = parseBoardKey("ACME");
   assert.ok(acme);

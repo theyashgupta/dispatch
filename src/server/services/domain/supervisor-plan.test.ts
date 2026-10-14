@@ -182,6 +182,10 @@ void test("a supervisor set needs_input holds until a busy sign, a permission pr
     false,
   );
   assert.equal(
+    holdsNeedsInput("needs_input", "supervisor_gave_up", { state: "paused" }),
+    false,
+  );
+  assert.equal(
     holdsNeedsInput("needs_input", undefined, { state: "idle" }),
     false,
   );

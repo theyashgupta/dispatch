@@ -20,8 +20,7 @@ const { recordTurnEvent } =
   await import("../services/orchestration/session-turn.js");
 const { store } = await import("../store/board.store.js");
 const { cardsRouter } = await import("./cards.route.js");
-const { withCardLock } =
-  await import("../services/orchestration/run-claude.js");
+const { withCardLock } = await import("../services/orchestration/card-lock.js");
 setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
 
 const CANCELLED_PANE = fs.readFileSync(

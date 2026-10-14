@@ -602,16 +602,18 @@ export async function setSessionEnv(
 }
 
 /**
- * Whether a pane's root process (`#{pane_pid}`, the login shell of a command-less session) owns
- * the terminal's foreground process group, i.e. the shell is at its prompt.
+ * The process group of a pane's root process and the process group that owns its terminal, or
+ * null when the pane or the `ps` read is gone.
  *
- * @remarks Read as `ps -o pgid=,tpgid= -p <pane_pid>`: at the prompt both ids are the shell's
- * own. Process names are deliberately not compared: tmux reports the exec'd
- * image (`bash` for macOS `/bin/sh`) while `ps` reports argv0 (`-sh`), so names disagree even
- * when the shell is idle, whereas the foreground group is exact for any program the rc or the
- * user runs (an ssh-agent PIN prompt, a pager, claude).
+ * @remarks Read as `ps -o pgid=,tpgid= -p <pane_pid>` (`#{pane_pid}` is the login shell of a
+ * command-less session). A tmux error throws. Process names are deliberately not compared: tmux
+ * reports the exec'd image (`bash` for macOS `/bin/sh`) while `ps` reports argv0 (`-sh`), whereas
+ * the foreground group is exact for any program the rc or the user runs (an ssh-agent PIN prompt,
+ * a pager, claude).
  */
-export async function paneAtPrompt(target: string): Promise<boolean> {
+export async function paneTerminal(
+  target: string,
+): Promise<{ pgid: number; tpgid: number } | null> {
   const { stdout } = await tmux([
     "display-message",
     "-p",
@@ -620,14 +622,23 @@ export async function paneAtPrompt(target: string): Promise<boolean> {
     "#{pane_pid}",
   ]);
   const pid = stdout.trim();
-  if (!/^\d+$/.test(pid)) return false;
+  if (!/^\d+$/.test(pid)) return null;
   try {
     const ps = await run("ps", ["-o", "pgid=,tpgid=", "-p", pid]);
     const m = ps.stdout.trim().match(/^(\d+)\s+(\d+)$/);
-    return m != null && m[1] === m[2];
+    return m ? { pgid: Number(m[1]), tpgid: Number(m[2]) } : null;
   } catch {
-    return false;
+    return null;
   }
+}
+
+/**
+ * Whether a pane's root process owns the terminal's foreground process group, i.e. the shell is
+ * at its prompt.
+ */
+export async function paneAtPrompt(target: string): Promise<boolean> {
+  const terminal = await paneTerminal(target);
+  return terminal !== null && terminal.pgid === terminal.tpgid;
 }
 
 /**

@@ -134,6 +134,7 @@ Start work in these ways:
 `start_card` starts one ticket card the way the start dialog does. It refuses these cases:
 
 - The cap is reached (403 `policy-refused`).
+- Memory on this Mac is low (409 `memory-pressure`, with the reading and the limit in `reason`). `start_group`, `resume_loop` and `resume_card` refuse the same way. Do not retry at once. Try again after a running loop finishes or the next wake.
 - The card is a group card.
 - The card is in Done or Inbox.
 - The card is running.
@@ -254,6 +255,8 @@ When a test fails only under load, tell the loop to run that one file alone one 
 ### Restarts
 
 Call `resume_loop` only for a loop that you stopped with `stop_session`. You can also call it for a loop that the supervisor gave up on.
+
+Call `pause_card` to stop a loop in place when memory is low or the user asks. The server pauses and resumes loops on its own under swap pressure, so do not resume a loop that it paused. Call `resume_card` only for a loop that you paused. On a 409 `memory-pressure`, wait for the next wake.
 
 ### Loop count
 

@@ -92,6 +92,8 @@ import {
   superviseLost,
 } from "../services/orchestration/supervisor-registry.js";
 import { startSupervisorPass } from "../services/orchestration/supervisor-pass.js";
+import { onPausedPidsReleased } from "../services/orchestration/pause-card.js";
+import { startMemoryGovernor } from "../services/orchestration/memory-governor.js";
 import { resumeShipFlows } from "../services/orchestration/ship-flow.js";
 import { startAccountChain } from "../services/orchestration/account-chain.js";
 import { healServicePlist } from "../services/orchestration/service.js";
@@ -398,6 +400,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   );
   await ensureHyperlinksTerminalFeature();
   await ensureNoAltScreenOverride();
+  store.on("activity", onPausedPidsReleased);
   await reconcileSessions();
   await settleTransientRecords();
   if (isPackagedInstall()) {
@@ -511,6 +514,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   startDefaultIdentityWatch();
   await startAccountChain();
   startUsagePollLoop();
+  startMemoryGovernor();
   return { port };
 }
 

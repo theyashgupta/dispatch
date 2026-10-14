@@ -116,6 +116,7 @@ const KEYLESS: SupervisorState[] = [
   "usage_limit_dialog",
   "usage_limit_wait",
   "shell_prompt",
+  "paused",
 ];
 
 void test(
@@ -154,7 +155,7 @@ void test(
 );
 
 void test(
-  "the inline reply is refused in the four keyless states and for a bad text",
+  "the inline reply is refused in the five keyless states and for a bad text",
   { skip: !hasTmux },
   async () => {
     const s = await start("reply-refused");
@@ -168,6 +169,28 @@ void test(
       await refused(s, route, { text }, 400, "invalid-text");
     }
     await refused(s, route, { text: "x", extra: 1 }, 400, "unknown-field");
+    assert.deepEqual(s.userTexts(), []);
+  },
+);
+
+void test(
+  "the inline reply is refused for a card with the paused mark",
+  { skip: !hasTmux },
+  async () => {
+    const s = await start("reply-paused-mark");
+    await store.markCardPaused(s.card().id, s.session().id, {
+      at: "2026-10-13T00:00:00.000Z",
+      by: "user",
+      sessionId: s.session().id,
+      pids: [101],
+    });
+    await refused(
+      s,
+      `/sessions/${s.card().id}/input`,
+      { text: "x" },
+      409,
+      "session-state-refused",
+    );
     assert.deepEqual(s.userTexts(), []);
   },
 );
@@ -262,6 +285,30 @@ void test(
       .filter((e) => e.cardId === id && e.kind === "supervisor_state");
     assert.equal(rows.at(-1)?.data.evidence, "resume_loop by user");
     assert.equal(rows.at(-1)?.data.to, "working");
+  },
+);
+
+void test(
+  "the user resume is refused for a card with the paused mark",
+  { skip: !hasTmux },
+  async () => {
+    const s = await start("resume-user-paused", { group: true });
+    const id = s.card().id;
+    await setState(s, "needs_input", "usage_stop");
+    await store.markCardPaused(id, s.session().id, {
+      at: "2026-10-13T00:00:00.000Z",
+      by: "user",
+      sessionId: s.session().id,
+      pids: [101],
+    });
+    await refused(
+      s,
+      `/sessions/${id}/resume-loop`,
+      undefined,
+      409,
+      "session-state-refused",
+    );
+    assert.deepEqual(s.userTexts(), []);
   },
 );
 

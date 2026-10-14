@@ -12,15 +12,16 @@ import {
   boardRepository as store,
 } from "../store/board-repository.js";
 import { startCardFromDialog } from "../services/orchestration/start-session.js";
-import {
-  createGroup,
-  startGroup,
-} from "../services/orchestration/group-launch.js";
+import { createAndStartGroup } from "../services/orchestration/group-launch.js";
 import { createTicket } from "../services/orchestration/ticket-create.js";
 import {
+  beginResume,
   reconnectTerminal,
-  resumeSession,
 } from "../services/orchestration/resume-session.js";
+import {
+  pauseCard,
+  unpauseCard,
+} from "../services/orchestration/pause-card.js";
 import { resolveResumeTarget } from "../services/orchestration/resume-target.js";
 import { cleanupWorkspace } from "../services/orchestration/cleanup.js";
 import {
@@ -60,6 +61,7 @@ import { attachmentsDir } from "../services/infra/paths.js";
 import { enabledSource } from "../adapters/source-gateway.js";
 import {
   attachmentParamsSchema,
+  cardIdParamsSchema,
   cardListQuerySchema,
   commentBodySchema,
   createCardBodySchema,
@@ -75,7 +77,6 @@ import {
   sessionPinBodySchema,
   startBodySchema,
   syncBodySchema,
-  resumeTargetParamsSchema,
   unwindBodySchema,
 } from "./cards-schemas.js";
 import { httpErrorHandler } from "./error-handler.js";
@@ -169,7 +170,7 @@ async function getResumeTarget(
   req: Request<{ id: string }>,
   res: Response,
 ): Promise<void> {
-  const { id } = parseOrThrow(resumeTargetParamsSchema, req.params);
+  const { id } = parseOrThrow(cardIdParamsSchema, req.params);
   const card = store.getCard(id);
   if (!card) throw new NotFoundError(`unknown card id: ${id}`);
   const session = card.sessions?.find((s) => s.id === card.activeSessionId);
@@ -205,8 +206,20 @@ cardsRouter.post("/cards/:id/resume", (req, res) => {
     throw new ConflictError("a start is in flight for this card");
   }
 
-  void resumeSession(id);
+  beginResume(card);
   res.status(202).json({ resuming: true });
+});
+
+cardsRouter.post("/cards/:id/pause", async (req, res) => {
+  const { id } = parseOrThrow(cardIdParamsSchema, req.params);
+  const card = await pauseCard(id, { by: "user", reason: "paused by user" });
+  res.status(200).json(redactCard(card));
+});
+
+cardsRouter.post("/cards/:id/unpause", async (req, res) => {
+  const { id } = parseOrThrow(cardIdParamsSchema, req.params);
+  const card = await unpauseCard(id, { reason: "resumed by user" });
+  res.status(200).json(redactCard(card));
 });
 
 cardsRouter.post("/cards/:id/terminal", (req, res) => {
@@ -297,6 +310,7 @@ cardsRouter.post("/cards/:id/session", async (req, res) => {
   const { id } = req.params;
 
   const card = actionableCard(id);
+  if (card.paused) throw new ConflictError("card-paused");
 
   const { sessionId } = parseOrThrow(sessionBodySchema, req.body);
 
@@ -392,13 +406,11 @@ async function createGroupHandler(req: Request, res: Response): Promise<void> {
   const { title, memberIds, playbook, extraDirection, workspace } =
     parseOrThrow(createGroupBodySchema, req.body);
   const { key: board } = resolveBoardForCreate(parseBoardParam(req.query));
-  const card = await createGroup(board, {
-    title,
-    memberIds,
-    playbook,
-    workspace,
-  });
-  void startGroup(card.id, { extraDirection, playbook });
+  const card = await createAndStartGroup(
+    board,
+    { title, memberIds, playbook, workspace },
+    { extraDirection, playbook },
+  );
   res.status(202).json({ started: true, card: redactCard(card) });
 }
 

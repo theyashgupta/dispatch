@@ -993,6 +993,8 @@ class BoardStore extends EventEmitter {
       toCol: partial.toCol ?? null,
       reason: partial.reason ?? null,
       source: partial.source ?? null,
+      ...(partial.pausedPids ? { pausedPids: partial.pausedPids } : {}),
+      ...(partial.pausedAt ? { pausedAt: partial.pausedAt } : {}),
       boardKey:
         partial.boardKey ??
         (partial.cardId != null
@@ -2731,7 +2733,8 @@ class BoardStore extends EventEmitter {
    * are left exactly as they were.
    * @remarks `wasTransition` is recomputed against the DERIVED state, not the raw call: a partial
    * loss on a card that still has a live sibling never emits `session_lost` (the card is not
-   * actually lost), and a full loss emits it exactly once, on the transition into it.
+   * actually lost) unless it loses the paused session, which clears the mark and emits the mark's
+   * pids; a full loss emits it exactly once, on the transition into it.
    * Called at BOTH boot (reconcileSessions) and RUNTIME (the watcher's per-session dead-session
    * detector). No-op if the id is unknown. SECURITY: never logs card contents.
    */
@@ -2739,14 +2742,19 @@ class BoardStore extends EventEmitter {
     return this.enqueue(() => {
       const card = this.cards.get(id);
       if (!card) return [];
+      const mark = card.paused;
       const wasTransition = this.loseSession(card, sessionId);
-      return wasTransition
+      const released = mark != null && card.paused == null;
+      const pausedPids = released ? mark.pids : undefined;
+      const pausedAt = released ? mark.at : undefined;
+      return wasTransition || released
         ? [
             this.event("session_lost", {
               cardId: id,
               fromCol: card.column,
               toCol: card.column,
               source: "watcher",
+              ...(pausedPids?.length ? { pausedPids, pausedAt } : {}),
             }),
           ]
         : [];
@@ -2771,6 +2779,7 @@ class BoardStore extends EventEmitter {
     this.clearHookToken(card, resolvedTargetId);
     if (target) target.lastMarker = undefined;
     if (targetId === card.activeSessionId) card.lastMarker = undefined;
+    if (target && target.id === card.paused?.sessionId) card.paused = null;
     if (target && targetId === card.activeSessionId) {
       const promoted = (card.sessions ?? [])
         .filter((s) => s.id !== target.id && s.tmuxSession != null)
@@ -2786,6 +2795,7 @@ class BoardStore extends EventEmitter {
       sessions.length === 0 || sessions.every((s) => s.tmuxSession == null);
     card.sessionLost = derivedLost;
     if (derivedLost) {
+      card.paused = null;
       card.terminalError = null;
       card.prs = undefined;
       card.prsUnknown = undefined;
@@ -2825,6 +2835,8 @@ class BoardStore extends EventEmitter {
         result = { ok: false, reason: "a start or resume is in flight" };
         return [];
       }
+      const pausedPids = card.paused?.pids;
+      const pausedAt = card.paused?.at;
       for (const s of card.sessions ?? []) this.loseSession(card, s.id);
       if (!card.sessions?.length) this.loseSession(card, undefined);
       const members = this.membersOf(card.id);
@@ -2855,6 +2867,7 @@ class BoardStore extends EventEmitter {
           fromCol: card.column,
           toCol: destination,
           reason: `${members.length} tickets`,
+          ...(pausedPids?.length ? { pausedPids, pausedAt } : {}),
         }),
       ];
     }).then(() => result);
@@ -3763,6 +3776,52 @@ class BoardStore extends EventEmitter {
   }
 
   /**
+   * Write the paused mark when the card still runs the session that pause read.
+   *
+   * @remarks The check and the write share one mutator, so a lost card or a changed active
+   * session cannot take a mark that points at the wrong processes. Returns whether it wrote.
+   */
+  markCardPaused(
+    id: string,
+    sessionId: string,
+    mark: NonNullable<Card["paused"]>,
+  ): Promise<boolean> {
+    let wrote = false;
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      const session = card?.sessions?.find((s) => s.id === sessionId);
+      if (
+        !card ||
+        card.sessionLost ||
+        card.activeSessionId !== sessionId ||
+        !session?.tmuxSession
+      )
+        return [];
+      card.paused = mark;
+      wrote = true;
+      return [];
+    }).then(() => wrote);
+  }
+
+  /** Store the signalled pids on a paused mark. No-op when the card is not paused. */
+  setPausedPids(id: string, pids: number[]): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card?.paused) card.paused = { ...card.paused, pids };
+      return [];
+    });
+  }
+
+  /** Remove the paused mark of a card. No-op if the id is unknown. */
+  clearCardPaused(id: string): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (card) card.paused = null;
+      return [];
+    });
+  }
+
+  /**
    * Record a resume-saga failure (REV-04) in ONE atomic mutation (markSessionLost precedent):
    * restore `sessionLost`, clear any partial session fields, and set the fixed failure copy the
    * SessionLostSection renders. The SSE frame this broadcasts is the ONLY failure signal the
@@ -3924,6 +3983,8 @@ class BoardStore extends EventEmitter {
         return [];
       }
       const wasActive = resolvedId === c.activeSessionId;
+      const pausedPids = wasActive ? c.paused?.pids : undefined;
+      const pausedAt = wasActive ? c.paused?.at : undefined;
       this.setActiveSession(
         c,
         {
@@ -3944,6 +4005,7 @@ class BoardStore extends EventEmitter {
       c.cleanupAttempt = (c.cleanupAttempt ?? 0) + 1;
       if (wasActive) {
         c.sessionLost = false;
+        c.paused = null;
         c.terminalError = null;
         c.cleanupWarning = undefined;
         c.cleanupBlocked = undefined;
@@ -3955,7 +4017,12 @@ class BoardStore extends EventEmitter {
       }
       this.removeSessionRecord(c, resolvedId);
       return [
-        this.event("cleanup", { cardId: id, fromCol: "done", toCol: "done" }),
+        this.event("cleanup", {
+          cardId: id,
+          fromCol: "done",
+          toCol: "done",
+          ...(pausedPids?.length ? { pausedPids, pausedAt } : {}),
+        }),
       ];
     });
   }
@@ -3973,6 +4040,8 @@ class BoardStore extends EventEmitter {
       const card = this.cards.get(id);
       if (!card) return [];
       const from = card.column;
+      const pausedPids = card.paused?.pids;
+      const pausedAt = card.paused?.at;
       for (const s of [...(card.sessions ?? [])]) {
         this.setActiveSession(
           card,
@@ -3992,6 +4061,7 @@ class BoardStore extends EventEmitter {
       card.branch = undefined;
       card.claudeAccountId = undefined;
       card.nextSessionOrdinal = undefined;
+      card.paused = null;
       card.sessionLost = undefined;
       card.lastMarker = undefined;
       card.statusReason = undefined;
@@ -4021,6 +4091,7 @@ class BoardStore extends EventEmitter {
           fromCol: from,
           toCol: "inbox",
           source: "user",
+          ...(pausedPids?.length ? { pausedPids, pausedAt } : {}),
         }),
       ];
     });

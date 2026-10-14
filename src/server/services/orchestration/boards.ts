@@ -446,29 +446,35 @@ export function getBoard(key: BoardKey): Board {
 /**
  * Store a board policy and answer the board as the API shows it, or the typed 404 `unknown-board`.
  *
- * @remarks An omitted `groupPlaybook`, `wakeMinutes` or `crossSessionInbound` keeps the stored
- * value, and an explicit null clears the playbook or the inbound value.
+ * @remarks An omitted `groupPlaybook`, `wakeMinutes`, `crossSessionInbound`, `memoryFloorMb` or
+ * `swapCeilingMb` keeps the stored value, and an explicit null clears the playbook or the inbound
+ * value.
  */
 export async function setBoardPolicy(
   key: BoardKey,
   policy: Omit<
     BoardPolicy,
-    "groupPlaybook" | "wakeMinutes" | "crossSessionInbound"
+    | "groupPlaybook"
+    | "wakeMinutes"
+    | "crossSessionInbound"
+    | "memoryFloorMb"
+    | "swapCeilingMb"
   > & {
     groupPlaybook?: string | null | undefined;
     wakeMinutes?: number | undefined;
     crossSessionInbound?: CrossSessionInbound | null | undefined;
+    memoryFloorMb?: number | undefined;
+    swapCeilingMb?: number | undefined;
   },
 ): Promise<Board> {
   const stored = store.getBoard(key)?.policy;
+  const defaults = defaultBoardPolicy(key);
   const groupPlaybook =
     policy.groupPlaybook === undefined
       ? (stored?.groupPlaybook ?? null)
       : policy.groupPlaybook;
   const wakeMinutes =
-    policy.wakeMinutes ??
-    stored?.wakeMinutes ??
-    defaultBoardPolicy(key).wakeMinutes;
+    policy.wakeMinutes ?? stored?.wakeMinutes ?? defaults.wakeMinutes;
   const crossSessionInbound =
     policy.crossSessionInbound === undefined
       ? (stored?.crossSessionInbound ?? null)
@@ -478,6 +484,10 @@ export async function setBoardPolicy(
     groupPlaybook,
     wakeMinutes,
     crossSessionInbound,
+    memoryFloorMb:
+      policy.memoryFloorMb ?? stored?.memoryFloorMb ?? defaults.memoryFloorMb,
+    swapCeilingMb:
+      policy.swapCeilingMb ?? stored?.swapCeilingMb ?? defaults.swapCeilingMb,
   });
   if (!board) throw new BoardNotFoundError("unknown-board");
   return viewOf(board);

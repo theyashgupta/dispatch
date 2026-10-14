@@ -37,9 +37,11 @@ import {
   listEventsHandler,
   listSessionsHandler,
   moveCardHandler,
+  pauseCardHandler,
   readPaneTailHandler,
   readStateHandler,
   requestHandoffHandler,
+  resumeCardHandler,
   resumeLoopHandler,
   sendInputHandler,
   startCardHandler,
@@ -280,6 +282,14 @@ orchestratorRouter.post(
 orchestratorRouter.post(
   "/sessions/:cardId/stop",
   tool("stop_session", stopSessionHandler),
+);
+orchestratorRouter.post(
+  "/sessions/:cardId/pause",
+  tool("pause_card", pauseCardHandler),
+);
+orchestratorRouter.post(
+  "/sessions/:cardId/unpause",
+  tool("resume_card", resumeCardHandler),
 );
 orchestratorRouter.post(
   "/decisions",

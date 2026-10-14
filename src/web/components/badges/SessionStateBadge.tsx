@@ -1,6 +1,7 @@
 import {
   ArrowRightLeft,
   CircleCheck,
+  CirclePause,
   Clock,
   Gauge,
   Hourglass,
@@ -30,6 +31,7 @@ const GLYPHS: Record<SupervisorState, LucideIcon> = {
   stale: Clock,
   lost: Unplug,
   shell_prompt: SquareTerminal,
+  paused: CirclePause,
 };
 
 interface SessionStateBadgeProps {

@@ -16,6 +16,11 @@ import {
   type SelectOption,
 } from "./orchestrator-models.js";
 
+export type PolicyPayload = Omit<
+  BoardPolicy,
+  "memoryFloorMb" | "swapCeilingMb"
+>;
+
 export interface PolicyFormValues {
   roadmapApproval: BoardPolicy["roadmapApproval"];
   concurrencyCap: string;
@@ -239,7 +244,7 @@ export function isPolicyDirty(
  * @remarks
  * `usageLimit` is `wait` or `stop`, so the body never holds a usage credits value.
  */
-export function policyPayload(values: PolicyFormValues): BoardPolicy {
+export function policyPayload(values: PolicyFormValues): PolicyPayload {
   return {
     roadmapApproval: values.roadmapApproval,
     concurrencyCap: Number(values.concurrencyCap),

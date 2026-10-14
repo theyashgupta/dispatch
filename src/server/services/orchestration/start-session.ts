@@ -36,6 +36,7 @@ import {
 } from "./steps.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { isHiddenCard } from "../../../shared/hidden-card.js";
+import { assertMemoryHeadroom } from "./memory-governor.js";
 
 /** Milliseconds after which a transient reattach statusReason is cleared (shared with resume). */
 export const REATTACH_STATUS_CLEAR_MS = 5000;
@@ -361,7 +362,8 @@ function inheritFromError(
  * Run every check of a card start and answer what the commit needs, writing nothing.
  *
  * @remarks The start dialog route and the orchestrator `start_card` tool both call it, so the two
- * paths cannot drift.
+ * paths cannot drift. A paused card is refused (`card-paused`) because a new session would orphan
+ * its stopped processes.
  */
 export async function prepareCardStart(
   id: string,
@@ -369,6 +371,8 @@ export async function prepareCardStart(
 ): Promise<Config> {
   const { playbook, newSession, inheritFrom, workspace } = input;
   const card = launchableCard(id);
+
+  if (card.paused) throw new ConflictError("card-paused");
 
   if (card.column === "done") {
     throw new ConflictError("cannot start a session for a Done card");
@@ -469,9 +473,11 @@ export async function startCardFromDialog(
   id: string,
   input: CardStartInput,
 ): Promise<void> {
+  const card = launchableCard(id);
+  assertMemoryHeadroom(card.boardKey ?? DEFAULT_BOARD_KEY);
   const start = {
     ...input,
-    workspace: bodyWorkspace(launchableCard(id), input.workspace),
+    workspace: bodyWorkspace(card, input.workspace),
   };
   const config = await prepareCardStart(id, start);
   await commitCardStart(id, config, start);

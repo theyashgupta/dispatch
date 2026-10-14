@@ -320,7 +320,7 @@ Amendment, 2026-10-14 (LOCAL-109 part B): a ticket card that `start_card` starte
 
 ## Tool reference
 
-This section is the reference for the 33 tools. Each tool calls one route under `/api/orchestrator/`. Each call is checked against the board scope and, for a write, the policy (D-6), and is recorded as a `tool_call` row in `orchestration_events`. A tool call on a card that another orchestrator owns (D-7) returns 403 `other-owner`.
+This section is the reference for the 35 tools. Each tool calls one route under `/api/orchestrator/`. Each call is checked against the board scope and, for a write, the policy (D-6), and is recorded as a `tool_call` row in `orchestration_events`. A tool call on a card that another orchestrator owns (D-7) returns 403 `other-owner`.
 
 | Family    | Tools                                                                                                                                                                                        | Notes                                                                                    |
 | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
@@ -330,7 +330,7 @@ This section is the reference for the 33 tools. Each tool calls one route under 
 | Groups    | `create_base_branch`, `create_group`, `start_group`                                                                                                                                          | `create_group` takes members, optional repos, playbook, direction and `dependsOn`        |
 | Cards     | `start_card`, `release_prep`                                                                                                                                                                 | `start_card` takes an optional `account`; `release_prep` creates a release card          |
 | Accounts  | `list_accounts`                                                                                                                                                                              | the accounts with state and usage windows, from the cached meter                         |
-| Sessions  | `send_input`, `approve_roadmap`, `request_handoff`, `resume_loop`, `stop_session`                                                                                                            | `send_input` returns `confirmed` or `unconfirmed` (D-4); `resume_loop` per Key rules     |
+| Sessions  | `send_input`, `approve_roadmap`, `request_handoff`, `resume_loop`, `stop_session`, `pause_card`, `resume_card`                                                                               | `send_input` returns `confirmed` or `unconfirmed` (D-4); `resume_loop` per Key rules     |
 | Ship      | `start_ship`, `get_ship_state`                                                                                                                                                               | D-8                                                                                      |
 | Decisions | `create_decision_item`                                                                                                                                                                       | the user answers; the answer returns as an event                                         |
 | Wait      | `wait_for_event`                                                                                                                                                                             | blocks until an event matches a filter or a time limit passes                            |
@@ -469,7 +469,7 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 - Route: `POST /groups/:id/start`. It answers 202 with `{ started: true }` after the session start ends, or with `{ queued: true, waitingOn }` at once when a dependency is not done. The cap check and the start call run inside the cap lock, so two calls at the same time cannot both take the last slot, and the answer waits for the outcome of the start.
 - Input: `id` (card id).
 - Description: "Start the session of a group card. A group that is already started is refused."
-- Refusals: 400 `not-group-card`, `orchestration config is not loaded` (before the queue flag changes). 403 `policy-refused` with `reason` `concurrency cap reached: <running> of <cap> loops running` or `budget reached: cost <cost> of <budget>`. 404 `unknown-board`. 409 `already-started` when the group runs or has a live session. 409 `start-failed` with `reason` `start failed at <step>` or `start failed` when the session start fails; the queue flag goes back to its value before the call and one `supervisor_action` event with `action` `start_group_failed` is recorded. A held start that the supervisor pass makes and that fails goes back in the queue with the same event.
+- Refusals: 400 `not-group-card`, `orchestration config is not loaded` (before the queue flag changes). 403 `policy-refused` with `reason` `concurrency cap reached: <running> of <cap> loops running` or `budget reached: cost <cost> of <budget>`. 404 `unknown-board`. 409 `memory-pressure` with `reason` `free memory <free> MB is below the <floor> MB floor` or `swap used <used> MB is above the <ceiling> MB ceiling`, checked before the cap. 409 `already-started` when the group runs or has a live session. 409 `start-failed` with `reason` `start failed at <step>` or `start failed` when the session start fails; the queue flag goes back to its value before the call and one `supervisor_action` event with `action` `start_group_failed` is recorded. A held start that the supervisor pass makes and that fails goes back in the queue with the same event.
 
 ### `send_input`
 
@@ -498,7 +498,7 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 - Route: `POST /sessions/:cardId/resume`. It answers 200 with `{ result }`.
 - Input: `cardId` (card id).
 - Description: "Resume the loop of a session that stopped. A session that stopped on budget or usage is refused."
-- Refusals: 403 `policy-refused` with `reason` `user must resume`, `concurrency cap reached: <running> of <cap> loops running` or `budget reached: cost <cost> of <budget>`. 404 `unknown-board`. 409 `ship-running`, `no-live-session`, `session-busy`, `not-resumable` with `reason` `session is not stopped by stop_session or a supervisor give-up`.
+- Refusals: 403 `policy-refused` with `reason` `user must resume`, `concurrency cap reached: <running> of <cap> loops running` or `budget reached: cost <cost> of <budget>`. 404 `unknown-board`. 409 `memory-pressure` with `reason` `free memory <free> MB is below the <floor> MB floor` or `swap used <used> MB is above the <ceiling> MB ceiling`, checked before the cap. 409 `ship-running`, `no-live-session`, `session-busy`, `not-resumable` with `reason` `session is not stopped by stop_session or a supervisor give-up`.
 
 ### `stop_session`
 
@@ -506,6 +506,21 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 - Input: `cardId` (card id).
 - Description: "Stop the session of a card. A card outside your board is refused."
 - Refusals: 403 `policy-refused` with `reason` `user must resume`. 409 `ship-running`, `no-live-session`, `session-busy`, `session-state-refused` (as for `send_input`).
+
+### `pause_card`
+
+- Route: `POST /sessions/:cardId/pause`. It answers 200 with `{ paused: true }`.
+- Input: `cardId` (card id).
+- Description: "Pause the loop of a card: stop its processes in place. The server never resumes it; call resume_card."
+- A pause records `by: user`, so the memory governor of the server never resumes it. Only `resume_card` or the user resumes the card.
+- Refusals: 403 `other-board` or `other-owner` (as for `stop_session`). 409 `already-paused`, `not-pausable` with `reason` `not a loop`, `orchestrator session`, `start in progress`, `no live session`, `no shell session` or `process read failed`, and `busy`.
+
+### `resume_card`
+
+- Route: `POST /sessions/:cardId/unpause`. It answers 200 with `{ resumed: true }`.
+- Input: `cardId` (card id).
+- Description: "Resume a paused loop. Refused while memory is low."
+- Refusals: 403 `other-board` or `other-owner` (as for `stop_session`). 409 `memory-pressure` with `reason` `free memory <free> MB is below the <floor> MB floor` or `swap used <used> MB is above the <ceiling> MB ceiling`, checked first, then `not-paused`, `busy`, and `unpause-incomplete` with `reason` `a command typed while paused owns the terminal` or `the shell did not hand the terminal back`.
 
 ### `start_ship`
 
@@ -592,7 +607,7 @@ When `handoffReady` is `true`, the supervisor reads the handoff as pending, as i
 - Route: `POST /cards/:cardId/start`. It answers 202 with `{ started: true, cardId, playbook }` when the session start began, not when the worktree exists. The cap check, the write of `launch` and the start run in one cap-locked step, so two calls at the same time cannot both take the last slot.
 - Input: `cardId` (card id), `playbook` (string, 1 to 200 characters), `direction` (optional string, with the same limit and marker rule as the `create_group` direction), `folder` (optional string, 1 character or more), `repos` (optional list of `{ path, base }`, 1 entry or more), `account` (optional string, 1 to 200 characters: an account id from `list_accounts`, or `default`).
 - Description: "Start the session of one ticket card with a playbook and a direction, the way the start dialog does. Omit repos to use the stored workspace of the card, else the board repositories with their base branch. A stored workspace with no repository counts as none, and a board with no repository answers no-repositories. A group card, a running card, a card in Done or Inbox, the Board Orchestrator playbook and a start at the concurrency cap are refused. Pass account, an account id from list_accounts or default, to start on that account; an unknown account is refused with unknown-account. Omit it to use the active account."
-- Refusals: 400 `invalid-playbook`, `invalid-direction`, `invalid-folder`, `invalid-repos`, `invalid-account`, `unknown-account` (the account is not in `list_accounts`; the call answers it before the cap check), `no-repositories` (an omitted `repos` on a board with no repository), `missing-base` with `path`, `unknown-repository`, `not-ticket-card` (the card is a group card), `orchestrator-playbook` (the playbook is Board Orchestrator), `unknown-playbook`, and the marker reason of `create_group`. 403 `policy-refused` with `reason` `concurrency cap reached: <running> of <cap> loops running`. 409 `already-started` when the card runs or has a live session. 409 for a card in Done or Inbox. 409 `a session start is already in progress` when a start of the card is running. Every refusal comes before the first write, so a refused call leaves no `launch` and no session.
+- Refusals: 400 `invalid-playbook`, `invalid-direction`, `invalid-folder`, `invalid-repos`, `invalid-account`, `unknown-account` (the account is not in `list_accounts`; the call answers it before the cap check), `no-repositories` (an omitted `repos` on a board with no repository), `missing-base` with `path`, `unknown-repository`, `not-ticket-card` (the card is a group card), `orchestrator-playbook` (the playbook is Board Orchestrator), `unknown-playbook`, and the marker reason of `create_group`. 403 `policy-refused` with `reason` `concurrency cap reached: <running> of <cap> loops running`. 409 `memory-pressure` with `reason` `free memory <free> MB is below the <floor> MB floor` or `swap used <used> MB is above the <ceiling> MB ceiling`, checked before the cap. 409 `already-started` when the card runs or has a live session. 409 for a card in Done or Inbox. 409 `a session start is already in progress` when a start of the card is running. Every refusal comes before the first write, so a refused call leaves no `launch` and no session.
 - The tool writes `launch` on the card with the playbook and the direction, so the card counts as a running loop until it reaches Agent done or Done.
 - With `account`, the session starts on that account and the card is not pinned to it. With no `account`, the session starts on the active account. The start dialog of the user is unchanged.
 

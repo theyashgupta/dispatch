@@ -74,6 +74,7 @@ interface SandboxOptions {
   name: string;
   buildRoot?: string;
   reuseDir?: boolean;
+  memorySampleFile?: string;
 }
 
 export interface OrchestrationEventRow {
@@ -389,6 +390,9 @@ export async function startSandbox(opts: SandboxOptions): Promise<Sandbox> {
     PATH: `${bin}:${process.env.PATH ?? ""}`,
     FAKE_CLAUDE_SCENARIO_DIR: scenarios,
     DISPATCH_USAGE_URL: "http://127.0.0.1:1",
+    ...(opts.memorySampleFile
+      ? { DISPATCH_MEMORY_SAMPLE_FILE: opts.memorySampleFile }
+      : {}),
     GIT_AUTHOR_NAME: SHIP_IDENTITY.name,
     GIT_AUTHOR_EMAIL: SHIP_IDENTITY.email,
     GIT_COMMITTER_NAME: SHIP_IDENTITY.name,

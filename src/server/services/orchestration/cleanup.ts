@@ -9,6 +9,7 @@ import {
   worktreeStatus,
 } from "../../adapters/git.js";
 import { worktreePath as buildWorktreePath } from "../domain/workspace-paths.js";
+import { continueSession } from "./pause-card.js";
 
 /**
  * Env-gated measurement instrumentation for the perf-cleanup harness (PERF-01), dead on every
@@ -29,6 +30,7 @@ export async function killSessionProcesses(
   tmuxSession: string | undefined,
 ): Promise<void> {
   if (!tmuxSession) return;
+  await continueSession(tmuxSession);
   killTtyd(tmuxSession);
   await killSession(`=${tmuxSession}`);
 }

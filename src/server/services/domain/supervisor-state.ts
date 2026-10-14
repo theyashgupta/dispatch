@@ -1,5 +1,9 @@
 import { STALE_MINUTES } from "../../../shared/orchestrator-limits.js";
-import type { LoopProgress, SupervisorState } from "../../../shared/types.js";
+import type {
+  Card,
+  LoopProgress,
+  SupervisorState,
+} from "../../../shared/types.js";
 import {
   AUTO_CONTINUE,
   inputLineAt,
@@ -22,6 +26,7 @@ export interface DetectInput {
   now: number;
   tmuxAlive: boolean;
   atShellPrompt: boolean;
+  paused: Card["paused"];
   pane: string;
   engineSessionId: string | null;
   completion: LoopProgress["completion"] | null;
@@ -299,6 +304,13 @@ export function detectState(input: DetectInput): Detection {
   });
 
   if (!input.tmuxAlive) return done("lost", "tmux: session not found");
+  if (input.paused)
+    return done(
+      "paused",
+      `paused by ${input.paused.by}`,
+      {},
+      { lastGrowthAt: now },
+    );
   if (input.atShellPrompt)
     return done("shell_prompt", "tmux: pane at shell prompt");
 

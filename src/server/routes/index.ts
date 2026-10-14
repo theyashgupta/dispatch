@@ -33,6 +33,7 @@ import { meetingsRouter } from "./meetings.route.js";
 import { calendarRouter } from "./calendar.route.js";
 import { workspacesRouter } from "./workspaces.route.js";
 import { askRouter } from "./ask.route.js";
+import { systemRouter } from "./system.route.js";
 import { httpErrorHandler } from "./error-handler.js";
 import {
   orchestratorRouter,
@@ -86,3 +87,4 @@ apiRouter.use(meetingsRouter);
 apiRouter.use(calendarRouter);
 apiRouter.use(workspacesRouter);
 apiRouter.use(askRouter);
+apiRouter.use(systemRouter);

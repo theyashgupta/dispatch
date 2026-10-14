@@ -1,3 +1,4 @@
+import type { PolicyPayload } from "@/modules/orchestrator/domain/policy-form";
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import {
@@ -232,7 +233,7 @@ test("the entry decision is null for a board missing from the list", () => {
   assert.equal(observer.getCurrentResult().data, null);
 });
 
-const policy: BoardPolicy = {
+const policy: PolicyPayload = {
   roadmapApproval: "ask",
   concurrencyCap: 3,
   loopModel: null,

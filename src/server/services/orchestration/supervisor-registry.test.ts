@@ -8,8 +8,13 @@ import { startedGroup } from "../../test-support/group-fixtures.js";
 
 const env = isolateEnv();
 const { store } = await import("../../store/board.store.js");
-const { ensureWatcher, watcherNames, dropWatcher, supervisePane } =
-  await import("./supervisor-registry.js");
+const {
+  ensureWatcher,
+  watcherNames,
+  dropWatcher,
+  supervisePane,
+  superviseLost,
+} = await import("./supervisor-registry.js");
 await store.load();
 after(() => env.cleanup());
 
@@ -139,6 +144,33 @@ void test("a server restart with the session still idle writes no new event", as
   );
 });
 
+void test("a paused card gets the paused state and no action even over an api error pane", async () => {
+  const ids = await startedCard(SBX, "paused-card");
+  await supervisePane({ ...ids, pane: pane("working.txt") });
+  await store.markCardPaused(ids.cardId, ids.sessionId, {
+    at: "2026-10-13T00:00:00.000Z",
+    by: "user",
+    sessionId: ids.sessionId,
+    pids: [101],
+  });
+  await supervisePane({ ...ids, pane: pane("api-error.txt") });
+  const session = sessionOf(ids.cardId);
+  assert.equal(session?.state, "paused");
+  assert.deepEqual(
+    store
+      .listOrchestrationEvents(SBX, 0, 100)
+      .filter((e) => e.cardId === ids.cardId)
+      .map((e) => [e.kind, e.data.to]),
+    [
+      ["supervisor_state", "working"],
+      ["supervisor_state", "paused"],
+    ],
+  );
+  await store.clearCardPaused(ids.cardId);
+  await supervisePane({ ...ids, pane: pane("working.txt") });
+  assert.equal(sessionOf(ids.cardId)?.state, "working");
+});
+
 void test("an orchestrator's continue budget is keyed by the UTC day, so a new day gets a fresh one", async () => {
   const hidden = await store.createOrchestratorCard(
     SBX,
@@ -249,4 +281,64 @@ void test("a ticket card and the orchestrator card write no group_state event on
   assert.equal(sessionOf(ids.cardId)?.state, "api_error");
   assert.equal(groupStates(SBX, ids.cardId).length, 0);
   dropWatcher(ids.tmuxSession);
+});
+
+function supervisorEvents(board: BoardKey, cardId: string) {
+  return store
+    .listOrchestrationEvents(board, 0, 500)
+    .filter(
+      (e) =>
+        e.cardId === cardId &&
+        (e.kind === "supervisor_state" || e.kind === "supervisor_action"),
+    );
+}
+
+void test("superviseLost does nothing for a partial loss whose card still has a live session", async () => {
+  const ids = await startedCard(SBX, "partial-loss");
+  const reserved = await store.reserveNewSession(
+    ids.cardId,
+    store.getCard(ids.cardId)!.identifier,
+  );
+  await store.completeStart(ids.cardId, reserved!.sessionId, {
+    workspacePath: "/tmp/ws-partial-loss-2",
+    tmuxSession: "dsp-partial-loss-2",
+    branch: "partial-loss-2",
+  });
+  await store.markSessionLost(
+    ids.cardId,
+    store.getCard(ids.cardId)!.activeSessionId,
+  );
+  const card = store.getCard(ids.cardId)!;
+  assert.equal(card.sessionLost, false);
+  assert.equal(card.activeSessionId, ids.sessionId);
+  await store.setSessionStateIfSession(ids.cardId, ids.sessionId, "working");
+  const before = supervisorEvents(SBX, ids.cardId).length;
+  await superviseLost(ids.cardId);
+  assert.equal(supervisorEvents(SBX, ids.cardId).length, before);
+  assert.equal(sessionOf(ids.cardId)?.state, "working");
+});
+
+void test("superviseLost records lost and runs the duty once for a whole-card loss", async () => {
+  const ids = await startedCard(SBX, "whole-loss");
+  await store.setSessionStateIfSession(ids.cardId, ids.sessionId, "working");
+  await store.markSessionLost(ids.cardId, ids.sessionId);
+  assert.equal(store.getCard(ids.cardId)?.sessionLost, true);
+  store.beginStart(ids.cardId);
+  try {
+    await superviseLost(ids.cardId);
+    const events = supervisorEvents(SBX, ids.cardId);
+    assert.equal(sessionOf(ids.cardId)?.state, "lost");
+    assert.deepEqual(
+      events.map((e) => [e.kind, e.data.to ?? e.data.action]),
+      [
+        ["supervisor_state", "lost"],
+        ["supervisor_action", "resume"],
+      ],
+    );
+    assert.equal(events[0].data.from, "working");
+    await superviseLost(ids.cardId);
+    assert.equal(supervisorEvents(SBX, ids.cardId).length, events.length);
+  } finally {
+    store.endStart(ids.cardId);
+  }
 });

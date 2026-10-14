@@ -18,6 +18,8 @@ import {
   typedLine,
   type SendResult,
 } from "./supervisor-send.js";
+import { assertMemoryHeadroom } from "./memory-governor.js";
+import { pauseCard, unpauseCard } from "./pause-card.js";
 
 export const sessionTools: {
   send: typeof sendConfirmed;
@@ -29,6 +31,7 @@ const KEYLESS_STATES: ReadonlySet<SupervisorState> = new Set([
   "usage_limit_dialog",
   "usage_limit_wait",
   "shell_prompt",
+  "paused",
 ]);
 const USER_MUST_RESUME = "user must resume";
 const MODE_CHARACTERS = new Set(["!", "/", "#", "&", "@"]);
@@ -40,8 +43,18 @@ function liveSession(card: Card): Session {
   return session;
 }
 
-/** Throw the typed 409 when the pane shows a dialog or a shell that a key must never reach. */
-function assertKeysAllowed(session: Session): void {
+/** Throw the typed 409 when the card is paused, because its stopped pane would take the keys later. */
+function assertNotPaused(card: Card): void {
+  if (card.paused) {
+    throw new ConflictError("session-state-refused", {
+      reason: "session is paused",
+    });
+  }
+}
+
+/** Throw the typed 409 when the card is paused or the pane shows a dialog or a shell that a key must never reach. */
+function assertKeysAllowed(card: Card, session: Session): void {
+  assertNotPaused(card);
   if (session.state !== undefined && KEYLESS_STATES.has(session.state)) {
     throw new ConflictError("session-state-refused", {
       reason: `session is at ${session.state}`,
@@ -107,7 +120,7 @@ export async function sendInput(
   assertTypable(text);
   return oneAtATime(card, async () => {
     const session = liveSession(card);
-    assertKeysAllowed(session);
+    assertKeysAllowed(card, session);
     assertNotUserStop(session);
     enforce(
       checkBudget({
@@ -133,7 +146,7 @@ export async function userSendInput(
   assertTypable(text);
   return oneAtATime(card, async () => {
     const session = liveSession(card);
-    assertKeysAllowed(session);
+    assertKeysAllowed(card, session);
     return sessionTools.send(card, session, text, "user_input");
   });
 }
@@ -153,7 +166,7 @@ export async function approveGroupPlan(
   return oneAtATime(card, async () => {
     if (card.source !== "group") throw new ValidationError("not-group-card");
     const session = liveSession(card);
-    assertKeysAllowed(session);
+    assertKeysAllowed(card, session);
     assertNotUserStop(session);
     if (callerPolicy(caller).roadmapApproval === "ask") {
       const approval = store
@@ -190,7 +203,7 @@ export async function requestHandoff(
     const session = liveSession(card);
     const slug = card.loopProgress?.slug;
     if (!slug) throw new ConflictError("no-loop");
-    assertKeysAllowed(session);
+    assertKeysAllowed(card, session);
     assertNotUserStop(session);
     return sendHandoffRequest(card, session, slug, hard, {}, sessionTools.send);
   });
@@ -208,6 +221,7 @@ export async function resumeLoop(
 ): Promise<SendResult> {
   return oneAtATime(card, async () => {
     const session = liveSession(card);
+    assertNotPaused(card);
     assertNotUserStop(session);
     if (
       session.state !== "needs_input" ||
@@ -219,6 +233,7 @@ export async function resumeLoop(
           "session is not stopped by stop_session or a supervisor give-up",
       });
     }
+    assertMemoryHeadroom(caller.boardKey);
     const policy = callerPolicy(caller);
     enforce(
       checkCap({
@@ -261,6 +276,7 @@ export async function resumeLoop(
 export async function userResumeLoop(card: Card): Promise<SendResult> {
   return oneAtATime(card, async () => {
     const session = liveSession(card);
+    assertNotPaused(card);
     if (session.state !== "needs_input") {
       throw new ConflictError("not-resumable", {
         reason: "session is not waiting at needs_input",
@@ -297,7 +313,7 @@ export async function stopSession(
 ): Promise<void> {
   return oneAtATime(card, async () => {
     const session = liveSession(card);
-    assertKeysAllowed(session);
+    assertKeysAllowed(card, session);
     assertNotUserStop(session);
     await sessionTools.keys(`=${session.tmuxSession}:`, ["Escape"]);
     await markNeedsInput(
@@ -306,5 +322,31 @@ export async function stopSession(
       "stop_session",
       `stop_session by orchestrator ${caller.orchestratorId}`,
     );
+  });
+}
+
+/**
+ * Pause the loop of a card on behalf of an orchestrator.
+ *
+ * @remarks `by: "user"` keeps the memory governor from resuming the card.
+ */
+export async function orchestratorPauseCard(
+  caller: OrchestratorIdentity,
+  card: Card,
+): Promise<void> {
+  await pauseCard(card.id, {
+    by: "user",
+    reason: `paused by orchestrator ${caller.orchestratorId}`,
+  });
+}
+
+/** Resume a paused loop on behalf of an orchestrator, refused while memory is low. */
+export async function orchestratorResumeCard(
+  caller: OrchestratorIdentity,
+  card: Card,
+): Promise<void> {
+  assertMemoryHeadroom(card.boardKey);
+  await unpauseCard(card.id, {
+    reason: `resumed by orchestrator ${caller.orchestratorId}`,
   });
 }

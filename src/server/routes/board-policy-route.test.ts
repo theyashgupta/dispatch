@@ -61,6 +61,8 @@ const VALID: BoardPolicy = {
   groupPlaybook: null,
   wakeMinutes: 15,
   crossSessionInbound: null,
+  memoryFloorMb: 1024,
+  swapCeilingMb: 8192,
 };
 
 function stored(): BoardPolicy | undefined {
@@ -302,4 +304,67 @@ test("an unknown crossSessionInbound answers 400 and the stored value does not c
     );
   }
   assert.equal(stored()?.crossSessionInbound, "hold");
+});
+
+test("a fresh board has the memory floor 1024 MB and the swap ceiling 8192 MB", async () => {
+  const fresh = parseBoardKey("MEMF") as BoardKey;
+  await store.createBoard({
+    key: fresh,
+    name: "Memory",
+    workspaceRoot: null,
+    repositories: [],
+    linearTeamKeys: [],
+  });
+  assert.equal(store.getBoard(fresh)?.policy.memoryFloorMb, 1024);
+  assert.equal(store.getBoard(fresh)?.policy.swapCeilingMb, 8192);
+});
+
+test("memoryFloorMb and swapCeilingMb accept their range ends and read back", async () => {
+  for (const [memoryFloorMb, swapCeilingMb] of [
+    [0, 256],
+    [65536, 65536],
+    [2048, 3072],
+  ]) {
+    const got = await put("/boards/PLC/policy", {
+      ...VALID,
+      memoryFloorMb,
+      swapCeilingMb,
+    });
+    assert.equal(got.status, 200, got.text);
+    assert.equal(got.body.board.policy.memoryFloorMb, memoryFloorMb);
+    assert.equal(stored()?.swapCeilingMb, swapCeilingMb);
+  }
+});
+
+test("an omitted memoryFloorMb and swapCeilingMb keep the stored values", async () => {
+  await put("/boards/PLC/policy", {
+    ...VALID,
+    memoryFloorMb: 1500,
+    swapCeilingMb: 5000,
+  });
+  const kept = await put("/boards/PLC/policy", {
+    ...VALID,
+    memoryFloorMb: undefined,
+    swapCeilingMb: undefined,
+  });
+  assert.equal(kept.status, 200, kept.text);
+  assert.equal(stored()?.memoryFloorMb, 1500);
+  assert.equal(stored()?.swapCeilingMb, 5000);
+});
+
+test("an out-of-range memory floor or swap ceiling answers 400 and the policy does not change", async () => {
+  for (const memoryFloorMb of [-1, 65537, 1.5, "1024"]) {
+    await expectRefusal(
+      { ...VALID, memoryFloorMb },
+      400,
+      "invalid-memoryFloorMb",
+    );
+  }
+  for (const swapCeilingMb of [255, 65537, 1.5, "4096"]) {
+    await expectRefusal(
+      { ...VALID, swapCeilingMb },
+      400,
+      "invalid-swapCeilingMb",
+    );
+  }
 });
