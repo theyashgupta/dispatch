@@ -21,7 +21,7 @@ import {
   boardListQueryOptions,
 } from "@/queries/board-list-queries";
 import type { ScopeStep } from "@/modules/orchestrator/domain/ownership";
-import type { ControlKind } from "@/modules/orchestrator/domain/panel-model";
+import type { ControlKind } from "@/modules/orchestrator/domain/centre-model";
 import {
   addExtraOrchestrator,
   ensureOrchestratorTerminal,
@@ -35,10 +35,10 @@ import {
   type ExtraInput,
 } from "./orchestrator-api.js";
 
-export const PANEL_POLL_MS = 3000;
+export const CENTRE_POLL_MS = 3000;
 
 export const orchestratorKeys = {
-  panel: (board: BoardKey) => ["orchestrators", "panel", board] as const,
+  centre: (board: BoardKey) => ["orchestrators", "centre", board] as const,
   answered: (board: BoardKey) =>
     [...attentionActionsKeys.decisions(board), "answered"] as const,
   conversation: (board: BoardKey, id: string) =>
@@ -52,13 +52,13 @@ export const orchestratorKeys = {
  * The query is off while `open` is false, so a board page without the command centre makes no
  * orchestrator request. There is no stream event for session state, so the poll is the live feed.
  */
-export function orchestratorPanelQueryOptions(board: BoardKey, open: boolean) {
+export function orchestratorCentreQueryOptions(board: BoardKey, open: boolean) {
   return queryOptions({
-    queryKey: orchestratorKeys.panel(board),
+    queryKey: orchestratorKeys.centre(board),
     queryFn: () => getOrchestrators(board),
     enabled: open,
     staleTime: 0,
-    refetchInterval: open ? PANEL_POLL_MS : false,
+    refetchInterval: open ? CENTRE_POLL_MS : false,
   });
 }
 
@@ -77,8 +77,8 @@ export function boardRecordQueryOptions(board: BoardKey) {
 }
 
 /** Read the orchestrators of the command centre and keep them fresh with the 3 s poll. */
-export function useOrchestratorPanelQuery(board: BoardKey, open: boolean) {
-  return useQuery(orchestratorPanelQueryOptions(board, open));
+export function useOrchestratorCentreQuery(board: BoardKey, open: boolean) {
+  return useQuery(orchestratorCentreQueryOptions(board, open));
 }
 
 /** Read the board record behind the header entry button from the cached board list. */
@@ -111,7 +111,7 @@ export function lifecycleMutationOptions(
     onSettled: () =>
       Promise.all([
         queryClient.invalidateQueries({
-          queryKey: orchestratorKeys.panel(board),
+          queryKey: orchestratorKeys.centre(board),
         }),
         queryClient.invalidateQueries({ queryKey: boardListKeys.list }),
       ]),
@@ -136,17 +136,17 @@ export function useEnsureOrchestratorTerminalMutation() {
  * @remarks
  * A decision item arrives from an orchestrator tool call and no stream event carries it, so the poll is the live feed, as for the orchestrator records. The key is the shared one, so the dashboard and the command centre hold one cache entry.
  */
-export function panelDecisionsQueryOptions(board: BoardKey) {
+export function centreDecisionsQueryOptions(board: BoardKey) {
   return queryOptions({
     ...openDecisionsQueryOptions(board),
     staleTime: 0,
-    refetchInterval: PANEL_POLL_MS,
+    refetchInterval: CENTRE_POLL_MS,
   });
 }
 
 /** Read the open decision items of the board for the command centre. */
-export function usePanelDecisionsQuery(board: BoardKey) {
-  return useQuery(panelDecisionsQueryOptions(board));
+export function useCentreDecisionsQuery(board: BoardKey) {
+  return useQuery(centreDecisionsQueryOptions(board));
 }
 
 /**
@@ -160,7 +160,7 @@ export function answeredDecisionsQueryOptions(board: BoardKey) {
     queryKey: orchestratorKeys.answered(board),
     queryFn: () => getDecisions(board, "answered"),
     staleTime: 0,
-    refetchInterval: PANEL_POLL_MS,
+    refetchInterval: CENTRE_POLL_MS,
   });
 }
 
@@ -180,7 +180,7 @@ export function conversationQueryOptions(board: BoardKey, id: string) {
     queryKey: orchestratorKeys.conversation(board, id),
     queryFn: () => getOrchestratorConversation(board, id),
     staleTime: 0,
-    refetchInterval: PANEL_POLL_MS,
+    refetchInterval: CENTRE_POLL_MS,
   });
 }
 
@@ -224,7 +224,7 @@ export function useSavePolicyMutation(board: BoardKey) {
 
 function refreshRecords(queryClient: QueryClient, board: BoardKey) {
   return Promise.all([
-    queryClient.invalidateQueries({ queryKey: orchestratorKeys.panel(board) }),
+    queryClient.invalidateQueries({ queryKey: orchestratorKeys.centre(board) }),
     queryClient.invalidateQueries({ queryKey: boardListKeys.list }),
   ]);
 }

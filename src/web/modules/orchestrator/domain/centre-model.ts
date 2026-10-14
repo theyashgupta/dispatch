@@ -11,7 +11,7 @@ export type {
 
 export type ControlKind = "start" | "stop" | "resume";
 
-export interface PanelControl {
+export interface CentreControl {
   kind: ControlKind;
   label: string;
   disabled: boolean;
@@ -51,7 +51,7 @@ interface ControlInput {
 export function controlFor(
   main: OrchestratorView | null,
   input: ControlInput,
-): PanelControl | null {
+): CentreControl | null {
   const state = main?.session?.state ?? null;
   const locked = input.stale || input.pending !== null;
   const stale = input.stale ? STALE_REASON : null;

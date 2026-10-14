@@ -5,9 +5,9 @@ import {
   replyFeedback,
 } from "../../../../shared/decision-view.js";
 import type { BoardKey } from "../../../../shared/types.js";
-import type { RetryFailure } from "@/modules/orchestrator/components/PanelAlertBar";
+import type { RetryFailure } from "@/modules/orchestrator/components/CentreAlertBar";
 import { noSessionSendText } from "@/modules/orchestrator/domain/centre-page-state";
-import type { OrchestratorView } from "@/modules/orchestrator/domain/panel-model";
+import type { OrchestratorView } from "@/modules/orchestrator/domain/centre-model";
 import {
   useAnswerDecisionMutation,
   useLoopReplyMutation,

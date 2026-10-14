@@ -10,7 +10,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CENTRE_SETTINGS_BUTTON_ID } from "@/modules/orchestrator/domain/centre-page-state";
-import { PanelAlertBar } from "@/modules/orchestrator/components/PanelAlertBar";
+import { CentreAlertBar } from "@/modules/orchestrator/components/CentreAlertBar";
 
 interface CentreToolbarProps {
   inline: boolean;
@@ -83,7 +83,7 @@ export function CentreToolbar({
               : "absolute top-full right-0 z-10 mt-(--space-xs) w-max max-w-120 rounded-md border bg-popover px-3 py-2 shadow-md"
           }
         >
-          <PanelAlertBar
+          <CentreAlertBar
             message={alert.message}
             retryDisabled={alert.retryDisabled}
             onRetry={alert.onRetry}

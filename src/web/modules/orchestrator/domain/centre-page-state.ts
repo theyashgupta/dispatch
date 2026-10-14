@@ -6,7 +6,7 @@ import {
   stripPeriod,
   type ControlKind,
   type OrchestratorView,
-} from "./panel-model.js";
+} from "./centre-model.js";
 
 export const NO_ORCHESTRATOR_TEXT = "This board has no orchestrator.";
 export const NO_BRANCHES_TEXT =

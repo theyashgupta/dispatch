@@ -17,12 +17,12 @@ import {
   conversationQueryOptions,
   lifecycleMutationOptions,
   moveGroupsMutationOptions,
-  panelDecisionsQueryOptions,
+  centreDecisionsQueryOptions,
   saveOverridesMutationOptions,
   savePolicyMutationOptions,
   orchestratorKeys,
-  orchestratorPanelQueryOptions,
-  PANEL_POLL_MS,
+  orchestratorCentreQueryOptions,
+  CENTRE_POLL_MS,
 } from "./orchestrator-queries.js";
 import { ensureOrchestratorTerminal } from "./orchestrator-api.js";
 
@@ -163,14 +163,14 @@ test("a network failure resolves as a refusal", async () => {
   assert.deepEqual(result, { ok: false, reason: "offline" });
 });
 
-test("every lifecycle outcome refreshes the panel and the board list", async () => {
+test("every lifecycle outcome refreshes the centre and the board list", async () => {
   const client = newClient();
-  client.setQueryData(orchestratorKeys.panel(LOCAL), []);
+  client.setQueryData(orchestratorKeys.centre(LOCAL), []);
   client.setQueryData(boardListKeys.list, { boards: [] });
   stubFetch({ status: 202, body: {} });
   await runLifecycle(client, { kind: "stop", id: "main", hasRecord: true });
   assert.equal(
-    client.getQueryState(orchestratorKeys.panel(LOCAL))?.isInvalidated,
+    client.getQueryState(orchestratorKeys.centre(LOCAL))?.isInvalidated,
     true,
   );
   assert.equal(client.getQueryState(boardListKeys.list)?.isInvalidated, true);
@@ -183,10 +183,10 @@ test("the ensure terminal call posts to the card route", async () => {
   assert.equal(calls[0]?.init?.method, "POST");
 });
 
-test("the panel query reads the list route and polls only while open", async () => {
-  const open = orchestratorPanelQueryOptions(LOCAL, true);
-  const closed = orchestratorPanelQueryOptions(LOCAL, false);
-  assert.equal(open.refetchInterval, PANEL_POLL_MS);
+test("the centre query reads the list route and polls only while open", async () => {
+  const open = orchestratorCentreQueryOptions(LOCAL, true);
+  const closed = orchestratorCentreQueryOptions(LOCAL, false);
+  assert.equal(open.refetchInterval, CENTRE_POLL_MS);
   assert.equal(closed.refetchInterval, false);
   stubFetch({ status: 200, body: { orchestrators: [{ id: "main" }] } });
   const data = await newClient().fetchQuery(open);
@@ -194,12 +194,12 @@ test("the panel query reads the list route and polls only while open", async () 
   assert.equal(calls[0]?.url, "/api/boards/LOCAL/orchestrators");
 });
 
-test("request parity: a closed panel makes no request", async () => {
+test("request parity: a closed centre makes no request", async () => {
   stubFetch({ status: 200, body: { orchestrators: [] } });
   const client = newClient();
   const observer = new QueryObserver(
     client,
-    orchestratorPanelQueryOptions(LOCAL, false),
+    orchestratorCentreQueryOptions(LOCAL, false),
   );
   const unsubscribe = observer.subscribe(() => undefined);
   await new Promise((resolve) => setTimeout(resolve, 20));
@@ -255,10 +255,10 @@ function body(index: number): unknown {
   return JSON.parse(calls[index]?.init?.body as string);
 }
 
-test("the panel decisions query polls on the shared decisions key", async () => {
-  const options = panelDecisionsQueryOptions(LOCAL);
+test("the centre decisions query polls on the shared decisions key", async () => {
+  const options = centreDecisionsQueryOptions(LOCAL);
   assert.deepEqual(options.queryKey, openDecisionsQueryOptions(LOCAL).queryKey);
-  assert.equal(options.refetchInterval, PANEL_POLL_MS);
+  assert.equal(options.refetchInterval, CENTRE_POLL_MS);
   assert.equal(options.staleTime, 0);
   stubFetch({ status: 200, body: { items: [{ id: "d1" }] } });
   const data = await newClient().fetchQuery(options);
@@ -274,7 +274,7 @@ test("the answered decisions query reads the answered decisions of the board eve
     "decisions",
     "answered",
   ]);
-  assert.equal(options.refetchInterval, PANEL_POLL_MS);
+  assert.equal(options.refetchInterval, CENTRE_POLL_MS);
   assert.equal(options.staleTime, 0);
   stubFetch({ status: 200, body: { items: [{ id: "d2" }] } });
   assert.deepEqual(await newClient().fetchQuery(options), [{ id: "d2" }]);
@@ -289,7 +289,7 @@ test("the conversation query reads one orchestrator every 3 s", async () => {
     "LOCAL",
     "main",
   ]);
-  assert.equal(options.refetchInterval, PANEL_POLL_MS);
+  assert.equal(options.refetchInterval, CENTRE_POLL_MS);
   assert.equal(options.staleTime, 0);
   const conversation = { status: "ok", messages: [], truncated: false };
   stubFetch({ status: 200, body: conversation });
@@ -348,7 +348,7 @@ test("a refused policy save leaves the board list as it was", async () => {
 
 test("Add extra orchestrator posts the extra role with its scope and override, then refreshes", async () => {
   const client = newClient();
-  client.setQueryData(orchestratorKeys.panel(LOCAL), []);
+  client.setQueryData(orchestratorKeys.centre(LOCAL), []);
   stubFetch({ status: 201, body: { orchestrator: {} } });
   const result = await new MutationObserver(
     client,
@@ -370,7 +370,7 @@ test("Add extra orchestrator posts the extra role with its scope and override, t
     role: "extra",
   });
   assert.equal(
-    client.getQueryState(orchestratorKeys.panel(LOCAL))?.isInvalidated,
+    client.getQueryState(orchestratorKeys.centre(LOCAL))?.isInvalidated,
     true,
   );
 });
