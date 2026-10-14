@@ -190,7 +190,7 @@ function assertPausable(card: Card): LiveSession {
  */
 export async function pauseCard(
   cardId: string,
-  opts: { by: PausedBy; reason: string },
+  opts: { by: PausedBy; reason: string; swapMb?: number },
 ): Promise<Card> {
   const result = await withCardLock(
     cardId,
@@ -205,6 +205,8 @@ export async function pauseCard(
         by: opts.by,
         sessionId: session.id,
         pids: [],
+        reason: opts.reason,
+        ...(opts.swapMb === undefined ? {} : { swapMb: opts.swapMb }),
       });
       if (!marked)
         throw new ConflictError("not-pausable", { reason: NO_LIVE_SESSION });

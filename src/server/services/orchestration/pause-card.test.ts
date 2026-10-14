@@ -211,6 +211,8 @@ void test("pause stops the pane tree, stores the mark and logs one event", async
   assert.equal(paused.paused?.by, "user");
   assert.equal(paused.paused?.sessionId, "session-1");
   assert.deepEqual(paused.paused?.pids, [4242]);
+  assert.equal(paused.paused?.reason, "memory");
+  assert.equal(paused.paused?.swapMb, undefined);
   assert.match(
     paused.paused?.at ?? "",
     /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
@@ -222,6 +224,17 @@ void test("pause stops the pane tree, stores the mark and logs one event", async
     by: "user",
     reason: "memory",
   });
+});
+
+void test("a governor pause stores its swap reading on the mark", async () => {
+  loopCard();
+  const paused = await pauseCard("card-1", {
+    by: "memory",
+    reason: "swap used 9000 MB is above the 8192 MB ceiling",
+    swapMb: 9000,
+  });
+  assert.equal(paused.paused?.by, "memory");
+  assert.equal(paused.paused?.swapMb, 9000);
 });
 
 void test("pause of a paused card is 409 already-paused with no second signal", async () => {

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import type { BoardKey, SystemMemory } from "../../../shared/types.js";
 import {
   IDLE_RUN,
+  decideAfterRestart,
   decideMemoryPause,
   type PauseCandidate,
   type PauseRun,
@@ -80,6 +81,7 @@ test("swap above the ceiling pauses the newest unpaused candidate with the exact
       kind: "pause",
       cardId: "new",
       reason: "swap used 9000 MB is above the 8192 MB ceiling",
+      swapMb: 9000,
     },
     next: { lastPauseSwapMb: 9000, lowReadings: 0 },
   });
@@ -105,6 +107,7 @@ test("cascade guard: growth of 255 MB pauses nothing and 256 MB pauses the next 
       kind: "pause",
       cardId: "old",
       reason: "swap used 9256 MB is above the 8192 MB ceiling",
+      swapMb: 9256,
     },
     next: { lastPauseSwapMb: 9256, lowReadings: 0 },
   });
@@ -167,6 +170,7 @@ test("a cooling-down newest candidate is skipped for the pause target but still 
     kind: "pause",
     cardId: "old",
     reason: "swap used 5000 MB is above the 4096 MB ceiling",
+    swapMb: 5000,
   });
   const held = candidate("held", "2026-10-13T07:00:00.000Z", {
     pausedBy: "memory",
@@ -190,6 +194,7 @@ test("the lowest ceiling across two boards wins", () => {
     kind: "pause",
     cardId: "old",
     reason: "swap used 5000 MB is above the 4096 MB ceiling",
+    swapMb: 5000,
   });
 });
 
@@ -296,4 +301,62 @@ test("the floor is half the ceiling up to a 2048 MB ceiling and the ceiling minu
   });
   assert.equal(floorOf(1025, 512).kind, "none");
   assert.equal(floorOf(1025, 511).kind, "resume");
+});
+
+function restart(swap: number, candidates: PauseCandidate[], stale = false) {
+  return decideAfterRestart({
+    memory: reading(swap, stale),
+    candidates,
+    ceilings: CEILINGS,
+  });
+}
+
+const HELD_OLD = { ...OLD, pausedBy: "memory" as const, pausedSwapMb: 9000 };
+const USER_NEW = { ...NEW, pausedBy: "user" as const };
+
+test("after a restart, swap at the ceiling resumes the oldest governor-paused loop at once", () => {
+  const held = candidate("held", "2026-10-13T10:00:00.000Z", {
+    pausedBy: "memory",
+    pausedSwapMb: 9500,
+  });
+  assert.deepEqual(restart(8192, [held, USER_NEW, HELD_OLD]), {
+    action: {
+      kind: "resume",
+      cardId: "old",
+      reason:
+        "swap used 8192 MB is not above the 8192 MB ceiling after a restart",
+    },
+    next: IDLE_RUN,
+  });
+});
+
+test("after a restart, swap over the ceiling continues the run from the highest persisted reading", () => {
+  const held = candidate("held", "2026-10-13T07:00:00.000Z", {
+    pausedBy: "memory",
+    pausedSwapMb: 9200,
+  });
+  const fresh = candidate("fresh", "2026-10-13T11:00:00.000Z");
+  assert.deepEqual(restart(9455, [held, HELD_OLD, fresh]), {
+    action: { kind: "none" },
+    next: { lastPauseSwapMb: 9200, lowReadings: 0 },
+  });
+  assert.deepEqual(restart(9456, [held, HELD_OLD, fresh])?.action, {
+    kind: "pause",
+    cardId: "fresh",
+    reason: "swap used 9456 MB is above the 8192 MB ceiling",
+    swapMb: 9456,
+  });
+});
+
+test("after a restart, a mark with no persisted reading anchors the run at the current reading", () => {
+  const legacy = { ...OLD, pausedBy: "memory" as const };
+  assert.deepEqual(restart(12000, [legacy, NEW]), {
+    action: { kind: "none" },
+    next: { lastPauseSwapMb: 12000, lowReadings: 0 },
+  });
+});
+
+test("the restart rebuild is skipped with no governor mark or a stale reading", () => {
+  assert.equal(restart(1000, [OLD, USER_NEW]), null);
+  assert.equal(restart(1000, [HELD_OLD], true), null);
 });

@@ -11,6 +11,7 @@ import { ConflictError } from "../domain/errors.js";
 import { admitStart } from "../domain/memory-admission.js";
 import {
   IDLE_RUN,
+  decideAfterRestart,
   decideMemoryPause,
   type PauseAction,
   type PauseCandidate,
@@ -31,6 +32,7 @@ const COOLDOWN_MS = 5 * 60_000;
 let latest: MemorySample | null = null;
 let run: PauseRun = IDLE_RUN;
 let stepping = false;
+let restored = false;
 let lastRefusal: string | null = null;
 const cooldown = new Map<string, number>();
 
@@ -64,6 +66,7 @@ export function systemMemory(now = Date.now()): SystemMemory {
  * in flight skips the next tick's step.
  */
 export function startMemoryGovernor(read = readMemory): () => void {
+  restored = false;
   const tick = (): void => {
     void read()
       .then(async (sample) => {
@@ -116,6 +119,7 @@ function pauseCandidates(): PauseCandidate[] {
       boardKey: card.boardKey,
       startedAt: session.createdAt,
       pausedBy,
+      pausedSwapMb: card.paused?.swapMb,
       coolingDown: (cooldown.get(card.id) ?? 0) > now,
     });
   }
@@ -126,7 +130,8 @@ function pauseCandidates(): PauseCandidate[] {
  * Pause or resume at most one loop card for the latest reading.
  *
  * @remarks Never throws. A refused or failed signal leaves the run state as it was, so the next
- * reading tries again, and the same refusal is logged once.
+ * reading tries again, and the same refusal is logged once. The first fresh reading after start rebuilds
+ * the run from the persisted governor marks, because a restart loses the in-memory run.
  */
 export async function memoryPauseStep(memory = systemMemory()): Promise<void> {
   let action: PauseAction = { kind: "none" };
@@ -136,17 +141,23 @@ export async function memoryPauseStep(memory = systemMemory()): Promise<void> {
     for (const c of candidates) {
       ceilings[c.boardKey] ??= boardPolicy(c.boardKey).swapCeilingMb;
     }
-    const decision = decideMemoryPause({ memory, candidates, ceilings, run });
+    const decision =
+      (restored
+        ? null
+        : decideAfterRestart({ memory, candidates, ceilings })) ??
+      decideMemoryPause({ memory, candidates, ceilings, run });
     action = decision.action;
     if (action.kind === "pause") {
       await governorTools.pauseCard(action.cardId, {
         by: "memory",
         reason: action.reason,
+        swapMb: action.swapMb,
       });
     } else if (action.kind === "resume") {
       await governorTools.unpauseCard(action.cardId, { reason: action.reason });
     }
     run = decision.next;
+    if (memory.supported && !memory.stale) restored = true;
     lastRefusal = null;
     if (action.kind !== "none") cooldown.delete(action.cardId);
     if (action.kind === "none") return;
