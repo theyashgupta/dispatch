@@ -495,7 +495,7 @@ export interface Card {
   resumeError?: string | null;
   paused?: {
     at: string;
-    by: "memory" | "user";
+    by: PausedBy;
     sessionId: string;
     pids: number[];
   } | null;
@@ -1111,6 +1111,8 @@ export type TunnelState =
   | { status: "on"; url: string; code: string }
   | { status: "error"; message: string }
   | { status: "binary-missing"; installHint: string };
+
+export type PausedBy = "memory" | "user";
 
 export interface MemorySample {
   at: string;

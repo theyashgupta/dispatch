@@ -1,6 +1,11 @@
 import { ALL_BOARDS } from "../../../shared/board-key.js";
 import { isHiddenCard } from "../../../shared/hidden-card.js";
-import type { ActivityEvent, Card, Session } from "../../../shared/types.js";
+import type {
+  ActivityEvent,
+  Card,
+  PausedBy,
+  Session,
+} from "../../../shared/types.js";
 import { sleep } from "../../adapters/exec.js";
 import {
   readElapsed,
@@ -51,7 +56,8 @@ const HANGUP_SLACK_SECONDS = 2;
 
 type LiveSession = Session & { tmuxSession: string };
 
-function activeSession(card: Card): LiveSession | undefined {
+/** The card's active session when it has a tmux session, else undefined. */
+export function activeSession(card: Card): LiveSession | undefined {
   const session = card.sessions?.find((s) => s.id === card.activeSessionId);
   return session?.tmuxSession ? (session as LiveSession) : undefined;
 }
@@ -63,6 +69,12 @@ function pausable(card: Card): { session: LiveSession } | { reason: string } {
   if (store.isStarting(card.id)) return { reason: "start in progress" };
   const session = activeSession(card);
   return session ? { session } : { reason: NO_LIVE_SESSION };
+}
+
+/** The reason a card cannot be paused, or null when it can. */
+export function pauseRefusal(card: Card): string | null {
+  const result = pausable(card);
+  return "reason" in result ? result.reason : null;
 }
 
 function requireCard(cardId: string): Card {
@@ -178,7 +190,7 @@ function assertPausable(card: Card): LiveSession {
  */
 export async function pauseCard(
   cardId: string,
-  opts: { by: "memory" | "user"; reason: string },
+  opts: { by: PausedBy; reason: string },
 ): Promise<Card> {
   const result = await withCardLock(
     cardId,

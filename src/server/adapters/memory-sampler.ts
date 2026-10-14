@@ -1,3 +1,5 @@
+import { readFile, stat } from "node:fs/promises";
+import { z } from "zod";
 import type { MemorySample } from "../../shared/types.js";
 import { run } from "./exec.js";
 
@@ -43,7 +45,18 @@ export function parseSysctl(
   return { swapUsedMb, swapTotalMb, load1 };
 }
 
+const MAX_SAMPLE_BYTES = 4096;
+const SAMPLE_NUMBER = z.number().finite().nonnegative();
+const SAMPLE_FIELDS = z.object({
+  freeMb: SAMPLE_NUMBER,
+  compressorMb: SAMPLE_NUMBER,
+  swapUsedMb: SAMPLE_NUMBER,
+  swapTotalMb: SAMPLE_NUMBER,
+  load1: SAMPLE_NUMBER,
+});
+
 let failing = false;
+let seamLogged = false;
 
 /**
  * Sample the machine memory, or null off macOS or when a command or a parse fails.
@@ -54,6 +67,8 @@ let failing = false;
 export async function readMemory(
   platform: NodeJS.Platform = process.platform,
 ): Promise<MemorySample | null> {
+  const file = process.env.DISPATCH_MEMORY_SAMPLE_FILE;
+  if (file) return readSampleFile(file);
   if (platform !== "darwin") return null;
   try {
     const [vm, sysctl] = await Promise.all([
@@ -68,6 +83,34 @@ export async function readMemory(
   } catch (err) {
     return readFailed((err as Error).message);
   }
+}
+
+/**
+ * Read one sample from a JSON file, or null when the file is missing, too large, not JSON or lacks a field.
+ *
+ * @remarks A test seam that a scenario sets through `DISPATCH_MEMORY_SAMPLE_FILE` to drive swap on
+ * a machine that is not macOS. It is unset in production, like `DISPATCH_USAGE_URL`, and logs once
+ * per process when used. Never throws.
+ */
+export async function readSampleFile(
+  path: string,
+): Promise<MemorySample | null> {
+  if (!seamLogged) {
+    seamLogged = true;
+    console.info(`[memory] sampling from file ${path}`);
+  }
+  let parsed: ReturnType<typeof SAMPLE_FIELDS.safeParse>;
+  try {
+    const info = await stat(path);
+    if (!info.isFile() || info.size > MAX_SAMPLE_BYTES)
+      return readFailed("sample file is not a small regular file");
+    parsed = SAMPLE_FIELDS.safeParse(JSON.parse(await readFile(path, "utf8")));
+  } catch (err) {
+    return readFailed(`sample file: ${(err as Error).message}`);
+  }
+  if (!parsed.success) return readFailed("sample file has a bad field");
+  failing = false;
+  return { at: new Date().toISOString(), ...parsed.data };
 }
 
 /** Log the first failure of a run of failed reads and answer no reading. */
