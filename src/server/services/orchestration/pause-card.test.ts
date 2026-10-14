@@ -303,7 +303,7 @@ void test("unpause types the keys twice, keeps the mark and answers 409 unpause-
     reason: "the shell did not hand the terminal back",
   });
   assert.deepEqual(
-    typed.map(([kind, , value]) => `${kind}:${value}`),
+    typed.map(([kind, , value]) => `${kind}:${String(value)}`),
     Array(2).fill(["keys:C-u", "literal:fg %1", "keys:Enter"]).flat(),
   );
   assert.deepEqual(cards.get("card-1")?.paused?.pids, [SHELL, JOB]);

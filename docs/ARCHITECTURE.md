@@ -5535,7 +5535,7 @@ Dev tooling plus one small `node:test` suite. Each gate answers one narrow, mech
 question; none of them read prose for truth.
 
 - **`npm run check`** — the standing CI-shaped gate: `format:check`, `lint`, `typecheck`, `test`,
-  `deadcode` (knip), `replay-gate`, `doc-drift`, and `invariants` (all below), run in sequence.
+  `deadcode` (knip), `replay-gate`, `doc-drift`, `invariants`, `check-hooks` and `test:timing` (all below), run in sequence.
 - **`npm run lint`** and **`npm run lint:typed`**: two ESLint modes. `lint` runs every rule that does not
   need type information, which includes all custom rules, and does not build a TypeScript program.
   It is the local default and a step of `npm run check`. `lint:typed` sets `DISPATCH_LINT_TYPED=1`,
@@ -5549,7 +5549,7 @@ question; none of them read prose for truth.
   `npm run typecheck:tsc`, the same two checks with `tsc`, because tsgo is a preview build.
   `npm run build:server` still uses `tsc`, because only `tsc` emits the server build.
 - **`scripts/with-check-slot.mjs`**: the slot gate for heavy checks. `lint`, `lint:fix`,
-  `lint:typed`, `typecheck`, `deadcode`, `check`, `check:static` and `check:changed` run their
+  `lint:typed`, `typecheck`, `test`, `test:timing`, `deadcode`, `check`, `check:static` and `check:changed` run their
   command through it. The number of gated commands that run at the same time on the machine, across
   all worktrees, is the slot count. The slot count is `DISPATCH_CHECK_SLOTS`, or by default 1 slot
   for each 8 GB of RAM, minimum 1 (see [Check slot count](#check-slot-count-dispatch_check_slots)).
@@ -5579,11 +5579,15 @@ question; none of them read prose for truth.
 - **Format hook** (the `PostToolUse` hook in `.claude/settings.json`): after each Edit or Write in a Claude
   session, it runs `prettier --write` on the edited file. It does not format files under `.claude/`
   or Prettier, ESLint and package config files.
-- **`npm test`**: two `node --import tsx --test` passes, `src/server` and `src/shared` under the root
+- **`npm test`** (`scripts/run-tests.mjs unit`): two `node --import tsx --test` passes, `src/server` and `src/shared` under the root
   tsconfig, then `src/web` with `TSX_TSCONFIG_PATH=src/web/tsconfig.json`: unit tests on pure modules and
   wiring tests that boot a router on port 0 under a temporary `HOME`. No framework beyond Node's
   built-in runner; test files are excluded from the server build. A last pass runs
-  `scripts/**/*.test.mjs` with `node --test`.
+  `scripts/**/*.test.mjs` with `node --test`. The passes skip the files in `TIMING_FILES`.
+- **`npm run test:timing`** (`scripts/run-tests.mjs timing`): the files in `TIMING_FILES`, the tests
+  that start a real tmux server or assert on real elapsed time. It runs each file alone, one after
+  the other, and runs a failed file one more time. A file fails only when it fails two times. It is
+  the last step of `npm run check`.
 - **`node scripts/check-invariants.mjs`** (`npm run invariants`, wired into `npm run check`) —
   invariant-home audit: every ID in the frozen baseline (`scripts/invariant-baseline.txt`) must
   have a durable home (a JSDoc block in `src/` or anywhere in this doc). It was previously

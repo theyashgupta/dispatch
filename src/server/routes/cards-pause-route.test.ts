@@ -97,23 +97,35 @@ test("pause and unpause of a loop card round trip with 409s on repeats", async (
 
   const paused = await call("POST", `/cards/${id}/pause`);
   assert.equal(paused.status, 200);
-  assert.equal(JSON.parse(paused.text).paused.by, "user");
+  assert.equal(
+    (JSON.parse(paused.text) as { paused: { by: string } }).paused.by,
+    "user",
+  );
   assert.deepEqual(signals, [["SIGSTOP", [4242]]]);
   assert.deepEqual(actions(id), ["pause"]);
 
   const again = await call("POST", `/cards/${id}/pause`);
   assert.equal(again.status, 409);
-  assert.equal(JSON.parse(again.text).error, "already-paused");
+  assert.equal(
+    (JSON.parse(again.text) as { error: string }).error,
+    "already-paused",
+  );
 
   const resumed = await call("POST", `/cards/${id}/unpause`);
   assert.equal(resumed.status, 200);
-  assert.equal(JSON.parse(resumed.text).paused ?? null, null);
+  assert.equal(
+    (JSON.parse(resumed.text) as { paused?: unknown }).paused ?? null,
+    null,
+  );
   assert.deepEqual(signals[1], ["SIGCONT", [4242]]);
   assert.deepEqual(actions(id), ["pause", "resume"]);
 
   const twice = await call("POST", `/cards/${id}/unpause`);
   assert.equal(twice.status, 409);
-  assert.equal(JSON.parse(twice.text).error, "not-paused");
+  assert.equal(
+    (JSON.parse(twice.text) as { error: string }).error,
+    "not-paused",
+  );
 });
 
 test("pause of a card that is not a loop answers 409 not-pausable and signals nothing", async () => {

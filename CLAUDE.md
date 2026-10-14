@@ -30,3 +30,7 @@
 8. Put a `node:test` file next to each new route, service and domain file.
 9. A file imports only from its own folder and from folders earlier in this list: `src/shared/`, `store/` and `sources/`, `adapters/`, `services/infra/`, `services/orchestration/`, `routes/`. `store/` and `sources/` do not import each other, and among these folders only `adapters/` imports `sources/`. A file in `services/domain/` imports `src/shared/` only; orchestration files and routes can import it. The one exception is `adapters/image-proxy.ts`, which imports `services/infra/config-holder.ts`.
 10. Use `bootstrap/` as the composition root. It can import every folder. Only `bootstrap/index.ts` calls `setBoardRepository(store)` in source code. A test can call `setBoardRepository` to install `fakeBoardRepository`.
+
+# Check rule
+
+Run `npm run check` with `NODE_ENV` unset. It runs the unit tests (`npm run test`) and then, as its last step, the tmux and wall-clock tests (`npm run test:timing`). Both steps run in the check slot of `scripts/with-check-slot.mjs`. `test:timing` runs each file in `TIMING_FILES` (`scripts/run-tests.mjs`) alone and runs a failed file one more time. A file that passes on its second run does not fail the check. When a new test starts a real tmux server or asserts on real elapsed time, add it to `TIMING_FILES`. To run one timing file, use `node scripts/run-tests.mjs timing <file>`.

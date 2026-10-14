@@ -106,6 +106,7 @@ On 2026-09-30, ticket 18 moved 18 files: 15 did not obey this direction, and 3 m
 10. Test the store with the real SQLite store under `isolateEnv()`.
 11. Before you convert a route, write a characterization test that pins the status and the exact body of each status path. Keep its assertions unchanged through the conversion.
 12. Replace only external binaries with stubs, for example a `claude` stub on the isolated `PATH`. Do not mock the route or its service.
+13. When a test starts a real tmux server or asserts on real elapsed time, add its path to `TIMING_FILES` in `scripts/run-tests.mjs`. `npm run test` does not run the files in this list. `npm run test:timing` runs each file in the list alone, one after the other. It runs a failed file one more time, and a file fails only when it fails two times. `npm run check` runs `test` before `test:timing`, and `test:timing` is its last step. Both steps run in the check slot of `scripts/with-check-slot.mjs`, so two workspaces do not run the timing files at the same time. CI runs `npm run check`, so CI runs the same two steps.
 
 ### Test files by layer
 
