@@ -7,6 +7,7 @@ interface ProgressSectionProps {
   state: SectionState;
   rows: ProgressRow[];
   countText: string | null;
+  memory: string | null;
   onRetry: () => void;
 }
 
@@ -14,6 +15,7 @@ export function ProgressSection({
   state,
   rows,
   countText,
+  memory,
   onRetry,
 }: ProgressSectionProps) {
   return (
@@ -23,6 +25,14 @@ export function ProgressSection({
       state={state}
       onRetry={onRetry}
     >
+      {memory !== null && (
+        <p
+          data-testid="memory-line"
+          className="m-0 mb-(--space-md) text-sm text-muted-foreground"
+        >
+          {memory}
+        </p>
+      )}
       {rows.length === 0 ? (
         <p className="m-0 text-sm text-muted-foreground">
           No loops on this board yet. Start a group from the board to see its

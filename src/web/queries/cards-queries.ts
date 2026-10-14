@@ -10,10 +10,12 @@ import {
   generateGroupTitle,
   generateTicketDraft,
   getResumeTarget,
+  pauseCard,
   resumeCard,
   startCard,
   startGroup,
   syncCardToLinear,
+  unpauseCard,
 } from "./cards-api.js";
 
 interface SyncCardToLinearVariables {
@@ -53,7 +55,7 @@ interface StartGroupVariables {
   extraDirection?: string;
 }
 
-interface ResumeCardVariables {
+interface CardIdVariables {
   id: string;
 }
 
@@ -181,7 +183,7 @@ export function useGenerateGroupTitleMutation() {
  */
 export function resumeCardMutationOptions() {
   return {
-    mutationFn: ({ id }: ResumeCardVariables) => resumeCard(id),
+    mutationFn: ({ id }: CardIdVariables) => resumeCard(id),
   };
 }
 
@@ -216,4 +218,26 @@ export function useResumeCardMutation() {
     onSuccess: (_result, { id }) =>
       queryClient.invalidateQueries({ queryKey: cardsKeys.resumeTarget(id) }),
   });
+}
+
+function pauseCardMutationOptions() {
+  return {
+    mutationFn: ({ id }: CardIdVariables) => pauseCard(id),
+  };
+}
+
+function unpauseCardMutationOptions() {
+  return {
+    mutationFn: ({ id }: CardIdVariables) => unpauseCard(id),
+  };
+}
+
+/** Pause a loop card; the card update arrives over the board stream, so no cache is written. */
+export function usePauseCardMutation() {
+  return useMutation(pauseCardMutationOptions());
+}
+
+/** Unpause a paused loop card; the card update arrives over the board stream, so no cache is written. */
+export function useUnpauseCardMutation() {
+  return useMutation(unpauseCardMutationOptions());
 }

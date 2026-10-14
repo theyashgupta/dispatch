@@ -177,6 +177,8 @@ test("every refusal code a user route can return has plain text", () => {
     "invalid-handoffPercent",
     "invalid-handoffHardPercent",
     "hard-below-handoff",
+    "invalid-memoryFloorMb",
+    "invalid-swapCeilingMb",
     "invalid-budgetPerGroup",
     "invalid-policy",
     "unknown-field",

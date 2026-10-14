@@ -5,6 +5,7 @@ import type {
   SettableItemState,
   SlackThread,
 } from "./types.js";
+import type { ActionRefusal } from "./memory-refusal.js";
 import type { StartRequest } from "./start-request.js";
 import { isWebUrl } from "./web-url.js";
 import { draftReplyPrompt } from "./slack-prompt.js";
@@ -50,7 +51,7 @@ export interface ActionApi {
   switchSession: (cardId: string, sessionId: string) => Promise<void>;
   resumeCard: (
     id: string,
-  ) => Promise<{ ok: true } | { ok: false; status: number | null }>;
+  ) => Promise<{ ok: true } | ({ ok: false } & ActionRefusal)>;
   pollSource: (id: string) => Promise<void>;
   getSlackThread: (
     itemId: string,
@@ -373,7 +374,11 @@ export function runBulkResume(
     if (switched && restore != null && restore !== row.sessionId) {
       await api.switchSession(row.cardId, restore).catch(() => undefined);
     }
-    throw new Error(`resume refused (${result.status ?? "network"})`);
+    throw new Error(
+      result.error === "memory-pressure" && result.reason
+        ? result.reason
+        : `resume refused (${result.status ?? "network"})`,
+    );
   });
 }
 

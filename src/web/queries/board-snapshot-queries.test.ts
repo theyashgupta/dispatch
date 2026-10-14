@@ -9,6 +9,7 @@ import type {
   TunnelState,
 } from "../../shared/types.js";
 import { activityKeys } from "./activity-queries.js";
+import { systemMemoryKeys } from "./system-memory-queries.js";
 import { fetchBoardSnapshot } from "./board-snapshot-api.js";
 import {
   applyActivityEvent,
@@ -58,6 +59,12 @@ class FakeEventSource {
 
   emitMessage(data: unknown): void {
     this.onmessage?.({ data: JSON.stringify(data) } as MessageEvent);
+  }
+
+  emitRaw(type: string, data: string): void {
+    for (const listener of this.listeners.get(type) ?? []) {
+      listener({ data } as MessageEvent);
+    }
   }
 
   emitNamed(type: string, data?: unknown): void {
@@ -275,6 +282,33 @@ test("activity and tunnel frames route to their callbacks and cache keys", () =>
   assert.deepEqual(h.queryClient.getQueryData(tunnelKeys.state), {
     status: "off",
   });
+  h.dispose();
+});
+
+test("a memory frame writes the system memory cache and a garbled one is ignored", () => {
+  const h = start();
+  const reading = {
+    supported: true,
+    sample: {
+      at: "2026-10-14T00:00:00.000Z",
+      freeMb: 900,
+      compressorMb: 10,
+      swapUsedMb: 100,
+      swapTotalMb: 2048,
+      load1: 1,
+    },
+    stale: false,
+  };
+  h.source().emitNamed("memory", reading);
+  assert.deepEqual(
+    h.queryClient.getQueryData(systemMemoryKeys.reading),
+    reading,
+  );
+  assert.doesNotThrow(() => h.source().emitRaw("memory", "not json"));
+  assert.deepEqual(
+    h.queryClient.getQueryData(systemMemoryKeys.reading),
+    reading,
+  );
   h.dispose();
 });
 

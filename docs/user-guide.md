@@ -115,6 +115,8 @@ Only you can change the policy. The orchestrator reads it. No tool can change it
 | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------ | --------------------------- |
 | **Roadmap approval**                                      | **Ask me for each roadmap**, **Approve when the rules pass, else ask**, **Approve each roadmap** | **Ask me for each roadmap** |
 | **Loops at once**                                         | A whole number from 1 to 10                                                                      | 3                           |
+| **Free memory floor (MB)**                                | A whole number from 0 to 65536. 0 turns the floor off                                            | 1024                        |
+| **Swap ceiling (MB)**                                     | A whole number from 256 to 65536                                                                 | 8192                        |
 | **Loop model**                                            | **Session settings**, or a model with the effort `high` or `max`                                 | **Session settings**        |
 | **Group playbook**                                        | **None**, or a playbook name                                                                     | **None**                    |
 | **Messages from other sessions (loops and orchestrator)** | **Refuse (default)**, **Accept**, **Hold for review**                                            | **Refuse (default)**        |
@@ -130,7 +132,7 @@ Only you can change the policy. The orchestrator reads it. No tool can change it
 Notes on the fields:
 
 - **Roadmap approval** controls how the orchestrator approves the plan of a loop. With **Ask me for each roadmap**, the `approve_roadmap` tool needs your approve answer on a decision item of that group. With the two other values, the tool call is allowed. With **Approve when the rules pass, else ask**, the playbook judges the rules.
-- **Memory floor and swap ceiling.** Dispatch reads the memory of this Mac every 15 seconds. When free memory is below the board's memory floor (default 1024 MB) or swap used is above its swap ceiling (default 8192 MB), Dispatch refuses a card start, a group start, a resume of a lost session and the orchestrator tools that start or resume a loop. The refusal names the reading and the limit, for example "free memory 812 MB is below the 1024 MB floor". A group that waits in the queue starts when memory recovers. On Linux there is no reading and nothing is refused.
+- **Memory floor and swap ceiling.** Dispatch reads the memory of this Mac every 15 seconds. When free memory is below the board's memory floor (default 1024 MB) or swap used is above its swap ceiling (default 8192 MB), Dispatch refuses a card start, a group start, a resume of a lost session and the orchestrator tools that start or resume a loop. The refusal names the reading and the limit, for example "free memory 812 MB is below the 1024 MB floor". A group that waits in the queue starts when memory recovers. On Linux there is no reading and nothing is refused. Set the two limits with **Free memory floor (MB)** and **Swap ceiling (MB)**, which are next to **Loops at once** on the **Policy** tab. A start, a group start or a resume that Dispatch refuses for memory shows the reason in the usual place for that action. See also "Memory and paused loops".
 - **Loops at once** is the concurrency cap. It covers groups and the ticket cards that the orchestrator starts. Dispatch refuses the orchestrator tools that start a group or a card above the cap. A card or group in Agent done frees its slot. A group that waits for its dependencies stays queued. The supervisor starts it when the dependencies are done and a slot is free.
 - **Loop model**: The model and effort of the sessions of a group. When you choose a model, Dispatch starts each group session with that model and effort, and it ignores any model or effort in the Settings Claude arguments. When you choose **Session settings**, Dispatch uses the Settings.
 - **Group playbook**: the playbook of a group that the orchestrator creates without one. When the playbook no longer exists, the group starts with no playbook. When the stored name is not in the list of playbooks, the select shows it as "<name> (not found)", and **Save policy** keeps the name.
@@ -298,7 +300,7 @@ At 1024 px and wider, the sections show in this order:
 
 Below 1024 px, the sections show in this order: the status line, **Needs your call**, **Progress per group**, **Left on this board**, **Tickets by column**, **PRs and merge order**, **Next step**, **Changed since** and **Cost and usage**. Each section shows once in the page. The section headings are small uppercase labels. A screen reader still reads the names "Attention queue", "Progress per group", "Left on this board", "Tickets by column", "PRs and merge order", "Next step", "Activity log" and "Cost and usage".
 
-- **Progress per group.** Each loop is a milestone track with one node for each unit. With no units it shows "No loop progress". The session badges and the last gate text stay on the track header. A node has one of these states:
+- **Progress per group.** The first line of the section is the memory line, for example "Memory: 812 MB free, swap 2048 of 8192 MB". It adds ", <n> paused" when loops are paused. It updates every 15 seconds. It shows "(stale)" after 60 seconds without a reading, and it is hidden when the computer is not a Mac. Each loop is a milestone track with one node for each unit. With no units it shows "No loop progress". The session badges and the last gate text stay on the track header. A node has one of these states:
   - Done. The node has a check glyph and the state line "Done HH:MM" or "Done".
   - Current. The node has an accent ring, a glow, the pill "You are here" and a phase sub-bar. The state line reads "Phase n of m". The glow moves only when the system allows motion.
   - Failed gate. The node has an X glyph and the state line "Gate failed".
@@ -323,6 +325,21 @@ Below 1024 px, the sections show in this order: the status line, **Needs your ca
 Each node and each tile state has a glyph and a text. The page reads without color.
 
 When the connection to the server drops, the dashboard keeps the last data. The status line reads "Data from <time>". The reply, resume and decision buttons are off, with the reason "Reconnecting. Actions are off until the board stream is back."
+
+## Memory and paused loops
+
+Dispatch reads the memory of a Mac every 15 seconds. The reading shows as the memory line at the top of **Progress per group** on the dashboard (see "The dashboard"). Off macOS there is no reading, so the line is hidden. When 60 seconds pass without a new reading, the line adds "(stale)".
+
+The two limits are **Free memory floor (MB)** (0 to 65536, where 0 turns the floor off) and **Swap ceiling (MB)** (256 to 65536). Set them on the **Policy** tab (see "Board policy"). When a card start, a group start or a resume is refused for memory, Dispatch shows the reason, for example "free memory 812 MB is below the 1024 MB floor".
+
+To stop a loop by hand:
+
+1. Open the card of a loop that has a live session. The card panel header shows **Pause** next to **Reset**.
+2. Choose **Pause**. Dispatch stops every process of the loop until you resume it. On a narrow panel the button shows only its icon and keeps the name **Pause**.
+3. The card shows a paused badge. The panel shows a note. The note reads "Paused. Resume it when you are ready." after you pause the loop. It reads "Paused for memory. Dispatch resumes it when swap falls." when Dispatch paused the loop because of memory.
+4. Choose **Resume** in the same place to continue the loop.
+
+**Run Claude** is off on a paused card. Its tooltip reads "Resume the loop first". When a pause or a resume fails, a message names the reason.
 
 ## The command centre
 

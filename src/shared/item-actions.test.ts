@@ -372,6 +372,25 @@ test("bulk resume switches then resumes per card and reports a refused resume by
   );
 });
 
+test("bulk resume names the memory reason of a memory-pressure refusal", async () => {
+  const c = ctx();
+  c.context.api.resumeCard = async () =>
+    await Promise.resolve({
+      ok: false as const,
+      status: 409,
+      error: "memory-pressure",
+      reason: "swap is full",
+    });
+  const outcome = await runBulkResume(c.context.api, [target("LOCAL-1", "s1")]);
+  assert.deepEqual(outcome.failed, [
+    { identifier: "LOCAL-1", error: "swap is full" },
+  ]);
+  assert.equal(
+    bulkOutcomeCopy("Resumed", outcome),
+    "Resumed 0 of 1. Failed: LOCAL-1 (swap is full)",
+  );
+});
+
 test("bulk resume skips the switch for an active row and switches back after a refused resume", async () => {
   const c = ctx();
   c.context.api.resumeCard = async (id) => {

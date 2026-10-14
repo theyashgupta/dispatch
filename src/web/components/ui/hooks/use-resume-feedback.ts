@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import type { Card as CardModel } from "../../../../shared/types.js";
+import type { ActionRefusal } from "../../../../shared/memory-refusal.js";
 import {
   RESUME_WATCHDOG_MS,
   resumeFailureCopy,
 } from "../../../../shared/resume-feedback.js";
 
-export type ResumeOutcome = { ok: true } | { ok: false; status: number | null };
+export type ResumeOutcome = { ok: true } | ({ ok: false } & ActionRefusal);
 
 interface ResumeFeedback {
   resuming: boolean;
@@ -29,8 +30,7 @@ export function useResumeFeedback(
   resume: (id: string) => Promise<ResumeOutcome>,
 ): ResumeFeedback {
   const [resuming, setResuming] = useState(false);
-  const [requestFailed, setRequestFailed] = useState(false);
-  const [resumeStatus, setResumeStatus] = useState<number | null>(null);
+  const [failure, setFailure] = useState<ActionRefusal | null>(null);
   const [watchdogFired, setWatchdogFired] = useState(false);
 
   const [prevResumeError, setPrevResumeError] = useState(card.resumeError);
@@ -44,8 +44,7 @@ export function useResumeFeedback(
   if (resetKey !== prevResetKey) {
     setPrevResetKey(resetKey);
     setResuming(false);
-    setRequestFailed(false);
-    setResumeStatus(null);
+    setFailure(null);
     setWatchdogFired(false);
   }
 
@@ -60,13 +59,11 @@ export function useResumeFeedback(
 
   const onResume = () => {
     setResuming(true);
-    setRequestFailed(false);
-    setResumeStatus(null);
+    setFailure(null);
     setWatchdogFired(false);
     void resume(card.id).then((r) => {
       if (!r.ok) {
-        setResumeStatus(r.status);
-        setRequestFailed(true);
+        setFailure(r);
         setResuming(false);
       }
     });
@@ -74,9 +71,9 @@ export function useResumeFeedback(
 
   return {
     resuming,
-    resumeFailed: !resuming && (requestFailed || card.resumeError != null),
+    resumeFailed: !resuming && (failure !== null || card.resumeError != null),
     watchdogFired: watchdogFired && !resuming,
-    failureCopy: resumeFailureCopy(card.resumeError, resumeStatus),
+    failureCopy: resumeFailureCopy(card.resumeError, failure),
     onResume,
   };
 }

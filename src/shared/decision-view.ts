@@ -226,6 +226,10 @@ const REFUSALS: Record<string, string> = {
     "hard handoff has to be a number above the handoff percent, up to 100",
   "hard-below-handoff":
     "hard handoff has to be a number above the handoff percent, up to 100",
+  "invalid-memoryFloorMb":
+    "the free memory floor has to be a whole number from 0 to 65536",
+  "invalid-swapCeilingMb":
+    "the swap ceiling has to be a whole number from 256 to 65536",
   "invalid-budgetPerGroup":
     "the budget has to be an amount above 0 and at most 100000",
   "invalid-policy": "the policy has a field that is not valid",

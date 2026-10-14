@@ -86,3 +86,33 @@ test("a group refusal that is not ineligible maps like a card refusal", () => {
     { variant: "config", text: "x" },
   );
 });
+
+test("a memory refusal reads as the start memory sentence with no variant", () => {
+  assert.deepEqual(
+    startFailure({
+      error: "free memory 812 MB is below the 1024 MB floor",
+      variant: "memory",
+    }),
+    {
+      variant: null,
+      text: "Not enough memory to start: free memory 812 MB is below the 1024 MB floor. Try again after a loop finishes.",
+    },
+  );
+});
+
+test("a group memory refusal reads as the group memory sentence with no variant", () => {
+  assert.deepEqual(
+    groupStartFailure({ error: "swap is full", variant: "memory" }, members),
+    {
+      variant: null,
+      text: "Not enough memory to start the group: swap is full. Try again after a loop finishes.",
+    },
+  );
+});
+
+test("a group refusal with another code and no variant shows the server text", () => {
+  assert.deepEqual(groupStartFailure({ error: "board-busy" }, members), {
+    variant: null,
+    text: "board-busy",
+  });
+});

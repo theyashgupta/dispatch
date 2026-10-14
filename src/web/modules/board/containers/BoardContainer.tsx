@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { useRouteContext, useRouter } from "@tanstack/react-router";
+import { toast } from "sonner";
 import {
   DndContext,
   MouseSensor,
@@ -22,6 +23,7 @@ import type {
 } from "@dnd-kit/core";
 import { blocksAgentDoneManualEntry } from "../../../../shared/column-transitions.js";
 import { COLUMN_LABELS } from "../../../../shared/column-labels.js";
+import { startRefusalText } from "../../../../shared/memory-refusal.js";
 import { inboxWaitingCount } from "../../../../shared/inbox-count.js";
 import { membersOf } from "../../../../shared/group-members.js";
 import {
@@ -374,6 +376,9 @@ export function BoardContainer({ search }: BoardContainerProps) {
         extraDirection: card.extraDirection ?? "",
         newSession: card.startError?.newSession === true,
       })
+      .then((result) => {
+        if (!result.ok) toast.error(startRefusalText(result));
+      })
       .catch((err: unknown) => {
         console.error("retry startCard failed", err);
       });
@@ -383,6 +388,9 @@ export function BoardContainer({ search }: BoardContainerProps) {
     if (card.workspace) {
       void startCard
         .mutateAsync({ id: card.id, extraDirection: card.extraDirection ?? "" })
+        .then((result) => {
+          if (!result.ok) toast.error(startRefusalText(result));
+        })
         .catch((err: unknown) => {
           console.error("restart startCard failed", err);
         });

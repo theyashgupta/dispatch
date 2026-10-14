@@ -51,7 +51,7 @@ async function assertNoLiveService() {
  * @remarks
  * HOME points into the folder and the usage URL at a closed loopback port, so no account, usage or vault file of this machine reaches a screenshot and no usage request leaves it.
  * The darwin keychain is not isolated: the server still reads the Claude Code credential from it at boot.
- * The parent env loses every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable plus the tmux and `NODE_ENV` ones, so no key or account folder of the shell reaches the server.
+ * The parent env loses every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable plus the tmux and `NODE_ENV` ones, so no key or account folder of the shell reaches the server, and the memory sample file is a missing path so no memory line appears on any platform.
  */
 function boot(dir, stdio) {
   const env = {};
@@ -65,6 +65,7 @@ function boot(dir, stdio) {
     env: {
       ...env,
       DISPATCH_DIR: dir,
+      DISPATCH_MEMORY_SAMPLE_FILE: join(dir, "no-memory-sample.json"),
       DISPATCH_USAGE_URL: "http://127.0.0.1:1",
       HOME: join(dir, "home"),
       NODE_ENV: "production",

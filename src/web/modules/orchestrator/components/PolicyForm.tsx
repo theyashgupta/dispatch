@@ -81,6 +81,21 @@ export function PolicyForm({
         error={errors.concurrencyCap}
         onChange={(concurrencyCap) => onChange({ concurrencyCap })}
       />
+      <TextField
+        id="policy-memory-floor"
+        label="Free memory floor (MB)"
+        value={values.memoryFloorMb}
+        description="0 turns the floor off"
+        error={errors.memoryFloorMb}
+        onChange={(memoryFloorMb) => onChange({ memoryFloorMb })}
+      />
+      <TextField
+        id="policy-swap-ceiling"
+        label="Swap ceiling (MB)"
+        value={values.swapCeilingMb}
+        error={errors.swapCeilingMb}
+        onChange={(swapCeilingMb) => onChange({ swapCeilingMb })}
+      />
       <SelectField
         id="policy-loop-model"
         label="Loop model"

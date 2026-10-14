@@ -40,12 +40,18 @@ function reasonOf(failure: ApiFailure): string {
 async function request<T>(
   url: string,
   init: RequestInit,
-): Promise<{ ok: true; data: T } | { ok: false; reason: string }> {
+): Promise<
+  { ok: true; data: T } | { ok: false; reason: string; code?: string }
+> {
   try {
     const result = await http<T>(url, init);
     return result.ok
       ? { ok: true, data: result.data }
-      : { ok: false, reason: reasonOf(result) };
+      : {
+          ok: false,
+          reason: reasonOf(result),
+          ...(result.error !== null && { code: result.error }),
+        };
   } catch (err) {
     return {
       ok: false,
@@ -56,7 +62,7 @@ async function request<T>(
 
 async function send(url: string, init: RequestInit): Promise<ActionResult> {
   const result = await request<unknown>(url, init);
-  return result.ok ? { ok: true } : result;
+  return result.ok ? { ok: true } : { ok: false, reason: result.reason };
 }
 
 /** Read the orchestrators of a board with their session views: GET /api/boards/:key/orchestrators. */
@@ -134,7 +140,7 @@ export async function ensureOrchestratorTerminal(
 }
 
 export type SaveOutcome =
-  { ok: true; board: Board } | { ok: false; reason: string };
+  { ok: true; board: Board } | { ok: false; reason: string; code?: string };
 
 export interface ExtraInput {
   id: string;
@@ -147,7 +153,7 @@ function jsonInit(method: string, body: unknown): RequestInit {
   return { method, headers: JSON_HEADERS, body: JSON.stringify(body) };
 }
 
-/** Save the board policy: PUT /api/boards/:key/policy with the ten policy fields. */
+/** Save the board policy: PUT /api/boards/:key/policy with the policy fields. */
 export async function saveBoardPolicy(
   board: BoardKey,
   policy: PolicyPayload,

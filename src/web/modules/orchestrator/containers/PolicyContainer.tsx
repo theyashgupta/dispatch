@@ -13,7 +13,9 @@ import {
   listedModels,
   policyFormValues,
   policyPayload,
+  serverFieldErrors,
   validatePolicyForm,
+  type PolicyFormErrors,
   type PolicyFormValues,
 } from "@/modules/orchestrator/domain/policy-form";
 import {
@@ -28,6 +30,7 @@ export function PolicyContainer({ board }: { board: BoardKey }) {
   const save = useSavePolicyMutation(board);
   const playbookNames = usePlaybookPickerQuery().data?.valid.map((p) => p.name);
   const [edited, setEdited] = useState<PolicyFormValues | null>(null);
+  const [serverErrors, setServerErrors] = useState<PolicyFormErrors>({});
   if (record === null) return <Skeleton className="h-16 w-full" />;
 
   const saved = policyFormValues(record.policy);
@@ -39,7 +42,13 @@ export function PolicyContainer({ board }: { board: BoardKey }) {
     const result = await save.mutateAsync(policyPayload(values));
     if (result.ok) {
       setEdited(null);
+      setServerErrors({});
       toast.success("Policy saved.");
+      return;
+    }
+    const fieldErrors = serverFieldErrors(result.code);
+    if (Object.keys(fieldErrors).length > 0) {
+      setServerErrors(fieldErrors);
     } else {
       toast.error(actionErrorCopy("Save policy", result.reason), {
         action: { label: "Try again", onClick: () => void submit() },
@@ -51,7 +60,7 @@ export function PolicyContainer({ board }: { board: BoardKey }) {
     <PolicyForm
       boardName={record.name}
       values={values}
-      errors={errors}
+      errors={{ ...serverErrors, ...errors }}
       loopOptions={loopModelOptions()}
       playbookOptions={groupPlaybookOptions(
         playbookNames,
@@ -60,7 +69,14 @@ export function PolicyContainer({ board }: { board: BoardKey }) {
       modelOptions={orchestratorModelOptions()}
       dirty={isPolicyDirty(values, saved)}
       pending={save.isPending}
-      onChange={(patch) => setEdited({ ...values, ...patch })}
+      onChange={(patch) => {
+        setEdited({ ...values, ...patch });
+        const next = { ...serverErrors };
+        for (const key of Object.keys(patch)) {
+          delete next[key as keyof PolicyFormErrors];
+        }
+        setServerErrors(next);
+      }}
       onSubmit={() => void submit()}
     />
   );

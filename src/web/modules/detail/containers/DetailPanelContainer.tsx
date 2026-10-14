@@ -5,6 +5,8 @@ import {
   useRouter,
   useRouterState,
 } from "@tanstack/react-router";
+import { toast } from "sonner";
+import { startRefusalText } from "../../../../shared/memory-refusal.js";
 import type {
   Card as CardModel,
   UnwindDestination,
@@ -35,11 +37,13 @@ import { useAccountsQuery } from "@/queries/accounts-queries";
 import { useActivityFeedQuery } from "@/queries/activity-queries";
 import { restoreArchived } from "@/queries/archive-api";
 import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
-import { getCard, unwindGroup } from "@/queries/cards-api";
+import { getCard, unwindGroup, type ResumeResult } from "@/queries/cards-api";
 import {
+  usePauseCardMutation,
   useResumeCardMutation,
   useResumeTargetQuery,
   useStartCardMutation,
+  useUnpauseCardMutation,
 } from "@/queries/cards-queries";
 import { useSessionAccountMove } from "@/queries/session-account-queries";
 import { useAppStore } from "@/components/ui/hooks/use-app-store";
@@ -59,10 +63,15 @@ import {
   PanelRow,
 } from "@/modules/detail/components/PanelFrame";
 import {
+  pauseFailureCopy,
+  pausedNote,
+} from "@/modules/detail/domain/pause-copy";
+import {
   resumeLine as buildResumeLine,
   RESUME_TARGET_ERROR,
   RESUME_TARGET_LOADING,
 } from "@/modules/detail/domain/resume-target";
+import { PanelMutedNotice } from "@/modules/detail/components/PanelNotice";
 import { PanelHeader } from "@/modules/detail/components/PanelHeader";
 import { PanelResizeHandle } from "@/modules/detail/components/PanelResizeHandle";
 import { PreviewRow } from "@/modules/detail/components/PreviewRow";
@@ -225,6 +234,13 @@ export function DetailPanelContainer() {
   const { mutateAsync: cleanupCard } = useCleanupCardMutation();
   const { mutateAsync: startCard } = useStartCardMutation();
   const { mutateAsync: resumeCard } = useResumeCardMutation();
+  const pause = usePauseCardMutation();
+  const unpause = useUnpauseCardMutation();
+  const runPauseChange = (change: Promise<ResumeResult>) => {
+    void change.then((result) => {
+      if (!result.ok) toast.error(pauseFailureCopy(result));
+    });
+  };
   const accountMove = useSessionAccountMove();
 
   const [prevCardId, setPrevCardId] = useState<string | null>(card?.id ?? null);
@@ -345,6 +361,7 @@ export function DetailPanelContainer() {
       : buildReviewHeader(c, [...items, ...heldPrItems(board?.items ?? [])]);
 
   const hasLiveSession = !!(c?.tmuxSession && !c.sessionLost);
+  const note = c != null ? pausedNote(c) : null;
   const activeSessionLost = c?.activeSessionId != null && !c.tmuxSession;
   const resumeTarget = useResumeTargetQuery(c?.id ?? "", activeSessionLost);
   const resumeLine =
@@ -435,6 +452,15 @@ export function DetailPanelContainer() {
             onUnwindRequest={onUnwindRequest}
             onResetRequest={onResetRequest}
             onSyncRequest={onSyncRequest}
+            onPauseRequest={(id) => runPauseChange(pause.mutateAsync({ id }))}
+            onResumePausedRequest={(id) =>
+              runPauseChange(unpause.mutateAsync({ id }))
+            }
+            pausePending={
+              c != null &&
+              ((pause.isPending && pause.variables?.id === c.id) ||
+                (unpause.isPending && unpause.variables?.id === c.id))
+            }
             onAskRequest={onAskRequest}
             resumeLine={resumeLine}
             reviewHeader={reviewHeader}
@@ -528,6 +554,15 @@ export function DetailPanelContainer() {
                     </PanelPreviews>
                   )}
 
+                {note !== null && (
+                  <div
+                    data-testid="paused-note"
+                    className="mx-(--space-xl) mb-(--space-lg)"
+                  >
+                    <PanelMutedNotice label="Status">{note}</PanelMutedNotice>
+                  </div>
+                )}
+
                 {hasLiveSession && c && (
                   <TerminalRegion
                     card={c}
@@ -550,7 +585,12 @@ export function DetailPanelContainer() {
                         startCard({
                           id: lost.id,
                           extraDirection: lost.extraDirection ?? "",
-                        }).catch(console.error);
+                        })
+                          .then((result) => {
+                            if (!result.ok)
+                              toast.error(startRefusalText(result));
+                          })
+                          .catch(console.error);
                       } else {
                         onStartRequest?.(lost.id);
                       }

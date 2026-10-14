@@ -16,10 +16,7 @@ import {
   type SelectOption,
 } from "./orchestrator-models.js";
 
-export type PolicyPayload = Omit<
-  BoardPolicy,
-  "memoryFloorMb" | "swapCeilingMb"
->;
+export type PolicyPayload = BoardPolicy;
 
 export interface PolicyFormValues {
   roadmapApproval: BoardPolicy["roadmapApproval"];
@@ -35,6 +32,8 @@ export interface PolicyFormValues {
   groupPlaybook: string | null;
   crossSessionInbound: CrossSessionInbound | null;
   wakeMinutes: string;
+  memoryFloorMb: string;
+  swapCeilingMb: string;
 }
 
 export type PolicyFormErrors = Partial<
@@ -43,6 +42,8 @@ export type PolicyFormErrors = Partial<
     | "handoffPercent"
     | "handoffHardPercent"
     | "wakeMinutes"
+    | "memoryFloorMb"
+    | "swapCeilingMb"
     | "budgetPerGroup",
     string
   >
@@ -79,6 +80,8 @@ export const POLICY_ERRORS = {
   handoffPercent: "Enter a number from 10 to 95.",
   handoffHardPercent: "Enter a number above the handoff percent.",
   wakeMinutes: "Enter a whole number from 0 to 1440.",
+  memoryFloorMb: "Enter a whole number from 0 to 65536.",
+  swapCeilingMb: "Enter a whole number from 256 to 65536.",
   budgetPerGroup: "Enter an amount above 0, or leave it empty for no limit.",
   budgetPerGroupMax: "Enter an amount of 100000 or less.",
 } as const;
@@ -160,6 +163,8 @@ export function policyFormValues(policy: BoardPolicy): PolicyFormValues {
     groupPlaybook: policy.groupPlaybook,
     crossSessionInbound: policy.crossSessionInbound,
     wakeMinutes: String(policy.wakeMinutes),
+    memoryFloorMb: String(policy.memoryFloorMb),
+    swapCeilingMb: String(policy.swapCeilingMb),
   };
 }
 
@@ -219,6 +224,12 @@ export function validatePolicyForm(values: PolicyFormValues): PolicyFormErrors {
   if (!inRange(values.wakeMinutes, 0, 1440)) {
     errors.wakeMinutes = POLICY_ERRORS.wakeMinutes;
   }
+  if (!inRange(values.memoryFloorMb, 0, 65536)) {
+    errors.memoryFloorMb = POLICY_ERRORS.memoryFloorMb;
+  }
+  if (!inRange(values.swapCeilingMb, 256, 65536)) {
+    errors.swapCeilingMb = POLICY_ERRORS.swapCeilingMb;
+  }
   const budget = budgetAmount(values.budgetPerGroup);
   if (budget !== null && !(budget > 0)) {
     errors.budgetPerGroup = POLICY_ERRORS.budgetPerGroup;
@@ -226,6 +237,16 @@ export function validatePolicyForm(values: PolicyFormValues): PolicyFormErrors {
     errors.budgetPerGroup = POLICY_ERRORS.budgetPerGroupMax;
   }
   return errors;
+}
+
+export function serverFieldErrors(code: string | undefined): PolicyFormErrors {
+  if (code === "invalid-memoryFloorMb") {
+    return { memoryFloorMb: POLICY_ERRORS.memoryFloorMb };
+  }
+  if (code === "invalid-swapCeilingMb") {
+    return { swapCeilingMb: POLICY_ERRORS.swapCeilingMb };
+  }
+  return {};
 }
 
 /** True when a field of the form differs from the saved values. */
@@ -239,7 +260,7 @@ export function isPolicyDirty(
 }
 
 /**
- * Build the body of the policy save: the thirteen policy fields and nothing else.
+ * Build the body of the policy save: the fifteen policy fields and nothing else.
  *
  * @remarks
  * `usageLimit` is `wait` or `stop`, so the body never holds a usage credits value.
@@ -259,5 +280,7 @@ export function policyPayload(values: PolicyFormValues): PolicyPayload {
     groupPlaybook: values.groupPlaybook,
     crossSessionInbound: values.crossSessionInbound,
     wakeMinutes: Number(values.wakeMinutes),
+    memoryFloorMb: Number(values.memoryFloorMb),
+    swapCeilingMb: Number(values.swapCeilingMb),
   };
 }
