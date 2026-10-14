@@ -46,10 +46,10 @@ export const orchestratorKeys = {
 };
 
 /**
- * Read the orchestrators of a board for the open panel, refetching every 3 s while it is open.
+ * Read the orchestrators of a board for the command centre, refetching every 3 s while it is open.
  *
  * @remarks
- * The query is off while `open` is false, so a board page without the panel makes no
+ * The query is off while `open` is false, so a board page without the command centre makes no
  * orchestrator request. There is no stream event for session state, so the poll is the live feed.
  */
 export function orchestratorPanelQueryOptions(board: BoardKey, open: boolean) {
@@ -76,7 +76,7 @@ export function boardRecordQueryOptions(board: BoardKey) {
   });
 }
 
-/** Read the orchestrators of the open panel and keep them fresh with the 3 s poll. */
+/** Read the orchestrators of the command centre and keep them fresh with the 3 s poll. */
 export function useOrchestratorPanelQuery(board: BoardKey, open: boolean) {
   return useQuery(orchestratorPanelQueryOptions(board, open));
 }
@@ -97,7 +97,7 @@ export interface LifecycleVariables {
  *
  * @remarks
  * Start on a board with no record adds the main orchestrator first. Every outcome
- * refreshes the panel and the board list, because a successful add changes the header entry button.
+ * refreshes the orchestrator records and the board list, because a successful add changes the header entry button.
  */
 export function lifecycleMutationOptions(
   queryClient: QueryClient,
@@ -131,10 +131,10 @@ export function useEnsureOrchestratorTerminalMutation() {
 }
 
 /**
- * Build the open decisions query options of the open panel: the shared decisions query, refetched every 3 s.
+ * Build the open decisions query options of the command centre: the shared decisions query, refetched every 3 s.
  *
  * @remarks
- * A decision item arrives from an orchestrator tool call and no stream event carries it, so the poll is the live feed, as for the panel records. The key is the shared one, so the dashboard and the panel hold one cache entry.
+ * A decision item arrives from an orchestrator tool call and no stream event carries it, so the poll is the live feed, as for the orchestrator records. The key is the shared one, so the dashboard and the command centre hold one cache entry.
  */
 export function panelDecisionsQueryOptions(board: BoardKey) {
   return queryOptions({
@@ -144,7 +144,7 @@ export function panelDecisionsQueryOptions(board: BoardKey) {
   });
 }
 
-/** Read the open decision items of the board of the open panel. */
+/** Read the open decision items of the board for the command centre. */
 export function usePanelDecisionsQuery(board: BoardKey) {
   return useQuery(panelDecisionsQueryOptions(board));
 }

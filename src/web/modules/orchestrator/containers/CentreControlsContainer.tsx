@@ -20,7 +20,7 @@ interface CentreControlsContainerProps {
 export function CentreControlsContainer({
   inline = false,
 }: CentreControlsContainerProps) {
-  const { boardKey, stale, panel, snapshot, records, record, unknown } =
+  const { boardKey, id, stale, panel, snapshot, records, record, unknown } =
     useCentreSelection();
   const navigate = useNavigate();
   const wide = !useMediaQuery(NARROW_QUERY);
@@ -67,9 +67,9 @@ export function CentreControlsContainer({
       }
       onSettings={() =>
         void navigate({
-          to: "/boards/$key",
-          params: { key: boardKey },
-          search: (prev) => ({ ...prev, panel: "orchestrator", tab: "policy" }),
+          to: "/boards/$key/orchestrator/{-$id}",
+          params: { key: boardKey, id },
+          search: (prev) => ({ ...prev, settings: "policy" }),
         })
       }
       alert={

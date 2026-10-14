@@ -17,6 +17,7 @@ export const CONVERSATION_UNAVAILABLE_TEXT =
   "The conversation is not available.";
 export const OPEN_TERMINAL_LINK_TEXT = "Open the terminal.";
 export const COMMENT_BOX_ID = "centre-comment-box";
+export const CENTRE_SETTINGS_BUTTON_ID = "centre-settings-button";
 const NOT_STARTED_TEXT = "Not started";
 
 export const OPEN_TERMINAL_LABEL = "Open terminal";
@@ -156,4 +157,9 @@ export function selectedRecord(
   return id === undefined
     ? (mainOrchestrator(records) ?? null)
     : (records.find((r) => r.id === id) ?? null);
+}
+
+/** Build the label of the Orchestrators settings tab, with the count once the records loaded. */
+export function orchestratorsTabLabel(count: number | null): string {
+  return count === null ? "Orchestrators" : `Orchestrators (${count})`;
 }

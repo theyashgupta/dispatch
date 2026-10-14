@@ -45,6 +45,28 @@ const CONVERSATION = {
   ],
 };
 
+const centreRoutes = async (page: Page) => {
+  await page.route(
+    "**/api/boards/ORC/orchestrators/orch-main/conversation",
+    (route) => route.fulfill({ json: CONVERSATION }),
+  );
+  await page.route(
+    (url) => url.pathname === "/api/decisions",
+    async (route) => {
+      const response = await route.fetch();
+      const { items } = (await response.json()) as {
+        items: { id: string }[];
+      };
+      await route.fulfill({
+        response,
+        json: {
+          items: items.filter((i) => i.id.startsWith(SEEDED_DECISION_PREFIX)),
+        },
+      });
+    },
+  );
+};
+
 const screens: {
   name: string;
   url: string;
@@ -100,14 +122,6 @@ const screens: {
       ).toBeVisible(),
   },
   {
-    name: "orchestrator-panel",
-    url: `${orchestrated}/#/boards/ORC?panel=orchestrator&tab=decisions`,
-    ready: (page) =>
-      expect(
-        page.getByText(/Retry the Phase 5 gate now/).first(),
-      ).toBeVisible(),
-  },
-  {
     name: "dashboard",
     url: `${orchestrated}/#/boards/ORC/dashboard`,
     ready: (page) =>
@@ -124,29 +138,7 @@ const screens: {
   {
     name: "command-centre",
     url: `${orchestrated}/#/boards/ORC/orchestrator`,
-    routes: async (page) => {
-      await page.route(
-        "**/api/boards/ORC/orchestrators/orch-main/conversation",
-        (route) => route.fulfill({ json: CONVERSATION }),
-      );
-      await page.route(
-        (url) => url.pathname === "/api/decisions",
-        async (route) => {
-          const response = await route.fetch();
-          const { items } = (await response.json()) as {
-            items: { id: string }[];
-          };
-          await route.fulfill({
-            response,
-            json: {
-              items: items.filter((i) =>
-                i.id.startsWith(SEEDED_DECISION_PREFIX),
-              ),
-            },
-          });
-        },
-      );
-    },
+    routes: centreRoutes,
     ready: async (page) => {
       if ((page.viewportSize()?.width ?? 0) < 768)
         await page.getByRole("tab", { name: "Conversation" }).first().click();
@@ -156,6 +148,21 @@ const screens: {
       await expect(
         page.getByText(/Retry the Phase 5 gate now/).first(),
       ).toBeVisible();
+    },
+  },
+  {
+    name: "centre-settings",
+    url: `${orchestrated}/#/boards/ORC/orchestrator?settings=policy`,
+    routes: centreRoutes,
+    ready: async (page) => {
+      await expect(
+        page
+          .getByRole("dialog")
+          .getByRole("heading", { name: "Orchestrator settings" }),
+      ).toBeVisible();
+      await expect(
+        page.getByRole("dialog").getByRole("tab", { name: "Policy" }),
+      ).toHaveAttribute("aria-selected", "true");
     },
   },
   {

@@ -551,6 +551,7 @@ export function ShellContainer({
           toastOptions={{
             closeButtonAriaLabel: "Dismiss",
             classNames: {
+              toast: "pointer-events-auto",
               description: "text-destructive-text!",
               actionButton: "bg-primary! text-primary-foreground!",
             },

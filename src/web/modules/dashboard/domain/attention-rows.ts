@@ -1,7 +1,7 @@
 import { activeSessionView } from "../../../../shared/active-session.js";
 import type { AttentionItem } from "../../../../shared/attention-queue.js";
 import type { DecisionView } from "../../../../shared/decision-view.js";
-import { routeHash } from "../../../../shared/route.js";
+import { settingsHash } from "../../../../shared/orchestrator-settings.js";
 import {
   DEFAULT_CLAUDE_ACCOUNT_ID,
   type BoardKey,
@@ -162,9 +162,7 @@ function itemRow(item: AttentionItem, ctx: AttentionContext): AttentionRow {
     body: bodyOf(item, ctx),
     action: ACTIONS[item.kind] ?? null,
     changeBudgetHref:
-      item.kind === "budget_stop"
-        ? `${routeHash({ page: "board", board: ctx.boardKey })}?panel=orchestrator&tab=policy`
-        : null,
+      item.kind === "budget_stop" ? settingsHash(ctx.boardKey, "policy") : null,
   };
 }
 
