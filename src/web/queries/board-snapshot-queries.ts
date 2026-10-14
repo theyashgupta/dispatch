@@ -13,11 +13,13 @@ import type {
   BoardKey,
   BoardSnapshot,
   ConnectionStatus,
+  SystemMemory,
   TunnelState,
 } from "../../shared/types.js";
 import { activityKeys, mergeActivity } from "./activity-queries.js";
 import { orchestrationKey } from "./attention-actions-queries.js";
 import { fetchBoardSnapshot } from "./board-snapshot-api.js";
+import { applyMemoryFrame } from "./system-memory-queries.js";
 
 export const boardSnapshotKeys = {
   all: ["board-snapshot"] as const,
@@ -377,6 +379,17 @@ export function connectBoardStream(
       const state = JSON.parse(e.data as string) as TunnelState;
       options.onTunnelState?.(state);
       applyTunnelState(queryClient, state);
+    });
+    src.addEventListener("memory", (e) => {
+      lastEventAt = Date.now();
+      try {
+        applyMemoryFrame(
+          queryClient,
+          JSON.parse(e.data as string) as SystemMemory,
+        );
+      } catch {
+        return;
+      }
     });
     src.addEventListener("orchestration", (e) => {
       lastEventAt = Date.now();
