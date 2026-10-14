@@ -2,19 +2,19 @@ import { TriangleAlert } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 
-export type RetryFailure = Pick<PanelAlertBarProps, "message" | "onRetry">;
+export type RetryFailure = Pick<CentreAlertBarProps, "message" | "onRetry">;
 
-interface PanelAlertBarProps {
+interface CentreAlertBarProps {
   message: string;
   onRetry: () => void;
   retryDisabled: boolean;
 }
 
-export function PanelAlertBar({
+export function CentreAlertBar({
   message,
   onRetry,
   retryDisabled,
-}: PanelAlertBarProps) {
+}: CentreAlertBarProps) {
   return (
     <Alert variant="destructive" className="items-center">
       <TriangleAlert aria-hidden="true" />

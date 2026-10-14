@@ -1,4 +1,4 @@
-import { PanelAlertBar } from "@/modules/orchestrator/components/PanelAlertBar";
+import { CentreAlertBar } from "@/modules/orchestrator/components/CentreAlertBar";
 
 interface CentreRegionAlertProps {
   message: string;
@@ -11,7 +11,7 @@ export function CentreRegionAlert({
 }: CentreRegionAlertProps) {
   return (
     <div className="p-(--space-xl)">
-      <PanelAlertBar
+      <CentreAlertBar
         message={message}
         retryDisabled={false}
         onRetry={onRetry}

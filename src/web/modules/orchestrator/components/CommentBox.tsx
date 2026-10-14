@@ -1,8 +1,8 @@
 import { ReplyField } from "@/components/attention/ReplyField";
 import {
-  PanelAlertBar,
+  CentreAlertBar,
   type RetryFailure,
-} from "@/modules/orchestrator/components/PanelAlertBar";
+} from "@/modules/orchestrator/components/CentreAlertBar";
 import { COMMENT_BOX_ID } from "@/modules/orchestrator/domain/centre-page-state";
 
 interface CommentBoxProps {
@@ -46,7 +46,7 @@ export function CommentBox({
         )}
       </ReplyField>
       {failure !== null && (
-        <PanelAlertBar
+        <CentreAlertBar
           message={failure.message}
           retryDisabled={disabled || sending}
           onRetry={failure.onRetry}

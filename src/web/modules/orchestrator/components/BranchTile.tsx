@@ -13,7 +13,7 @@ import { ReplyField } from "@/components/attention/ReplyField";
 import { ToneBadge } from "@/components/badges/ToneBadge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { PanelAlertBar } from "@/modules/orchestrator/components/PanelAlertBar";
+import { CentreAlertBar } from "@/modules/orchestrator/components/CentreAlertBar";
 import type {
   BranchAction,
   BranchState,
@@ -192,7 +192,7 @@ export function BranchTile({ branch, tile }: BranchTileProps) {
               )}
             </div>
             {feedback.failure !== null && (
-              <PanelAlertBar
+              <CentreAlertBar
                 message={feedback.failure}
                 retryDisabled={tile.disabled}
                 onRetry={() => tile.onRetry(branch)}

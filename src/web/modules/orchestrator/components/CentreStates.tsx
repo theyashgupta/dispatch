@@ -6,7 +6,7 @@ import {
   EmptyTitle,
 } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PanelAlertBar } from "@/modules/orchestrator/components/PanelAlertBar";
+import { CentreAlertBar } from "@/modules/orchestrator/components/CentreAlertBar";
 import {
   LOADING_TEXT,
   NO_MESSAGES_TEXT,
@@ -65,7 +65,7 @@ export function NoOrchestrator({
         Start
       </Button>
       {alert !== null && (
-        <PanelAlertBar
+        <CentreAlertBar
           message={alert.message}
           retryDisabled={alert.retryDisabled}
           onRetry={alert.onRetry}

@@ -3,13 +3,13 @@ import { NARROW_QUERY } from "../../../../shared/media-queries.js";
 import { staleText } from "../../../../shared/stale-text.js";
 import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
 import { CentreToolbar } from "@/modules/orchestrator/components/CentreToolbar";
-import { PanelControls } from "@/modules/orchestrator/components/PanelControls";
+import { CentreControls } from "@/modules/orchestrator/components/CentreControls";
 import {
   CENTRE_CONTROL_LABELS,
   showSwitcher,
   switcherOptions,
 } from "@/modules/orchestrator/domain/centre-page-state";
-import { STALE_REASON } from "@/modules/orchestrator/domain/panel-model";
+import { STALE_REASON } from "@/modules/orchestrator/domain/centre-model";
 import { useCentreControl } from "./use-centre-control";
 import { useCentreSelection } from "./use-centre-selection";
 
@@ -20,7 +20,7 @@ interface CentreControlsContainerProps {
 export function CentreControlsContainer({
   inline = false,
 }: CentreControlsContainerProps) {
-  const { boardKey, id, stale, panel, snapshot, records, record, unknown } =
+  const { boardKey, id, stale, list, snapshot, records, record, unknown } =
     useCentreSelection();
   const navigate = useNavigate();
   const wide = !useMediaQuery(NARROW_QUERY);
@@ -29,7 +29,7 @@ export function CentreControlsContainer({
     record,
     stale,
   );
-  const emptyBoard = panel.data !== undefined && records.length === 0;
+  const emptyBoard = list.data !== undefined && records.length === 0;
   const shown =
     control === null || unknown || emptyBoard
       ? null
@@ -59,9 +59,9 @@ export function CentreControlsContainer({
           : null
       }
       controls={
-        <PanelControls
+        <CentreControls
           control={shown}
-          loading={panel.isPending}
+          loading={list.isPending}
           onRun={(kind) => void run(kind)}
         />
       }

@@ -4,7 +4,7 @@ import { CentreRegionAlert } from "@/modules/orchestrator/components/CentreRegio
 import { CentreLoading } from "@/modules/orchestrator/components/CentreStates";
 import { CommentBox } from "@/modules/orchestrator/components/CommentBox";
 import { ConversationList } from "@/modules/orchestrator/components/ConversationList";
-import type { RetryFailure } from "@/modules/orchestrator/components/PanelAlertBar";
+import type { RetryFailure } from "@/modules/orchestrator/components/CentreAlertBar";
 import { StaleReason } from "@/modules/orchestrator/components/StaleReason";
 import {
   CONVERSATION_UNAVAILABLE_TEXT,

@@ -6,15 +6,19 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import type { PanelControl } from "@/modules/orchestrator/domain/panel-model";
+import type { CentreControl } from "@/modules/orchestrator/domain/centre-model";
 
-interface PanelControlsProps {
-  control: PanelControl | null;
+interface CentreControlsProps {
+  control: CentreControl | null;
   loading: boolean;
-  onRun: (kind: PanelControl["kind"]) => void;
+  onRun: (kind: CentreControl["kind"]) => void;
 }
 
-export function PanelControls({ control, loading, onRun }: PanelControlsProps) {
+export function CentreControls({
+  control,
+  loading,
+  onRun,
+}: CentreControlsProps) {
   if (loading) return <Skeleton className="h-8 w-40 self-end" />;
   if (control === null) return null;
   const reasonId = `orchestrator-${control.kind}-reason`;

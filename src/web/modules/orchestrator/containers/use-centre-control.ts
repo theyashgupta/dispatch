@@ -6,7 +6,7 @@ import {
   startFailureFor,
   type ControlKind,
   type OrchestratorView,
-} from "@/modules/orchestrator/domain/panel-model";
+} from "@/modules/orchestrator/domain/centre-model";
 import {
   useBoardRecordQuery,
   useLifecycleMutation,
