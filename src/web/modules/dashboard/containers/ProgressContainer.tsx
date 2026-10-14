@@ -1,9 +1,15 @@
 import { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { systemMemoryQueryOptions } from "@/queries/system-memory-queries";
 import { ProgressSection } from "@/modules/dashboard/components/ProgressSection";
 import {
   loopsRunningText,
   progressRows,
 } from "@/modules/dashboard/domain/progress-rows";
+import {
+  memoryLine,
+  pausedLoopCount,
+} from "@/modules/dashboard/domain/memory-line";
 import { sectionState } from "@/modules/dashboard/domain/section-state";
 import { retryFailed, useDashboardData } from "./use-dashboard-data";
 
@@ -14,6 +20,8 @@ export function ProgressContainer() {
     () => (cards === undefined ? [] : progressRows(cards, new Date(now))),
     [cards, now],
   );
+  const reading = useQuery(systemMemoryQueryOptions());
+  const memory = memoryLine(reading.data, pausedLoopCount(cards ?? []));
   const countText =
     summary.data === undefined
       ? null
@@ -26,6 +34,7 @@ export function ProgressContainer() {
       state={sectionState([snapshot])}
       rows={rows}
       countText={countText}
+      memory={memory}
       onRetry={() => retryFailed([snapshot])}
     />
   );
