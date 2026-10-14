@@ -99,6 +99,8 @@ test("package scripts route checks through the slot gate", () => {
     "lint:typed",
     "lint:fix",
     "typecheck",
+    "test",
+    "test:timing",
     "deadcode",
     "check",
     "check:static",
@@ -117,7 +119,17 @@ test("package scripts route checks through the slot gate", () => {
   }
   assert.ok(scripts["lint:typed"].includes("DISPATCH_LINT_TYPED=1"));
   assert.ok(!scripts.lint.includes("DISPATCH_LINT_TYPED"));
-  assert.ok(scripts.test.includes("scripts/**/*.test.mjs"));
+  assert.equal(scripts.test, `${gate} node scripts/run-tests.mjs unit`);
+  assert.equal(
+    scripts["test:timing"],
+    `${gate} node scripts/run-tests.mjs timing`,
+  );
+  assert.ok(scripts["check:unlocked"].endsWith("&& npm run test:timing"));
+  assert.ok(
+    readFileSync(join(root, "scripts/run-tests.mjs"), "utf8").includes(
+      "scripts/**/*.test.mjs",
+    ),
+  );
   assert.equal(scripts.deadcode, `${gate} npm run deadcode:knip`);
   assert.ok(scripts["deadcode:knip"].includes("knip --production"));
   assert.equal(scripts["typecheck:tsc"].split("tsc --noEmit").length - 1, 2);
