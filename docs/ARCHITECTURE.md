@@ -6221,7 +6221,8 @@ runs on a board at a time. A flow in the state `running` is started again at boo
 **Ship gate for a group with no loop progress.** A group with no loop progress has no
 `loopProgress` or zero units (decision record D-10). `assertShippable` refuses 409
 `engine-not-closed` for any group whose engine is active and not closed, whatever its unit count.
-For a group with no loop progress it replaces `loop-not-finished` with 409 `card-not-done`, and
+For a group with no loop progress it replaces `loop-not-finished` with 409 `card-not-done`, or with
+409 `already-shipped` and the PR number in `pr` when the card is in Done, and
 `assertGroupBranches` allows only the session branch of the card (`branch`, else the identifier).
 `startShip` then refuses 409 `engine-not-closed` when the session root holds the file
 `.claude/ralph-loop.local.md`, before any git call. After the local branch checks, and before it
