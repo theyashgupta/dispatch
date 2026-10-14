@@ -1,4 +1,4 @@
-import { STALE_REASON } from "@/modules/orchestrator/domain/panel-model";
+import { STALE_REASON } from "@/modules/orchestrator/domain/centre-model";
 
 interface StaleReasonProps {
   id: string;

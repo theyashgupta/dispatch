@@ -26,7 +26,7 @@ import {
   regionErrorText,
   regionState,
 } from "@/modules/orchestrator/domain/centre-page-state";
-import { STALE_REASON } from "@/modules/orchestrator/domain/panel-model";
+import { STALE_REASON } from "@/modules/orchestrator/domain/centre-model";
 import { useCentrePane } from "@/modules/orchestrator/hooks/use-centre-pane";
 import { useEdgePaths } from "@/modules/orchestrator/hooks/use-edge-paths";
 import { useTileFocus } from "@/modules/orchestrator/hooks/use-tile-focus";
@@ -46,7 +46,7 @@ export function CentreContainer() {
     boardKey,
     id,
     stale,
-    panel,
+    list,
     snapshot,
     records,
     record,
@@ -94,13 +94,13 @@ export function CentreContainer() {
     wide ? graph.branches.map((b) => `${b.id}:${b.band}`) : [],
   );
 
-  const queries = [panel, snapshot];
+  const queries = [list, snapshot];
   const failed = queries.find((q) => q.data === undefined && q.error !== null);
   const failure = failed?.error ?? decisions.error;
   const state = regionState({
     loading: queries.some((q) => q.data === undefined) || decisions.pending,
     error: failure !== null || unknown,
-    empty: panel.data !== undefined && records.length === 0,
+    empty: list.data !== undefined && records.length === 0,
   });
 
   const disabled = stale || actions.pending;
@@ -135,7 +135,7 @@ export function CentreContainer() {
         ),
         onRetry: () => {
           for (const q of queries) {
-            if (q.error !== null || (unknown && q === panel)) {
+            if (q.error !== null || (unknown && q === list)) {
               void q.refetch();
             }
           }

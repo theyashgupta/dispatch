@@ -12,7 +12,7 @@ import {
   refusalReason,
   type ControlKind,
   type OrchestratorView,
-} from "@/modules/orchestrator/domain/panel-model";
+} from "@/modules/orchestrator/domain/centre-model";
 
 export type ActionResult = { ok: true } | { ok: false; reason: string };
 

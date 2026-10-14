@@ -14,7 +14,7 @@ import {
   regionErrorText,
 } from "@/modules/orchestrator/domain/centre-page-state";
 import { conversationView } from "@/modules/orchestrator/domain/conversation-view";
-import type { OrchestratorView } from "@/modules/orchestrator/domain/panel-model";
+import type { OrchestratorView } from "@/modules/orchestrator/domain/centre-model";
 import { focusCommentBox } from "@/modules/orchestrator/hooks/focus-entry";
 import { useCentrePane } from "@/modules/orchestrator/hooks/use-centre-pane";
 import { useConversationQuery } from "@/modules/orchestrator/queries/orchestrator-queries";
@@ -128,10 +128,10 @@ function ConversationBody({
 }
 
 export function ConversationContainer() {
-  const { boardKey, stale, panel, record, records } = useCentreSelection();
+  const { boardKey, stale, list, record, records } = useCentreSelection();
   if (record === null) {
-    if (panel.isPending) return <CentreLoading />;
-    if (panel.data === undefined) return null;
+    if (list.isPending) return <CentreLoading />;
+    if (list.data === undefined) return null;
     return <CentreNoMessages />;
   }
   return (

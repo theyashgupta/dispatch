@@ -8,7 +8,7 @@ import {
 } from "@/components/ui/empty";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Spinner } from "@/components/ui/spinner";
-import type { TerminalMode } from "@/modules/orchestrator/domain/panel-model";
+import type { TerminalMode } from "@/modules/orchestrator/domain/centre-model";
 
 interface TerminalFrameProps {
   mode: TerminalMode;

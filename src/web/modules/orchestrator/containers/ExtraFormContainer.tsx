@@ -16,7 +16,7 @@ import {
   scopeRows,
   type OwnerRecord,
 } from "@/modules/orchestrator/domain/ownership";
-import { actionErrorCopy } from "@/modules/orchestrator/domain/panel-model";
+import { actionErrorCopy } from "@/modules/orchestrator/domain/centre-model";
 import {
   useAddExtraMutation,
   useSaveOverridesMutation,

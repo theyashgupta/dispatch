@@ -16,7 +16,7 @@ import {
   tileMeters,
   unknownOrchestrator,
 } from "./centre-page-state.js";
-import type { OrchestratorView } from "./panel-model.js";
+import type { OrchestratorView } from "./centre-model.js";
 
 function record(
   id: string,

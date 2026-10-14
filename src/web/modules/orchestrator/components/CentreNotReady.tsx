@@ -4,7 +4,7 @@ import {
   NoOrchestrator,
   type NoOrchestratorProps,
 } from "@/modules/orchestrator/components/CentreStates";
-import type { RetryFailure } from "@/modules/orchestrator/components/PanelAlertBar";
+import type { RetryFailure } from "@/modules/orchestrator/components/CentreAlertBar";
 import type { RegionState } from "@/modules/orchestrator/domain/centre-page-state";
 
 interface CentreNotReadyProps {

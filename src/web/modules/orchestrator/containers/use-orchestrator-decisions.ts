@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import type { BoardKey } from "../../../../shared/types.js";
 import {
   useAnsweredDecisionsQuery,
-  usePanelDecisionsQuery,
+  useCentreDecisionsQuery,
 } from "@/modules/orchestrator/queries/orchestrator-queries";
 
 /**
@@ -12,7 +12,7 @@ import {
  * `error` is set only for a read that holds no data, so the last list stays on screen after a failed refetch.
  */
 export function useOrchestratorDecisions(board: BoardKey) {
-  const open = usePanelDecisionsQuery(board);
+  const open = useCentreDecisionsQuery(board);
   const answered = useAnsweredDecisionsQuery(board);
   const decisions = useMemo(
     () => [...(open.data ?? []), ...(answered.data ?? [])],
