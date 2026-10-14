@@ -9,6 +9,7 @@ export interface PauseCandidate {
   boardKey: BoardKey;
   startedAt: string;
   pausedBy: PausedBy | null;
+  pausedSwapMb?: number;
   coolingDown: boolean;
 }
 
@@ -20,7 +21,7 @@ export interface PauseRun {
 export const IDLE_RUN: PauseRun = { lastPauseSwapMb: null, lowReadings: 0 };
 
 export type PauseAction =
-  | { kind: "pause"; cardId: string; reason: string }
+  | { kind: "pause"; cardId: string; reason: string; swapMb: number }
   | { kind: "resume"; cardId: string; reason: string }
   | { kind: "none" };
 
@@ -31,6 +32,17 @@ const RESUME_READINGS = 2;
 const byStartedAt = (a: PauseCandidate, b: PauseCandidate): number =>
   Date.parse(a.startedAt) - Date.parse(b.startedAt) ||
   a.cardId.localeCompare(b.cardId);
+
+function lowestCeiling(
+  candidates: PauseCandidate[],
+  ceilings: Partial<Record<BoardKey, number>>,
+): number | null {
+  const limits = candidates
+    .filter((c) => c.pausedBy !== "user")
+    .map((c) => ceilings[c.boardKey])
+    .filter((n): n is number => n !== undefined);
+  return limits.length === 0 ? null : Math.min(...limits);
+}
 
 /**
  * Decide the one pause or resume a memory reading calls for.
@@ -49,12 +61,8 @@ export function decideMemoryPause(input: {
   const none: PauseAction = { kind: "none" };
   if (!memory.supported || memory.stale)
     return { action: none, next: IDLE_RUN };
-  const limits = candidates
-    .filter((c) => c.pausedBy !== "user")
-    .map((c) => ceilings[c.boardKey])
-    .filter((n): n is number => n !== undefined);
-  if (limits.length === 0) return { action: none, next: IDLE_RUN };
-  const ceiling = Math.min(...limits);
+  const ceiling = lowestCeiling(candidates, ceilings);
+  if (ceiling === null) return { action: none, next: IDLE_RUN };
   const used = memory.sample.swapUsedMb;
 
   if (used > ceiling) {
@@ -73,6 +81,7 @@ export function decideMemoryPause(input: {
         kind: "pause",
         cardId: target.cardId,
         reason: `swap used ${used} MB is above the ${ceiling} MB ceiling`,
+        swapMb: used,
       },
       next: { lastPauseSwapMb: used, lowReadings: 0 },
     };
@@ -100,4 +109,42 @@ export function decideMemoryPause(input: {
       lowReadings: low,
     },
   };
+}
+
+/**
+ * Decide the first fresh reading after a server restart from the governor's persisted paused marks.
+ *
+ * @remarks The low readings of the lost run are gone, so swap at or under the ceiling resumes the oldest
+ * governor-paused loop at once. Over the ceiling, the run continues from the highest persisted pause reading,
+ * so the cascade guard still holds. Returns null when the reading is stale or no loop has a governor mark.
+ */
+export function decideAfterRestart(input: {
+  memory: SystemMemory;
+  candidates: PauseCandidate[];
+  ceilings: Partial<Record<BoardKey, number>>;
+}): { action: PauseAction; next: PauseRun } | null {
+  const { memory, candidates, ceilings } = input;
+  if (!memory.supported || memory.stale) return null;
+  const paused = candidates.filter((c) => c.pausedBy === "memory");
+  if (paused.length === 0) return null;
+  const used = memory.sample.swapUsedMb;
+  const ceiling = lowestCeiling(candidates, ceilings);
+  const target = paused.filter((c) => !c.coolingDown).sort(byStartedAt)[0];
+  if (ceiling !== null && used <= ceiling && target) {
+    return {
+      action: {
+        kind: "resume",
+        cardId: target.cardId,
+        reason: `swap used ${used} MB is not above the ${ceiling} MB ceiling after a restart`,
+      },
+      next: IDLE_RUN,
+    };
+  }
+  const readings = paused.map((c) => c.pausedSwapMb ?? used);
+  return decideMemoryPause({
+    memory,
+    candidates,
+    ceilings,
+    run: { lastPauseSwapMb: Math.max(...readings), lowReadings: 0 },
+  });
 }

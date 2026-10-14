@@ -220,17 +220,36 @@ async function startLoop(
   note(`${id} has a live session`);
 }
 
+interface Held {
+  sb: Sandbox;
+  userPaused?: string;
+}
+
+/**
+ * Stop the server and start a new one on the same data folder and sample file.
+ *
+ * @remarks Only the server process stops, so the tmux sessions, their stopped processes and the paused marks stay.
+ */
+async function restart(held: Held): Promise<Sandbox> {
+  await held.sb.stopServer();
+  held.sb = await startSandbox({
+    name: NAME,
+    reuseDir: true,
+    memorySampleFile: SAMPLE_FILE,
+  });
+  note(`server restarted on port ${held.sb.port}`);
+  return held.sb;
+}
+
 /**
  * Drive swap through the sample file and check that the governor pauses the newest loop, holds, and resumes it.
  *
  * @remarks The three loops start 2 s apart so `createdAt` orders them. The only inputs after the start are HTTP
- * calls and writes to the sample file, and no key is typed into a pane. `held.userPaused` names the card that
- * the caller must unpause, whatever the outcome.
+ * calls, writes to the sample file and server restarts, and no key is typed into a pane. `held.userPaused` names
+ * the card that the caller must unpause, and `held.sb` the live sandbox, whatever the outcome.
  */
-async function runScenario(
-  sb: Sandbox,
-  held: { userPaused?: string },
-): Promise<void> {
+async function runScenario(held: Held): Promise<void> {
+  let sb = held.sb;
   const sample = makeSampleRepo(sb.root, sb.home);
   const [a, b, c] = await setup(sb, sample);
   const minted = await sb.api<{ token: string }>(
@@ -329,22 +348,80 @@ async function runScenario(
   );
   assert.equal(await pausedOf(sb, a), undefined);
   note("the user pause of the second loop survived the low readings");
+
+  writeSwap(9000);
+  const again = await waitFor(
+    async () => {
+      const paused = await pausedOf(sb, c);
+      return paused?.by === "memory" ? paused : null;
+    },
+    READING_WAIT_MS,
+    `${c} paused by memory a second time`,
+  );
+  assert.equal(again.swapMb, 9000);
+  assert.equal(
+    again.reason,
+    `swap used 9000 MB is above the ${CEILING_MB} MB ceiling`,
+  );
+
+  writeSwap(9100);
+  sb = await restart(held);
+  await waitForReadings(sb, 9100, 2);
+  assert.equal((await pausedOf(sb, c))?.by, "memory");
+  assert.equal((await pausedOf(sb, b))?.by, "user");
+  assert.equal(await pausedOf(sb, a), undefined);
+  assert.equal(
+    governorRows(await sb.orchestrationEvents(BOARD), a, "pause").length,
+    0,
+  );
+  note("after a restart over the ceiling nothing new was paused");
+
+  writeSwap(8000);
+  const restartedAt = Date.now();
+  sb = await restart(held);
+  await waitFor(
+    async () => ((await pausedOf(sb, c)) === undefined ? true : null),
+    20_000,
+    `${c} resumed after the restart under the ceiling`,
+  );
+  note(`${c} resumed ${Date.now() - restartedAt} ms after the restart began`);
+  const restartResumes = governorRows(
+    await sb.orchestrationEvents(BOARD),
+    c,
+    "resume",
+  );
+  assert.equal(
+    restartResumes.at(-1)?.data.reason,
+    `swap used 8000 MB is not above the ${CEILING_MB} MB ceiling after a restart`,
+  );
+  for (const pid of childPids(again)) {
+    assert.equal(
+      stateOf(pid).startsWith("T"),
+      false,
+      `pid ${pid} of ${c} is still stopped after the restart`,
+    );
+  }
+  assert.equal((await pausedOf(sb, b))?.by, "user");
+  assert.equal(await pausedOf(sb, a), undefined);
+  note("after a restart under the ceiling the governor resumed its loop only");
 }
 
 void test(
-  "scenario 8: swap pressure pauses the newest loop, growth under 256 MB holds, and low swap resumes it",
-  { timeout: 6 * MINUTE, skip: TMUX_MISSING },
+  "scenario 8: swap pressure pauses the newest loop, growth under 256 MB holds, low swap resumes it, and a restart keeps the run",
+  { timeout: 9 * MINUTE, skip: TMUX_MISSING },
   async () => {
     fs.mkdirSync(SANDBOX_ROOT, { recursive: true });
     writeSwap(1000);
-    const sb = await startSandbox({
-      name: NAME,
-      memorySampleFile: SAMPLE_FILE,
-    });
-    const held: { userPaused?: string } = {};
+    const held: Held = {
+      sb: await startSandbox({
+        name: NAME,
+        memorySampleFile: SAMPLE_FILE,
+      }),
+    };
     try {
-      await runScenario(sb, held);
+      await runScenario(held);
     } finally {
+      const sb = held.sb;
       try {
         if (held.userPaused !== undefined) {
           await sb.api("POST", `/api/cards/${held.userPaused}/unpause`);
