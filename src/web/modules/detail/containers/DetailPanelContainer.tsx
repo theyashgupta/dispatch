@@ -5,6 +5,7 @@ import {
   useRouter,
   useRouterState,
 } from "@tanstack/react-router";
+import { toast } from "sonner";
 import type {
   Card as CardModel,
   UnwindDestination,
@@ -35,11 +36,13 @@ import { useAccountsQuery } from "@/queries/accounts-queries";
 import { useActivityFeedQuery } from "@/queries/activity-queries";
 import { restoreArchived } from "@/queries/archive-api";
 import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
-import { getCard, unwindGroup } from "@/queries/cards-api";
+import { getCard, unwindGroup, type PauseResult } from "@/queries/cards-api";
 import {
+  usePauseCardMutation,
   useResumeCardMutation,
   useResumeTargetQuery,
   useStartCardMutation,
+  useUnpauseCardMutation,
 } from "@/queries/cards-queries";
 import { useSessionAccountMove } from "@/queries/session-account-queries";
 import { useAppStore } from "@/components/ui/hooks/use-app-store";
@@ -59,10 +62,15 @@ import {
   PanelRow,
 } from "@/modules/detail/components/PanelFrame";
 import {
+  pauseFailureCopy,
+  pausedNote,
+} from "@/modules/detail/domain/pause-copy";
+import {
   resumeLine as buildResumeLine,
   RESUME_TARGET_ERROR,
   RESUME_TARGET_LOADING,
 } from "@/modules/detail/domain/resume-target";
+import { PanelMutedNotice } from "@/modules/detail/components/PanelNotice";
 import { PanelHeader } from "@/modules/detail/components/PanelHeader";
 import { PanelResizeHandle } from "@/modules/detail/components/PanelResizeHandle";
 import { PreviewRow } from "@/modules/detail/components/PreviewRow";
@@ -225,6 +233,16 @@ export function DetailPanelContainer() {
   const { mutateAsync: cleanupCard } = useCleanupCardMutation();
   const { mutateAsync: startCard } = useStartCardMutation();
   const { mutateAsync: resumeCard } = useResumeCardMutation();
+  const pause = usePauseCardMutation();
+  const unpause = useUnpauseCardMutation();
+  const pausePending = pause.isPending || unpause.isPending;
+  const runPauseChange = (change: Promise<PauseResult>) => {
+    change
+      .then((result) => {
+        if (!result.ok) toast.error(pauseFailureCopy(result));
+      })
+      .catch(() => toast.error(pauseFailureCopy({ status: null })));
+  };
   const accountMove = useSessionAccountMove();
 
   const [prevCardId, setPrevCardId] = useState<string | null>(card?.id ?? null);
@@ -435,6 +453,11 @@ export function DetailPanelContainer() {
             onUnwindRequest={onUnwindRequest}
             onResetRequest={onResetRequest}
             onSyncRequest={onSyncRequest}
+            onPauseRequest={(id) => runPauseChange(pause.mutateAsync({ id }))}
+            onResumePausedRequest={(id) =>
+              runPauseChange(unpause.mutateAsync({ id }))
+            }
+            pausePending={pausePending}
             onAskRequest={onAskRequest}
             resumeLine={resumeLine}
             reviewHeader={reviewHeader}
@@ -527,6 +550,17 @@ export function DetailPanelContainer() {
                       )}
                     </PanelPreviews>
                   )}
+
+                {c != null && pausedNote(c) !== null && (
+                  <div
+                    data-testid="paused-note"
+                    className="mx-(--space-xl) mb-(--space-lg)"
+                  >
+                    <PanelMutedNotice label="Status">
+                      {pausedNote(c)}
+                    </PanelMutedNotice>
+                  </div>
+                )}
 
                 {hasLiveSession && c && (
                   <TerminalRegion

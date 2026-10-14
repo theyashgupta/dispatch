@@ -7,6 +7,7 @@ import {
   Maximize2,
   MessageCircleQuestion,
   Minimize2,
+  Pause,
   Play,
   RotateCcw,
   Trash2,
@@ -19,6 +20,7 @@ import type {
   UnwindDestination,
 } from "../../../../shared/types.js";
 import { isDemoteEligible } from "../../../../shared/demote-eligibility.js";
+import { pauseAction } from "../domain/pause-copy";
 import { isResetEligible } from "../../../../shared/reset-eligibility.js";
 import { LinearStateChip } from "@/components/badges/LinearStateChip";
 import { TeamCycleText } from "@/components/badges/TeamCycleText";
@@ -52,6 +54,9 @@ interface PanelHeaderProps {
   onUnwindRequest?: (id: string, to: UnwindDestination) => void;
   onResetRequest?: (id: string) => void;
   onSyncRequest?: (id: string) => void;
+  onPauseRequest?: (id: string) => void;
+  onResumePausedRequest?: (id: string) => void;
+  pausePending?: boolean;
   onAskRequest?: (card: CardModel) => void;
   resumeLine?: ResumeLine;
   reviewHeader?: ReviewHeader | null;
@@ -78,6 +83,9 @@ export function PanelHeader({
   onUnwindRequest,
   onResetRequest,
   onSyncRequest,
+  onPauseRequest,
+  onResumePausedRequest,
+  pausePending = false,
   onAskRequest,
   resumeLine,
   reviewHeader,
@@ -89,6 +97,7 @@ export function PanelHeader({
     narrowPanel ? { "aria-label": label, title: label } : {};
   const awaitingCleanup =
     c?.column === "done" && (c.tmuxSession != null || c.workspacePath != null);
+  const pauseKind = c ? pauseAction(c) : null;
   const syncLabel = c?.syncing === true ? "Syncing…" : "Sync Linear";
   return (
     <div className="flex flex-wrap items-center justify-between gap-(--space-lg) border-b border-border py-(--space-sm) pr-(--space-lg) pl-(--space-xl)">
@@ -241,6 +250,32 @@ export function PanelHeader({
           >
             <RotateCcw className="size-3" aria-hidden="true" />
             {!narrowPanel && "Reset"}
+          </Button>
+        )}
+        {c && pauseKind === "pause" && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={pausePending}
+            onClick={() => onPauseRequest?.(c.id)}
+            aria-label={narrowPanel ? "Pause" : undefined}
+            title="Stop every process of this loop until you resume it"
+          >
+            <Pause className="size-3" aria-hidden="true" />
+            {!narrowPanel && "Pause"}
+          </Button>
+        )}
+        {c && pauseKind === "resume" && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={pausePending}
+            onClick={() => onResumePausedRequest?.(c.id)}
+            aria-label={narrowPanel ? "Resume" : undefined}
+            title="Continue the paused loop"
+          >
+            <Play className="size-3" aria-hidden="true" />
+            {!narrowPanel && "Resume"}
           </Button>
         )}
         {awaitingCleanup && c?.cleaningUp && (
