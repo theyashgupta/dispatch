@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import type { Card, SystemMemory } from "../../../../shared/types.js";
-import { memoryLine, pausedLoopCount, STALE_SUFFIX } from "./memory-line.js";
+import { memoryLine, pausedLoopCount } from "./memory-line.js";
 
 function reading(
   stale: boolean,
@@ -46,31 +46,37 @@ const mark = {
 };
 
 test("a fresh supported reading reads as the memory line", () => {
-  assert.deepEqual(memoryLine(reading(false), 0), {
-    text: "Memory: 2048 MB free, swap 512 of 4096 MB",
-    stale: false,
-  });
+  assert.equal(
+    memoryLine(reading(false), 0),
+    "Memory: 2048 MB free, swap 512 of 4096 MB",
+  );
 });
 
-test("a stale reading keeps its text and sets the flag", () => {
-  assert.equal(memoryLine(reading(true), 0)?.stale, true);
-  assert.equal(STALE_SUFFIX, " (stale)");
+test("a stale reading appends the stale suffix", () => {
+  assert.equal(
+    memoryLine(reading(true), 0),
+    "Memory: 2048 MB free, swap 512 of 4096 MB (stale)",
+  );
+  assert.equal(
+    memoryLine(reading(true), 2),
+    "Memory: 2048 MB free, swap 512 of 4096 MB, 2 paused (stale)",
+  );
 });
 
 test("the paused count shows from 1 and not at 0", () => {
   assert.equal(
-    memoryLine(reading(false), 2)?.text,
+    memoryLine(reading(false), 2),
     "Memory: 2048 MB free, swap 512 of 4096 MB, 2 paused",
   );
   assert.equal(
-    memoryLine(reading(false), 1)?.text,
+    memoryLine(reading(false), 1),
     "Memory: 2048 MB free, swap 512 of 4096 MB, 1 paused",
   );
 });
 
 test("numbers round to whole megabytes", () => {
   assert.equal(
-    memoryLine(reading(false, 811.6, 99.4), 0)?.text,
+    memoryLine(reading(false, 811.6, 99.4), 0),
     "Memory: 812 MB free, swap 99 of 4096 MB",
   );
 });

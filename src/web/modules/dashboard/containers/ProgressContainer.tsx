@@ -1,6 +1,5 @@
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { systemMemoryQueryOptions } from "@/queries/system-memory-queries";
+import { useSystemMemoryQuery } from "@/queries/system-memory-queries";
 import { ProgressSection } from "@/modules/dashboard/components/ProgressSection";
 import {
   loopsRunningText,
@@ -20,7 +19,7 @@ export function ProgressContainer() {
     () => (cards === undefined ? [] : progressRows(cards, new Date(now))),
     [cards, now],
   );
-  const reading = useQuery(systemMemoryQueryOptions());
+  const reading = useSystemMemoryQuery();
   const memory = memoryLine(reading.data, pausedLoopCount(cards ?? []));
   const countText =
     summary.data === undefined

@@ -1,7 +1,3 @@
-import {
-  STALE_SUFFIX,
-  type MemoryLine,
-} from "@/modules/dashboard/domain/memory-line";
 import type { ProgressRow } from "@/modules/dashboard/domain/progress-rows";
 import type { SectionState } from "@/modules/dashboard/domain/section-state";
 import { DashboardSection } from "./DashboardSection";
@@ -11,7 +7,7 @@ interface ProgressSectionProps {
   state: SectionState;
   rows: ProgressRow[];
   countText: string | null;
-  memory: MemoryLine | null;
+  memory: string | null;
   onRetry: () => void;
 }
 
@@ -34,10 +30,7 @@ export function ProgressSection({
           data-testid="memory-line"
           className="m-0 mb-(--space-md) text-sm text-muted-foreground"
         >
-          {memory.text}
-          {memory.stale && (
-            <span className="text-muted-foreground">{STALE_SUFFIX}</span>
-          )}
+          {memory}
         </p>
       )}
       {rows.length === 0 ? (
