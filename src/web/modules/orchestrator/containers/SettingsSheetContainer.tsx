@@ -21,7 +21,7 @@ const NO_CARDS: Card[] = [];
 const ROUTE = "/boards/$key/orchestrator/{-$id}";
 
 export function SettingsSheetContainer() {
-  const { boardKey, stale, panel, snapshot, records } = useCentreSelection();
+  const { boardKey, stale, list, snapshot, records } = useCentreSelection();
   const navigate = useNavigate({ from: ROUTE });
   const router = useRouter();
   const { settings, index } = useLocation({
@@ -69,21 +69,21 @@ export function SettingsSheetContainer() {
       boardName={boardName}
       staleBadge={staleText(stale, snapshot.dataUpdatedAt)}
       orchestratorsLabel={orchestratorsTabLabel(
-        panel.data === undefined ? null : records.length,
+        list.data === undefined ? null : records.length,
       )}
       policy={<PolicyContainer key={boardKey} board={boardKey} />}
       orchestrators={
-        panel.data === undefined && panel.isError ? (
+        list.data === undefined && list.isError ? (
           <CentreRegionAlert
-            message={regionErrorText("Orchestrators", panel.error.message)}
-            onRetry={() => void panel.refetch()}
+            message={regionErrorText("Orchestrators", list.error.message)}
+            onRetry={() => void list.refetch()}
           />
         ) : (
           <OrchestratorsContainer
             board={boardKey}
             orchestrators={records}
             cards={snapshot.data?.cards ?? NO_CARDS}
-            loading={panel.data === undefined}
+            loading={list.data === undefined}
           />
         )
       }

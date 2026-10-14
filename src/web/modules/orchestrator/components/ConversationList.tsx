@@ -4,9 +4,9 @@ import { Badge } from "@/components/ui/badge";
 import { Item, ItemContent } from "@/components/ui/item";
 import { Eyebrow } from "@/modules/orchestrator/components/Eyebrow";
 import {
-  PanelAlertBar,
+  CentreAlertBar,
   type RetryFailure,
-} from "@/modules/orchestrator/components/PanelAlertBar";
+} from "@/modules/orchestrator/components/CentreAlertBar";
 import type { ConversationEntry } from "@/modules/orchestrator/domain/conversation-view";
 
 interface ConversationListProps {
@@ -74,7 +74,7 @@ export function ConversationList({
                       }
                     />
                     {failure !== undefined && (
-                      <PanelAlertBar
+                      <CentreAlertBar
                         message={failure.message}
                         retryDisabled={disabled}
                         onRetry={failure.onRetry}

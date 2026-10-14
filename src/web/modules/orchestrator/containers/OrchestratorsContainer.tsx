@@ -4,7 +4,7 @@ import {
   movableGroups,
   orchestratorRows,
 } from "@/modules/orchestrator/domain/ownership";
-import type { OrchestratorView } from "@/modules/orchestrator/domain/panel-model";
+import type { OrchestratorView } from "@/modules/orchestrator/domain/centre-model";
 import { useBoardRecordQuery } from "@/modules/orchestrator/queries/orchestrator-queries";
 import type { BoardKey, Card } from "../../../../shared/types.js";
 import { ExtraFormContainer } from "./ExtraFormContainer";

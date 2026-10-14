@@ -14,7 +14,7 @@ import {
   SUPERVISOR_OFF_REASON,
   STOP_TOOLTIP,
   type OrchestratorView,
-} from "./panel-model.js";
+} from "./centre-model.js";
 
 function main(
   state: OrchestratorView["state"],

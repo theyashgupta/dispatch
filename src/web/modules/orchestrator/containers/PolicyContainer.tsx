@@ -6,7 +6,7 @@ import {
   loopModelOptions,
   orchestratorModelOptions,
 } from "@/modules/orchestrator/domain/orchestrator-models";
-import { actionErrorCopy } from "@/modules/orchestrator/domain/panel-model";
+import { actionErrorCopy } from "@/modules/orchestrator/domain/centre-model";
 import {
   groupPlaybookOptions,
   isPolicyDirty,

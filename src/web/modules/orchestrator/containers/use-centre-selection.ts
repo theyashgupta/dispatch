@@ -4,8 +4,8 @@ import {
   selectedRecord,
   unknownOrchestrator,
 } from "@/modules/orchestrator/domain/centre-page-state";
-import type { OrchestratorView } from "@/modules/orchestrator/domain/panel-model";
-import { useOrchestratorPanelQuery } from "@/modules/orchestrator/queries/orchestrator-queries";
+import type { OrchestratorView } from "@/modules/orchestrator/domain/centre-model";
+import { useOrchestratorCentreQuery } from "@/modules/orchestrator/queries/orchestrator-queries";
 import { useBoardSnapshotQuery } from "@/queries/board-snapshot-queries";
 
 const NO_RECORDS: OrchestratorView[] = [];
@@ -21,12 +21,12 @@ export function useCentreSelection() {
   const boardKey = useAppStore(appStore, (s) => s.board);
   const stale = useAppStore(appStore, (s) => s.connection === "disconnected");
   const doneLimit = useAppStore(appStore, (s) => s.doneLimit);
-  const panel = useOrchestratorPanelQuery(boardKey, true);
+  const list = useOrchestratorCentreQuery(boardKey, true);
   const snapshot = useBoardSnapshotQuery(boardKey, doneLimit);
-  const records = panel.data ?? NO_RECORDS;
+  const records = list.data ?? NO_RECORDS;
   const record = selectedRecord(records, id);
   const unknown =
-    panel.data !== undefined &&
+    list.data !== undefined &&
     (unknownOrchestrator(records, id) ||
       (records.length > 0 && record === null));
   return {
@@ -34,7 +34,7 @@ export function useCentreSelection() {
     boardKey,
     id,
     stale,
-    panel,
+    list,
     snapshot,
     records,
     record,
