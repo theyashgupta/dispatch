@@ -1,4 +1,5 @@
 import { withBoard } from "../../shared/board-select.js";
+import type { ActionRefusal } from "../../shared/memory-refusal.js";
 import type {
   ArchivedGroupSummary,
   BoardKey,
@@ -82,7 +83,7 @@ const MEMORY_PRESSURE = "memory-pressure";
 
 function refusalReason(body: unknown): string {
   const reason = (body as { reason?: unknown } | null)?.reason;
-  return typeof reason === "string" ? reason : "memory is low";
+  return typeof reason === "string" ? reason : "";
 }
 
 export type StartResult =
@@ -211,7 +212,9 @@ export async function startGroup(
         ok: false,
         error: failure.error ?? "Some selected tickets are no longer eligible.",
         variant: "ineligible",
-        ineligibleIds: failure.ineligibleIds as string[],
+        ineligibleIds: failure.ineligibleIds.filter(
+          (x): x is string => typeof x === "string",
+        ),
       };
     }
     return { ok: false, error: failure.error ?? "Start failed." };
@@ -347,11 +350,7 @@ export async function resetCard(
   throw httpError("resetCard", result);
 }
 
-export type ResumeResult =
-  | { ok: true }
-  | { ok: false; status: number | null; error?: string; reason?: string };
-
-export type PauseResult = ResumeResult;
+export type ResumeResult = { ok: true } | ({ ok: false } & ActionRefusal);
 
 async function postCardAction(
   id: string,
@@ -399,12 +398,12 @@ export function resumeCard(id: string): Promise<ResumeResult> {
  * @remarks
  * Resolves like `resumeCard`: a refusal carries its status, `error` code and `reason`, and a network failure has a null status.
  */
-export function pauseCard(id: string): Promise<PauseResult> {
+export function pauseCard(id: string): Promise<ResumeResult> {
   return postCardAction(id, "pause");
 }
 
 /** Unpause a paused loop card: POST /api/cards/:id/unpause, resolving like `pauseCard`. */
-export function unpauseCard(id: string): Promise<PauseResult> {
+export function unpauseCard(id: string): Promise<ResumeResult> {
   return postCardAction(id, "unpause");
 }
 

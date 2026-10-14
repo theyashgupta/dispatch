@@ -55,7 +55,7 @@ interface StartGroupVariables {
   extraDirection?: string;
 }
 
-interface ResumeCardVariables {
+interface CardIdVariables {
   id: string;
 }
 
@@ -183,7 +183,7 @@ export function useGenerateGroupTitleMutation() {
  */
 export function resumeCardMutationOptions() {
   return {
-    mutationFn: ({ id }: ResumeCardVariables) => resumeCard(id),
+    mutationFn: ({ id }: CardIdVariables) => resumeCard(id),
   };
 }
 
@@ -220,17 +220,15 @@ export function useResumeCardMutation() {
   });
 }
 
-/** Build the mutation options that pause a loop card. */
-export function pauseCardMutationOptions() {
+function pauseCardMutationOptions() {
   return {
-    mutationFn: ({ id }: ResumeCardVariables) => pauseCard(id),
+    mutationFn: ({ id }: CardIdVariables) => pauseCard(id),
   };
 }
 
-/** Build the mutation options that unpause a paused loop card. */
-export function unpauseCardMutationOptions() {
+function unpauseCardMutationOptions() {
   return {
-    mutationFn: ({ id }: ResumeCardVariables) => unpauseCard(id),
+    mutationFn: ({ id }: CardIdVariables) => unpauseCard(id),
   };
 }
 

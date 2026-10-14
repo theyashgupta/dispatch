@@ -251,6 +251,15 @@ test("startCard resolves a 409 memory-pressure as the memory variant with the re
   });
 });
 
+test("a memory-pressure refusal without a reason resolves an empty error", async () => {
+  reply(409, { error: "memory-pressure" }, "Conflict");
+  assert.deepEqual(await startCard("c1", "go"), {
+    ok: false,
+    error: "",
+    variant: "memory",
+  });
+});
+
 test("resumeCard carries the error code and reason of a refusal", async () => {
   reply(409, { error: "memory-pressure", reason: "swap is full" });
   assert.deepEqual(await resumeCard("c1"), {

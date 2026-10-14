@@ -1,3 +1,5 @@
+import { memoryRefusalCopy } from "../../../../shared/memory-refusal.js";
+
 export const NETWORK_FAILURE_COPY = "Couldn't reach the server. Try again.";
 
 export const START_FAILURE_COPY = {
@@ -34,7 +36,7 @@ export function startFailure(result: Refusal): StartFailure {
   if (result.variant === "memory") {
     return {
       variant: null,
-      text: `Not enough memory to start: ${result.error}. Try again after a loop finishes.`,
+      text: memoryRefusalCopy("start", result.error),
     };
   }
   return {
@@ -58,7 +60,7 @@ export function groupStartFailure(
   if (result.variant === "memory") {
     return {
       variant: null,
-      text: `Not enough memory to start the group: ${result.error}. Try again after a loop finishes.`,
+      text: memoryRefusalCopy("start the group", result.error),
     };
   }
   if (result.variant !== "ineligible") return startFailure(result);

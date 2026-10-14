@@ -20,7 +20,6 @@ import type {
   UnwindDestination,
 } from "../../../../shared/types.js";
 import { isDemoteEligible } from "../../../../shared/demote-eligibility.js";
-import { pauseAction } from "../domain/pause-copy";
 import { isResetEligible } from "../../../../shared/reset-eligibility.js";
 import { LinearStateChip } from "@/components/badges/LinearStateChip";
 import { TeamCycleText } from "@/components/badges/TeamCycleText";
@@ -29,6 +28,7 @@ import { VsCodeMark } from "@/components/icons/brands/VsCodeMark";
 import { LoadingButton } from "@/components/LoadingButton";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { pauseAction } from "@/modules/detail/domain/pause-copy";
 import { ResumeTargetLine } from "./ResumeTargetLine";
 import type { ResumeLine } from "../domain/resume-target";
 import type { ReviewHeader } from "../domain/review-header";

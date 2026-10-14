@@ -2,13 +2,8 @@ import {
   hasLiveSession,
   isLoopCard,
 } from "../../../../shared/running-group.js";
+import type { ActionRefusal } from "../../../../shared/memory-refusal.js";
 import type { Card } from "../../../../shared/types.js";
-
-export interface PauseRefusal {
-  status: number | null;
-  error?: string;
-  reason?: string;
-}
 
 const NETWORK_COPY = "Couldn't reach the server. Try again.";
 
@@ -17,7 +12,7 @@ const NETWORK_COPY = "Couldn't reach the server. Try again.";
  *
  * @remarks A 404 reads as a vanished card, and any status the map does not name, including a null status, reads as the network copy.
  */
-export function pauseFailureCopy(result: PauseRefusal): string {
+export function pauseFailureCopy(result: ActionRefusal): string {
   switch (result.error) {
     case "already-paused":
       return "This loop is already paused.";
@@ -33,7 +28,6 @@ export function pauseFailureCopy(result: PauseRefusal): string {
   return result.status === 404 ? "This card no longer exists." : NETWORK_COPY;
 }
 
-/** The note the detail panel shows for a paused card, or null when the card is not paused. */
 export function pausedNote(card: Card): string | null {
   if (!card.paused) return null;
   return card.paused.by === "memory"
@@ -47,7 +41,6 @@ export function pauseAction(card: Card): "pause" | "resume" | null {
   return isLoopCard(card) && hasLiveSession(card) ? "pause" : null;
 }
 
-/** The title that disables Run Claude on a paused card, or null when the card is not paused. */
-export function runClaudeBlocked(card: Card): string | null {
+export function runClaudeBlockedTitle(card: Card): string | null {
   return card.paused ? "Resume the loop first" : null;
 }

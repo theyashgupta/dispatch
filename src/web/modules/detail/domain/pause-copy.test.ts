@@ -6,7 +6,7 @@ import {
   pauseAction,
   pauseFailureCopy,
   pausedNote,
-  runClaudeBlocked,
+  runClaudeBlockedTitle,
 } from "./pause-copy.js";
 
 function card(extra: Partial<Card>): Card {
@@ -108,8 +108,8 @@ test("Pause shows for a loop card with a live session, Resume for a paused card,
 
 test("Run Claude is blocked with its title only on a paused card", () => {
   assert.equal(
-    runClaudeBlocked(card({ paused: mark("memory") })),
+    runClaudeBlockedTitle(card({ paused: mark("memory") })),
     "Resume the loop first",
   );
-  assert.equal(runClaudeBlocked(card({})), null);
+  assert.equal(runClaudeBlockedTitle(card({})), null);
 });

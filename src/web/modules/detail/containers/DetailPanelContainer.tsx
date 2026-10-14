@@ -6,6 +6,7 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import { toast } from "sonner";
+import { startRefusalText } from "../../../../shared/memory-refusal.js";
 import type {
   Card as CardModel,
   UnwindDestination,
@@ -36,7 +37,7 @@ import { useAccountsQuery } from "@/queries/accounts-queries";
 import { useActivityFeedQuery } from "@/queries/activity-queries";
 import { restoreArchived } from "@/queries/archive-api";
 import { useBoardSnapshot } from "@/queries/board-snapshot-queries";
-import { getCard, unwindGroup, type PauseResult } from "@/queries/cards-api";
+import { getCard, unwindGroup, type ResumeResult } from "@/queries/cards-api";
 import {
   usePauseCardMutation,
   useResumeCardMutation,
@@ -235,13 +236,10 @@ export function DetailPanelContainer() {
   const { mutateAsync: resumeCard } = useResumeCardMutation();
   const pause = usePauseCardMutation();
   const unpause = useUnpauseCardMutation();
-  const pausePending = pause.isPending || unpause.isPending;
-  const runPauseChange = (change: Promise<PauseResult>) => {
-    change
-      .then((result) => {
-        if (!result.ok) toast.error(pauseFailureCopy(result));
-      })
-      .catch(() => toast.error(pauseFailureCopy({ status: null })));
+  const runPauseChange = (change: Promise<ResumeResult>) => {
+    void change.then((result) => {
+      if (!result.ok) toast.error(pauseFailureCopy(result));
+    });
   };
   const accountMove = useSessionAccountMove();
 
@@ -363,6 +361,7 @@ export function DetailPanelContainer() {
       : buildReviewHeader(c, [...items, ...heldPrItems(board?.items ?? [])]);
 
   const hasLiveSession = !!(c?.tmuxSession && !c.sessionLost);
+  const note = c != null ? pausedNote(c) : null;
   const activeSessionLost = c?.activeSessionId != null && !c.tmuxSession;
   const resumeTarget = useResumeTargetQuery(c?.id ?? "", activeSessionLost);
   const resumeLine =
@@ -457,7 +456,11 @@ export function DetailPanelContainer() {
             onResumePausedRequest={(id) =>
               runPauseChange(unpause.mutateAsync({ id }))
             }
-            pausePending={pausePending}
+            pausePending={
+              c != null &&
+              ((pause.isPending && pause.variables?.id === c.id) ||
+                (unpause.isPending && unpause.variables?.id === c.id))
+            }
             onAskRequest={onAskRequest}
             resumeLine={resumeLine}
             reviewHeader={reviewHeader}
@@ -551,14 +554,12 @@ export function DetailPanelContainer() {
                     </PanelPreviews>
                   )}
 
-                {c != null && pausedNote(c) !== null && (
+                {note !== null && (
                   <div
                     data-testid="paused-note"
                     className="mx-(--space-xl) mb-(--space-lg)"
                   >
-                    <PanelMutedNotice label="Status">
-                      {pausedNote(c)}
-                    </PanelMutedNotice>
+                    <PanelMutedNotice label="Status">{note}</PanelMutedNotice>
                   </div>
                 )}
 
@@ -584,7 +585,12 @@ export function DetailPanelContainer() {
                         startCard({
                           id: lost.id,
                           extraDirection: lost.extraDirection ?? "",
-                        }).catch(console.error);
+                        })
+                          .then((result) => {
+                            if (!result.ok)
+                              toast.error(startRefusalText(result));
+                          })
+                          .catch(console.error);
                       } else {
                         onStartRequest?.(lost.id);
                       }
