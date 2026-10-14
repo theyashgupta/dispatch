@@ -2,6 +2,7 @@ import { Plus } from "lucide-react";
 import type { Card as CardModel } from "../../../../shared/types.js";
 import type { StartRequest } from "../../../../shared/start-request.js";
 import { Button } from "@/components/ui/button";
+import { runClaudeBlockedTitle } from "@/modules/detail/domain/pause-copy";
 
 interface StartAnotherSessionButtonProps {
   card: CardModel;
@@ -15,6 +16,7 @@ export function StartAnotherSessionButton({
   narrowPanel,
 }: StartAnotherSessionButtonProps) {
   const inFlight = card.provisioningStep != null;
+  const blocked = runClaudeBlockedTitle(card);
   const label = inFlight ? "Starting…" : "Start another session";
   const reason = inFlight
     ? "Starting another session…"
@@ -23,16 +25,18 @@ export function StartAnotherSessionButton({
       : undefined;
 
   return (
-    <Button
-      variant="outline"
-      size="sm"
-      disabled={inFlight}
-      onClick={() => onStartRequest?.({ cardId: card.id, newSession: true })}
-      aria-label={reason}
-      title={reason}
-    >
-      <Plus className="size-3" aria-hidden="true" />
-      {!narrowPanel && label}
-    </Button>
+    <span title={blocked ?? undefined} className="flex">
+      <Button
+        variant="outline"
+        size="sm"
+        disabled={inFlight || blocked !== null}
+        onClick={() => onStartRequest?.({ cardId: card.id, newSession: true })}
+        aria-label={blocked ? `Start another session. ${blocked}` : reason}
+        title={blocked ?? reason}
+      >
+        <Plus className="size-3" aria-hidden="true" />
+        {!narrowPanel && label}
+      </Button>
+    </span>
   );
 }

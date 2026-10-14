@@ -1,7 +1,7 @@
 import { Play, RotateCw } from "lucide-react";
 import type { Card as CardModel } from "../../../../shared/types.js";
 import { Button } from "@/components/ui/button";
-import { runClaudeBlocked } from "../domain/pause-copy";
+import { runClaudeBlockedTitle } from "@/modules/detail/domain/pause-copy";
 import { PanelAlert, PanelMonoNotice } from "./PanelNotice";
 
 interface TerminalRegionProps {
@@ -16,7 +16,7 @@ export function TerminalRegion({
   onRunClaude,
 }: TerminalRegionProps) {
   const c = card;
-  const blocked = runClaudeBlocked(c);
+  const blocked = runClaudeBlockedTitle(c);
   return (
     <div className="mx-(--space-xl) mt-0 mb-(--space-xl) flex min-h-60 flex-auto flex-col border-t border-border pt-(--space-lg)">
       <div className="flex min-h-0 flex-auto flex-col overflow-hidden rounded-md border border-border bg-background">
@@ -56,6 +56,7 @@ export function TerminalRegion({
                   size="sm"
                   className="h-auto min-h-8 shrink whitespace-normal"
                   disabled={blocked !== null}
+                  aria-label={blocked ? `Run Claude. ${blocked}` : undefined}
                   onClick={() => onRunClaude(c.id)}
                 >
                   <Play className="size-3" aria-hidden="true" />
