@@ -38,7 +38,11 @@ test("resumeCard posts only the card id in the path and resolves ok on a 2xx", a
 
 test("resumeCard resolves the status of a non-2xx so a 409 reads apart from other failures", async () => {
   reply(409, { error: "starting" });
-  assert.deepEqual(await resumeCard("c1"), { ok: false, status: 409 });
+  assert.deepEqual(await resumeCard("c1"), {
+    ok: false,
+    status: 409,
+    error: "starting",
+  });
   reply(500);
   assert.deepEqual(await resumeCard("c1"), { ok: false, status: 500 });
 });

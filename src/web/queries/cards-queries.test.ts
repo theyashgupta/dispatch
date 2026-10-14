@@ -9,10 +9,13 @@ import {
   generateGroupTitle,
   generateTicketDraft,
   getResumeTarget,
+  pauseCard,
   resetCard,
+  resumeCard,
   startCard,
   startGroup,
   syncCardToLinear,
+  unpauseCard,
 } from "./cards-api.js";
 import {
   cardsKeys,
@@ -203,14 +206,97 @@ test("startGroup reports the ineligible ids on a 409", async () => {
   });
 });
 
-test("startGroup falls back to the eligibility copy and an empty id list on a 409", async () => {
+test("startGroup resolves a 409 with another code as its error with no variant", async () => {
+  reply(409, { error: "board-busy" }, "Conflict");
+  assert.deepEqual(await startGroup(LOCAL, groupInput), {
+    ok: false,
+    error: "board-busy",
+  });
   reply(409, {}, "Conflict");
   assert.deepEqual(await startGroup(LOCAL, groupInput), {
     ok: false,
-    error: "Some selected tickets are no longer eligible.",
-    variant: "ineligible",
-    ineligibleIds: [],
+    error: "Start failed.",
   });
+});
+
+test("startGroup resolves a 409 memory-pressure as the memory variant with the reason", async () => {
+  reply(
+    409,
+    {
+      error: "memory-pressure",
+      reason: "free memory 812 MB is below the 1024 MB floor",
+    },
+    "Conflict",
+  );
+  assert.deepEqual(await startGroup(LOCAL, groupInput), {
+    ok: false,
+    error: "free memory 812 MB is below the 1024 MB floor",
+    variant: "memory",
+  });
+});
+
+test("startCard resolves a 409 memory-pressure as the memory variant with the reason", async () => {
+  reply(
+    409,
+    {
+      error: "memory-pressure",
+      reason: "free memory 812 MB is below the 1024 MB floor",
+    },
+    "Conflict",
+  );
+  assert.deepEqual(await startCard("c1", "go"), {
+    ok: false,
+    error: "free memory 812 MB is below the 1024 MB floor",
+    variant: "memory",
+  });
+});
+
+test("resumeCard carries the error code and reason of a refusal", async () => {
+  reply(409, { error: "memory-pressure", reason: "swap is full" });
+  assert.deepEqual(await resumeCard("c1"), {
+    ok: false,
+    status: 409,
+    error: "memory-pressure",
+    reason: "swap is full",
+  });
+});
+
+test("pauseCard and unpauseCard post to their routes and resolve ok on a 200", async () => {
+  reply(200, card);
+  assert.deepEqual(await pauseCard("a/b"), { ok: true });
+  assert.equal(calls[0]?.url, "/api/cards/a%2Fb/pause");
+  assert.equal(calls[0]?.init?.method, "POST");
+  assert.deepEqual(await unpauseCard("c1"), { ok: true });
+  assert.equal(calls[1]?.url, "/api/cards/c1/unpause");
+  assert.equal(calls[1]?.init?.method, "POST");
+});
+
+test("pauseCard and unpauseCard resolve every 409 refusal with its code and reason", async () => {
+  for (const error of [
+    "already-paused",
+    "not-paused",
+    "not-pausable",
+    "busy",
+    "unpause-incomplete",
+  ]) {
+    reply(409, { error, reason: "why" });
+    const expected = { ok: false, status: 409, error, reason: "why" };
+    assert.deepEqual(await pauseCard("c1"), expected, error);
+    assert.deepEqual(await unpauseCard("c1"), expected, error);
+  }
+});
+
+test("pauseCard and unpauseCard resolve a 404 with the server error", async () => {
+  reply(404, { error: "unknown card id: c1" });
+  const expected = { ok: false, status: 404, error: "unknown card id: c1" };
+  assert.deepEqual(await pauseCard("c1"), expected);
+  assert.deepEqual(await unpauseCard("c1"), expected);
+});
+
+test("pauseCard and unpauseCard resolve a null status on a network failure", async () => {
+  globalThis.fetch = () => Promise.reject(new TypeError("offline"));
+  assert.deepEqual(await pauseCard("c1"), { ok: false, status: null });
+  assert.deepEqual(await unpauseCard("c1"), { ok: false, status: null });
 });
 
 test("startGroup throws on any other failure status", async () => {

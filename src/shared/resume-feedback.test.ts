@@ -14,6 +14,30 @@ test("resumeFailureCopy gives the conflict copy for a 409 without a server error
   );
 });
 
+test("resumeFailureCopy names the reason of a 409 memory-pressure refusal", () => {
+  assert.equal(
+    resumeFailureCopy(null, 409, {
+      error: "memory-pressure",
+      reason: "swap is full",
+    }),
+    "Not enough memory to resume: swap is full. Try again after a loop finishes.",
+  );
+});
+
+test("resumeFailureCopy keeps the conflict copy for another 409 code and lets resumeError win", () => {
+  assert.equal(
+    resumeFailureCopy(null, 409, { error: "starting" }),
+    "Resume was rejected. The session may already be starting. Wait a moment and try Resume again.",
+  );
+  assert.equal(
+    resumeFailureCopy("Worktree is gone", 409, {
+      error: "memory-pressure",
+      reason: "swap is full",
+    }),
+    "Worktree is gone",
+  );
+});
+
 test("resumeFailureCopy gives the neutral copy for any other failure", () => {
   const neutral =
     "Resume didn't go through. Try Resume again, or use Restart to begin a fresh session in the same branch.";

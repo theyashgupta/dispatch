@@ -28,9 +28,15 @@ export interface Refusal {
 /**
  * Map a refused start to the failure the dialog shows.
  *
- * @remarks Only a `config` and a `playbook` variant get their own copy, from `START_FAILURE_COPY`. Any other 400 shows the server text as is.
+ * @remarks Only a `config` and a `playbook` variant get their own copy, from `START_FAILURE_COPY`, and a `memory` variant reads as the memory sentence. Any other refusal shows the server text as is.
  */
 export function startFailure(result: Refusal): StartFailure {
+  if (result.variant === "memory") {
+    return {
+      variant: null,
+      text: `Not enough memory to start: ${result.error}. Try again after a loop finishes.`,
+    };
+  }
   return {
     variant:
       result.variant === "config" || result.variant === "playbook"
@@ -43,12 +49,18 @@ export function startFailure(result: Refusal): StartFailure {
 /**
  * Map a refused group start to the failure the dialog shows.
  *
- * @remarks An `ineligible` refusal names the members the server rejected, as far as the dialog still lists them, and shows the server text when none match.
+ * @remarks A `memory` refusal reads as the group memory sentence. An `ineligible` refusal names the members the server rejected, as far as the dialog still lists them, and shows the server text when none match.
  */
 export function groupStartFailure(
   result: Refusal,
   members: readonly { id: string; identifier: string }[],
 ): StartFailure {
+  if (result.variant === "memory") {
+    return {
+      variant: null,
+      text: `Not enough memory to start the group: ${result.error}. Try again after a loop finishes.`,
+    };
+  }
   if (result.variant !== "ineligible") return startFailure(result);
   const stale = members
     .filter((m) => result.ineligibleIds?.includes(m.id))

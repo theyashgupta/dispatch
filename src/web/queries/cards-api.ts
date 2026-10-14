@@ -78,6 +78,13 @@ export async function createLocalTicket(
   }
 }
 
+const MEMORY_PRESSURE = "memory-pressure";
+
+function refusalReason(body: unknown): string {
+  const reason = (body as { reason?: unknown } | null)?.reason;
+  return typeof reason === "string" ? reason : "memory is low";
+}
+
 export type StartResult =
   { ok: true } | { ok: false; error: string; variant?: string };
 
@@ -86,7 +93,8 @@ export type StartResult =
  *
  * @remarks
  * A 202 resolves `{ ok: true }`, a 400 resolves `{ ok: false, error, variant }` from the parsed
- * body (variant `config` or `playbook`), and any other status throws. Each optional argument
+ * body (variant `config` or `playbook`), a 409 `memory-pressure` resolves variant `memory` with the
+ * server's reason, and any other status throws. Each optional argument
  * reaches the body only when the caller supplies it (`newSession` only when `true`), so the
  * request stays byte-identical for callers that do not opt in.
  */
@@ -126,6 +134,9 @@ export async function startCard(
       variant: failure.variant,
     };
   }
+  if (result.status === 409 && result.error === MEMORY_PRESSURE) {
+    return { ok: false, error: refusalReason(result.body), variant: "memory" };
+  }
   throw httpError("startCard", result);
 }
 
@@ -134,7 +145,7 @@ export type StartGroupResult =
   | {
       ok: false;
       error: string;
-      variant?: "config" | "playbook" | "ineligible";
+      variant?: "config" | "playbook" | "ineligible" | "memory";
       ineligibleIds?: string[];
     };
 
@@ -143,8 +154,9 @@ export type StartGroupResult =
  *
  * @remarks
  * A 202 carries the new `card`, a 400 resolves the error with its `config` or `playbook` variant,
- * and a 409 resolves the server's re-validated `ineligibleIds`, because the server is the source
- * of truth for eligibility. Any other status throws.
+ * and a 409 `memory-pressure` resolves variant `memory` with the server's reason. A 409 with
+ * `ineligibleIds` resolves them, because the server is the source of truth for eligibility, and any
+ * other 409 resolves its error without a variant. Any other status throws.
  */
 export async function startGroup(
   board: BoardKey,
@@ -185,14 +197,24 @@ export async function startGroup(
   if (!result.ok && result.status === 409) {
     const failure = (result.body ?? {}) as {
       error?: string;
-      ineligibleIds?: string[];
+      ineligibleIds?: unknown;
     };
-    return {
-      ok: false,
-      error: failure.error ?? "Some selected tickets are no longer eligible.",
-      variant: "ineligible",
-      ineligibleIds: failure.ineligibleIds ?? [],
-    };
+    if (failure.error === MEMORY_PRESSURE) {
+      return {
+        ok: false,
+        error: refusalReason(result.body),
+        variant: "memory",
+      };
+    }
+    if (Array.isArray(failure.ineligibleIds)) {
+      return {
+        ok: false,
+        error: failure.error ?? "Some selected tickets are no longer eligible.",
+        variant: "ineligible",
+        ineligibleIds: failure.ineligibleIds as string[],
+      };
+    }
+    return { ok: false, error: failure.error ?? "Start failed." };
   }
   throw new Error(
     `startGroup failed: ${result.status} ${result.ok ? "" : result.statusText}`,
@@ -325,29 +347,65 @@ export async function resetCard(
   throw httpError("resetCard", result);
 }
 
-export type ResumeResult = { ok: true } | { ok: false; status: number | null };
+export type ResumeResult =
+  | { ok: true }
+  | { ok: false; status: number | null; error?: string; reason?: string };
+
+export type PauseResult = ResumeResult;
+
+async function postCardAction(
+  id: string,
+  action: "resume" | "pause" | "unpause",
+): Promise<ResumeResult> {
+  try {
+    const result = await http(
+      `/api/cards/${encodeURIComponent(id)}/${action}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      },
+    );
+    if (result.ok) {
+      return { ok: true };
+    }
+    const body = (result.body ?? {}) as { error?: unknown; reason?: unknown };
+    return {
+      ok: false,
+      status: result.status,
+      ...(typeof body.error === "string" && { error: body.error }),
+      ...(typeof body.reason === "string" && { reason: body.reason }),
+    };
+  } catch {
+    return { ok: false, status: null };
+  }
+}
 
 /**
  * Resume a dead In Review session: POST /api/cards/:id/resume.
  *
  * @remarks
  * Resolves `{ ok: true }` on 2xx and `{ ok: false, status }` on a non-2xx so the caller can tell a
- * 409 conflict from other failures, with `status` null on a network failure. The client sends only
- * the card id, because the worktree path is server-owned.
+ * 409 conflict from other failures, with `status` null on a network failure. A JSON body adds its
+ * `error` code and `reason`. The client sends only the card id, because the worktree path is
+ * server-owned.
  */
-export async function resumeCard(id: string): Promise<ResumeResult> {
-  try {
-    const result = await http(`/api/cards/${encodeURIComponent(id)}/resume`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-    });
-    if (result.ok) {
-      return { ok: true };
-    }
-    return { ok: false, status: result.status };
-  } catch {
-    return { ok: false, status: null };
-  }
+export function resumeCard(id: string): Promise<ResumeResult> {
+  return postCardAction(id, "resume");
+}
+
+/**
+ * Pause a loop card: POST /api/cards/:id/pause.
+ *
+ * @remarks
+ * Resolves like `resumeCard`: a refusal carries its status, `error` code and `reason`, and a network failure has a null status.
+ */
+export function pauseCard(id: string): Promise<PauseResult> {
+  return postCardAction(id, "pause");
+}
+
+/** Unpause a paused loop card: POST /api/cards/:id/unpause, resolving like `pauseCard`. */
+export function unpauseCard(id: string): Promise<PauseResult> {
+  return postCardAction(id, "unpause");
 }
 
 /**
