@@ -67,9 +67,45 @@ const centreRoutes = async (page: Page) => {
   );
 };
 
+const START_FAILED_SESSION = {
+  cardId: "orc-orch-main",
+  state: null,
+  stateReason: null,
+  contextPercent: null,
+  cost: null,
+  model: null,
+  hasTmuxSession: false,
+  activeSessionId: null,
+  ttydPort: null,
+  stateSince: null,
+  startError: "worktree: fatal: a branch named 'orchestrator' already exists",
+};
+
+const startFailedRoutes = async (page: Page) => {
+  await centreRoutes(page);
+  await page.route("**/api/boards/ORC/orchestrators", async (route) => {
+    const response = await route.fetch();
+    const { orchestrators } = (await response.json()) as {
+      orchestrators: Record<string, unknown>[];
+    };
+    await route.fulfill({
+      response,
+      json: {
+        orchestrators: orchestrators.map((o) => ({
+          ...o,
+          session: START_FAILED_SESSION,
+        })),
+      },
+    });
+  });
+};
+
+const DEFAULT_WIDTHS = [1440, 390];
+
 const screens: {
   name: string;
   url: string;
+  widths?: number[];
   routes?: (page: Page) => Promise<unknown>;
   ready: (page: Page) => Promise<void>;
 }[] = [
@@ -151,6 +187,19 @@ const screens: {
     },
   },
   {
+    name: "centre-start-failed",
+    url: `${orchestrated}/#/boards/ORC/orchestrator`,
+    widths: [1440, 768],
+    routes: startFailedRoutes,
+    ready: async (page) => {
+      await expect(
+        page.getByRole("alert").filter({ hasText: "did not start" }),
+      ).toBeVisible();
+      for (const name of ["Terminal", "Conversation"])
+        await page.getByRole("tab", { name }).click({ trial: true });
+    },
+  },
+  {
     name: "centre-settings",
     url: `${orchestrated}/#/boards/ORC/orchestrator?settings=policy`,
     routes: centreRoutes,
@@ -227,11 +276,12 @@ const screens: {
 ];
 
 for (const theme of ["dark", "light"] as const) {
-  for (const width of [1440, 390]) {
+  for (const width of [1440, 390, 768]) {
     test.describe(`${theme} ${width}`, () => {
       test.use({ colorScheme: theme, viewport: { width, height: 900 } });
 
       for (const screen of screens) {
+        if (!(screen.widths ?? DEFAULT_WIDTHS).includes(width)) continue;
         test(screen.name, async ({ page }) => {
           await page.clock.install({ time: now });
           await page.clock.setFixedTime(now);

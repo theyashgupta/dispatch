@@ -6,6 +6,7 @@ interface CentrePaneProps {
   onValueChange: (value: string) => void;
   conversation: ReactNode;
   terminal: ReactNode;
+  alertSlot: (element: HTMLElement | null) => void;
 }
 
 export function CentrePane({
@@ -13,6 +14,7 @@ export function CentrePane({
   onValueChange,
   conversation,
   terminal,
+  alertSlot,
 }: CentrePaneProps) {
   return (
     <Tabs
@@ -31,6 +33,7 @@ export function CentrePane({
           Terminal
         </TabsTrigger>
       </TabsList>
+      <div ref={alertSlot} />
       <TabsContent
         value="conversation"
         forceMount
