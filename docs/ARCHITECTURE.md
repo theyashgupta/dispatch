@@ -6331,11 +6331,11 @@ the budget per group, the cap on running loops and the usage limit.
 `orchestratorLaunchArgs` in `services/domain/orchestrator-launch.ts`:
 `--model <orchestratorModel of the policy>`, `--mcp-config <file>`, `--strict-mcp-config`,
 `--tools Read Glob Grep`, `--allowedTools mcp__dispatch` (the board tools run without a permission
-dialog), `--permission-mode manual` (a user `defaultMode` cannot widen it) and
-`--disallowedTools Bash Write Edit NotebookEdit`. The `--tools` list is an allowlist of the built-in
+dialog), `--dangerously-skip-permissions` (the session runs unattended, so a permission prompt must
+not stop it) and `--disallowedTools Bash Write Edit NotebookEdit`. The `--tools` list is an allowlist of the built-in
 tools, so a code running tool such as `Monitor` is out, which a deny list alone misses. The configured Settings arguments lose every `--model`,
-`--permission-mode`, `--mcp-config`, tool list and bypass flag first, so the policy values win and no
-bypass flag can reach the session. The orchestrator has the MCP tools and the read-only file tools; it
+`--permission-mode`, `--mcp-config`, tool list and bypass flag first, so the policy values win and the
+argv holds one bypass flag and no permission mode. The orchestrator has the MCP tools and the read-only file tools; it
 cannot run a shell or write a file, so it cannot reach a user route. The MCP config file
 (`<data dir>/orchestrators/<board>-<id>.mcp.json`, directory `0700`, file `0600`) names the `dispatch mcp`
 command and holds no token. The token (`DISPATCH_ORCHESTRATOR_TOKEN`) and `DISPATCH_PORT` go into the

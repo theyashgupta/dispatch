@@ -57,8 +57,8 @@ function stripOwnedFlags(args: string[]): string[] {
  *
  * @remarks
  * The built-in tools are an allowlist of read-only tools, because a deny list misses any
- * other code-running tool. The permission mode is pinned so a user default mode cannot widen it,
- * and the board tools are allowed so each call runs without a permission dialog.
+ * other code-running tool. The session runs unattended, so it skips permission prompts; the
+ * allowlist and the disallowed tools still limit it to read-only and board tools.
  */
 export function orchestratorLaunchArgs(input: {
   model: string;
@@ -76,8 +76,7 @@ export function orchestratorLaunchArgs(input: {
       ...ORCHESTRATOR_BUILTIN_TOOLS,
       "--allowedTools",
       "mcp__dispatch",
-      "--permission-mode",
-      "manual",
+      "--dangerously-skip-permissions",
       "--disallowedTools",
       ...ORCHESTRATOR_DISALLOWED_TOOLS,
     ],

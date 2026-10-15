@@ -452,7 +452,7 @@ void test("remove refuses the main while an extra exists and removes a stopped e
   );
 });
 
-void test("the launch of an orchestrator card carries the policy flags and never a bypass flag", async () => {
+void test("the launch of an orchestrator card carries the policy flags with one bypass flag and no permission mode", async () => {
   const card = store.getCard(record("lead").cardId as string)!;
   const { argv } = await buildLaunch(
     { id: "default", label: "Default" } as never,
@@ -461,7 +461,7 @@ void test("the launch of an orchestrator card carries the policy flags and never
     card,
   );
   const mcp = orchestratorMcpConfigPath(DISPATCH_DATA_DIR, "SBX", "lead");
-  assert.deepEqual(argv.slice(1, 20), [
+  assert.deepEqual(argv.slice(1, 19), [
     "--model",
     "opus",
     "--mcp-config",
@@ -473,8 +473,7 @@ void test("the launch of an orchestrator card carries the policy flags and never
     "Grep",
     "--allowedTools",
     "mcp__dispatch",
-    "--permission-mode",
-    "manual",
+    "--dangerously-skip-permissions",
     "--disallowedTools",
     "Bash",
     "Write",
@@ -482,8 +481,12 @@ void test("the launch of an orchestrator card carries the policy flags and never
     "NotebookEdit",
     "--resume",
   ]);
+  assert.deepEqual(
+    argv.filter((a) => a.includes("dangerously")),
+    ["--dangerously-skip-permissions"],
+  );
   assert.equal(
-    argv.some((a) => a.includes("dangerously")),
+    argv.some((a) => a.startsWith("--permission-mode")),
     false,
   );
   const plain = await buildLaunch(
