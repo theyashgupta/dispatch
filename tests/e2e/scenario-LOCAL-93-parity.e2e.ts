@@ -45,7 +45,6 @@ const PIXEL_ATTRIBUTION: Record<string, string> = {
   "/slack": SHADCN_RESTYLE,
   "/tickets": SHADCN_RESTYLE,
   "/today": SHADCN_RESTYLE,
-  "/workspace": SHADCN_RESTYLE,
   "/workspaces": SHADCN_RESTYLE,
   "/flow": SHADCN_RESTYLE,
   "/board":
@@ -115,7 +114,7 @@ function judgeRoute(
   return { attribution, verdict: pixelsOk && requestsOk ? "pass" : "FAIL" };
 }
 
-const REMOVED_ROUTES = new Set(["/sessions"]);
+const REMOVED_ROUTES = new Set(["/sessions", "/workspace"]);
 const note = makeNote("local-93-parity");
 
 /**
