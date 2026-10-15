@@ -3,10 +3,8 @@ import { test } from "node:test";
 import {
   CENTRE_CONTROL_LABELS,
   contextText,
-  conversationState,
   costText,
   countsText,
-  noSessionSendText,
   orchestratorsTabLabel,
   regionErrorText,
   regionState,
@@ -173,56 +171,6 @@ test("an id that no record has is unknown, and no id is never unknown", () => {
   assert.equal(unknownOrchestrator([main], "ghost"), true);
   assert.equal(unknownOrchestrator([main], "main"), false);
   assert.equal(unknownOrchestrator([main], undefined), false);
-});
-
-test("the conversation state follows the query, the status and the entry count", () => {
-  const base = {
-    pending: false,
-    error: false,
-    status: "ok",
-    entryCount: 2,
-  } as const;
-  assert.equal(
-    conversationState({ ...base, pending: true, status: null }),
-    "loading",
-  );
-  assert.equal(
-    conversationState({ ...base, error: true, status: null }),
-    "error",
-  );
-  assert.equal(
-    conversationState({ ...base, status: "no-transcript" }),
-    "unavailable",
-  );
-  assert.equal(
-    conversationState({ ...base, status: "unreadable", entryCount: 0 }),
-    "unavailable",
-  );
-  assert.equal(conversationState({ ...base, entryCount: 0 }), "empty");
-  assert.equal(conversationState(base), "ready");
-});
-
-test("a session-less conversation is empty with no entry and ready with a decision entry", () => {
-  const base = {
-    pending: false,
-    error: false,
-    status: "no-session",
-    entryCount: 0,
-  } as const;
-  assert.equal(conversationState(base), "empty");
-  assert.equal(conversationState({ ...base, entryCount: 1 }), "ready");
-  assert.equal(conversationState({ ...base, pending: true }), "loading");
-  assert.equal(
-    conversationState({ ...base, pending: true, entryCount: 1 }),
-    "ready",
-  );
-});
-
-test("a send with no session names the orchestrator and ends in one period", () => {
-  assert.equal(
-    noSessionSendText("Main"),
-    "Message failed: Main has no session. Start it first.",
-  );
 });
 
 test("the Orchestrators tab shows its count once the records loaded", () => {

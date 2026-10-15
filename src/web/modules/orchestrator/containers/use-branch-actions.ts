@@ -31,7 +31,7 @@ const NONE: TileFeedback = { result: null, failure: null };
 /**
  * Run the inline actions of the branch tiles and keep the result, the failure line and the reply draft of each tile.
  *
- * @remarks A result or a failure belongs to the state it answered: it hides once the branch has a new `stateSince`, so a stored "Delivered" never labels a question nobody answered. The draft lives here so a tile that remounts on a band change or a tab switch keeps it.
+ * @remarks A result or a failure belongs to the state it answered: it hides once the branch has a new `stateSince`, so a stored "Delivered" never labels a question nobody answered. The draft lives here so a tile that remounts on a band change keeps it.
  */
 export function useBranchActions(board: BoardKey, cards: readonly Card[]) {
   const navigate = useNavigate();

@@ -246,7 +246,6 @@ const ROADMAP_TOOL_FILES = [
   /^src\/server\/services\/infra\/playbooks-seed\.test\.ts$/,
   /^src\/server\/services\/infra\/rulebook\.test\.ts$/,
   /^src\/web\/modules\/card-actions\/domain\/playbook-picker(\.test)?\.ts$/,
-  /^src\/web\/modules\/orchestrator\/domain\/conversation-view\.test\.ts$/,
 ];
 
 /**

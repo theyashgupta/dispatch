@@ -9,8 +9,14 @@ import {
   showSwitcher,
   switcherOptions,
 } from "@/modules/orchestrator/domain/centre-page-state";
-import { STALE_REASON } from "@/modules/orchestrator/domain/centre-model";
+import {
+  STALE_REASON,
+  terminalFor,
+} from "@/modules/orchestrator/domain/centre-model";
+import { isTerminalReady } from "@/modules/orchestrator/domain/centre-pane";
+import { focusTerminalClose } from "@/modules/orchestrator/hooks/focus-entry";
 import { useCentreAlertSlot } from "@/modules/orchestrator/hooks/use-centre-pane";
+import { useCentrePaneMode } from "@/modules/orchestrator/hooks/use-centre-pane-mode";
 import { useCentreControl } from "./use-centre-control";
 import { useCentreSelection } from "./use-centre-selection";
 
@@ -26,6 +32,10 @@ export function CentreControlsContainer({
   const navigate = useNavigate();
   const wide = !useMediaQuery(NARROW_QUERY);
   const [alertSlot] = useCentreAlertSlot();
+  const terminalReady = isTerminalReady(
+    list.data !== undefined && !unknown ? terminalFor(record) : "unavailable",
+  );
+  const { paneMode, setOpen } = useCentrePaneMode(terminalReady);
   const { control, run, failure, retryFailed, pending } = useCentreControl(
     boardKey,
     record,
@@ -67,6 +77,14 @@ export function CentreControlsContainer({
           loading={list.isPending}
           onRun={(kind) => void run(kind)}
         />
+      }
+      onTerminal={
+        paneMode === "closed"
+          ? () => {
+              setOpen(true);
+              focusTerminalClose();
+            }
+          : null
       }
       onSettings={() =>
         void navigate({

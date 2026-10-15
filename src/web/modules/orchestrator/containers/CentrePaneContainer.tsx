@@ -1,39 +1,43 @@
-import { useEffect, useRef } from "react";
-import { NARROW_QUERY } from "../../../../shared/media-queries.js";
-import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
+import { useCallback, useEffect, useRef, type ReactNode } from "react";
+import { SidePanel } from "@/components/ui/side-panel";
 import { CentrePane } from "@/modules/orchestrator/components/CentrePane";
 import { CentreAlertBar } from "@/modules/orchestrator/components/CentreAlertBar";
 import { TerminalFrame } from "@/modules/orchestrator/components/TerminalFrame";
+import {
+  CENTRE_WIDTH_KEY,
+  isTerminalReady,
+} from "@/modules/orchestrator/domain/centre-pane";
 import { regionErrorText } from "@/modules/orchestrator/domain/centre-page-state";
 import {
   terminalFor,
   terminalSrcFor,
 } from "@/modules/orchestrator/domain/centre-model";
-import {
-  useCentreAlertSlot,
-  useCentrePane,
-} from "@/modules/orchestrator/hooks/use-centre-pane";
+import { focusTerminalButton } from "@/modules/orchestrator/hooks/focus-entry";
+import { useCentreAlertSlot } from "@/modules/orchestrator/hooks/use-centre-pane";
+import { useCentrePaneMode } from "@/modules/orchestrator/hooks/use-centre-pane-mode";
 import { useEnsureOrchestratorTerminalMutation } from "@/modules/orchestrator/queries/orchestrator-queries";
-import { ConversationContainer } from "./ConversationContainer";
 import { useCentreSelection } from "./use-centre-selection";
 
 interface CentrePaneContainerProps {
-  inTab?: boolean;
+  canvas: ReactNode;
 }
 
-export function CentrePaneContainer({
-  inTab = false,
-}: CentrePaneContainerProps) {
+export function CentrePaneContainer({ canvas }: CentrePaneContainerProps) {
   const { list, record, unknown } = useCentreSelection();
-  const wide = !useMediaQuery(NARROW_QUERY);
-  const { pane, setPane } = useCentrePane();
+  const loaded = list.data !== undefined && !unknown;
+  const mode = loaded ? terminalFor(record) : "unavailable";
+  const terminalReady = isTerminalReady(mode);
+  const { paneMode, expanded, setExpanded, setOpen } =
+    useCentrePaneMode(terminalReady);
+  const close = useCallback(() => {
+    setOpen(false);
+    focusTerminalButton();
+  }, [setOpen]);
   const [, setAlertSlot] = useCentreAlertSlot();
   const { mutateAsync: ensureTerminal } =
     useEnsureOrchestratorTerminalMutation();
   const spawnedFor = useRef<string | null>(null);
 
-  const loaded = list.data !== undefined && !unknown;
-  const mode = loaded ? terminalFor(record) : "unavailable";
   const session = record?.session ?? null;
   const sessionCard = session?.cardId;
   const sessionId = session?.activeSessionId ?? "";
@@ -44,7 +48,7 @@ export function CentrePaneContainer({
     session.state !== "lost";
 
   useEffect(() => {
-    if (wide === inTab || !needsTerminal || sessionCard === undefined) {
+    if (!needsTerminal || sessionCard === undefined) {
       spawnedFor.current = null;
       return;
     }
@@ -54,9 +58,8 @@ export function CentrePaneContainer({
     void ensureTerminal(sessionCard).then((result) => {
       if (!result.ok && spawnedFor.current === key) spawnedFor.current = null;
     });
-  }, [wide, inTab, needsTerminal, sessionCard, sessionId, ensureTerminal]);
+  }, [needsTerminal, sessionCard, sessionId, ensureTerminal]);
 
-  if (wide === inTab) return null;
   const src = terminalSrcFor(mode, record);
   const frame =
     list.data === undefined && list.error !== null ? (
@@ -74,12 +77,27 @@ export function CentrePaneContainer({
       />
     );
   return (
-    <CentrePane
-      value={pane}
-      onValueChange={setPane}
-      conversation={<ConversationContainer />}
-      terminal={frame}
-      alertSlot={setAlertSlot}
+    <SidePanel
+      placement="inline"
+      title="Terminal"
+      handleLabel="Resize terminal"
+      storageKey={CENTRE_WIDTH_KEY}
+      open={paneMode !== "closed"}
+      onClose={close}
+      expanded={paneMode === "expanded"}
+      sheet={paneMode === "sheet"}
+      main={canvas}
+      panel={
+        <CentrePane
+          terminal={frame}
+          alertSlot={setAlertSlot}
+          expanded={paneMode === "expanded"}
+          onToggleExpand={() => setExpanded(!expanded)}
+          onClose={close}
+          sheet={paneMode === "sheet"}
+          terminalReady={terminalReady}
+        />
+      }
     />
   );
 }
