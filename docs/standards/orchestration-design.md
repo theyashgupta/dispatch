@@ -188,6 +188,8 @@ Amendment, 2026-10-10 (LOCAL-98): `crossSessionInbound` is a setting now, not a 
 | `budgetPerGroup`     | a cost limit per group, or none                                                                                                                                                 | none                                            |
 | `supervisor`         | `on` or `off`                                                                                                                                                                   | `off` on the default board, `on` on a new board |
 
+Under `roadmapApproval` `rules` and `all`, the server stores a new `ticket_proposal` or `plan` item answered with `approve`, so the orchestrator does not wait for the user (LOCAL-128).
+
 Usage credits are not a value of any field. With `supervisor` off, the board behaves as today, and it cannot start an orchestrator (D-3).
 
 **Reason:** the manual run changed four of these values by a user rule (model, cap, handoff and the usage rule, research A20), and a board with no policy change must behave as today.

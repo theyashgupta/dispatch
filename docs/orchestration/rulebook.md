@@ -41,7 +41,10 @@ Act on an `intake_submitted` event only when its data.orchestratorId is your orc
 
 Read every ticket in full with `get_card`. Do not judge a ticket from its title.
 
-A goal with no tickets becomes a decision item of kind `ticket_proposal` first. Call `create_ticket` only after the user approves the proposal. Give `create_ticket` the proposal id and the index of the ticket.
+A goal with no tickets becomes a decision item of kind `ticket_proposal` first. Give `create_ticket` the proposal id and the index of the ticket. Read the state of the item that `create_decision_item` returns:
+
+- When it is `answered` with `approve`, call `create_ticket` immediately. The server answers the proposal when roadmapApproval is `rules` or `all`.
+- When it is `open`, call `create_ticket` only after the user approves the proposal. This occurs when roadmapApproval is `ask`.
 
 A decision record on the main branch wins over ticket text. Record each difference in `write_state`.
 
@@ -111,8 +114,8 @@ Put the entries in this order: quick fixes first, then single features, then gro
 
 Read roadmapApproval in `get_policy`:
 
-- When it is `ask`, call `wait_for_event` and wait for `decision_answered`.
-- When it is `rules` or `all`, write the plan with `write_state` and proceed.
+- When it is `ask`, the item is `open`. Call `wait_for_event` and wait for `decision_answered`.
+- When it is `rules` or `all`, the server answers the item with `approve` and the item comes back `answered`. Write the plan with `write_state` and proceed. Do not wait.
 
 Act on an answer only when its data.orchestratorId is your orchestrator id.
 
@@ -326,7 +329,7 @@ The release session publishes only when the shipRights of the board are `merge`.
 Raise a decision item only when a person must act. These cases need a person:
 
 - The plan, when roadmapApproval is `ask`.
-- A ticket proposal.
+- A ticket proposal, when roadmapApproval is `ask`.
 - A roadmap approval, when roadmapApproval is `ask`.
 - A ship, when shipRights is `none` or `open_prs`.
 - A human gate: an OS permission prompt, an account login, or a key in the vault.
@@ -334,7 +337,7 @@ Raise a decision item only when a person must act. These cases need a person:
 
 Give 2 to 8 options. Mark one option as the recommended option.
 
-Never answer your own decision item.
+Never answer your own decision item. When roadmapApproval is `rules` or `all`, the server answers a `ticket_proposal` or `plan` item. You do not answer it.
 
 Do not use a decision item to report status. Report status in `write_state`.
 
