@@ -5121,9 +5121,8 @@ the sidebar is collapsed the text stays in the DOM with the `sr-only` class so t
 `textContent` is always the complete string.
 The status precedence itself is unchanged and homed by `SYNC-04` above. The footer, top to bottom:
 sync status, the account usage chip (always compact at this width), New ticket (an outline `Button`
-with a `--surface-card` resting fill that lifts to `--surface-card-hover`), the Activity drawer toggle
-(`id="activity-toggle"`, the drawer's focus-return target) beside the collapse toggle, and the
-Settings row.
+with a `--surface-card` resting fill that lifts to `--surface-card-hover`), the collapse toggle, and
+the Settings row.
 
 **Responsive rule.** At or below 1023px (the breakpoint the board carousel and
 the detail-panel takeover already share) the sidebar renders collapsed regardless of the
@@ -5139,7 +5138,7 @@ scrolling strip above the content (`web/modules/settings/views/SettingsView.tsx`
 **Retired with the strip.** The strip cascade invariant (its two token cascades, formerly the
 eighteenth NEW-series ID) and its file-scoped check were deleted together with the strip component, and `FROZEN_COUNT` in `scripts/check-invariants.mjs`
 moved from 150 to 149 in the same commit. The three strip tokens (height, padding, grid
-columns) are gone; the banner, the drawer header and the sidebar identity row
+columns) are gone; the banner and the sidebar identity row
 read `--page-header-height` (52px, stepped to 44px below 768px for the same card-row reason the
 strip once recorded). The strip's zone grid, its width-dependent template, the narrow-width
 wordmark removal and the view-switch rendering (Candidate C and its retune) are history, recorded
@@ -5155,7 +5154,7 @@ to activatable targets);
 and `INBOX_SHORTCUTS`. The inert rule: a plain key never fires while the user types in an input, textarea, select or
 contentEditable, with a modifier held, outside the owning view, or while a Modal or a row menu is
 open; a meta binding fires only with Cmd or Ctrl and never with Shift. The global keys are also
-inert while the Activity drawer or the nav sheet is open and before setup finishes, and the board
+inert while the nav sheet is open and before setup finishes, and the board
 keys are inert while the undocked detail panel is open. Closing the palette, the cheat sheet or
 New ticket returns focus to the element that had it, unless a palette command ran.
 The palette (`modules/shell/components/CommandPalette.tsx`) is a shadcn `Dialog` over `cmdk`, so its
