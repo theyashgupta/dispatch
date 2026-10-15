@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { buildAttentionQueue } from "./attention-queue.js";
 import { DEFAULT_BOARD_KEY, parseBoardKey } from "./board-key.js";
+import { decisionViews } from "./decision-view.js";
 import type {
   Card,
   DecisionItem,
@@ -525,4 +526,61 @@ test("a group in Needs Input gives one item, not one per mirrored member", () =>
     items.map((i) => [i.kind, i.cardId]),
     [["needs_input", "g1"]],
   );
+});
+
+test("auto-answered ticket_proposal and plan items stay out of the queue and the decision views", () => {
+  const base = {
+    boardKey: DEFAULT_BOARD_KEY,
+    cardId: "id-GROUP-1",
+    orchestratorId: "o",
+    options: [],
+    recommendedOptionId: null,
+    createdAt: minutesAgo(60),
+  };
+  const autoAnswered = {
+    ...base,
+    state: "answered" as const,
+    answer: {
+      optionId: "approve",
+      note: "Approved by the board policy (roadmapApproval: all).",
+    },
+    answeredAt: minutesAgo(60),
+  };
+  const items: DecisionItem[] = [
+    {
+      ...autoAnswered,
+      id: "d-proposal",
+      kind: "ticket_proposal",
+      question: "Proposal?",
+      proposal: {
+        tickets: [{ title: "t", description: "d" }],
+        usedIndexes: [],
+      },
+    },
+    {
+      ...autoAnswered,
+      id: "d-plan",
+      kind: "plan",
+      question: "Plan?",
+      plan: {
+        entries: [{ ref: "r", playbook: "p", order: 1, size: "small" }],
+      },
+    },
+    {
+      ...base,
+      id: "d-ruling",
+      kind: "ruling",
+      question: "Ruling?",
+      state: "open",
+      answer: null,
+      answeredAt: null,
+    },
+  ];
+  const queue = build([card("GROUP-1")], items);
+  assert.equal(queue.length, 1);
+  assert.equal(queue[0]?.kind, "decision");
+  assert.equal(queue[0]?.id, "decision:d-ruling");
+  const views = decisionViews(items, new Map(), NOW.getTime());
+  assert.equal(views.length, 1);
+  assert.equal(views[0]?.id, "d-ruling");
 });
