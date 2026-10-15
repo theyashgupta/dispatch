@@ -37,6 +37,7 @@ import { Button } from "@/components/ui/button";
 import { Card, cardVariants } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { isMultiSelectable } from "@/modules/board/domain/drag-selection";
+import { showsSessionRecovery } from "@/modules/board/domain/session-recovery";
 import { GroupPrRow } from "./GroupPrRow";
 import { MoveToPicker } from "./MoveToPicker";
 
@@ -125,6 +126,7 @@ export function CardView({
   const showRepo = new Set(prs.map((pr) => pr.repo)).size > 1;
   const selectable = isMultiSelectable(card);
   const needsAttention = getNeedsAttention(card);
+  const showRecovery = showsSessionRecovery(card);
   const priorityDot = isGroup ? undefined : PRIORITY_DOT[card.priority];
   const memberCount = members?.length ?? 0;
   const startError = card.startError;
@@ -143,10 +145,12 @@ export function CardView({
         {`Provisioning${sessionCountSuffix}`}
       </Badge>
     ) : card.sessionLost === true ? (
-      <Badge tone="danger" title={sessionChipTitle("Lost")}>
-        <TriangleAlert aria-hidden="true" />
-        {`Lost${sessionCountSuffix}`}
-      </Badge>
+      showRecovery ? (
+        <Badge tone="danger" title={sessionChipTitle("Lost")}>
+          <TriangleAlert aria-hidden="true" />
+          {`Lost${sessionCountSuffix}`}
+        </Badge>
+      ) : null
     ) : card.tmuxSession != null ? (
       <Badge tone="success" title={sessionChipTitle("Live")}>
         <Activity aria-hidden="true" />
@@ -356,7 +360,7 @@ export function CardView({
         <div className="mt-(--space-xs) text-sm font-semibold text-muted-foreground">
           {card.provisioningStep}
         </div>
-      ) : card.sessionLost === true ? (
+      ) : card.sessionLost === true && showRecovery ? (
         <div className="mt-(--space-xs) flex flex-col gap-(--space-xs)">
           <CardNotice icon>Session lost</CardNotice>
 
