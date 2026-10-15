@@ -11,24 +11,3 @@ export const CONTINUE_LEADS = {
   resume: "The session was restarted.",
   usage_limit: "The usage limit has reset.",
 } as const;
-
-const DISPATCH_PREFIXES = [
-  DISPATCH_WAKE_PREFIX,
-  HANDOFF_REQUEST_TITLE,
-  HANDOFF_CANCEL_LINE,
-  ORCHESTRATOR_RESUME_PREFIX,
-  ...Object.values(CONTINUE_LEADS),
-];
-
-/**
- * True when a session line is one that Dispatch typed: a wake, handoff, resume, continue or kickoff line.
- *
- * @remarks The kickoff starts with the editable playbook body, so it is found by the orchestrator
- * sentence inside it, not by its first characters.
- */
-export function isDispatchLine(text: string): boolean {
-  return (
-    DISPATCH_PREFIXES.some((prefix) => text.startsWith(prefix)) ||
-    text.includes(ORCHESTRATOR_KICKOFF_LEAD)
-  );
-}

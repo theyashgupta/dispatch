@@ -126,6 +126,11 @@ void test("list answers an empty board", async () => {
   assert.deepEqual(reply.body, { orchestrators: [] });
 });
 
+void test("the conversation route is gone and answers 404", async () => {
+  const res = await fetch(`${base}${R}/main/conversation`);
+  assert.equal(res.status, 404);
+});
+
 void test("add accepts a main and an extra and lists both with their session view", async () => {
   const main = await call("POST", R, {
     id: "lead",

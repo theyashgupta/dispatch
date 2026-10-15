@@ -2160,19 +2160,6 @@ export interface DecisionItem {
   plan?: { entries: PlanEntry[] };
 }
 
-export interface ConversationMessage {
-  id: string;
-  at: string | null;
-  role: "user" | "orchestrator" | "system";
-  text: string;
-}
-
-export interface OrchestratorConversation {
-  status: "ok" | "no-session" | "no-transcript" | "unreadable";
-  messages: ConversationMessage[];
-  truncated: boolean;
-}
-
 export interface SessionMeters {
   contextPercent: number | null;
   model: string | null;

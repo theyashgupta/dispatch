@@ -16,8 +16,8 @@ export const ORCHESTRATOR_REPLY = "Noted. CEN-1 goes first.";
 /**
  * The main orchestrator replay: raise a plan decision with two entries, wait for the answer, then start both cards.
  *
- * @remarks The fake TUI answers every typed line with the same reply, so the kickoff and the user comment each leave
- * a user entry and an orchestrator reply in the transcript that the conversation route reads.
+ * @remarks The fake TUI answers every typed line with the same reply, so the kickoff leaves a user entry and an
+ * orchestrator reply in the transcript.
  */
 export function centreScenario(plan: CentrePlan): Record<string, unknown> {
   const waits = Array.from({ length: plan.waits }, () =>
