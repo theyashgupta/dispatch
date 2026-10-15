@@ -246,6 +246,22 @@ const REFUSED: [string, Record<string, unknown>][] = [
   ],
   [
     "start_ship",
+    { cardId: ID, repository: "/r", branches: [{ ...BRANCH, name: "a b" }] },
+  ],
+  [
+    "start_ship",
+    { cardId: ID, repository: "/r", branches: [{ ...BRANCH, name: "feat/" }] },
+  ],
+  [
+    "start_ship",
+    { cardId: ID, repository: "/r", branches: [{ ...BRANCH, name: "x.lock" }] },
+  ],
+  [
+    "start_ship",
+    { cardId: ID, repository: "/r", branches: [{ ...BRANCH, name: "a@{b" }] },
+  ],
+  [
+    "start_ship",
     {
       cardId: ID,
       repository: "/r",
@@ -367,6 +383,19 @@ describe("mcp tool table against the server schemas", () => {
       PLAN_ENTRY,
       { ...PLAN_ENTRY, ref: "Calendar sync", order: 2, size: "large" },
     ]);
+    assert.equal(mcpAccepts(tool, input), true, "mcp");
+    assert.equal(serverAccepts(tool, input), true, "server");
+  });
+
+  it("start_ship: a feature branch name passes the MCP and the server schema", () => {
+    const tool = byName("start_ship");
+    const input = {
+      cardId: ID,
+      repository: "/r",
+      branches: [
+        { ...BRANCH, name: "feat/LOCAL-131-unit-1-dashboards-dropdown" },
+      ],
+    };
     assert.equal(mcpAccepts(tool, input), true, "mcp");
     assert.equal(serverAccepts(tool, input), true, "server");
   });
