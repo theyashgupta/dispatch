@@ -13,6 +13,7 @@ const env = isolateEnv();
 const { store } = await import("../../store/board.store.js");
 const { answerDecisionItem, createDecisionItem } =
   await import("./decision-items.js");
+const { createOrchestratorTicket } = await import("./orchestrator-tickets.js");
 const listDecisionItems = store.listDecisionItems.bind(store);
 
 const SBX = parseBoardKey("SBX") as BoardKey;
@@ -283,4 +284,158 @@ void test("createDecisionItem refuses a plan on another kind and a plan item wit
     );
   }
   assert.equal(listDecisionItems(SBX).length, before);
+});
+
+const PLAN = {
+  entries: [{ ref: "CEN-1", playbook: "p", order: 1, size: "small" as const }],
+};
+const TICKETS = [{ title: "t", description: "d" }];
+const AUTO_KINDS = [
+  { kind: "ticket_proposal" as const, tickets: TICKETS },
+  { kind: "plan" as const, plan: PLAN },
+];
+const INFRA = record("infra", "extra", [minted.card.id]);
+
+async function withMode(
+  mode: "ask" | "rules" | "all",
+  run: () => Promise<void> | void,
+): Promise<void> {
+  await store.setBoardPolicy(SBX, {
+    ...store.getBoard(SBX)!.policy,
+    roadmapApproval: mode,
+  });
+  try {
+    await run();
+  } finally {
+    await store.setBoardPolicy(SBX, {
+      ...store.getBoard(SBX)!.policy,
+      roadmapApproval: "ask",
+    });
+  }
+}
+
+const eventsFor = (id: string, kind: string) =>
+  store
+    .listOrchestrationEvents(SBX, 0, 1000)
+    .filter((e) => e.kind === kind && e.data.decisionId === id);
+
+void test("under roadmapApproval all or rules a ticket_proposal or plan item is stored answered with approve and records decision_answered", async () => {
+  for (const mode of ["all", "rules"] as const) {
+    await withMode(mode, () => {
+      for (const extra of AUTO_KINDS) {
+        const item = createDecisionItem(CALLER, {
+          ...extra,
+          question: "q",
+          options: OPTIONS,
+        });
+        const label = `${mode} ${extra.kind}`;
+        assert.equal(item.state, "answered", label);
+        assert.equal(item.answer?.optionId, "approve", label);
+        assert.ok(item.answer?.note?.includes(mode), label);
+        assert.equal(item.answeredAt, item.createdAt, label);
+        assert.deepEqual(store.getDecisionItem(item.id), item, label);
+        const answered = eventsFor(item.id, "decision_answered");
+        assert.equal(answered.length, 1, label);
+        assert.equal(answered[0]?.data.orchestratorId, "orc-sbx", label);
+        assert.equal(answered[0]?.data.optionId, "approve", label);
+        assert.equal(eventsFor(item.id, "decision_raised").length, 0, label);
+      }
+    });
+  }
+});
+
+void test("under roadmapApproval ask a ticket_proposal or plan item stays open and records decision_raised", async () => {
+  await withMode("ask", () => {
+    for (const extra of AUTO_KINDS) {
+      const item = createDecisionItem(CALLER, {
+        ...extra,
+        question: "q",
+        options: OPTIONS,
+      });
+      assert.equal(item.state, "open", extra.kind);
+      assert.equal(item.answer, null, extra.kind);
+      assert.equal(item.answeredAt, null, extra.kind);
+      assert.equal(eventsFor(item.id, "decision_raised").length, 1);
+      assert.equal(eventsFor(item.id, "decision_answered").length, 0);
+    }
+  });
+});
+
+void test("under roadmapApproval all a ruling or ship_failure item stays open", async () => {
+  await withMode("all", () => {
+    for (const kind of ["ruling", "ship_failure"] as const) {
+      const item = createDecisionItem(CALLER, {
+        kind,
+        question: "q",
+        options: OPTIONS,
+      });
+      assert.equal(item.state, "open", kind);
+      assert.equal(eventsFor(item.id, "decision_raised").length, 1, kind);
+      assert.equal(eventsFor(item.id, "decision_answered").length, 0, kind);
+    }
+  });
+});
+
+void test("a policy override of ask on the owner record keeps the item open under board all", async () => {
+  await store.setBoardOrchestrators(SBX, [
+    record("main", "main"),
+    { ...INFRA, policyOverride: { roadmapApproval: "ask" as const } },
+  ]);
+  try {
+    await withMode("all", () => {
+      const overridden = createDecisionItem(
+        { boardKey: SBX, orchestratorId: "main" },
+        {
+          cardId: memberA.id,
+          kind: "plan",
+          question: "q",
+          options: OPTIONS,
+          plan: PLAN,
+        },
+      );
+      assert.equal(overridden.orchestratorId, "infra");
+      assert.equal(overridden.state, "open");
+      const plain = createDecisionItem(CALLER, {
+        kind: "plan",
+        question: "q",
+        options: OPTIONS,
+        plan: PLAN,
+      });
+      assert.equal(plain.state, "answered");
+    });
+  } finally {
+    await store.setBoardOrchestrators(SBX, [
+      record("main", "main"),
+      record("infra", "extra", [minted.card.id]),
+    ]);
+  }
+});
+
+void test("create_ticket works at once on an auto-approved proposal and is refused with proposal-open under ask", async () => {
+  const MAIN = { boardKey: SBX, orchestratorId: "main" };
+  await withMode("all", async () => {
+    const item = createDecisionItem(MAIN, {
+      kind: "ticket_proposal",
+      question: "q",
+      options: OPTIONS,
+      tickets: TICKETS,
+    });
+    const card = await createOrchestratorTicket(MAIN, {
+      proposalItemId: item.id,
+      index: 0,
+    });
+    assert.equal(card.title, "t");
+  });
+  await withMode("ask", async () => {
+    const item = createDecisionItem(MAIN, {
+      kind: "ticket_proposal",
+      question: "q",
+      options: OPTIONS,
+      tickets: TICKETS,
+    });
+    await assert.rejects(
+      createOrchestratorTicket(MAIN, { proposalItemId: item.id, index: 0 }),
+      (err) => err instanceof ConflictError && err.code === "proposal-open",
+    );
+  });
 });
