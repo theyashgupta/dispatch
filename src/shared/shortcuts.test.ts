@@ -5,7 +5,6 @@ import {
   bindShortcuts,
   GLOBAL_SHORTCUTS,
   INBOX_SHORTCUTS,
-  SESSIONS_SHORTCUTS,
   resolveShortcut,
   type ShortcutBinding,
   type ShortcutEvent,
@@ -123,17 +122,6 @@ test("Enter and Space stay with a focused button or link while letters still fir
   );
 });
 
-test("the Sessions shortcut table lists j, k and Enter with labels", () => {
-  assert.deepEqual(
-    SESSIONS_SHORTCUTS.map((s) => [s.key, s.label]),
-    [
-      ["j", "Next session"],
-      ["k", "Previous session"],
-      ["Enter", "Open"],
-    ],
-  );
-});
-
 const meta: ShortcutBinding[] = [
   { key: "k", label: "Command palette", meta: true, run: () => {} },
   { key: "j", label: "Next card", run: () => {} },
@@ -194,12 +182,7 @@ test("the global and board tables list each key once, board keys 1 to 7 follow t
     "7",
   ]);
   assert.equal(BOARD_SHORTCUTS[7]?.label, "Move to Needs Input");
-  for (const table of [
-    GLOBAL_SHORTCUTS,
-    BOARD_SHORTCUTS,
-    INBOX_SHORTCUTS,
-    SESSIONS_SHORTCUTS,
-  ]) {
+  for (const table of [GLOBAL_SHORTCUTS, BOARD_SHORTCUTS, INBOX_SHORTCUTS]) {
     const keys = table.map((b) => `${b.meta === true ? "meta+" : ""}${b.key}`);
     assert.equal(new Set(keys).size, keys.length);
     for (const b of table) assert.ok(b.label.length > 0 && b.key.length > 0);

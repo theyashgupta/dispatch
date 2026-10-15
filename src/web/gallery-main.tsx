@@ -1057,7 +1057,7 @@ function Gallery() {
                             </SidebarMenuButton>
                           </SidebarMenuItem>
                           <SidebarMenuItem>
-                            <SidebarMenuButton>Sessions</SidebarMenuButton>
+                            <SidebarMenuButton>Inbox</SidebarMenuButton>
                           </SidebarMenuItem>
                           <SidebarMenuItem>
                             <SidebarMenuButton>Settings</SidebarMenuButton>

@@ -24,7 +24,6 @@ export const NAV_ITEMS: readonly NavItem[] = [
   { page: "today", label: "Today", group: "Home" },
   { page: "inbox", label: "Inbox", group: "Home" },
   { page: "ask", label: "Ask", group: "Home" },
-  { page: "sessions", label: "Sessions", group: "Work" },
   { page: "workspace", label: "Workspace", group: "Work" },
   { page: "activity", label: "Activity", group: "Work" },
   {
