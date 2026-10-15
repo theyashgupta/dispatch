@@ -235,16 +235,15 @@ Mount prefix: `/api`.
 
 Mount prefix: `/api`.
 
-| Method | Path                                              | Auth | Purpose                                                                                                                                                                                                  |
-| ------ | ------------------------------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/api/boards/:key/orchestrators`                  | User | List the orchestrators of a board with their session views.                                                                                                                                              |
-| POST   | `/api/boards/:key/orchestrators`                  | User | Add an orchestrator record, main or extra.                                                                                                                                                               |
-| PATCH  | `/api/boards/:key/orchestrators/:id`              | User | Edit the name, scope or policy override of an orchestrator.                                                                                                                                              |
-| DELETE | `/api/boards/:key/orchestrators/:id`              | User | Remove a stopped orchestrator and revoke its token.                                                                                                                                                      |
-| POST   | `/api/boards/:key/orchestrators/:id/start`        | User | Start the session of a stopped orchestrator.                                                                                                                                                             |
-| POST   | `/api/boards/:key/orchestrators/:id/stop`         | User | Stop a running orchestrator.                                                                                                                                                                             |
-| POST   | `/api/boards/:key/orchestrators/:id/resume`       | User | Bring an orchestrator back after a lost session or a Claude exit.                                                                                                                                        |
-| GET    | `/api/boards/:key/orchestrators/:id/conversation` | User | Read the conversation of an orchestrator from its transcript: user turns, text replies and the lines that Dispatch typed, in order, with no tool calls. `limit` 1 to 200. Refuses an orchestrator token. |
+| Method | Path                                        | Auth | Purpose                                                           |
+| ------ | ------------------------------------------- | ---- | ----------------------------------------------------------------- |
+| GET    | `/api/boards/:key/orchestrators`            | User | List the orchestrators of a board with their session views.       |
+| POST   | `/api/boards/:key/orchestrators`            | User | Add an orchestrator record, main or extra.                        |
+| PATCH  | `/api/boards/:key/orchestrators/:id`        | User | Edit the name, scope or policy override of an orchestrator.       |
+| DELETE | `/api/boards/:key/orchestrators/:id`        | User | Remove a stopped orchestrator and revoke its token.               |
+| POST   | `/api/boards/:key/orchestrators/:id/start`  | User | Start the session of a stopped orchestrator.                      |
+| POST   | `/api/boards/:key/orchestrators/:id/stop`   | User | Stop a running orchestrator.                                      |
+| POST   | `/api/boards/:key/orchestrators/:id/resume` | User | Bring an orchestrator back after a lost session or a Claude exit. |
 
 ### `routes/intake.route.ts`
 
@@ -2340,12 +2339,13 @@ identity-stable across four separate mutations:
   region stays a byte-identical sibling at the SAME index regardless, so toggling Details never
   reorders the tree and never remounts the iframe. Any refactor that moves the iframe's position
   (or wraps it conditionally) reintroduces the remount.
-- **Fullscreen is a STYLE-ONLY change, never a remount.** Fullscreen swaps ONLY the width and left
-  border classes of the enclosing `<aside>` in `PanelFrame.tsx` (`w-screen`, or the
-  `--panel-live-width` width with `border-l`); `top`, `right`, `height`, the `translate-x-*` class and
-  the `transition-[translate]` list (which names translate ONLY) stay constant, so the width and border
-  change snaps instantly and the iframe reflows exactly ONCE with no unmount and no WebSocket reconnect. Fullscreen
-  is per-open React state, never persisted.
+- **Fullscreen is a STYLE-ONLY change, never a remount.** The side panel shell `components/ui/side-panel.tsx`
+  draws the `<aside>`. Fullscreen (the `expanded` prop) swaps ONLY the geometry classes of that `<aside>`: the
+  expanded geometry (`top`, `left`, `width` and `height` from `--chrome-top` and `--nav-current`),
+  or the `--panel-live-width` width with `border-l`; the `translate-x-*` class and the `transition-[translate]`
+  list (which names translate ONLY) stay constant, so the change snaps instantly and the iframe reflows exactly ONCE
+  with no unmount and no WebSocket reconnect. Expanded fills the main area to the right of the side navbar and
+  below the page header, so the side navbar stays visible. Fullscreen is per-open React state, never persisted.
 - **The iframe is NEVER keyed, and reset-on-open is done in render, not by remount.** A `key=` on
   the panel or a remount to reset per-open state (Details collapsed, fullscreen off) is deliberately
   NOT used — it would remount the ttyd iframe. Instead the panel tracks the previous card id in state
@@ -2375,7 +2375,7 @@ identity-stable across four separate mutations:
   `window` at all when the release happened to land over the iframe's rendered area — the drag
   would silently abandon mid-resize, leaving `document.body.style.cursor` stuck and the orphaned
   listeners hijacking the next unrelated click with stale coordinates. `onPointerDown` in
-  `use-panel-resize.ts` now appends a transparent, full-viewport `fixed` div at `document.body` (max
+  `use-side-panel-width.ts` now appends a transparent, full-viewport `fixed` div at `document.body` (max
   `z-index`, `col-resize` cursor) for the drag's duration only, mounted imperatively on `pointerdown`,
   always removed by a single idempotent `teardown()` shared across `pointerup`, `pointercancel`,
   mid-drag Escape (which cancels the drag and restores the pre-drag width instead of closing the
@@ -2385,23 +2385,23 @@ identity-stable across four separate mutations:
   inside the `<aside>` or the iframe subtree, and never persists once the drag ends (PANEL-03
   untouched: no key/re-parent/position change on the panel itself). Because the overlay is only
   ever removed by a delivered end event, the drag must NEVER start for a non-primary button
-  (`startsResizeDrag` guard from `panel-width.ts`, first statement): a secondary click opens the native context menu,
+  (`startsResizeDrag` guard from `src/shared/side-panel-width.ts`, first statement): a secondary click opens the native context menu,
   Chrome then delivers neither `pointerup` nor `pointercancel` for that pointer, and the max-z
   overlay would strand permanently — shielding every element in the app until a full reload. The
-  handle itself is not rendered in fullscreen (`DetailPanelContainer` renders it only under `!docked && !effectiveFullscreen`): a
+  handle itself is not rendered in fullscreen (`side-panel.tsx` renders it only in side mode: open, not docked, not expanded, not a sheet): a
   fullscreen drag would visibly shrink the `100vw` panel then snap back while persisting an
   invisible width, and its absence means a drag can never span a fullscreen transition — the
   pointerup width write is always the plain `clamp()` form.
 
   Touch drags on this handle have two distinct, separately-diagnosed root causes, not one. The
-  handle renders only under `!docked && !effectiveFullscreen`. First, below the `CAROUSEL_QUERY`
+  handle renders only in side mode. First, below the `CAROUSEL_QUERY`
   breakpoint (`max-width: 1023px`) in the UNDOCKED panel, the handle deliberately does not exist:
-  that query makes `takeover` true, which makes `effectiveFullscreen` true, so the guard fails via
-  its `!effectiveFullscreen` term. The panel is `100vw` there, so there is no width to trade — this
+  that query makes `takeover` true, which makes the panel a full-width sheet, so the guard fails via
+  its not-a-sheet term. The panel is `100vw` there, so there is no width to trade. This
   is intended behavior, not a defect, and the
   breakpoint was deliberately not lowered to add one. In DOCKED (Orca) mode the handle is absent
   at every width instead, via the guard's `!docked` term — `takeover` is `false` in docked mode
-  regardless of viewport, so `effectiveFullscreen`/`CAROUSEL_QUERY` play no part there. Second, at
+  regardless of viewport, so the sheet mode and `CAROUSEL_QUERY` play no part there. Second, at
   `>=1024px` in the undocked panel the handle DID render but declared no
   `touch-action`, which was the actual bug: with the default `auto`, the browser is free to decide
   mid-gesture that a finger's perpendicular jitter on an 8px target is an attempted page pan, take
@@ -2435,8 +2435,8 @@ identity-stable across four separate mutations:
   The TAP-THRESHOLD branch does NOT use `(pointer: coarse)` — unlike the styling above, an
   8px-vs-3px threshold that fires on the wrong pointer type is not harmless (it would silently
   raise the threshold for a mouse drag on the same hybrid hardware), so
-  `onPointerDown` in `use-panel-resize.ts` reads `e.pointerType` once at `pointerdown` and captures it as
-  `pointerType` for that drag's closures (`isTapGesture` in `panel-width.ts` takes it). This is per-drag capture, not the per-`pointermove`
+  `onPointerDown` in `use-side-panel-width.ts` reads `e.pointerType` once at `pointerdown` and captures it as
+  `pointerType` for that drag's closures (`isTapGesture` in `src/shared/side-panel-width.ts` takes it). This is per-drag capture, not the per-`pointermove`
   `pointerType` sniffing this section warns against elsewhere — the value is fixed for the whole
   gesture, exactly like `isCoarsePointer` is fixed for the whole render.
 
@@ -2528,13 +2528,13 @@ panel would double-POST the same spawn. The POST fires at most once per card ope
 - **Reset on close.** Closing the panel (card → null) resets the guard so re-opening re-triggers a
   fresh spawn; switching directly to a different card re-fires because the id no longer matches.
 
-**Two-stage Esc, and Esc-inside-terminal reaches claude (`PANEL-03`).** A `keydown` listener bound on
-`window` (no trap, no capture, so it never intercepts other keystrokes) implements two-stage Esc: in
-fullscreen the first Esc exits fullscreen and the panel STAYS open, otherwise Esc closes the panel;
-`fullscreen` is in the effect deps so the handler always reads the current value. Because the ttyd
-iframe is a SEPARATE browsing context, an Esc typed while focus is inside the terminal reaches claude
-and never fires this window handler — the two-stage close only responds to Esc pressed outside the
-terminal.
+**Esc closes the panel, and Esc-inside-terminal reaches claude (`PANEL-03`).** A `keydown` listener bound on
+`window` (no trap, no capture, so it never intercepts other keystrokes) closes the panel in every non-docked
+mode (side, expanded and sheet); a docked panel ignores Esc, and an Esc during a resize drag cancels the drag
+first. The decision lives in `sidePanelEscapeAction` (`src/shared/side-panel-escape.ts`) and the listener
+lives in `components/ui/side-panel.tsx`. Because the ttyd iframe is a SEPARATE browsing context, an Esc typed
+while focus is inside the terminal reaches claude and never fires this window handler, so the close only
+responds to Esc pressed outside the terminal.
 
 **Open-editor path (`PANEL-04`).** Live-session cards additionally offer "Code"/"Cursor" buttons that
 open the card's workspace folder in VS Code or Cursor. Availability is detected ONCE at boot:
@@ -4869,10 +4869,10 @@ seven `--src-*` source colors and the "active sidebar row" accent job are ratifi
 sets `--nav-current` (the live sidebar width: `var(--nav-width)`, `var(--nav-width-collapsed)`, or `0px`
 when the sidebar becomes a phone sheet) with classes on its root element. The hook
 `hooks/use-chrome-top.ts` sets `--chrome-top` (the measured height of the top bar, banner and
-page header) on the same element with `style.setProperty`. The docked (Orca) `PanelFrame.tsx` reads
-both: `top: var(--chrome-top)`, `left: calc(var(--nav-current, 0px) + var(--orca-nav-width))` and
-`width: calc(100% - var(--nav-current, 0px) - var(--orca-nav-width))`, so collapsing the sidebar
-shifts the docked panel by style values alone and never remounts the terminal iframe. Measured at
+page header) on the same element with `style.setProperty`. The expanded `<aside>` in `components/ui/side-panel.tsx` reads
+both: `top: var(--chrome-top)`, `left: var(--nav-current, 0px)` and
+`width: calc(100% - var(--nav-current, 0px))`. The docked (Orca) `<aside>` also subtracts `--orca-nav-width` from `width` and adds it to `left`. Collapsing the sidebar
+shifts the panel by style values alone and never remounts the terminal iframe. Measured at
 1280px with the sidebar expanded: left 520, top 52, width 760, right edge 1280.
 
 **The active row carries its own tint.** `AppSidebar.tsx` renders each row as a shadcn
@@ -6398,7 +6398,7 @@ board policy has the supervisor off. Stop is off while the session state is `per
 A stopped record can hold a start error from a background start. The toolbar then shows the alert "The
 orchestrator did not start: <reason>." with a retry button. The retry button runs Start.
 
-The conversation pane answers a decision item through `POST /api/decisions/:id/answer`. A `roadmap_approval`,
+The command centre has no conversation view. The pane shows the terminal only. A decision item is answered in the attention queue of the dashboard through `POST /api/decisions/:id/answer`. A `roadmap_approval`,
 `ticket_proposal` or `plan` item is a gate. A gate has no "Other answer" field. It offers its options
 only. Any other kind shows the field. The field sends the typed text as `note` with the recommended
 option id. If no option is recommended, it sends the first option id.
