@@ -51,11 +51,11 @@ import { useItems } from "@/components/ui/hooks/use-items";
 import { stampLastOpened } from "@/components/ui/hooks/use-last-opened";
 import { CAROUSEL_QUERY } from "../../../../shared/media-queries.js";
 import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
+import { SidePanel } from "@/components/ui/side-panel";
 import {
   PanelAccountRow,
   PanelBody,
   PanelEmptyState,
-  PanelFrame,
   PanelLoadError,
   PanelLoading,
   PanelPreviews,
@@ -73,7 +73,6 @@ import {
 } from "@/modules/detail/domain/resume-target";
 import { PanelMutedNotice } from "@/modules/detail/components/PanelNotice";
 import { PanelHeader } from "@/modules/detail/components/PanelHeader";
-import { PanelResizeHandle } from "@/modules/detail/components/PanelResizeHandle";
 import { PreviewRow } from "@/modules/detail/components/PreviewRow";
 import { ReferenceBlocks } from "@/modules/detail/components/ReferenceBlocks";
 import { SessionFlowRow } from "@/modules/detail/components/SessionFlowRow";
@@ -84,11 +83,9 @@ import { TerminalRegion } from "@/modules/detail/components/TerminalRegion";
 import { UnknownProbeRow } from "@/modules/detail/components/UnknownProbeRow";
 import { reviewHeader as buildReviewHeader } from "@/modules/detail/domain/review-header";
 import { heldPrItems } from "../../../../shared/pr-rows.js";
-import { panelEscapeAction } from "@/modules/detail/domain/panel-escape";
 import { hasSessionFlow } from "@/modules/detail/domain/session-flow";
 import { useFocusReturn } from "@/modules/detail/hooks/use-focus-return";
 import { usePanelHistory } from "@/modules/detail/hooks/use-panel-history";
-import { usePanelResize } from "@/modules/detail/hooks/use-panel-resize";
 import {
   useCleanupCardMutation,
   useEnsureTerminalMutation,
@@ -216,14 +213,10 @@ export function DetailPanelContainer() {
   const [fullscreen, setFullscreen] = useState(false);
 
   const isCarousel = useMediaQuery(CAROUSEL_QUERY);
-  const isCoarsePointer = useMediaQuery("(pointer: coarse)");
   const isNarrowViewport = useMediaQuery("(max-width: 520px)");
   const takeover = !docked && isCarousel;
   const narrowPanel = (docked || takeover) && isNarrowViewport;
-  const effectiveFullscreen = fullscreen || takeover;
   const requestClose = usePanelHistory(open && takeover, onClose);
-  const resize = usePanelResize();
-  const { isDragging, cancelDrag } = resize;
   useFocusReturn(open);
 
   const { mutateAsync: ensureTerminal } = useEnsureTerminalMutation();
@@ -271,35 +264,6 @@ export function DetailPanelContainer() {
       window.setTimeout(() => stampLastOpened(id), 5000);
     };
   }, [card?.id, card?.tmuxSession]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (event: KeyboardEvent) => {
-      const action = panelEscapeAction({
-        key: event.key,
-        defaultPrevented: event.defaultPrevented,
-        dragging: isDragging(),
-        takeover,
-        fullscreen,
-        docked,
-      });
-      if (action === "cancel-drag") cancelDrag();
-      else if (action === "close-takeover") requestClose();
-      else if (action === "exit-fullscreen") setFullscreen(false);
-      else if (action === "close-overlay") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [
-    open,
-    fullscreen,
-    docked,
-    onClose,
-    takeover,
-    requestClose,
-    isDragging,
-    cancelDrag,
-  ]);
 
   const spawnedForRef = useRef<string | null>(null);
   useEffect(() => {
@@ -405,203 +369,195 @@ export function DetailPanelContainer() {
       )}
     </>
   );
-  return (
-    <PanelFrame
-      open={open}
-      docked={docked}
-      fullscreen={effectiveFullscreen}
-      asideRef={resize.asideRef}
-      onScrimClick={requestClose}
-    >
-      {!docked && !effectiveFullscreen && (
-        <PanelResizeHandle
-          open={open}
-          coarsePointer={isCoarsePointer}
-          resizing={resize.resizing}
-          currentWidthPx={resize.currentWidthPx}
-          maxWidthPx={resize.maxWidthPx}
-          onPointerDown={resize.onPointerDown}
-          onDoubleClick={resize.onDoubleClick}
-          onKeyDown={resize.onKeyDown}
+  const panel =
+    docked && c == null ? (
+      <PanelEmptyState />
+    ) : (
+      <>
+        <PanelHeader
+          card={c}
+          editors={editors}
+          hasLiveSession={hasLiveSession}
+          detailsExpanded={detailsExpanded}
+          onToggleDetails={() => setDetailsExpanded((v) => !v)}
+          fullscreen={fullscreen}
+          onToggleFullscreen={() => setFullscreen((v) => !v)}
+          onClose={requestClose}
+          docked={docked}
+          takeover={takeover}
+          narrowPanel={narrowPanel}
+          onOpenEditor={(id, editor) => {
+            openEditor({ id, editor }).catch(console.error);
+          }}
+          onMove={(id, column) => {
+            moveCard({ id, column }).catch(console.error);
+          }}
+          onStartRequest={onStartRequest}
+          onCleanupRequest={onCleanupRequest}
+          onUnwindRequest={onUnwindRequest}
+          onResetRequest={onResetRequest}
+          onSyncRequest={onSyncRequest}
+          onPauseRequest={(id) => runPauseChange(pause.mutateAsync({ id }))}
+          onResumePausedRequest={(id) =>
+            runPauseChange(unpause.mutateAsync({ id }))
+          }
+          pausePending={
+            c != null &&
+            ((pause.isPending && pause.variables?.id === c.id) ||
+              (unpause.isPending && unpause.variables?.id === c.id))
+          }
+          onAskRequest={onAskRequest}
+          resumeLine={resumeLine}
+          reviewHeader={reviewHeader}
         />
-      )}
-      {docked && c == null ? (
-        <PanelEmptyState />
-      ) : (
-        <>
-          <PanelHeader
-            card={c}
-            editors={editors}
-            hasLiveSession={hasLiveSession}
-            detailsExpanded={detailsExpanded}
-            onToggleDetails={() => setDetailsExpanded((v) => !v)}
-            fullscreen={fullscreen}
-            onToggleFullscreen={() => setFullscreen((v) => !v)}
-            onClose={requestClose}
-            docked={docked}
-            takeover={takeover}
-            narrowPanel={narrowPanel}
-            onOpenEditor={(id, editor) => {
-              openEditor({ id, editor }).catch(console.error);
-            }}
-            onMove={(id, column) => {
-              moveCard({ id, column }).catch(console.error);
-            }}
-            onStartRequest={onStartRequest}
-            onCleanupRequest={onCleanupRequest}
-            onUnwindRequest={onUnwindRequest}
-            onResetRequest={onResetRequest}
-            onSyncRequest={onSyncRequest}
-            onPauseRequest={(id) => runPauseChange(pause.mutateAsync({ id }))}
-            onResumePausedRequest={(id) =>
-              runPauseChange(unpause.mutateAsync({ id }))
-            }
-            pausePending={
-              c != null &&
-              ((pause.isPending && pause.variables?.id === c.id) ||
-                (unpause.isPending && unpause.variables?.id === c.id))
-            }
-            onAskRequest={onAskRequest}
-            resumeLine={resumeLine}
-            reviewHeader={reviewHeader}
-          />
 
-          {sessionAccount != null && (
-            <PanelAccountRow
-              name={sessionAccount.name}
-              stale={sessionAccount.stale}
-              continueAction={sessionAccount.continueAction}
-              pendingNote={sessionAccount.pendingNote}
-              pending={
-                accountMove.pending?.key === accountKey
-                  ? accountMove.pending.kind
-                  : null
-              }
-              busy={accountMove.pending !== null}
-              note={
-                accountKey == null ? undefined : accountMove.notes[accountKey]
-              }
-              onRestart={() =>
-                moveSessionAccount(
-                  "restart",
-                  sessionAccount.accountId,
-                  "Restarted",
+        {sessionAccount != null && (
+          <PanelAccountRow
+            name={sessionAccount.name}
+            stale={sessionAccount.stale}
+            continueAction={sessionAccount.continueAction}
+            pendingNote={sessionAccount.pendingNote}
+            pending={
+              accountMove.pending?.key === accountKey
+                ? accountMove.pending.kind
+                : null
+            }
+            busy={accountMove.pending !== null}
+            note={
+              accountKey == null ? undefined : accountMove.notes[accountKey]
+            }
+            onRestart={() =>
+              moveSessionAccount(
+                "restart",
+                sessionAccount.accountId,
+                "Restarted",
+              )
+            }
+            onContinue={() => {
+              if (accountsData == null) return;
+              moveSessionAccount(
+                "continue",
+                accountsData.activeId,
+                `Moved to ${accountName(accountsData.accounts, accountsData.activeId)}`,
+              );
+            }}
+          />
+        )}
+        {((c?.sessionSummaries?.length ?? 0) >= 2 || showStartAnother) && (
+          <PanelRow>
+            {c != null && (c.sessionSummaries?.length ?? 0) >= 2 && (
+              <SessionSwitcher
+                card={c}
+                onSwitch={(cardId, sessionId) => {
+                  switchSession({ cardId, sessionId }).catch(console.error);
+                }}
+              />
+            )}
+            {showStartAnother && c != null && (
+              <StartAnotherSessionButton
+                card={c}
+                onStartRequest={onStartRequest}
+                narrowPanel={narrowPanel}
+              />
+            )}
+          </PanelRow>
+        )}
+        {c != null && hasSessionFlow(c) && <SessionFlowRow card={c} />}
+
+        <PanelBody>
+          {hydrating ? (
+            <PanelLoading />
+          ) : pinFetchError != null ? (
+            <PanelLoadError kind={pinFetchError} onRetry={onRetryPinFetch} />
+          ) : (
+            <>
+              {hasLiveSession ? (
+                detailsExpanded && (
+                  <PanelReference capped grow={false}>
+                    {referenceColumn}
+                  </PanelReference>
                 )
-              }
-              onContinue={() => {
-                if (accountsData == null) return;
-                moveSessionAccount(
-                  "continue",
-                  accountsData.activeId,
-                  `Moved to ${accountName(accountsData.accounts, accountsData.activeId)}`,
-                );
-              }}
-            />
-          )}
-          {((c?.sessionSummaries?.length ?? 0) >= 2 || showStartAnother) && (
-            <PanelRow>
-              {c != null && (c.sessionSummaries?.length ?? 0) >= 2 && (
-                <SessionSwitcher
+              ) : (
+                <PanelReference capped={false} grow={!c?.tmuxSession}>
+                  {referenceColumn}
+                </PanelReference>
+              )}
+
+              {c != null &&
+                (c.previewsUnknown != null ||
+                  (c.previews != null && c.previews.length > 0)) && (
+                  <PanelPreviews>
+                    {c.previews?.map((preview) => (
+                      <PreviewRow key={preview.port} preview={preview} />
+                    ))}
+                    {c.previewsUnknown != null && (
+                      <UnknownProbeRow
+                        category={c.previewsUnknown.category}
+                        partial={(c.previews?.length ?? 0) > 0}
+                      />
+                    )}
+                  </PanelPreviews>
+                )}
+
+              {note !== null && (
+                <div
+                  data-testid="paused-note"
+                  className="mx-(--space-xl) mb-(--space-lg)"
+                >
+                  <PanelMutedNotice label="Status">{note}</PanelMutedNotice>
+                </div>
+              )}
+
+              {hasLiveSession && c && (
+                <TerminalRegion
                   card={c}
-                  onSwitch={(cardId, sessionId) => {
-                    switchSession({ cardId, sessionId }).catch(console.error);
+                  onReconnect={(id) => {
+                    ensureTerminal(id).catch(console.error);
+                  }}
+                  onRunClaude={(id) => {
+                    void runClaude(id).catch(console.error);
                   }}
                 />
               )}
-              {showStartAnother && c != null && (
-                <StartAnotherSessionButton
+
+              {activeSessionLost && (
+                <SessionLostSection
                   card={c}
-                  onStartRequest={onStartRequest}
-                  narrowPanel={narrowPanel}
+                  resume={(id) => resumeCard({ id })}
+                  resumeLine={resumeLine}
+                  onRestart={(lost) => {
+                    if (lost.workspace) {
+                      startCard({
+                        id: lost.id,
+                        extraDirection: lost.extraDirection ?? "",
+                      })
+                        .then((result) => {
+                          if (!result.ok) toast.error(startRefusalText(result));
+                        })
+                        .catch(console.error);
+                    } else {
+                      onStartRequest?.(lost.id);
+                    }
+                  }}
                 />
               )}
-            </PanelRow>
+            </>
           )}
-          {c != null && hasSessionFlow(c) && <SessionFlowRow card={c} />}
-
-          <PanelBody>
-            {hydrating ? (
-              <PanelLoading />
-            ) : pinFetchError != null ? (
-              <PanelLoadError kind={pinFetchError} onRetry={onRetryPinFetch} />
-            ) : (
-              <>
-                {hasLiveSession ? (
-                  detailsExpanded && (
-                    <PanelReference capped grow={false}>
-                      {referenceColumn}
-                    </PanelReference>
-                  )
-                ) : (
-                  <PanelReference capped={false} grow={!c?.tmuxSession}>
-                    {referenceColumn}
-                  </PanelReference>
-                )}
-
-                {c != null &&
-                  (c.previewsUnknown != null ||
-                    (c.previews != null && c.previews.length > 0)) && (
-                    <PanelPreviews>
-                      {c.previews?.map((preview) => (
-                        <PreviewRow key={preview.port} preview={preview} />
-                      ))}
-                      {c.previewsUnknown != null && (
-                        <UnknownProbeRow
-                          category={c.previewsUnknown.category}
-                          partial={(c.previews?.length ?? 0) > 0}
-                        />
-                      )}
-                    </PanelPreviews>
-                  )}
-
-                {note !== null && (
-                  <div
-                    data-testid="paused-note"
-                    className="mx-(--space-xl) mb-(--space-lg)"
-                  >
-                    <PanelMutedNotice label="Status">{note}</PanelMutedNotice>
-                  </div>
-                )}
-
-                {hasLiveSession && c && (
-                  <TerminalRegion
-                    card={c}
-                    onReconnect={(id) => {
-                      ensureTerminal(id).catch(console.error);
-                    }}
-                    onRunClaude={(id) => {
-                      void runClaude(id).catch(console.error);
-                    }}
-                  />
-                )}
-
-                {activeSessionLost && (
-                  <SessionLostSection
-                    card={c}
-                    resume={(id) => resumeCard({ id })}
-                    resumeLine={resumeLine}
-                    onRestart={(lost) => {
-                      if (lost.workspace) {
-                        startCard({
-                          id: lost.id,
-                          extraDirection: lost.extraDirection ?? "",
-                        })
-                          .then((result) => {
-                            if (!result.ok)
-                              toast.error(startRefusalText(result));
-                          })
-                          .catch(console.error);
-                      } else {
-                        onStartRequest?.(lost.id);
-                      }
-                    }}
-                  />
-                )}
-              </>
-            )}
-          </PanelBody>
-        </>
-      )}
-    </PanelFrame>
+        </PanelBody>
+      </>
+    );
+  return (
+    <SidePanel
+      placement="overlay"
+      title="Ticket detail"
+      handleLabel="Resize panel"
+      storageKey="dsp.panel.width"
+      open={open}
+      docked={docked}
+      expanded={fullscreen}
+      sheet={takeover}
+      onClose={takeover ? requestClose : onClose}
+      panel={panel}
+    />
   );
 }

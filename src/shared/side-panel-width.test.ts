@@ -6,7 +6,7 @@ import {
   keyboardStepWidth,
   persistedWidthCss,
   startsResizeDrag,
-} from "./panel-width.js";
+} from "./side-panel-width.js";
 
 test("the clamp refuses a width below 360 px or above 90 percent of the viewport", () => {
   assert.equal(clampPanelWidth(200, 1440), 360);

@@ -310,25 +310,32 @@ const PANEL_CONTRACT = [
     "src={`/sessions/${c.activeSessionId}/terminal/`}",
   ],
   [
-    join(PANEL_DIR, "components", "PanelFrame.tsx"),
-    'aria-label="Ticket detail"',
+    join(PANEL_DIR, "containers", "DetailPanelContainer.tsx"),
+    'title="Ticket detail"',
   ],
   [
-    join(PANEL_DIR, "components", "PanelFrame.tsx"),
+    join("src", "web", "components", "ui", "side-panel.tsx"),
     'data-docked={docked ? "true" : undefined}',
   ],
-  [join(PANEL_DIR, "components", "PanelFrame.tsx"), "inert={!docked && !open}"],
+  [
+    join("src", "web", "components", "ui", "side-panel.tsx"),
+    "inert={!docked && !open}",
+  ],
   [
     join(PANEL_DIR, "components", "PanelHeader.tsx"),
-    '"Exit fullscreen" : "Enter fullscreen"',
+    'expandLabel="Enter fullscreen"',
+  ],
+  [
+    join(PANEL_DIR, "components", "PanelHeader.tsx"),
+    'collapseLabel="Exit fullscreen"',
   ],
   [
     join(PANEL_DIR, "components", "PanelHeader.tsx"),
     '"Back to board" : "Close panel"',
   ],
   [
-    join(PANEL_DIR, "components", "PanelResizeHandle.tsx"),
-    'aria-label="Resize panel"',
+    join(PANEL_DIR, "containers", "DetailPanelContainer.tsx"),
+    'handleLabel="Resize panel"',
   ],
   [
     join(PANEL_DIR, "components", "SessionSwitcher.tsx"),
@@ -342,7 +349,10 @@ const PANEL_CONTRACT = [
     join(PANEL_DIR, "containers", "DetailPanelContainer.tsx"),
     "useFocusReturn(open)",
   ],
-  [join(PANEL_DIR, "hooks", "use-panel-resize.ts"), '"dsp.panel.width"'],
+  [
+    join(PANEL_DIR, "containers", "DetailPanelContainer.tsx"),
+    'storageKey="dsp.panel.width"',
+  ],
   [
     join(PANEL_DIR, "queries", "detail-queries.ts"),
     "previousQuery?.queryKey[2] === id ? previous : []",

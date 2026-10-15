@@ -1,12 +1,12 @@
 export const PANEL_MIN_WIDTH_PX = 360;
 export const PANEL_MAX_WIDTH_RATIO = 0.9;
-export const PANEL_KEYBOARD_STEP_PX = 16;
+const PANEL_KEYBOARD_STEP_PX = 16;
 
 const MOUSE_TAP_PX = 3;
 const TOUCH_TAP_PX = 8;
 
 /**
- * Clamp a panel width to at least 360 px and at most 90 percent of the viewport.
+ * Clamp a panel width to the minimum width and the maximum share of the viewport.
  *
  * @remarks The maximum wins over the minimum, so a viewport under 400 px gets 90 percent of it.
  */
@@ -32,7 +32,6 @@ export function keyboardStepWidth(
   return clampPanelWidth(current + step, viewportWidth);
 }
 
-/** Whether a drag that moved `delta` px is a tap: 3 px or less for a mouse, 8 px or less otherwise. */
 export function isTapGesture(delta: number, pointerType: string): boolean {
   return (
     Math.abs(delta) <= (pointerType === "mouse" ? MOUSE_TAP_PX : TOUCH_TAP_PX)

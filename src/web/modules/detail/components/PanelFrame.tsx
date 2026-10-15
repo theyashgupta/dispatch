@@ -1,4 +1,4 @@
-import type { ReactNode, Ref } from "react";
+import type { ReactNode } from "react";
 import { RotateCw } from "lucide-react";
 import type { SessionNote } from "../../../../shared/session-account-view.js";
 import type { ContinueAction } from "../../../../shared/types.js";
@@ -10,64 +10,6 @@ import { SessionRestartButton } from "@/components/SessionRestartButton";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PanelAlert } from "./PanelNotice";
-
-interface PanelFrameProps {
-  open: boolean;
-  docked: boolean;
-  fullscreen: boolean;
-  asideRef: Ref<HTMLElement>;
-  onScrimClick: () => void;
-  children: ReactNode;
-}
-
-export function PanelFrame({
-  open,
-  docked,
-  fullscreen,
-  asideRef,
-  onScrimClick,
-  children,
-}: PanelFrameProps) {
-  return (
-    <>
-      {!docked && (
-        <div
-          onClick={onScrimClick}
-          aria-hidden="true"
-          className={cn(
-            "fixed inset-0 z-10 bg-scrim transition-opacity",
-            open
-              ? "pointer-events-auto opacity-100 duration-(--motion-panel-open) ease-(--easing-enter)"
-              : "pointer-events-none opacity-0 duration-(--motion-panel-close) ease-(--easing-exit)",
-          )}
-        />
-      )}
-
-      <aside
-        aria-label="Ticket detail"
-        ref={asideRef}
-        inert={!docked && !open}
-        data-docked={docked ? "true" : undefined}
-        className={cn(
-          "fixed right-0 z-11 flex max-w-screen flex-col bg-(--surface-column)",
-          docked
-            ? "top-[var(--chrome-top,var(--page-header-height))] left-[calc(var(--nav-current,0px)_+_var(--orca-nav-width))] h-[calc(100dvh_-_var(--chrome-top,var(--page-header-height)))] w-[calc(100%_-_var(--nav-current,0px)_-_var(--orca-nav-width))] translate-none transition-none"
-            : "top-0 left-auto h-dvh transition-[translate]",
-          !docked &&
-            (fullscreen
-              ? "w-screen"
-              : "w-[var(--panel-live-width,var(--panel-width))] border-l border-border"),
-          !docked &&
-            (open
-              ? "translate-x-0 duration-(--motion-panel-open) ease-(--easing-enter)"
-              : "translate-x-full duration-(--motion-panel-close) ease-(--easing-exit)"),
-        )}
-      >
-        {children}
-      </aside>
-    </>
-  );
-}
 
 export function PanelEmptyState() {
   return (

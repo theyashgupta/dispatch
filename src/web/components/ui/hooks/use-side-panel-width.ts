@@ -16,14 +16,21 @@ import {
   keyboardStepWidth,
   persistedWidthCss,
   startsResizeDrag,
-} from "@/modules/detail/domain/panel-width";
+} from "../../../../shared/side-panel-width.js";
 
-const STORAGE_KEY = "dsp.panel.width";
 const WIDTH_VAR = "--panel-live-width";
+const SERVER_VIEWPORT_PX = 1280;
 
-function loadWidth(): number | null {
+interface WidthStore {
+  width: number | null;
+  listeners: Set<() => void>;
+}
+
+const stores = new Map<string, WidthStore>();
+
+function loadWidth(key: string): number | null {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(key);
     if (!raw) return null;
     const parsed = Number(raw);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
@@ -32,62 +39,68 @@ function loadWidth(): number | null {
   }
 }
 
-let width: number | null = loadWidth();
-const listeners = new Set<() => void>();
-
-window.addEventListener("storage", (e) => {
-  if (e.key === STORAGE_KEY) {
-    width = loadWidth();
-    for (const cb of listeners) cb();
-  }
-});
-
-function subscribe(cb: () => void): () => void {
-  listeners.add(cb);
-  return () => listeners.delete(cb);
+function notify(store: WidthStore): void {
+  for (const cb of store.listeners) cb();
 }
 
-function getSnapshot(): number | null {
-  return width;
+function storeFor(key: string): WidthStore {
+  const found = stores.get(key);
+  if (found) return found;
+  const store: WidthStore = { width: loadWidth(key), listeners: new Set() };
+  stores.set(key, store);
+  window.addEventListener("storage", (e) => {
+    if (e.key !== key) return;
+    store.width = loadWidth(key);
+    notify(store);
+  });
+  return store;
 }
 
-function setPanelWidth(px: number): void {
-  width = px;
+function setStoredWidth(key: string, px: number | null): void {
+  const store = storeFor(key);
+  store.width = px;
   try {
-    localStorage.setItem(STORAGE_KEY, String(px));
+    if (px == null) localStorage.removeItem(key);
+    else localStorage.setItem(key, String(px));
   } catch {}
-  for (const cb of listeners) cb();
-}
-
-function clearPanelWidth(): void {
-  width = null;
-  try {
-    localStorage.removeItem(STORAGE_KEY);
-  } catch {}
-  for (const cb of listeners) cb();
+  notify(store);
 }
 
 /**
- * Own the overlay panel width: the persisted store, the handle's drag, keys and double click, and
- * the live width the `aside` reads as a CSS variable.
+ * Own a side panel width: the persisted store for one storage key, the handle's drag, keys and
+ * double click, and the live width the `aside` reads as a CSS variable.
  *
  * @remarks
- * The width reaches the `aside` through `--panel-live-width`, written on the element through the
- * ref, because the module bans the JSX `style` prop. A drag appends a full-viewport overlay to the
- * body so `pointerup` never lands inside the terminal iframe; one idempotent teardown removes it on
- * `pointerup`, `pointercancel`, Escape and unmount.
+ * The drag writes `--panel-live-width` on the `aside` directly, so a pointermove never re-renders.
+ * A drag appends a full-viewport overlay to the body so `pointerup` never lands inside the terminal
+ * iframe; one idempotent teardown removes it on `pointerup`, `pointercancel`, Escape and unmount.
  */
-export function usePanelResize() {
+export function useSidePanelWidth(storageKey: string) {
+  const subscribe = useCallback(
+    (cb: () => void) => {
+      const { listeners } = storeFor(storageKey);
+      listeners.add(cb);
+      return () => {
+        listeners.delete(cb);
+      };
+    },
+    [storageKey],
+  );
   const persistedWidth = useSyncExternalStore(
     subscribe,
-    getSnapshot,
-    getSnapshot,
+    () => storeFor(storageKey).width,
+    () => null,
   );
-  const asideRef = useRef<HTMLElement | null>(null);
+  const nodeRef = useRef<HTMLElement | null>(null);
+  const [node, setNode] = useState<HTMLElement | null>(null);
+  const asideRef = useCallback((element: HTMLElement | null) => {
+    nodeRef.current = element;
+    setNode(element);
+  }, []);
   const cleanupDragRef = useRef<(() => void) | null>(null);
   const [resizing, setResizing] = useState(false);
   const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
-  const [, setViewportWidth] = useState<number>(() => window.innerWidth);
+  const [, setViewportWidth] = useState<number>(viewportWidthPx);
 
   useEffect(() => {
     return () => cleanupDragRef.current?.();
@@ -95,7 +108,6 @@ export function usePanelResize() {
 
   useEffect(() => {
     if (resizing) return;
-    const node = asideRef.current;
     if (node == null) return;
     const observer = new ResizeObserver(() => {
       setMeasuredWidth(node.getBoundingClientRect().width);
@@ -104,22 +116,22 @@ export function usePanelResize() {
     observer.observe(node);
     observer.observe(document.documentElement);
     return () => observer.disconnect();
-  }, [resizing]);
+  }, [resizing, node]);
 
   useLayoutEffect(() => {
-    const node = asideRef.current;
     if (node == null) return;
     if (persistedWidth != null) {
       node.style.setProperty(WIDTH_VAR, persistedWidthCss(persistedWidth));
     } else {
       node.style.removeProperty(WIDTH_VAR);
     }
-  }, [persistedWidth]);
+  }, [persistedWidth, node]);
 
-  const maxWidthPx = window.innerWidth * PANEL_MAX_WIDTH_RATIO;
-  const rawWidthPx = persistedWidth ?? measuredWidth;
+  const viewport = viewportWidthPx();
+  const maxWidthPx = viewport * PANEL_MAX_WIDTH_RATIO;
+  const rawWidthPx = measuredWidth ?? persistedWidth;
   const currentWidthPx =
-    rawWidthPx != null ? clampPanelWidth(rawWidthPx, window.innerWidth) : null;
+    rawWidthPx != null ? clampPanelWidth(rawWidthPx, viewport) : null;
 
   const isDragging = useCallback(() => cleanupDragRef.current != null, []);
   const cancelDrag = useCallback(() => cleanupDragRef.current?.(), []);
@@ -127,9 +139,10 @@ export function usePanelResize() {
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
     e.preventDefault();
-    const node = asideRef.current;
+    const node = nodeRef.current;
     if (node == null) return;
-    setPanelWidth(
+    setStoredWidth(
+      storageKey,
       keyboardStepWidth(
         e.key,
         currentWidthPx ?? node.getBoundingClientRect().width,
@@ -142,14 +155,14 @@ export function usePanelResize() {
     if (!startsResizeDrag(e.button)) return;
     if (cleanupDragRef.current != null) return;
     e.stopPropagation();
-    const found = asideRef.current;
+    const found = nodeRef.current;
     if (found == null) return;
     const node: HTMLElement = found;
     e.currentTarget.setPointerCapture(e.pointerId);
     const startX = e.clientX;
     const startWidth = node.getBoundingClientRect().width;
     const preDragWidth = node.style.getPropertyValue(WIDTH_VAR);
-    const viewportWidth = window.innerWidth;
+    const dragViewportWidth = window.innerWidth;
     const pointerType = e.pointerType;
     setResizing(true);
     document.body.style.cursor = "col-resize";
@@ -178,7 +191,7 @@ export function usePanelResize() {
     function handlePointerMove(ev: globalThis.PointerEvent) {
       const next = clampPanelWidth(
         startWidth + (startX - ev.clientX),
-        viewportWidth,
+        dragViewportWidth,
       );
       node.style.setProperty(WIDTH_VAR, `${next}px`);
     }
@@ -191,9 +204,9 @@ export function usePanelResize() {
         restoreWidth();
         return;
       }
-      const finalWidth = clampPanelWidth(startWidth + delta, viewportWidth);
+      const finalWidth = clampPanelWidth(startWidth + delta, dragViewportWidth);
       node.style.setProperty(WIDTH_VAR, persistedWidthCss(finalWidth));
-      setPanelWidth(finalWidth);
+      setStoredWidth(storageKey, finalWidth);
     }
 
     function handlePointerCancel() {
@@ -210,12 +223,12 @@ export function usePanelResize() {
 
   function onDoubleClick(e: MouseEvent<HTMLDivElement>) {
     e.stopPropagation();
-    const node = asideRef.current;
+    const node = nodeRef.current;
     if (node != null) {
       node.style.removeProperty(WIDTH_VAR);
       setMeasuredWidth(node.getBoundingClientRect().width);
     }
-    clearPanelWidth();
+    setStoredWidth(storageKey, null);
   }
 
   return {
@@ -229,4 +242,13 @@ export function usePanelResize() {
     onPointerDown,
     onDoubleClick,
   };
+}
+
+/**
+ * The viewport width in pixels, or a fixed desktop width where no window exists.
+ *
+ * @remarks Server rendering has no window, and a static render test reads the same fallback.
+ */
+function viewportWidthPx(): number {
+  return typeof window === "undefined" ? SERVER_VIEWPORT_PX : window.innerWidth;
 }
