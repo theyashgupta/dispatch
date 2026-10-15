@@ -559,7 +559,8 @@ function keysOf(data) {
       } else {
         keys.push("esc");
       }
-    } else if (c === "\r" || c === "\n") keys.push("enter");
+    } else if (c === "\r" || c === "\n")
+      keys.push(c === "\n" && scenario.lfInserts ? "char:\n" : "enter");
     else if (c === "\x7f" || c === "\b") keys.push("backspace");
     else if (c === "\x03") keys.push("ctrl-c");
     else if (c === "\t") keys.push("tab");
@@ -597,6 +598,7 @@ process.stdin.on("data", (chunk) => {
   for (const key of keysOf(chunk)) handleKey(key);
   render();
 });
+process.stdout.on("resize", render);
 process.stdin.resume();
 tick();
 setInterval(tick, 300);

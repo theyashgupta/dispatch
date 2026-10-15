@@ -4,8 +4,18 @@ import path from "node:path";
 import { parseBoardKey } from "../../shared/board-key.js";
 import type { LoopProgress } from "../../shared/types.js";
 import { store } from "../store/board.store.js";
-import { run } from "../adapters/exec.js";
-import { capturePane, TMUX_SERVER_ARGS } from "../adapters/tmux.js";
+import { run, sleep } from "../adapters/exec.js";
+import {
+  capturePane,
+  paneAtPrompt,
+  sendKeys,
+  sendLiteral,
+  TMUX_SERVER_ARGS,
+  wrapWithPtyShim,
+} from "../adapters/tmux.js";
+import { installPtyShim } from "../bootstrap/pty-shim-setup.js";
+import { shellQuote } from "../services/domain/claude-launch.js";
+import { SHELL_SESSION_ENV } from "../services/orchestration/steps.js";
 import { writeFakeClaudeTui } from "./fake-claude-tui.js";
 import { materializeLoopFixture } from "./loop-fixtures.js";
 
@@ -27,6 +37,17 @@ export const LOOP_PROGRESS = {
   warnings: [],
   readAt: "2026-10-06T00:00:00.000Z",
 } satisfies LoopProgress;
+
+/**
+ * Type the shim-wrapped fake claude launch line into a shell pane.
+ *
+ * @remarks Clears the screen first, because a stale frame from an earlier fake reads as a ready
+ * prompt and keys typed before the new fake draws are lost.
+ */
+async function launchFakeClaude(target: string, bin: string): Promise<void> {
+  await sendLiteral(target, `clear; ${shellQuote(wrapWithPtyShim([bin]))}`);
+  await sendKeys(target, ["Enter"]);
+}
 
 /** Load the isolated store and add the supervised board `SBX`; call once per test file after `isolateEnv`. */
 export async function setupSupervisedBoard(): Promise<void> {
@@ -81,6 +102,7 @@ export async function startSupervised(opts: {
   group?: boolean;
   fixture?: string;
   orchestrator?: string;
+  shell?: boolean;
 }) {
   const { title } = opts;
   const root =
@@ -100,6 +122,11 @@ export async function startSupervised(opts: {
   fs.writeFileSync(scenarioFile, JSON.stringify(scenario));
   const bin = writeFakeClaudeTui(root);
   const name = `dsp-${title}`;
+  const target = `=${name}:`;
+  const shellCommand = fs.existsSync("/bin/zsh")
+    ? "/bin/zsh -f"
+    : "bash --norc -i";
+  const launch = () => launchFakeClaude(target, bin);
   await run("tmux", [
     ...TMUX_SERVER_ARGS,
     "new-session",
@@ -110,8 +137,23 @@ export async function startSupervised(opts: {
     "160",
     "-y",
     "40",
-    `FAKE_CLAUDE_SCENARIO='${scenarioFile}' '${bin}'`,
+    ...(opts.shell
+      ? [
+          "-e",
+          `${SHELL_SESSION_ENV}=1`,
+          "-e",
+          `FAKE_CLAUDE_SCENARIO=${scenarioFile}`,
+          shellCommand,
+        ]
+      : [`FAKE_CLAUDE_SCENARIO='${scenarioFile}' '${bin}'`]),
   ]);
+  if (opts.shell) {
+    await installPtyShim();
+    const promptBy = Date.now() + 10_000;
+    while (!(await paneAtPrompt(target)) && Date.now() < promptBy)
+      await sleep(100);
+    await launch();
+  }
   const created =
     opts.orchestrator !== undefined
       ? await store.createOrchestratorCard(SBX, title, opts.orchestrator)
@@ -143,8 +185,18 @@ export async function startSupervised(opts: {
   }
   const pane = () => capturePane(`=${name}:`);
   const deadline = Date.now() + 10_000;
-  while ((await pane()).trim() === "" && Date.now() < deadline)
-    await new Promise((resolve) => setTimeout(resolve, 100));
+  while (
+    (opts.shell
+      ? !(await pane()).includes("❯")
+      : (await pane()).trim() === "") &&
+    Date.now() < deadline
+  )
+    await sleep(100);
+  if (opts.shell)
+    assert.ok(
+      (await pane()).includes("❯"),
+      "fake claude started in the shell pane",
+    );
   const card = () => store.getCard(created.id)!;
   const session = () => card().sessions!.find((s) => s.id === sessionId)!;
   const keys = () => readJsonl(keyLog);
@@ -155,6 +207,7 @@ export async function startSupervised(opts: {
     card,
     session,
     pane,
+    launch,
     keys,
     userTexts: (file: string = transcript) =>
       readJsonl(file)
