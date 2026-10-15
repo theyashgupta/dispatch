@@ -13,6 +13,7 @@ interface RoadmapUnit {
   status: LoopUnitStatus;
   statusText: string;
   prdPath: string | null;
+  branch: string | null;
 }
 
 interface ProgressRow {
@@ -166,6 +167,7 @@ export function parseRoadmap(text: string): ParsedRoadmap {
         status: "unknown",
         statusText: "",
         prdPath: null,
+        branch: null,
       };
       units.push(current);
       seenStatus = false;
@@ -182,6 +184,8 @@ export function parseRoadmap(text: string): ParsedRoadmap {
       seenStatus = true;
       current.statusText = (status[1] ?? "").trim();
       current.status = toStatus(current.statusText);
+      current.branch =
+        /\(branch `([^`]+)`/.exec(current.statusText)?.[1] ?? null;
       continue;
     }
     const prd = /^- \*\*PRD:\*\*(.*)$/.exec(line);
@@ -643,7 +647,7 @@ function buildUnit(
     title: roadmapUnit.title,
     status: roadmapUnit.status,
     statusText: roadmapUnit.statusText,
-    branch: row?.branch ?? null,
+    branch: row?.branch ?? roadmapUnit.branch,
     commit: row?.commit ?? null,
     prdPath: roadmapUnit.prdPath,
     phaseTotal: null,

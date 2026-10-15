@@ -24,6 +24,7 @@ import type {
   ShipFlow,
 } from "../../../shared/types.js";
 import type { HttpError } from "../domain/errors.js";
+import { buildLoopProgress } from "../domain/loop-progress.js";
 
 const env = isolateEnv();
 const { store } = await import("../../store/board.store.js");
@@ -658,6 +659,40 @@ void test("with merge rights a two unit stack and its specs branch ship in order
   const checkRuns = calls.filter((c) => c.cmd === "env");
   assert.equal(checkRuns.length, 3);
   assert.deepEqual(checkRuns[0]?.args, ["-u", "NODE_ENV", "git", "status"]);
+});
+
+void test("startShip ships loop unit branches that only the unit Status line names", async () => {
+  const stack = await newStack();
+  const names = [
+    "feat/LOCAL-131-unit-1-dashboards-dropdown",
+    "feat/LOCAL-132-unit-2-remove-sessions",
+  ];
+  await gitOutput(stack.worktree, "branch", names[0]!, "unit-1");
+  await gitOutput(stack.worktree, "branch", names[1]!, "unit-2");
+  const built = buildLoopProgress({
+    slug: "s",
+    roadmapFile: "units.md",
+    readAt: "2026-10-06T12:00:00.000Z",
+    roadmapText:
+      `### Unit 1: Dashboards dropdown\n- **Status:** built, awaiting /ship (branch \`${names[0]}\`, 8073bafe, 676d3279)\n` +
+      `### Unit 2: Remove sessions\n- **Status:** built, awaiting /ship (branch \`${names[1]}\`, 8073bafe, 676d3279)\n`,
+    progressText:
+      "Ledger of slug s\n\n## Unit statuses\n- Unit 1: committed 048f1d0d\n- Unit 2: committed 5755e79d\n",
+    engine: null,
+    files: new Map(),
+    refused: new Set(),
+    warnings: [],
+  });
+  await store.setLoopProgress(stack.card.id, built);
+  const started = await startShip(stack, names);
+  assert.equal(started.state, "running");
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  const gh = ghCalls(stack);
+  assert.deepEqual(
+    gh.filter((a) => a[1] === "create").map((a) => a[a.indexOf("--head") + 1]),
+    names,
+  );
 });
 
 void test("with open_prs rights the flow waits for the user merge and leaves the card in place", async () => {
