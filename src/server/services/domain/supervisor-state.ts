@@ -208,6 +208,13 @@ export function paneReady(pane: string): boolean {
   );
 }
 
+/** Whether a dialog is open under the last input line, or anywhere in a pane that has no input line. */
+export function paneDialog(pane: string): boolean {
+  const lines = pane.split("\n");
+  const inputAt = inputLineAt(lines);
+  return openDialog(inputAt >= 0 ? lines.slice(inputAt + 1) : lines) !== null;
+}
+
 /**
  * Read the usage limit surface below the last input line, the same region `detectState` reads.
  *

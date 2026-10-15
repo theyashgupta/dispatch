@@ -15,6 +15,15 @@ import { sessionTranscriptPath } from "./supervisor-transcript.js";
 
 export type SendResult = "confirmed" | "unconfirmed";
 
+export type SendReason =
+  | "no tmux session"
+  | "not ready"
+  | "no session root"
+  | "dialog opened"
+  | "not in transcript";
+
+export type SendOutcome = { result: SendResult; reason?: SendReason };
+
 export interface SendTiming {
   readyMs: number;
   settleMs: number;
@@ -84,9 +93,26 @@ export async function sendConfirmed(
   transcriptOf: () => Promise<string | null> = () =>
     sessionTranscriptPath(card, session),
 ): Promise<SendResult> {
+  return (await sendLine(card, session, text, kind, timing, transcriptOf))
+    .result;
+}
+
+/** Type one line like `sendConfirmed` and also return the reason of an unconfirmed result. */
+export async function sendLine(
+  card: Card,
+  session: Session,
+  text: string,
+  kind: string,
+  timing: SendTiming = SEND_TIMING,
+  transcriptOf: () => Promise<string | null> = () =>
+    sessionTranscriptPath(card, session),
+): Promise<SendOutcome> {
   const name = session.tmuxSession;
   const target = `=${name}:`;
-  const report = (reason: string, line: string): SendResult => {
+  const report = (
+    reason: SendReason,
+    line: string,
+  ): { result: SendResult; reason: SendReason } => {
     record(card, session, {
       action: "send",
       kind,
@@ -94,7 +120,7 @@ export async function sendConfirmed(
       reason,
       evidence: line.slice(0, MATCH_CHARS),
     });
-    return "unconfirmed";
+    return { result: "unconfirmed", reason };
   };
   if (name === undefined || !(await hasSession(`=${name}`)))
     return report("no tmux session", text);
@@ -135,8 +161,10 @@ export async function sendConfirmed(
     const now = await matches();
     return now.count > (now.file === before.file ? before.count : 0);
   };
-  if (await waitFor(seen, timing.confirmMs, timing.pollMs)) return "confirmed";
+  if (await waitFor(seen, timing.confirmMs, timing.pollMs))
+    return { result: "confirmed" };
   if (!(await enterIfReady())) return report("dialog opened", line);
-  if (await waitFor(seen, timing.confirmMs, timing.pollMs)) return "confirmed";
+  if (await waitFor(seen, timing.confirmMs, timing.pollMs))
+    return { result: "confirmed" };
   return report("not in transcript", line);
 }

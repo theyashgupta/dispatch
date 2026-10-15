@@ -642,6 +642,35 @@ export async function paneAtPrompt(target: string): Promise<boolean> {
 }
 
 /**
+ * Whether the pane tty is in cooked (`icanon`) mode, or null when it cannot be read.
+ *
+ * @remarks The shell restores cooked mode when its job stops, and a REPL needs raw mode, so a
+ * cooked tty under a non-shell job is a stuck REPL.
+ */
+export async function paneTtyCooked(target: string): Promise<boolean | null> {
+  try {
+    const { stdout } = await tmux([
+      "display-message",
+      "-p",
+      "-t",
+      target,
+      "#{pane_tty}",
+    ]);
+    const tty = stdout.trim();
+    if (tty === "") return null;
+    const stty = await run("stty", [
+      process.platform === "darwin" ? "-f" : "-F",
+      tty,
+      "-a",
+    ]);
+    if (/(^|\s)-icanon(\s|$)/.test(stty.stdout)) return false;
+    return /(^|\s)icanon(\s|$)/.test(stty.stdout) ? true : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Kill session `name` (`kill-session -t <name>`), reporting whether tmux accepted it. Never
  * throws: the rollback/undo path must be idempotent (killing an already-gone session is a no-op).
  * @remarks Tolerant swallow-to-default (NEW-10): idempotent no-op if the session is already gone.

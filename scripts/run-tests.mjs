@@ -21,6 +21,7 @@ const TIMING_FILES = [
   "src/server/services/orchestration/orchestrator-launch-tmux.test.ts",
   "src/server/services/orchestration/orchestrator-wait.test.ts",
   "src/server/services/orchestration/orchestrator-wake.test.ts",
+  "src/server/services/orchestration/pause-resume-input.test.ts",
   "src/server/services/orchestration/resume-session.test.ts",
   "src/server/services/orchestration/run-claude.test.ts",
   "src/server/services/orchestration/session-account-move.test.ts",

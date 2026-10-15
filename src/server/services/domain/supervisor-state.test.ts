@@ -9,6 +9,7 @@ import {
   type DetectInput,
   type Detection,
   paneBusy,
+  paneDialog,
 } from "./supervisor-state.js";
 import type { SupervisorState } from "../../../shared/types.js";
 
@@ -566,4 +567,19 @@ void test("a background agent wait reads as busy for the handoff quiet check", (
     true,
   );
   assert.equal(paneBusy(pane("idle.txt")), false);
+});
+
+const PERMISSION_DIALOG =
+  "Do you want to proceed?\n ❯ 1. Yes\n   2. No\n Esc to cancel";
+
+void test("paneDialog sees a dialog below the input line", () => {
+  assert.equal(paneDialog(`output\n────\n❯ \n${PERMISSION_DIALOG}`), true);
+});
+
+void test("paneDialog sees a dialog in a pane with no input line", () => {
+  assert.equal(paneDialog(PERMISSION_DIALOG), true);
+});
+
+void test("paneDialog is false for a plain idle pane", () => {
+  assert.equal(paneDialog("output\n────\n❯ \n────\n  ? for shortcuts"), false);
 });

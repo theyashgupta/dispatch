@@ -163,6 +163,7 @@ export async function memoryPauseStep(memory = systemMemory()): Promise<void> {
     if (action.kind === "none") return;
     const verb = action.kind === "pause" ? "paused" : "resumed";
     console.info(`[memory] ${verb} ${action.cardId}: ${action.reason}`);
+    if (action.kind === "resume") memoryEmitter.emit("resumed", action.cardId);
   } catch (err) {
     const why = (err as { code?: string }).code ?? (err as Error).message;
     const id = action.kind === "none" ? "" : action.cardId;
