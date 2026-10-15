@@ -224,9 +224,13 @@ const screens: {
       const create = nav.getByRole("button", { name: "Create board" });
       await create.scrollIntoViewIfNeeded();
       await expect(create).toBeVisible();
-      const row = nav.getByRole("button", { name: /^Orchestrated/ });
-      await expect(row).toBeVisible();
-      await expect(row).toHaveAttribute("aria-current", "true");
+      const rows = nav.getByRole("button", { name: /^Orchestrated/ });
+      await expect(rows).toHaveCount(2);
+      await expect(rows.first()).toHaveAttribute("aria-current", "true");
+      await expect(
+        nav.getByRole("button", { name: "Dashboards" }),
+      ).toBeVisible();
+      await expect(rows.last()).not.toHaveAttribute("aria-current");
     },
   },
   {
