@@ -4,6 +4,7 @@ import { useSidebar } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 import { AppSidebar } from "@/modules/shell/components/AppSidebar";
 import type { SidebarBoardsData } from "./SidebarBoards";
+import type { SidebarDashboardsData } from "./SidebarDashboards";
 import { PageHeader } from "@/modules/shell/components/PageHeader";
 import { TopBar } from "@/modules/shell/components/TopBar";
 import type { NavCounts, NavItem } from "../../../../shared/nav-items.js";
@@ -24,6 +25,8 @@ interface ShellFrameProps {
   activityOpen: boolean;
   carousel: boolean;
   boards: SidebarBoardsData;
+  dashboards: SidebarDashboardsData;
+  hasMainOrchestrator: boolean;
   pageTitle: string;
   pageCount?: number;
   headerView?: ReactNode;
@@ -45,6 +48,8 @@ export function ShellFrame({
   activityOpen,
   carousel,
   boards,
+  dashboards,
+  hasMainOrchestrator,
   pageTitle,
   pageCount,
   headerView,
@@ -102,6 +107,14 @@ export function ShellFrame({
             setOpenMobile(false);
           },
         }}
+        dashboards={{
+          ...dashboards,
+          onOpenDashboard: (key) => {
+            dashboards.onOpenDashboard(key);
+            setOpenMobile(false);
+          },
+        }}
+        hasMainOrchestrator={hasMainOrchestrator}
         onNavigate={(page) => {
           onNavigate(page);
           setOpenMobile(false);

@@ -1,17 +1,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PAGES, parseRoute } from "./route.js";
-import { NAV_ITEMS, navGroups, visibleNavItems } from "./nav-items.js";
+import { NAV_ITEMS, navGroups } from "./nav-items.js";
 
-test("every route page except settings, boards, board settings and the command centre has exactly one nav row", () => {
+test("every route page except settings, boards, board settings, board, dashboard and the command centre has exactly one nav row", () => {
   for (const page of PAGES) {
     const rows = NAV_ITEMS.filter((item) => item.page === page).length;
-    const sidebarless =
+    const noNavRow =
       page === "settings" ||
       page === "boards" ||
       page === "board-settings" ||
+      page === "board" ||
+      page === "dashboard" ||
       page === "orchestrator";
-    assert.equal(rows, sidebarless ? 0 : 1, page);
+    assert.equal(rows, noNavRow ? 0 : 1, page);
   }
 });
 
@@ -47,10 +49,10 @@ test("the System group lists its pages in order, Workspaces after Archive, Flow 
   );
 });
 
-test("the Work group lists Board, Dashboard, Sessions, Workspace and Activity in order", () => {
+test("the Work group lists Sessions, Workspace and Activity in order", () => {
   assert.deepEqual(
     NAV_ITEMS.filter((item) => item.group === "Work").map((item) => item.page),
-    ["board", "dashboard", "sessions", "workspace", "activity"],
+    ["sessions", "workspace", "activity"],
   );
 });
 
@@ -81,22 +83,9 @@ test("navGroups orders Home, Work, Sources, System", () => {
   assert.deepEqual(groups, ["Home", "Work", "Sources", "System"]);
 });
 
-test("the Dashboard row shows in Work only when the board has a main orchestrator", () => {
-  const pages = (hasMain: boolean) =>
-    visibleNavItems(NAV_ITEMS, [], hasMain)
-      .filter((item) => item.group === "Work")
-      .map((item) => item.page);
-  assert.deepEqual(pages(false), [
-    "board",
-    "sessions",
-    "workspace",
-    "activity",
-  ]);
-  assert.deepEqual(pages(true), [
-    "board",
-    "dashboard",
-    "sessions",
-    "workspace",
-    "activity",
-  ]);
+test("no nav row opens the board or the dashboard", () => {
+  assert.equal(
+    NAV_ITEMS.some((i) => i.page === "board" || i.page === "dashboard"),
+    false,
+  );
 });
