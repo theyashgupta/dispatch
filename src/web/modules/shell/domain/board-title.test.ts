@@ -19,7 +19,6 @@ test("a global page keeps its title when a board name is given", () => {
 
 test("BOARD_PAGES holds exactly the ten board pages", () => {
   assert.deepEqual([...BOARD_PAGES].sort(), [
-    "activity",
     "archive",
     "board",
     "dashboard",

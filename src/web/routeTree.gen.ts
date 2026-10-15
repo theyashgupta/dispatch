@@ -26,8 +26,6 @@ import { Route as BoardsKeyOrchestratorChar123IdChar125RouteImport } from './rou
 
 const AccountsChar123IdChar125LazyRouteImport =
   createFileRoute('/accounts/{-$id}')()
-const ActivityChar123IdChar125LazyRouteImport =
-  createFileRoute('/activity/{-$id}')()
 const ArchiveChar123IdChar125LazyRouteImport =
   createFileRoute('/archive/{-$id}')()
 const AskChar123IdChar125LazyRouteImport = createFileRoute('/ask/{-$id}')()
@@ -55,14 +53,6 @@ const AccountsChar123IdChar125LazyRoute =
     getParentRoute: () => rootRouteImport,
   } as any).lazy(() =>
     import('./routes/accounts.{-$id}.lazy').then((d) => d.Route),
-  )
-const ActivityChar123IdChar125LazyRoute =
-  ActivityChar123IdChar125LazyRouteImport.update({
-    id: '/activity/{-$id}',
-    path: '/activity/{-$id}',
-    getParentRoute: () => rootRouteImport,
-  } as any).lazy(() =>
-    import('./routes/activity.{-$id}.lazy').then((d) => d.Route),
   )
 const ArchiveChar123IdChar125LazyRoute =
   ArchiveChar123IdChar125LazyRouteImport.update({
@@ -244,7 +234,6 @@ export interface FileRoutesByFullPath {
   '/orchestrator/{-$id}': typeof OrchestratorChar123IdChar125Route
   '/pull-requests/{-$id}': typeof PullRequestsChar123IdChar125Route
   '/accounts/{-$id}': typeof AccountsChar123IdChar125LazyRoute
-  '/activity/{-$id}': typeof ActivityChar123IdChar125LazyRoute
   '/archive/{-$id}': typeof ArchiveChar123IdChar125LazyRoute
   '/ask/{-$id}': typeof AskChar123IdChar125LazyRoute
   '/calendar/{-$id}': typeof CalendarChar123IdChar125LazyRoute
@@ -272,7 +261,6 @@ export interface FileRoutesByTo {
   '/orchestrator/{-$id}': typeof OrchestratorChar123IdChar125Route
   '/pull-requests/{-$id}': typeof PullRequestsChar123IdChar125Route
   '/accounts/{-$id}': typeof AccountsChar123IdChar125LazyRoute
-  '/activity/{-$id}': typeof ActivityChar123IdChar125LazyRoute
   '/archive/{-$id}': typeof ArchiveChar123IdChar125LazyRoute
   '/ask/{-$id}': typeof AskChar123IdChar125LazyRoute
   '/calendar/{-$id}': typeof CalendarChar123IdChar125LazyRoute
@@ -301,7 +289,6 @@ export interface FileRoutesById {
   '/orchestrator/{-$id}': typeof OrchestratorChar123IdChar125Route
   '/pull-requests/{-$id}': typeof PullRequestsChar123IdChar125Route
   '/accounts/{-$id}': typeof AccountsChar123IdChar125LazyRoute
-  '/activity/{-$id}': typeof ActivityChar123IdChar125LazyRoute
   '/archive/{-$id}': typeof ArchiveChar123IdChar125LazyRoute
   '/ask/{-$id}': typeof AskChar123IdChar125LazyRoute
   '/calendar/{-$id}': typeof CalendarChar123IdChar125LazyRoute
@@ -331,7 +318,6 @@ export interface FileRouteTypes {
     | '/orchestrator/{-$id}'
     | '/pull-requests/{-$id}'
     | '/accounts/{-$id}'
-    | '/activity/{-$id}'
     | '/archive/{-$id}'
     | '/ask/{-$id}'
     | '/calendar/{-$id}'
@@ -359,7 +345,6 @@ export interface FileRouteTypes {
     | '/orchestrator/{-$id}'
     | '/pull-requests/{-$id}'
     | '/accounts/{-$id}'
-    | '/activity/{-$id}'
     | '/archive/{-$id}'
     | '/ask/{-$id}'
     | '/calendar/{-$id}'
@@ -387,7 +372,6 @@ export interface FileRouteTypes {
     | '/orchestrator/{-$id}'
     | '/pull-requests/{-$id}'
     | '/accounts/{-$id}'
-    | '/activity/{-$id}'
     | '/archive/{-$id}'
     | '/ask/{-$id}'
     | '/calendar/{-$id}'
@@ -416,7 +400,6 @@ export interface RootRouteChildren {
   OrchestratorChar123IdChar125Route: typeof OrchestratorChar123IdChar125Route
   PullRequestsChar123IdChar125Route: typeof PullRequestsChar123IdChar125Route
   AccountsChar123IdChar125LazyRoute: typeof AccountsChar123IdChar125LazyRoute
-  ActivityChar123IdChar125LazyRoute: typeof ActivityChar123IdChar125LazyRoute
   ArchiveChar123IdChar125LazyRoute: typeof ArchiveChar123IdChar125LazyRoute
   AskChar123IdChar125LazyRoute: typeof AskChar123IdChar125LazyRoute
   CalendarChar123IdChar125LazyRoute: typeof CalendarChar123IdChar125LazyRoute
@@ -444,13 +427,6 @@ declare module '@tanstack/react-router' {
       path: '/accounts/{-$id}'
       fullPath: '/accounts/{-$id}'
       preLoaderRoute: typeof AccountsChar123IdChar125LazyRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/activity/{-$id}': {
-      id: '/activity/{-$id}'
-      path: '/activity/{-$id}'
-      fullPath: '/activity/{-$id}'
-      preLoaderRoute: typeof ActivityChar123IdChar125LazyRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/archive/{-$id}': {
@@ -632,7 +608,6 @@ const rootRouteChildren: RootRouteChildren = {
   OrchestratorChar123IdChar125Route: OrchestratorChar123IdChar125Route,
   PullRequestsChar123IdChar125Route: PullRequestsChar123IdChar125Route,
   AccountsChar123IdChar125LazyRoute: AccountsChar123IdChar125LazyRoute,
-  ActivityChar123IdChar125LazyRoute: ActivityChar123IdChar125LazyRoute,
   ArchiveChar123IdChar125LazyRoute: ArchiveChar123IdChar125LazyRoute,
   AskChar123IdChar125LazyRoute: AskChar123IdChar125LazyRoute,
   CalendarChar123IdChar125LazyRoute: CalendarChar123IdChar125LazyRoute,

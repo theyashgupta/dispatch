@@ -65,7 +65,6 @@ test("the initial state has the defaults and an initial value overrides one fiel
   assert.equal(state.soundEnabled, true);
   assert.deepEqual(state.tunnelState, { status: "off" });
   assert.equal(state.connection, "connecting");
-  assert.equal(state.activityOpen, false);
   assert.equal(state.toast, IDLE_TOAST);
   assert.equal(state.toastSeq, 0);
 
@@ -79,11 +78,11 @@ test("subscribe returns an unsubscribe and every listener gets one call per chan
   let second = 0;
   const off = store.subscribe(() => first++);
   store.subscribe(() => second++);
-  store.setActivityOpen(true);
+  store.setSoundEnabled(false);
   assert.equal(first, 1);
   assert.equal(second, 1);
   off();
-  store.setActivityOpen(false);
+  store.setSoundEnabled(true);
   assert.equal(first, 1);
   assert.equal(second, 2);
 });
@@ -94,7 +93,6 @@ test("a same-value action changes nothing and notifies no listener", () => {
   store.selectCard(null, null);
   store.setSoundEnabled(true);
   store.closeCleanup();
-  store.setActivityOpen(false);
   assert.equal(counter.calls, 0);
   assert.equal(store.getState(), before);
 });
@@ -388,9 +386,6 @@ test("the preference and live state setters set their field and notify once", ()
   assert.equal(counter.calls, 3);
   store.setConnection("disconnected");
   assert.equal(counter.calls, 3);
-  store.setActivityOpen(true);
-  assert.equal(store.getState().activityOpen, true);
-  assert.equal(counter.calls, 4);
 });
 
 test("the toast shows, undoes, fails, dismisses and ignores a stale id", () => {

@@ -41,7 +41,6 @@ export interface AppState {
   soundEnabled: boolean;
   tunnelState: TunnelState;
   connection: ConnectionStatus;
-  activityOpen: boolean;
   toast: UndoToastState;
   toastSeq: number;
 }
@@ -68,7 +67,6 @@ const DEFAULT_STATE: AppState = {
   soundEnabled: true,
   tunnelState: { status: "off" },
   connection: "connecting",
-  activityOpen: false,
   toast: IDLE_TOAST,
   toastSeq: 0,
 };
@@ -249,7 +247,6 @@ export function createAppStore(initial: Partial<AppState> = {}) {
     setSoundEnabled: (on: boolean): void => set({ soundEnabled: on }),
     setTunnelState: (tunnelState: TunnelState): void => set({ tunnelState }),
     setConnection: (connection: ConnectionStatus): void => set({ connection }),
-    setActivityOpen: (open: boolean): void => set({ activityOpen: open }),
 
     showUndo: (label: string, undo: () => Promise<void>): void => {
       const id = state.toastSeq + 1;
