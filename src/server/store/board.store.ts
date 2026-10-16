@@ -1572,15 +1572,19 @@ class BoardStore extends EventEmitter {
    * Store a group card's loop progress, writing only when it differs from the stored value.
    *
    * @remarks The compare runs before the queue because every `enqueue` persists all cards and emits
-   * `change`, so a poll that re-reads identical progress must not enter it. An unknown card id is a
-   * no-op.
+   * `change`, so a poll that re-reads identical progress must not enter it. `force` skips the compare
+   * so a caller can advance `readAt` alone. An unknown card id is a no-op.
    */
-  setLoopProgress(cardId: string, progress: LoopProgress): Promise<void> {
+  setLoopProgress(
+    cardId: string,
+    progress: LoopProgress,
+    force = false,
+  ): Promise<void> {
     const card = this.cards.get(cardId);
     if (card === undefined) return Promise.resolve();
     const stable = (p: LoopProgress | undefined) =>
       JSON.stringify(p === undefined ? null : { ...p, readAt: "" });
-    if (stable(card.loopProgress) === stable(progress))
+    if (!force && stable(card.loopProgress) === stable(progress))
       return Promise.resolve();
     return this.enqueue(() => {
       const current = this.cards.get(cardId);
