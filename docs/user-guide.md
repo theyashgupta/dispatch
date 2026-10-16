@@ -49,6 +49,20 @@ Press `B` to open the command palette with the boards only. Type to filter the b
 
 The address of a board page holds the board key. The pages with a keyed address are the board (`/boards/<key>`), the dashboard (`/boards/<key>/dashboard`), the inbox (`/boards/<key>/inbox`), the sessions (`/boards/<key>/sessions`) and the board settings (`/boards/<key>/settings`). The other pages keep the `board` search parameter, for example `/tickets?board=<key>`. The old addresses, such as `/board`, `/inbox` and `/dashboard?board=<key>`, still open the same pages.
 
+### Split the board view
+
+On a screen 1024 px wide or wider, you can show two boards at once.
+
+1. Open a board. Choose **Split** at the right end of the search row. Dispatch opens the first other active board beside the first one. **Split** is off when no other board exists.
+2. In the second pane, use the **Board** list to choose another board.
+3. Use **Side by side** or **Stacked** to put the second board beside or below the first one.
+4. Drag the divider **Resize boards** to change the size of the panes. Dispatch remembers the size for each direction.
+5. Choose the close button of a pane (**Close <board name> pane**). The other board stays. Closing the first pane keeps the second board and opens it as the one board.
+
+You can also open the palette (`Cmd+K`) and choose **Split board view** or **Close split view**.
+
+The address holds the split, for example `/boards/LOCAL?split=OPS&dir=column`. A reload opens the same two boards, and Back undoes a change. Below 1024 px only the first board shows and the split controls are hidden. The address keeps the split, and the split shows again on a wider screen. The pane with the colored top border is the active pane. The orchestrator button in the page header opens the orchestrator of the active pane.
+
 ### Create a board from the palette
 
 1. Press `Cmd+K` (or `Ctrl+K`). Choose **Create board**.
