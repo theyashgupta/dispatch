@@ -667,8 +667,8 @@ void test("startShip ships loop unit branches that only the unit Status line nam
     "feat/LOCAL-131-unit-1-dashboards-dropdown",
     "feat/LOCAL-132-unit-2-remove-sessions",
   ];
-  await gitOutput(stack.worktree, "branch", names[0]!, "unit-1");
-  await gitOutput(stack.worktree, "branch", names[1]!, "unit-2");
+  await gitOutput(stack.worktree, "branch", names[0], "unit-1");
+  await gitOutput(stack.worktree, "branch", names[1], "unit-2");
   const built = buildLoopProgress({
     slug: "s",
     roadmapFile: "units.md",
