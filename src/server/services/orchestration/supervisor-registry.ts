@@ -43,7 +43,10 @@ export interface SupervisorWatcher {
   shellRoot: boolean;
   plan: PlanMemory;
   progressRead: boolean;
+  closeTriedAt: number;
 }
+
+const CLOSE_RETRY_MS = 60_000;
 
 const watchers = new Map<string, SupervisorWatcher>();
 let lastWakeAt: number | null = null;
@@ -67,6 +70,7 @@ export function ensureWatcher(
       shellRoot: false,
       plan: initialPlanMemory(),
       progressRead: false,
+      closeTriedAt: 0,
     };
     watchers.set(tmuxSession, watcher);
   }
@@ -261,6 +265,8 @@ export async function supervisePane(
       ),
       atShellPrompt(watcher),
     ]);
+    const engine = card.loopProgress?.engine;
+    const engineOpen = engine?.active === true && !engine.closed;
     const detection = detectState({
       now,
       tmuxAlive: true,
@@ -269,15 +275,37 @@ export async function supervisePane(
       pane: sample.pane,
       engineSessionId: engineSessionIdOf(card),
       completion: card.loopProgress?.completion ?? null,
+      engineOpen,
       transcript,
       memory: watcher.memory,
     });
     watcher.memory = detection.memory;
     const changed =
       detection.state !== (session.state ?? null) &&
-      !holdsNeedsInput(session.state ?? null, session.stateReason, detection);
+      !holdsNeedsInput(
+        session.state ?? null,
+        session.stateReason,
+        detection,
+        engineOpen,
+      );
     if (changed)
       watcher.plan = await act(card, session, detection, watcher.plan, now);
+    if (changed && detection.state === "roadmap_complete")
+      watcher.closeTriedAt = now;
+    if (
+      !changed &&
+      detection.state === "roadmap_complete" &&
+      engineOpen &&
+      now - watcher.closeTriedAt >= CLOSE_RETRY_MS
+    ) {
+      watcher.closeTriedAt = now;
+      await runActions(
+        card,
+        session,
+        [{ kind: "close_loop" }],
+        detection.evidence,
+      );
+    }
     if (
       (detection.state === "working" || detection.state === "idle") &&
       store.getCard(card.id)?.sessions?.find((s) => s.id === session.id)

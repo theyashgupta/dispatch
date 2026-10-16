@@ -344,6 +344,74 @@ void test("a progress file reports a missing table and malformed rows", () => {
   assert.deepEqual(parsed.warnings, ["malformed row 5", "malformed row 6"]);
 });
 
+void test("a roadmap Status line branch names the unit branch when the ledger has no units table", () => {
+  const unit = (n: number, title: string, branch: string) =>
+    `### Unit ${n}: ${title}\n- **Status:** built, awaiting /ship (branch \`${branch}\`, 8073bafe, 676d3279)\n`;
+  const result = build({
+    roadmapText: [
+      unit(
+        1,
+        "Dashboards dropdown",
+        "feat/LOCAL-131-unit-1-dashboards-dropdown",
+      ),
+      unit(2, "Remove sessions", "feat/LOCAL-132-unit-2-remove-sessions"),
+      unit(3, "Remove workspace", "feat/LOCAL-134-unit-3-remove-workspace"),
+      unit(4, "Remove activity", "feat/LOCAL-130-unit-4-remove-activity"),
+    ].join(""),
+    progressText:
+      "Roadmap: /x/ROADMAP.md, slug s\n\n## Unit statuses\n- Unit 1: committed 048f1d0d\n- Unit 2: committed 5755e79d\n- Unit 3: committed 69690ba8\n- Unit 4: committed 7b5f9c0a\n",
+  });
+  assert.deepEqual(
+    result.units.map((u) => u.branch),
+    [
+      "feat/LOCAL-131-unit-1-dashboards-dropdown",
+      "feat/LOCAL-132-unit-2-remove-sessions",
+      "feat/LOCAL-134-unit-3-remove-workspace",
+      "feat/LOCAL-130-unit-4-remove-activity",
+    ],
+  );
+});
+
+void test("a progress table branch wins over a roadmap Status line branch", () => {
+  const result = build({
+    roadmapText:
+      "### Unit 1: A\n- **Status:** built, awaiting /ship (branch `feat/X-1-unit-1-status`, abc1234)\n",
+    progressText:
+      "| Unit | Status | Branch |\n| - | - | - |\n| 1 | committed abc1234 | feat/X-1-unit-1-table |\n",
+  });
+  assert.equal(result.units[0]?.branch, "feat/X-1-unit-1-table");
+});
+
+void test("an empty or dash progress table branch cell falls back to the roadmap Status line branch", () => {
+  const result = build({
+    roadmapText: [
+      "### Unit 1: A\n- **Status:** built, awaiting /ship (branch `feat/X-1-unit-1-status`, abc1234)\n",
+      "### Unit 2: B\n- **Status:** built, awaiting /ship (branch `feat/X-2-unit-2-status`, abc1234)\n",
+    ].join(""),
+    progressText:
+      "| Unit | Status | Branch |\n| - | - | - |\n| 1 | committed abc1234 |  |\n| 2 | committed abc1234 | - |\n",
+  });
+  assert.deepEqual(
+    result.units.map((u) => u.branch),
+    ["feat/X-1-unit-1-status", "feat/X-2-unit-2-status"],
+  );
+});
+
+void test("a roadmap Status line keeps branch null without a parenthesised backtick branch", () => {
+  const result = build({
+    roadmapText: [
+      "### Unit 1: A\n- **Status:** built, awaiting /ship (branch x, commits a, b)\n",
+      "### Unit 2: B\n- **Status:** built, awaiting /ship, old branch `feat/old` dropped\n",
+      "### Unit 3: C\n- **Status:** built, awaiting /ship\n",
+    ].join(""),
+    progressText: "Roadmap: /x/R.md, slug s\n",
+  });
+  assert.deepEqual(
+    result.units.map((u) => u.branch),
+    [null, null, null],
+  );
+});
+
 void test("an engine with front matter and no active field gives a warning", () => {
   const result = build({
     engine: { text: "---\niteration: 2\n---\n", closed: false },

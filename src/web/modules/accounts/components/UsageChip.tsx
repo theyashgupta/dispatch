@@ -1,10 +1,6 @@
 import type { ReactNode, Ref } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Popover,
-  PopoverAnchor,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverTrigger } from "@/components/ui/popover";
 import { UsageDot } from "./UsageDot";
 import type { UsageTone } from "@/modules/accounts/domain/usage-format";
 
@@ -48,7 +44,6 @@ export function UsageChip({
             </span>
           </Button>
         </PopoverTrigger>
-        <PopoverAnchor className="pointer-events-none fixed inset-x-2 bottom-2" />
       </div>
       {children}
     </Popover>

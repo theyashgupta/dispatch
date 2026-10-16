@@ -7,7 +7,11 @@ import {
   type FileHandle,
 } from "node:fs/promises";
 import path from "node:path";
-import type { Card, LoopProgress } from "../../../shared/types.js";
+import type {
+  ActivityEvent,
+  Card,
+  LoopProgress,
+} from "../../../shared/types.js";
 import { isLoopCard } from "../../../shared/running-group.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import {
@@ -408,8 +412,10 @@ function phaseDirOf(progress: LoopProgress, root: string): string | null {
 
 const inFlight = new Map<string, Promise<void>>();
 const rerun = new Set<string>();
+const forced = new Set<string>();
 
 async function refreshOnce(cardId: string): Promise<void> {
+  const force = forced.delete(cardId);
   try {
     const card = store.getCard(cardId);
     if (!isTracked(card)) return;
@@ -418,7 +424,7 @@ async function refreshOnce(cardId: string): Promise<void> {
       single: card.source !== "group",
       previous: card.loopProgress,
     });
-    if (progress !== null) await store.setLoopProgress(cardId, progress);
+    if (progress !== null) await store.setLoopProgress(cardId, progress, force);
   } catch (error) {
     console.warn(`${LOG_PREFIX} ${cardId}: ${reasonOf(error)}`);
   }
@@ -438,9 +444,13 @@ async function refreshUntilQuiet(cardId: string): Promise<void> {
 /**
  * Re-reads the loop files of one tracked loop card and stores the result.
  *
- * @remarks A call during a read queues exactly one more read and returns the in-flight promise, which settles after that rerun. The promise never rejects.
+ * @remarks A call during a read queues exactly one more read and returns the in-flight promise, which settles after that rerun. The promise never rejects. `force` makes the next store write persist even when only `readAt` changed.
  */
-export function refreshLoopProgress(cardId: string): Promise<void> {
+export function refreshLoopProgress(
+  cardId: string,
+  force = false,
+): Promise<void> {
+  if (force) forced.add(cardId);
   const running = inFlight.get(cardId);
   if (running !== undefined) {
     rerun.add(cardId);
@@ -464,6 +474,13 @@ function trackedCards(): (Card & { workspacePath: string })[] {
 interface CardWatch {
   dirs: Map<string, FSWatcher>;
   debounce: NodeJS.Timeout | null;
+}
+
+/** Force a store write on a DONE marker so `readAt` follows it. */
+function onActivity(event: ActivityEvent): void {
+  if (event.type === "status_agent_done" && event.cardId != null) {
+    void refreshLoopProgress(event.cardId, true);
+  }
 }
 
 /**
@@ -572,12 +589,15 @@ export function startLoopProgressReader(
     }
   };
 
+  store.on("activity", onActivity);
+
   sync();
   const timer = setInterval(sync, intervalMs);
   timer.unref();
 
   return () => {
     stopped = true;
+    store.off("activity", onActivity);
     clearInterval(timer);
     for (const cardId of [...watches.keys()]) closeCard(cardId);
   };
