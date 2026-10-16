@@ -26,6 +26,8 @@ export interface AppState {
   pinFetchError: { id: string; kind: "not-found" | "network" } | null;
   pinFetch: { id: string; gen: number } | null;
   board: BoardKey;
+  splitBoard: BoardKey | null;
+  activeBoard: BoardKey | null;
   doneLimit: number;
   start: StartRequest | null;
   groupStart: Card[] | null;
@@ -53,6 +55,8 @@ const DEFAULT_STATE: AppState = {
   pinFetchError: null,
   pinFetch: null,
   board: DEFAULT_BOARD_KEY,
+  splitBoard: null,
+  activeBoard: null,
   doneLimit: DONE_PAGE_SIZE,
   start: null,
   groupStart: null,
@@ -199,6 +203,18 @@ export function createAppStore(initial: Partial<AppState> = {}) {
           ? { board }
           : { board, doneLimit: DONE_PAGE_SIZE },
       ),
+
+    setSplit: (board: BoardKey | null): void =>
+      set(
+        board === null
+          ? { splitBoard: null, activeBoard: null }
+          : {
+              splitBoard: board,
+              activeBoard: state.activeBoard === board ? board : null,
+            },
+      ),
+    setActiveBoard: (board: BoardKey | null): void =>
+      set({ activeBoard: board }),
 
     loadMoreDone: (): void =>
       set({ doneLimit: state.doneLimit + DONE_PAGE_SIZE }),

@@ -4,7 +4,7 @@ import { DONE_PAGE_SIZE } from "../../shared/done-limit.js";
 import type { PinnedCard } from "../../shared/pinned-card.js";
 import type { CardSearchResult } from "../../shared/search.js";
 import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
-import type { Card, SetupChecks } from "../../shared/types.js";
+import type { BoardKey, Card, SetupChecks } from "../../shared/types.js";
 import { IDLE_TOAST } from "../../shared/undo-toast.js";
 import { createAppStore, type AppState } from "./app-store.js";
 
@@ -51,6 +51,8 @@ test("the initial state has the defaults and an initial value overrides one fiel
   assert.equal(state.pinFetchError, null);
   assert.equal(state.pinFetch, null);
   assert.equal(state.doneLimit, DONE_PAGE_SIZE);
+  assert.equal(state.splitBoard, null);
+  assert.equal(state.activeBoard, null);
   assert.equal(state.start, null);
   assert.equal(state.groupStart, null);
   assert.equal(state.selectionResetToken, 0);
@@ -279,6 +281,54 @@ test("loadMoreDone adds one page each time", () => {
   store.loadMoreDone();
   store.loadMoreDone();
   assert.equal(store.getState().doneLimit, DONE_PAGE_SIZE * 3);
+});
+
+test("setSplit and setActiveBoard set their fields and notify only on a change", () => {
+  const { store, counter } = counted();
+  const acme = "ACME" as BoardKey;
+  store.setSplit(acme);
+  store.setActiveBoard(acme);
+  assert.equal(store.getState().splitBoard, acme);
+  assert.equal(store.getState().activeBoard, acme);
+  assert.equal(counter.calls, 2);
+  store.setSplit(acme);
+  store.setActiveBoard(acme);
+  assert.equal(counter.calls, 2);
+});
+
+test("clearing the split also clears the active board", () => {
+  const acme = "ACME" as BoardKey;
+  const { store, counter } = counted({ splitBoard: acme, activeBoard: acme });
+  store.setSplit(null);
+  assert.equal(store.getState().splitBoard, null);
+  assert.equal(store.getState().activeBoard, null);
+  assert.equal(counter.calls, 1);
+  store.setSplit(null);
+  assert.equal(counter.calls, 1);
+});
+
+test("changing the split board resets an active board that no longer shows", () => {
+  const b = "BBBB" as BoardKey;
+  const c = "CCCC" as BoardKey;
+  const store = createAppStore({ splitBoard: b, activeBoard: b });
+  store.setSplit(c);
+  assert.equal(store.getState().splitBoard, c);
+  assert.equal(store.getState().activeBoard, null);
+});
+
+test("setSplit with the active board keeps it active", () => {
+  const b = "BBBB" as BoardKey;
+  const store = createAppStore({ splitBoard: b, activeBoard: b });
+  store.setSplit(b);
+  assert.equal(store.getState().activeBoard, b);
+});
+
+test("setActiveBoard null returns focus to the primary and keeps the split", () => {
+  const acme = "ACME" as BoardKey;
+  const store = createAppStore({ splitBoard: acme, activeBoard: acme });
+  store.setActiveBoard(null);
+  assert.equal(store.getState().activeBoard, null);
+  assert.equal(store.getState().splitBoard, acme);
 });
 
 test("requestStart opens only for a startable card", () => {

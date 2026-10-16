@@ -170,6 +170,20 @@ test("cardBoardSwitch returns the card board only when it differs from the selec
   assert.equal(cardBoardSwitch(LOCAL, LOCAL), null);
 });
 
+test("cardBoardSwitch returns null for a card of the split board", () => {
+  const other = "OTHER" as BoardKey;
+  assert.equal(cardBoardSwitch(ACME, LOCAL, ACME), null);
+  assert.equal(cardBoardSwitch(undefined, ACME, LOCAL), null);
+  assert.equal(cardBoardSwitch(LOCAL, LOCAL, ACME), null);
+  assert.equal(cardBoardSwitch(other, LOCAL, ACME), other);
+});
+
+test("cardBoardSwitch with no split keeps its results", () => {
+  assert.equal(cardBoardSwitch(ACME, LOCAL, null), ACME);
+  assert.equal(cardBoardSwitch(undefined, ACME, null), LOCAL);
+  assert.equal(cardBoardSwitch(ACME, ACME, null), null);
+});
+
 test("staleCountsLabel names the last good time only after a failed refetch with data", () => {
   const data = { at: "2026-10-07T09:05:00.000Z" };
   const time = new Date(data.at).toLocaleTimeString([], {
