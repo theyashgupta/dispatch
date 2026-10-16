@@ -28,7 +28,7 @@ const SLUG = "export";
 const PROMISE = `<promise>RALPH COMPLETE ${SLUG}</promise>`;
 const DONE_LINE = `DISPATCH_STATUS: DONE - ${SLUG} built`;
 const CLAUDE_SESSION = "5c0a8b1e-3f2d-4e6a-9b7c-1d2e3f4a5b6c";
-const RUN_LOG = path.join(EVIDENCE_DIR, "scenario-9-run-log.txt");
+const RUN_LOG = path.join(EVIDENCE_DIR, "scenario-10-run-log.txt");
 const QA_OUT = process.env.LOCAL151_QA_OUT ?? "";
 const CLOSE_LIMIT_SECONDS = 60;
 const PRD_REL = "sample-app/.planning/prds/export.md";
@@ -37,7 +37,7 @@ const ENGINE_REL = ".claude/ralph-loop.local.md";
 const SHIP_BODY =
   "What\nThe work of the card.\nWhy\nThe card is done.\nHow\nShipped by the test.";
 
-const note = makeNote("scenario-9");
+const note = makeNote("scenario-10");
 
 interface Reply<T = Record<string, unknown>> {
   status: number;
@@ -555,10 +555,10 @@ async function runScenario(sb: Sandbox): Promise<void> {
 }
 
 void test(
-  "scenario 9: the supervisor closes the engine of a finished PRD loop from the transcript tail, and start_ship then merges it",
+  "scenario 10: the supervisor closes the engine of a finished PRD loop from the transcript tail, and start_ship then merges it",
   { timeout: 20 * MINUTE },
   async () => {
-    const sb = await startSandbox({ name: "s9-engine-close" });
+    const sb = await startSandbox({ name: "s10-engine-close" });
     try {
       await runScenario(sb);
     } finally {
@@ -574,7 +574,7 @@ void test(
   },
 );
 
-void test("scenario 9 code types no key into any pane", () => {
+void test("scenario 10 code types no key into any pane", () => {
   const typing = new RegExp(
     [
       ["send", "keys"].join("-?"),

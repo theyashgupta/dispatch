@@ -6,7 +6,7 @@ import path from "node:path";
 import { isolateEnv, waitFor } from "../test-support/fixtures.js";
 import { setGhScenario, writeFakeGh } from "../test-support/fake-gh.js";
 import { parseBoardKey } from "../../shared/board-key.js";
-import type { BoardKey, Card, ShipFlow } from "../../shared/types.js";
+import type { BoardKey, Card } from "../../shared/types.js";
 
 const env = isolateEnv();
 const { store } = await import("../store/board.store.js");
@@ -284,11 +284,7 @@ void test("a finished single PRD loop whose promise is only in the transcript is
   assert.equal(fs.existsSync(engine), false);
   assert.equal(fs.existsSync(`${engine}.done`), true);
   await waitFor(
-    () =>
-      Promise.resolve(
-        (store.getCard(card.id)?.shipFlow as ShipFlow | undefined)?.state ===
-          "done",
-      ),
+    () => Promise.resolve(store.getCard(card.id)?.shipFlow?.state === "done"),
     30_000,
     "flow done",
   );
