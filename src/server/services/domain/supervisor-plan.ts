@@ -53,15 +53,21 @@ export function initialPlanMemory(): PlanMemory {
  * a `resume_failed` hold until a real busy sign or a confirmed idle prompt, so a failed resume is
  * not planned on every sample. A confirmed idle needs claude up and quiet for three samples, which
  * a shell prompt or a dead pane never shows, so it marks a resume that worked after the hold. A
- * `paused` detection never holds, because the pause is the newer fact.
+ * `paused` detection never holds, because the pause is the newer fact. A `roadmap_complete`
+ * detection releases the hold only while the engine is open, so a finished loop still closes.
  */
 export function holdsNeedsInput(
   stored: SupervisorState | null,
   reason: SupervisorStateReason | undefined,
   detected: Pick<Detection, "state" | "busy">,
+  engineOpen = false,
 ): boolean {
   if (stored !== "needs_input" || reason === undefined) return false;
-  if (detected.state === "paused") return false;
+  if (
+    detected.state === "paused" ||
+    (detected.state === "roadmap_complete" && engineOpen)
+  )
+    return false;
   if (reason === "budget")
     return detected.state !== "lost" && detected.state !== "shell_prompt";
   if (reason === "resume_failed")
@@ -128,7 +134,7 @@ export function planActions(input: PlanInput): {
           }
         : none;
     case "roadmap_complete":
-      return loop?.engineActive
+      return loop?.engineActive && loop.orchestrator !== true
         ? { actions: [{ kind: "close_loop" }], memory }
         : none;
     case "lost":

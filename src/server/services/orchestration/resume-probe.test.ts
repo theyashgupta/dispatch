@@ -104,6 +104,7 @@ beforeEach(() => {
     shellRoot: false,
     plan: initialPlanMemory(),
     progressRead: false,
+    closeTriedAt: 0,
   };
   Object.assign(probeTools, {
     capturePane: () =>
