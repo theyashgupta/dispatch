@@ -13,6 +13,7 @@ const TIMING_FILES = [
   "src/server/adapters/tmux-env.test.ts",
   "src/server/adapters/tmux-pane-border.test.ts",
   "src/server/adapters/tmux-session-env.test.ts",
+  "src/server/bootstrap/boot-resume-tmux.test.ts",
   "src/server/routes/decisions-route.test.ts",
   "src/server/routes/orchestrator-sessions-route.test.ts",
   "src/server/routes/session-input-route.test.ts",
