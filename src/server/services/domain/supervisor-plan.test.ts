@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import type { SupervisorState } from "../../../shared/types.js";
+import type {
+  SupervisorState,
+  SupervisorStateReason,
+} from "../../../shared/types.js";
 import {
   declineKeys,
   holdsNeedsInput,
@@ -66,6 +69,13 @@ void test("each transition maps to its action list", () => {
       {
         to: "roadmap_complete",
         loop: { engineActive: false, handoffPending: false, unitPhase: "4/9" },
+      },
+      [],
+    ],
+    [
+      {
+        to: "roadmap_complete",
+        loop: { ...LOOP, orchestrator: true },
       },
       [],
     ],
@@ -193,6 +203,34 @@ void test("a supervisor set needs_input holds until a busy sign, a permission pr
     holdsNeedsInput("idle", "supervisor_gave_up", { state: "idle" }),
     false,
   );
+});
+
+void test("a roadmap_complete detection releases every hold reason only while the engine is open", () => {
+  const reasons: SupervisorStateReason[] = [
+    "usage_stop",
+    "budget",
+    "stop_session",
+    "supervisor_gave_up",
+    "resume_failed",
+  ];
+  const detected = { state: "roadmap_complete" } as const;
+  for (const reason of reasons) {
+    assert.equal(
+      holdsNeedsInput("needs_input", reason, detected, true),
+      false,
+      `open ${reason}`,
+    );
+    assert.equal(
+      holdsNeedsInput("needs_input", reason, detected, false),
+      true,
+      `closed ${reason}`,
+    );
+    assert.equal(
+      holdsNeedsInput("needs_input", reason, detected),
+      true,
+      `absent ${reason}`,
+    );
+  }
 });
 
 void test("the decline keys reach the No row of a dangerous delete prompt", () => {

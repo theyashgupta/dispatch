@@ -5930,6 +5930,8 @@ Scenario 8 (tests/e2e/scenario-8-memory-pause.e2e.ts) proves that the memory gov
 
 Scenario 9 (tests/e2e/scenario-9-unit-branch-ship.e2e.ts) proves that a finished Roadmap loop group whose two unit branches use the `feat/` prefix, recorded only in the roadmap Status lines with no progress table, ships through `start_ship`: a branch name with a space answers 400 `invalid-branch-name` with no flow, and the two unit branches reach `gh pr create` in stack order and the flow ends `done`.
 
+Scenario 10 (tests/e2e/scenario-10-engine-close.e2e.ts) proves that the supervisor closes the engine file of a finished PRD loop with no human Restart. The board has the supervisor on and the ship rights **merge**, and the test starts one "PRD + Ralph Loop" card. The session commits on its branch, and the test seeds a PRD, a state file with `gate=pass` for every phase and an engine file that stays open. The test checks that `get_card_progress` shows `completion: "complete"` with an open engine and that `start_ship` answers 409 `engine-not-closed`. The test then writes a session transcript whose last assistant message ends with the `RALPH COMPLETE` promise and the `DISPATCH_STATUS: DONE` line, and posts the Stop hook with that message and path while the pane shows no promise line. In 60 s the board holds one `close_loop` row with the result `closed`, the engine shows `closed`, `loopProgress.readAt` is not before the Stop hook, and the card has no `resume` row and no `continue` row with the duty `restart`. `start_ship` then answers 202, the fake `gh` log creates and merges one PR, and the bare origin `main` holds the work file. The test does not rename the engine file, and it types no key into any pane.
+
 The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
 ## Orchestration Initiative
@@ -6090,6 +6092,21 @@ Two reasons hold longer. A `budget` stop sends no key, so only a lost session or
 releases it; the 60 s pass clears its reason when a raised or removed budget allows the cost. A
 `resume_failed` hold releases only on a busy sign, so a failed resume is not planned again on
 every sample.
+
+**Engine close on the completion marker.** A finished loop closes its engine without a restart
+(LOCAL-151). A completion signal is a `<promise>RALPH COMPLETE` or `<promise>ROADMAP COMPLETE`
+line, or a `DISPATCH_STATUS: DONE` line. The detector looks for it in the agent lines of the pane
+(a DONE line only in the newest agent block) and, while the engine is open, in the last assistant
+message of the transcript tail, because after a memory pause the pane can show only shell job
+control lines. The signal gives `roadmap_complete` only when the loop progress says
+`completion: complete`, and while the engine is open no hold reason keeps it back. The planner
+then runs the same `close_loop` as after a relaunch, only while the engine is active and not
+closed and never for an orchestrator, and every close attempt refreshes the loop progress at
+once, so `engine.closed` is true for `start_ship` within one sample. A session that stays at
+`roadmap_complete` with an open engine, after a failed rename or a server stop between the state
+write and the rename, gets one more close attempt at most once a minute. A `status_agent_done` activity
+also forces a progress write, so `readAt` is never older than the last DONE marker; a gate line
+changes the state file, which the folder watch reads.
 
 **Keep awake.** `adapters/power.ts` holds one `caffeinate -is -w <server pid>` child while a
 session of a supervised board is live. It spawns the child through `adapters/exec.ts`. The `-w`

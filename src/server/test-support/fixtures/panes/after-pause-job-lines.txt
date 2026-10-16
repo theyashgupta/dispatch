@@ -1,0 +1,8 @@
+~/dispatch-workspaces/SBX-1 took 4m45s
+❯ fg %1
+[1]  + 29225 continued  '/Users/x/.dispatch/pty-shim.py' '/Users/x/.local/bin/claude'
+[1]  + 29225 suspended (signal)  '/Users/x/.dispatch/pty-shim.py' '/Users/x/.local/bin/claude'
+
+~/dispatch-workspaces/SBX-1 took 2m15s
+❯ fg %1
+[1]  + 29225 continued  '/Users/x/.dispatch/pty-shim.py' '/Users/x/.local/bin/claude'
