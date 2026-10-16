@@ -1,3 +1,4 @@
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import type { Card, Session, SupervisorState } from "../../../shared/types.js";
 import { sendKeys } from "../../adapters/tmux.js";
 import { boardRepository as store } from "../../store/board-repository.js";
@@ -8,7 +9,7 @@ import {
 } from "../domain/errors.js";
 import { checkBudget, checkCap } from "../domain/orchestrator-policy.js";
 import type { OrchestratorIdentity } from "../domain/orchestrator-scope.js";
-import { callerPolicy, runningLoops } from "./boards.js";
+import { callerPolicy, runningLoops, withCapLock } from "./boards.js";
 import { enforce } from "./orchestrator-groups.js";
 import { groupCost } from "./orchestrator-read.js";
 import { sendHandoffRequest } from "./supervisor-handoff.js";
@@ -18,13 +19,15 @@ import {
   typedLine,
   type SendResult,
 } from "./supervisor-send.js";
-import { assertMemoryHeadroom } from "./memory-governor.js";
+import { assertMemoryHeadroom, memoryCheck } from "./memory-governor.js";
 import { pauseCard, unpauseCard } from "./pause-card.js";
+import { beginResume } from "./resume-session.js";
 
 export const sessionTools: {
   send: typeof sendConfirmed;
   keys: typeof sendKeys;
-} = { send: sendConfirmed, keys: sendKeys };
+  resume: typeof beginResume;
+} = { send: sendConfirmed, keys: sendKeys, resume: beginResume };
 
 const KEYLESS_STATES: ReadonlySet<SupervisorState> = new Set([
   "permission_prompt",
@@ -263,6 +266,51 @@ export async function resumeLoop(
       );
     }
     return result;
+  });
+}
+
+/**
+ * Resume a card whose session is lost, through the same saga as the Resume button.
+ *
+ * @remarks Memory is checked here, before `beginResume`, so the refusal is `memory-low` and not
+ * `memory-pressure`. The cap gates only a card that holds a loop slot, the set `runningLoops` counts,
+ * and runs with the live guards again inside `withCapLock`. The resumed session gets no kickoff, so
+ * the caller sends a continue line once it is live.
+ */
+export async function resumeLostSession(
+  caller: OrchestratorIdentity,
+  card: Card,
+): Promise<void> {
+  if (card.tmuxSession) throw new ConflictError("session-live");
+  const hasRecord = card.sessions?.some((s) => s.id === card.activeSessionId);
+  if (
+    !card.workspacePath ||
+    (card.sessionLost !== true && hasRecord !== true)
+  ) {
+    throw new ConflictError("no-lost-session");
+  }
+  if (store.isStarting(card.id)) throw new ConflictError("start-in-flight");
+  if (!/^[A-Za-z0-9]+-\d+$/.test(card.identifier)) {
+    throw new ValidationError("invalid-identifier");
+  }
+  const memory = memoryCheck(card.boardKey ?? DEFAULT_BOARD_KEY);
+  if (!memory.ok) {
+    throw new ConflictError("memory-low", { reason: memory.reason });
+  }
+  await withCapLock(() => {
+    const current = store.getCard(card.id) ?? card;
+    if (current.tmuxSession) throw new ConflictError("session-live");
+    if (store.isStarting(card.id)) throw new ConflictError("start-in-flight");
+    if (current.source === "group" || current.launch !== undefined) {
+      enforce(
+        checkCap({
+          policy: callerPolicy(caller),
+          runningLoops: runningLoops(caller.boardKey, card.id),
+        }),
+      );
+    }
+    sessionTools.resume(current);
+    return Promise.resolve();
   });
 }
 
