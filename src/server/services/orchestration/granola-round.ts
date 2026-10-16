@@ -1,4 +1,3 @@
-import { run } from "../../adapters/exec.js";
 import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import {
@@ -14,6 +13,7 @@ import {
   nextRunDelay,
   roundSince,
 } from "./granola-actions.js";
+import { connectorLoaded, runConnectorCall } from "./connector-call.js";
 import {
   mcpToolPrefix,
   parseMcpList,
@@ -26,14 +26,12 @@ import {
   parseActionItems,
 } from "./meeting-actions.js";
 import { getOrchestrationConfig } from "../infra/config-holder.js";
-import { DISPATCH_DIR } from "../infra/paths.js";
 
 export type GranolaRunResult = "started" | "running" | "disabled";
 
 const CURSOR_KEY = "granola";
 const GRANOLA_SERVER = /granola/i;
 const ROUND_TIMEOUT_MS = 300_000;
-const KILL_GRACE_MS = 5_000;
 
 let timer: NodeJS.Timeout | null = null;
 let controller: AbortController | null = null;
@@ -136,8 +134,7 @@ async function listGranola(
  * then upsert the items and advance the cursor.
  *
  * @remarks The round owns its 300 s limit as an abort with reason "timeout", because the exec
- * wrapper does not report which of a timeout or an abort ended the child. `--restricted` keeps
- * the user's settings files, and so their allow rules and default mode, out of the round.
+ * wrapper does not report which of a timeout or an abort ended the child.
  */
 async function runRound(round: AbortController): Promise<void> {
   const signal = round.signal;
@@ -172,32 +169,15 @@ async function runRound(round: AbortController): Promise<void> {
       granolaSettings().windowHours,
       now,
     );
-    const { stdout } = await run(
-      claude,
-      [
-        "-p",
-        "--restricted",
-        "--output-format",
-        "text",
-        "--model",
-        "sonnet",
-        "--tools",
-        "",
-        "--allowedTools",
-        mcpToolPrefix(server),
-        "--no-session-persistence",
-      ],
-      {
-        cwd: DISPATCH_DIR,
-        timeout: ROUND_TIMEOUT_MS + KILL_GRACE_MS,
-        maxBuffer: 10 * 1024 * 1024,
-        signal,
-        killEscalationMs: KILL_GRACE_MS,
-        input: buildGranolaPrompt(since, until),
-      },
-    );
+    const stdout = await runConnectorCall(claude, {
+      allowed: [mcpToolPrefix(server)],
+      outputFormat: "text",
+      prompt: buildGranolaPrompt(since, until),
+      signal,
+      timeoutMs: ROUND_TIMEOUT_MS,
+    });
     if (stdout.trim() === GRANOLA_UNAVAILABLE) {
-      finish({ lastError: "failed", server });
+      finish({ lastError: "connector-unavailable", server });
       return;
     }
     let drafts;
@@ -289,13 +269,26 @@ export function applyGranolaSettings(previous: {
 }
 
 /**
- * Check connection: a fresh `claude mcp list`, with no model call.
+ * Check connection: a fresh `claude mcp list`, then the round call with a probe prompt.
+ *
+ * @remarks The answer is never model output. A listed connector that the call does not load answers
+ * `connector-unavailable`.
  */
 export async function checkGranolaConnection(): Promise<GranolaCheckResult> {
   const claude = await resolveBinaryPath("claude");
   if (claude === null) return { state: "claude-missing" };
   try {
-    return await listGranola(claude);
+    const check = await listGranola(claude);
+    if (check.state !== "connected") return check;
+    const stdout = await runConnectorCall(claude, {
+      allowed: [mcpToolPrefix(check.server)],
+      outputFormat: "stream-json",
+      prompt: "Reply with only OK.",
+      timeoutMs: 90_000,
+    });
+    return connectorLoaded(stdout, check.server)
+      ? check
+      : { state: "connector-unavailable", server: check.server };
   } catch {
     return { state: "failed" };
   }

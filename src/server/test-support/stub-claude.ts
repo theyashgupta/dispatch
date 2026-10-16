@@ -46,6 +46,9 @@ case "$1" in
     echo "@@" >> "$DIR/stdin.log"
     echo $$ > "$DIR/claude.pid"
     echo "$CLAUDE_CODE_MCP_STARTUP_WAIT_MS" >> "$DIR/env.log"
+    echo "$MCP_CONNECTION_NONBLOCKING" >> "$DIR/nonblocking.log"
+    SERVERS='[{"name":"claude.ai Slack","status":"connected"}]'
+    [ -f "$DIR/servers.json" ] && SERVERS=$(cat "$DIR/servers.json")
     ALLOWED=""
     PREV=""
     for a in "$@"; do
@@ -79,7 +82,7 @@ case "$1" in
     IFS="$OLDIFS"
     case "$MODE" in
       reply|toolerror|denied|mixed|profileonly|nouse)
-        echo "{\\"type\\":\\"system\\",\\"subtype\\":\\"init\\",\\"tools\\":[$TOOLS],\\"mcp_servers\\":[{\\"name\\":\\"claude.ai Slack\\",\\"status\\":\\"connected\\"}]}"
+        echo "{\\"type\\":\\"system\\",\\"subtype\\":\\"init\\",\\"tools\\":[$TOOLS],\\"mcp_servers\\":$SERVERS}"
         if [ "$MODE" != nouse ]; then
           echo "{\\"type\\":\\"assistant\\",\\"message\\":{\\"content\\":[$USES]}}"
           printf '%s\\n' "{\\"type\\":\\"user\\",\\"message\\":{\\"content\\":[$RESULTS]}}"
@@ -108,7 +111,9 @@ exit 0
  * `argv.log` and `stdin.log` hold each call's input, each closed by an `@@` line. In `reply` mode the fake
  * uses every allowed tool and answers each with a tool result holding `tool-text.txt` when it is not empty,
  * else the text of `reply.json`. The `mode` file holds `reply`, `toolerror`, `denied`, `mixed` (the third
- * tool answers an error result), `profileonly`, `notools`, `nouse`, `sleep` or `fail`.
+ * tool answers an error result), `profileonly`, `notools`, `nouse`, `sleep` or `fail`. The init event
+ * lists the servers in `servers.json` when it exists, else the connected `claude.ai Slack` server.
+ * `nonblocking.log` gets the `MCP_CONNECTION_NONBLOCKING` value of each call.
  * @public The Slack connector specs are the callers.
  */
 export function writeConnectorClaude(binDir: string): string {
