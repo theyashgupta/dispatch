@@ -520,6 +520,17 @@ The 12 session states of D-3 have these labels and glyphs on every screen. The g
 
 The tone maps to the `badge` tones of `src/web/components/ui/badge.tsx`: attention uses `tone="state"` with `stateColor="var(--col-needs-input)"` (the label mixes 35 percent of the state colour with `--text`, so it meets the contrast floor), error uses `danger`, success uses `success`, muted uses `neutral`, and neutral uses the `outline` variant. The warning of a meter (cost, usage) uses the `warning` tone with the glyph `TriangleAlert` and a word. A column token such as `--col-needs-input` is never a text colour. The other badges on these screens ("Default", "Main", "Extra", "By orchestrator", "Recommended", "Key clash", the ship flow state and the counts) use `tone="neutral"`. No badge on these screens uses `tone="accent"`. Ship, check and identity badges: `merged` and "Passing" use `success`; `failed`, "Failing" and "Author mismatch" use `danger`; the others use `neutral`.
 
+### Notice policy
+
+A notice is the desktop notification and chime of a card move, or the undo toast. A notice reports news only. These four rules apply to every notice (LOCAL-146):
+
+1. A session start or a session success does not cause a notice. Only a move into Needs Input or Agent Done causes one. Agent Done is a hand-off to the user, not a success. A move into In Progress, In Review or Done causes no notice.
+2. A failure older than 5 minutes does not cause a notice. The age of a move is the time since the card's `columnSince`. A move exactly 5 minutes old still causes a notice. The rule applies to Needs Input and Agent Done, because a failure arrives as Needs Input.
+3. A reconnect replay does not cause a notice. The first snapshot after a reconnect or a board change only records the columns.
+4. A hidden tab does not replay a backlog when it becomes visible. A move made before the tab last became visible, and not notified while the tab was hidden, causes no notice. A hidden tab that stays live keeps its notices.
+
+The undo toast follows these rules without extra code: only a user action in the same tab shows it, the store holds one toast, and the stream never writes it.
+
 ## Sketches
 
 Static sketches of the populated state of each screen. Each sketch is one HTML file with the shared `sketch.css`. Open a sketch with `?theme=light` or `?theme=dark`. The sketches are throwaway: they are not product code. The 1024 px layout and the empty, loading, error and stale states are in this spec only.
@@ -640,3 +651,9 @@ This entry changes the text of Screen 3 and of the sections that cite it. It cha
 - **Screen 3.** Screen 3 is now the settings sheet of the command centre. The panel text is removed. The Settings sheet section of Screen 6 moved into Screen 3.
 - **Screen 6, controls.** The Start, Stop and Resume rows of the panel moved into the parts of Screen 6. The "Stopped loops" list of the panel has no place on the centre; the "Resume loop" action of a branch tile replaces it.
 - **Citations.** Screen 4 and Screen 6 cite Screen 4, Section 1 for the decision options, and Screen 6 for the controls. Screen 5 opens Screen 6, as the LOCAL-104 entry of 2026-10-13 gives.
+
+### 2026-10-16 (LOCAL-146)
+
+This entry adds to the screens above. It does not change the text of an earlier section.
+
+- **Cross-screen rules, Notice policy.** A new section gives the four suppression rules for notices: no notice for a session start or success, none for a failure older than 5 minutes, none for a reconnect replay, and no backlog replay when a hidden tab becomes visible.
