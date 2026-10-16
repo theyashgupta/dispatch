@@ -105,7 +105,11 @@ export interface BoardRepository {
     sinceId: number,
     limit: number,
   ): ActivityEvent[];
-  setLoopProgress(cardId: string, progress: LoopProgress): Promise<void>;
+  setLoopProgress(
+    cardId: string,
+    progress: LoopProgress,
+    force?: boolean,
+  ): Promise<void>;
   appendOrchestrationEvent(
     e: Omit<OrchestrationEvent, "id">,
   ): OrchestrationEvent;

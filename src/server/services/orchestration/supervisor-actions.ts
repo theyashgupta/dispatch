@@ -10,6 +10,7 @@ import {
   declineKeys,
   type SupervisorAction,
 } from "../domain/supervisor-plan.js";
+import { refreshLoopProgress } from "./loop-progress-reader.js";
 import { memoryCheck } from "./memory-governor.js";
 import { resumeSession } from "./resume-session.js";
 import { runClaude, type RunClaudeOutcome } from "./run-claude.js";
@@ -91,6 +92,7 @@ async function closeLoop(card: Card, session: Session): Promise<void> {
     }
   }
   record(card, session, { action: "close_loop", file: engine, result });
+  await refreshLoopProgress(card.id);
 }
 
 /**

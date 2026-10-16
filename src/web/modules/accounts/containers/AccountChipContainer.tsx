@@ -10,8 +10,11 @@ import { AccountChipFrame } from "@/modules/accounts/components/AccountChipFrame
 import { AccountPopover } from "@/modules/accounts/components/AccountPopover";
 import { UsageChip } from "@/modules/accounts/components/UsageChip";
 import { chipState } from "@/modules/accounts/domain/usage-format";
+import { useNow } from "@/modules/accounts/hooks/use-now";
 import { useRefreshAccountUsageMutation } from "@/modules/accounts/queries/accounts-queries";
 import { useAccountsQuery } from "@/queries/accounts-queries";
+
+const STATE_TICK_MS = 30_000;
 
 export function AccountChipContainer() {
   const router = useRouter();
@@ -24,7 +27,8 @@ export function AccountChipContainer() {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
+  const [switchOpen, setSwitchOpen] = useState(false);
+  const now = useNow(STATE_TICK_MS);
   const [switchTarget, setSwitchTarget] = useState<ClaudeAccountSummary | null>(
     null,
   );
@@ -37,15 +41,9 @@ export function AccountChipContainer() {
   const handleOpenChange = (next: boolean) => {
     if (next) {
       setNotice(null);
-      setBusyId(null);
+      setSwitchOpen(false);
     }
     setOpen(next);
-  };
-
-  const settle = {
-    onSuccess: (result: { ok: true } | { ok: false; error: string }) =>
-      setNotice(result.ok ? null : result.error),
-    onSettled: () => setBusyId(null),
   };
 
   return (
@@ -60,24 +58,25 @@ export function AccountChipContainer() {
         onOpenChange={handleOpenChange}
       >
         <AccountPopover
-          accounts={data.accounts}
-          activeId={data.activeId}
-          busyId={busyId}
+          account={active}
+          others={data.accounts.filter((a) => a.id !== active.id)}
+          side={collapsed ? "right" : "top"}
+          now={now}
+          refreshing={refreshUsage.isPending}
           notice={notice}
-          onSwitch={(id) => {
-            const target = data.accounts.find((a) => a.id === id);
-            if (target === undefined) return;
+          switchOpen={switchOpen}
+          onToggleSwitch={() => setSwitchOpen((v) => !v)}
+          onSwitch={(target) => {
             setOpen(false);
             setSwitchTarget(target);
           }}
-          onRefresh={(id) => {
-            setBusyId(id);
-            refreshUsage.mutate(id, {
-              ...settle,
+          onRefresh={() =>
+            refreshUsage.mutate(active.id, {
+              onSuccess: (r) => setNotice(r.ok ? null : r.error),
               onError: () => setNotice("Couldn't refresh usage."),
-            });
-          }}
-          onOpenSettings={() => {
+            })
+          }
+          onOpenAccounts={() => {
             setOpen(false);
             void router.navigate({
               href: pageLocation({ page: "accounts" }, boardKey),

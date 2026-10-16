@@ -290,7 +290,7 @@ Ship a group that is in Agent done and has shipRights of `open_prs` or `merge`. 
 
 Give `start_ship` these items:
 
-- The branches in stack order: the unit branches first, then the specs branch.
+- The branches in stack order: the unit branches first, then the specs branch. A unit branch is the name that the progress table or the roadmap Status line of the unit records, such as `feat/LOCAL-131-unit-1-dashboards-dropdown`, and any name that git accepts as a branch name (the `git check-ref-format` branch rules) is valid.
 - For each branch, a conventional commit title that holds the ticket ids.
 - For each branch, a body with the sections What, Why and How.
 

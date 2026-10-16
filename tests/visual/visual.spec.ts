@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { mockAccounts } from "./accounts-fixture.js";
 
 const seededPort = Number(process.env.DISPATCH_VISUAL_PORT);
 const seeded = `http://127.0.0.1:${seededPort}`;
@@ -267,6 +268,27 @@ const screens: {
           : route.fallback(),
       ),
     ready: (page) => expect(page.getByRole("dialog")).toBeVisible(),
+  },
+  {
+    name: "account-popover",
+    url: `${seeded}/#/boards/LOCAL`,
+    widths: [1440],
+    routes: (page) => mockAccounts(page, now),
+    ready: async (page) => {
+      await page.locator("#usage-chip").click();
+      await expect(page.locator("#account-popover")).toBeVisible();
+    },
+  },
+  {
+    name: "account-popover-collapsed",
+    url: `${seeded}/#/boards/LOCAL`,
+    widths: [1440],
+    routes: (page) => mockAccounts(page, now),
+    ready: async (page) => {
+      await page.getByRole("button", { name: "Collapse sidebar" }).click();
+      await page.locator("#usage-chip").click();
+      await expect(page.locator("#account-popover")).toBeVisible();
+    },
   },
   {
     name: "gallery",
