@@ -92,6 +92,18 @@ void test("a value that differs in content is stored and fires one change", asyn
   assert.equal(storedOn(ACME, acmeGroup)?.summary.unitsDone, 1);
 });
 
+void test("a value that differs only in readAt is stored with force and fires one change", async () => {
+  const changes = countChanges();
+  await store.setLoopProgress(
+    acmeGroup,
+    progress("2026-10-06T02:30:00.000Z", 1),
+    true,
+  );
+  changes.stop();
+  assert.equal(changes.count(), 1);
+  assert.equal(storedOn(ACME, acmeGroup)?.readAt, "2026-10-06T02:30:00.000Z");
+});
+
 void test("an unknown card id is a no-op", async () => {
   const changes = countChanges();
   await store.setLoopProgress("NOPE-1", progress("2026-10-06T03:00:00.000Z"));

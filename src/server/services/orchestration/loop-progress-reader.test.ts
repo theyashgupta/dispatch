@@ -13,10 +13,16 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
+import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
-import type { Card, Column, LoopProgress } from "../../../shared/types.js";
+import type {
+  ActivityEvent,
+  Card,
+  Column,
+  LoopProgress,
+} from "../../../shared/types.js";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { fakeBoardRepository } from "../../test-support/fake-board-repository.js";
 import { materializeLoopFixture } from "../../test-support/loop-fixtures.js";
@@ -89,7 +95,10 @@ interface Recorded {
   at: number;
   cardId: string;
   progress: LoopProgress;
+  force: boolean;
 }
+
+const activity = new EventEmitter();
 
 function installRepo(
   getCard: () => Card,
@@ -108,8 +117,10 @@ function installRepo(
         const stored = recorded.at(-1)?.progress;
         return stored ? { ...getCard(), loopProgress: stored } : getCard();
       },
-      setLoopProgress: async (cardId, progress) => {
-        recorded.push({ at: Date.now(), cardId, progress });
+      on: activity.on.bind(activity),
+      off: activity.off.bind(activity),
+      setLoopProgress: async (cardId, progress, force = false) => {
+        recorded.push({ at: Date.now(), cardId, progress, force });
         await onSet?.();
       },
     }),
@@ -805,4 +816,94 @@ void test("a ticket card with no launch stores nothing", async () => {
   installRepo(() => launchedCard(root, false), recorded);
   await refreshLoopProgress("card-1");
   assert.equal(recorded.length, 0);
+});
+
+let nextEventId = 1;
+
+function doneEvent(cardId: string): ActivityEvent {
+  return {
+    id: nextEventId++,
+    cardId,
+    type: "status_agent_done",
+    fromCol: null,
+    toCol: null,
+    reason: null,
+    source: null,
+    ts: new Date().toISOString(),
+  };
+}
+
+void test("a DONE marker on a loop card forces a write with a newer readAt and the same files", async () => {
+  const root = singleRoot();
+  const recorded: Recorded[] = [];
+  installRepo(() => launchedCard(root, true), recorded);
+  const stop = startLoopProgressReader({ intervalMs: 60_000, debounceMs: 50 });
+  try {
+    await waitFor(() => recorded.length >= 1);
+    assert.equal(recorded[0]?.force, false);
+    await sleep(20);
+    const emittedAt = new Date().toISOString();
+    activity.emit("activity", doneEvent("card-1"));
+    await waitFor(() => recorded.length >= 2);
+    const [before, after] = recorded.slice(-2);
+    assert.equal(after?.force, true);
+    assert.ok((after?.progress.readAt ?? "") >= emittedAt);
+    assert.ok((after?.progress.readAt ?? "") > (before?.progress.readAt ?? ""));
+    assert.deepEqual(after?.progress.units, before?.progress.units);
+  } finally {
+    stop();
+  }
+});
+
+void test("a DONE marker on a card that is not a loop card stores nothing", async () => {
+  const root = singleRoot();
+  const recorded: Recorded[] = [];
+  installRepo(() => launchedCard(root, false), recorded);
+  const stop = startLoopProgressReader({ intervalMs: 60_000, debounceMs: 50 });
+  try {
+    activity.emit("activity", doneEvent("card-1"));
+    await sleep(300);
+    assert.equal(recorded.length, 0);
+  } finally {
+    stop();
+  }
+});
+
+void test("after the stop function a DONE marker triggers no read", async () => {
+  const root = singleRoot();
+  const recorded: Recorded[] = [];
+  installRepo(() => launchedCard(root, true), recorded);
+  const stop = startLoopProgressReader({ intervalMs: 60_000, debounceMs: 50 });
+  await waitFor(() => recorded.length >= 1);
+  stop();
+  const count = recorded.length;
+  activity.emit("activity", doneEvent("card-1"));
+  await sleep(300);
+  assert.equal(recorded.length, count);
+});
+
+void test("a gate line in a single PRD loop updates the phase gate and readAt", async () => {
+  const root = singleRoot();
+  const recorded: Recorded[] = [];
+  installRepo(() => launchedCard(root, true), recorded);
+  const stop = startLoopProgressReader({ intervalMs: 60_000, debounceMs: 50 });
+  try {
+    await waitFor(() => recorded.length >= 1);
+    await sleep(200);
+    const before = recorded.length;
+    appendFileSync(
+      join(root, SINGLE_DIR, "state.md"),
+      "phase 2 Two GREEN 2026-10-11T06:00:00Z gate=pass\n",
+    );
+    await waitFor(() => recorded.length > before);
+    const first = recorded[0]?.progress;
+    const last = recorded.at(-1)?.progress;
+    assert.deepEqual(
+      last?.units[0]?.phases.map((phase) => phase.gate),
+      ["pass", "pass", "pending"],
+    );
+    assert.ok((last?.readAt ?? "") > (first?.readAt ?? ""));
+  } finally {
+    stop();
+  }
 });
