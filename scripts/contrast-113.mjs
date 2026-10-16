@@ -303,7 +303,7 @@ function findResidual(fg, bg) {
 /**
  * Generates every background x foreground pair of one theme.
  *
- * @remarks --status-ok and --status-stale sit in the text set because chips and status badges render
+ * @remarks The status-ok and status-stale tokens sit in the text set because chips and status badges render
  * them as text. --border and a pair of one name with itself are left out.
  */
 function buildPairSet(tokens, extraBgs) {
@@ -363,7 +363,7 @@ function srgbMix(hexA, hexB, pctA) {
  *    be #40272c and `--destructive-text` on it 4.48:1, BELOW the text floor, so any future
  *    re-base of the chip tint onto the hover tier must change the tint formula and this list.
  * 3. The Badge `success`, `warning` and `danger` tones (`src/web/components/ui/badge.tsx`, used by
- *    ChainRow.tsx, CardView.tsx and AgendaRow.tsx): `--status-ok` and `--status-stale`
+ *    ChainRow.tsx, CardView.tsx and AgendaRow.tsx): the status-ok and status-stale tokens
  *    as text on their own 16% tint over `--surface-column`, and `--destructive-text` on the
  *    `--status-down` 16% tint, because `--status-down` itself is below the text floor there.
  * 4. A column colour as text (the count chip in `ColumnHeader.tsx`): 35% of the `--col-*` token
