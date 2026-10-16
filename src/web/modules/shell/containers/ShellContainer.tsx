@@ -14,6 +14,7 @@ import {
   useRouteContext,
   useRouter,
   useRouterState,
+  useSearch,
 } from "@tanstack/react-router";
 import { toast } from "sonner";
 import {
@@ -23,6 +24,10 @@ import {
 } from "../../../../shared/board-select.js";
 import { createdBoardText } from "../../../../shared/board-create.js";
 import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
+import {
+  firstOtherBoard,
+  splitLayout,
+} from "../../../../shared/board-split.js";
 import { inboxFeed, isListedError } from "../../../../shared/feed-items.js";
 import { nowMs } from "../../../../shared/format-age.js";
 import { inboxWaitingCount } from "../../../../shared/inbox-count.js";
@@ -199,6 +204,21 @@ export function ShellContainer({
     boardItems !== null && boardItems.length > 1
       ? (boardItems.find((item) => item.selected)?.name ?? null)
       : null;
+  const pageSearch = useSearch({ from: "/boards/$key/", shouldThrow: false });
+  const splitEnabled = pageSearch !== undefined && !carousel;
+  const primaryBoard = (route.board ?? boardKey) as BoardKey;
+  const splitOpen =
+    splitEnabled &&
+    splitLayout({
+      primary: primaryBoard,
+      split: pageSearch.split,
+      dir: pageSearch.dir,
+      wide: true,
+      boards: boardList?.boards,
+    }).mode === "split";
+  const splitOther = splitEnabled
+    ? firstOtherBoard(primaryBoard, boardList?.boards)
+    : null;
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [paletteGroup, setPaletteGroup] = useState<string | undefined>();
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -438,6 +458,21 @@ export function ShellContainer({
         ),
       switchBoard,
       createBoard,
+      split: splitEnabled
+        ? {
+            open: splitOpen,
+            available: splitOther !== null,
+            toggle: () =>
+              void router.navigate({
+                to: "/boards/$key",
+                params: { key: primaryBoard },
+                search: (prev) =>
+                  splitOpen
+                    ? { ...prev, split: undefined, dir: undefined }
+                    : { ...prev, split: splitOther ?? undefined, dir: "row" },
+              }),
+          }
+        : undefined,
     },
     navItems,
     selectedCardOf(board.cards, selectedCardId, pinned),

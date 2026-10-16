@@ -307,3 +307,50 @@ test("Go to Dashboard shows only when the Dashboard nav row does", () => {
     false,
   );
 });
+
+test("the split command opens a closed split when another board exists", () => {
+  const { context, calls } = ctx();
+  const command = buildCommands(
+    {
+      ...context,
+      split: {
+        open: false,
+        available: true,
+        toggle: () => calls.push("split"),
+      },
+    },
+    nav,
+    null,
+  ).find((c) => c.id === "board:split");
+  assert.equal(command?.label, "Split board view");
+  void command?.run();
+  assert.deepEqual(calls, ["split"]);
+});
+
+test("the split command closes an open split", () => {
+  const command = buildCommands(
+    {
+      ...ctx().context,
+      split: { open: true, available: true, toggle: () => undefined },
+    },
+    nav,
+    null,
+  ).find((c) => c.id === "board:split");
+  assert.equal(command?.label, "Close split view");
+});
+
+test("a closed split with no other board shows no split command", () => {
+  const found = buildCommands(
+    {
+      ...ctx().context,
+      split: { open: false, available: false, toggle: () => undefined },
+    },
+    nav,
+    null,
+  ).some((c) => c.id === "board:split");
+  assert.equal(found, false);
+});
+
+test("without a split context there is no split command", () => {
+  assert.equal(ids(null).includes("board:split"), false);
+});
