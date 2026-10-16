@@ -137,7 +137,7 @@ Start work in these ways:
 `start_card` starts one ticket card the way the start dialog does. It refuses these cases:
 
 - The cap is reached (403 `policy-refused`).
-- Memory on this Mac is low (409 `memory-pressure`, with the reading and the limit in `reason`). `start_group`, `resume_loop` and `resume_card` refuse the same way. Do not retry at once. Try again after a running loop finishes or the next wake.
+- Memory on this Mac is low (409 `memory-pressure`, with the reading and the limit in `reason`). `start_group`, `resume_loop` and `resume_card` refuse the same way, and `resume_session` refuses with 409 `memory-low`. Do not retry at once. Try again after a running loop finishes or the next wake.
 - The card is a group card.
 - The card is in Done or Inbox.
 - The card is running.
@@ -260,6 +260,23 @@ When a test fails only under load, tell the loop to run that one file alone one 
 Call `resume_loop` only for a loop that you stopped with `stop_session`. You can also call it for a loop that the supervisor gave up on.
 
 Call `pause_card` to stop a loop in place when memory is low or the user asks. The server pauses and resumes loops on its own under swap pressure, so do not resume a loop that it paused. Call `resume_card` only for a loop that you paused. On a 409 `memory-pressure`, wait for the next wake.
+
+### Lost sessions
+
+A server restart or a reboot marks the live sessions lost. At boot the supervisor resumes the lost cards in In progress and Needs input, one at a time, until memory is low or the cap is full. It does not resume a card that `stop_session`, a usage stop or the budget stopped. Cards in Agent done or a later column stay lost.
+
+For a card that is still lost, call `resume_session`. Do not raise a decision item that asks the user to press Restart or Resume. Call it only below the cap. For a card in Agent done or a later column, call it only when that card needs more work. For a card that `stop_session`, a usage stop or the budget stopped, follow the rules for that stop.
+
+A resumed session gets no kickoff prompt and sits at its prompt, so send_input a continue line after the session is live. Use `list_sessions` or `read_pane_tail` to see that it is live.
+
+`resume_session` refuses in these cases:
+
+- 409 `session-live`: the session is live. Use `send_input` instead.
+- 409 `no-lost-session`: there is nothing to resume.
+- 409 `start-in-flight`: a start or a resume of the card runs now. Wait for the next wake.
+- 409 `memory-low`: memory on this Mac is low. Wait for the next wake.
+- 400 `invalid-identifier`: the card id is not a ticket id. Raise a decision item.
+- 403 `policy-refused`: the cap is reached. Wait until a loop finishes.
 
 ### Loop count
 
