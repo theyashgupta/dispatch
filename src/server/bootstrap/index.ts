@@ -92,6 +92,7 @@ import {
   superviseLost,
 } from "../services/orchestration/supervisor-registry.js";
 import { startSupervisorPass } from "../services/orchestration/supervisor-pass.js";
+import { resumeLostAtBoot } from "../services/orchestration/supervisor-boot.js";
 import { onPausedPidsReleased } from "../services/orchestration/pause-card.js";
 import {
   memoryEmitter,
@@ -520,6 +521,9 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   startUsagePollLoop();
   memoryEmitter.on("resumed", (cardId: string) => void probeResume(cardId));
   startMemoryGovernor();
+  void resumeLostAtBoot().catch((err: unknown) => {
+    console.warn(`[supervisor] boot resume failed: ${(err as Error).message}`);
+  });
   return { port };
 }
 

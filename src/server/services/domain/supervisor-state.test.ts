@@ -29,6 +29,7 @@ function input(over: Partial<DetectInput>): DetectInput {
     pane: "",
     engineSessionId: "3f0c2a7e-5d1b-4c3e-9a2f-1b2c3d4e5f60",
     completion: "running",
+    engineOpen: true,
     transcript: null,
     memory: initialMemory(),
     ...over,
@@ -170,6 +171,112 @@ void test("the RALPH COMPLETE promise of a single PRD loop is roadmap_complete o
   assert.ok(done.includes("roadmap_complete"));
   const running = feed(text, 3, { completion: "running" }).map((d) => d.state);
   assert.ok(!running.includes("roadmap_complete"));
+});
+
+void test("a completion signal in the pane or the transcript tail gives roadmap_complete only with completion complete", () => {
+  const promisePane = pane("roadmap-complete.txt");
+  const jobPane = pane("after-pause-job-lines.txt");
+  const tail = (text: string) => ({
+    size: 100,
+    lastAssistantText: text,
+    userTexts: [],
+  });
+  const sources: [string, string, DetectInput["transcript"], string | null][] =
+    [
+      ["pane promise", promisePane, null, "pane:"],
+      [
+        "transcript promise",
+        jobPane,
+        tail("All green.\n<promise>RALPH COMPLETE demo</promise>"),
+        "transcript:",
+      ],
+      [
+        "transcript DONE line",
+        jobPane,
+        tail("Built.\nDISPATCH_STATUS: DONE - demo built"),
+        "transcript:",
+      ],
+      ["none", jobPane, tail("Still working on phase 2."), null],
+    ];
+  for (const [name, text, transcript, prefix] of sources) {
+    for (const completion of ["complete", "running"] as const) {
+      const d = detectState(input({ pane: text, transcript, completion }));
+      const wanted = prefix !== null && completion === "complete";
+      assert.equal(
+        d.state === "roadmap_complete",
+        wanted,
+        `${name} ${completion}`,
+      );
+      if (wanted) assert.ok(d.evidence.startsWith(prefix), d.evidence);
+    }
+  }
+});
+
+void test("with the engine closed a transcript tail signal is not roadmap_complete, a pane promise still is", () => {
+  const jobPane = pane("after-pause-job-lines.txt");
+  for (const lastAssistantText of [
+    "All green.\n<promise>RALPH COMPLETE demo</promise>",
+    "Built.\nDISPATCH_STATUS: DONE - demo built",
+  ]) {
+    const d = detectState(
+      input({
+        pane: jobPane,
+        completion: "complete",
+        engineOpen: false,
+        transcript: { size: 100, lastAssistantText },
+      }),
+    );
+    assert.notEqual(d.state, "roadmap_complete", lastAssistantText);
+  }
+  const closed = detectState(
+    input({
+      pane: pane("roadmap-complete.txt"),
+      completion: "complete",
+      engineOpen: false,
+    }),
+  );
+  assert.equal(closed.state, "roadmap_complete");
+  assert.ok(closed.evidence.startsWith("pane:"), closed.evidence);
+});
+
+void test("a DISPATCH_STATUS DONE line typed inside a pane user prompt block is not a completion signal", () => {
+  const text =
+    "❯ Finish up. When all phases are green print\n" +
+    "  DISPATCH_STATUS: DONE - demo built\n" +
+    "❯ \n" +
+    "  Opus 5.5 · high  │  ██░░░░░░░░   17%  174k/1.0M\n";
+  const states = feed(text, 3, { completion: "complete" }).map((d) => d.state);
+  assert.ok(!states.includes("roadmap_complete"));
+});
+
+void test("a DONE line counts only in the marker parser's shape", () => {
+  const jobPane = pane("after-pause-job-lines.txt");
+  const stateOf = (text: string) =>
+    detectState(
+      input({
+        pane: jobPane,
+        completion: "complete",
+        transcript: { size: 100, lastAssistantText: text },
+      }),
+    ).state;
+  assert.equal(stateOf("DISPATCH_STATUS: DONE - built"), "roadmap_complete");
+  assert.equal(stateOf("DISPATCH_STATUS: DONE"), "roadmap_complete");
+  assert.notEqual(stateOf("DISPATCH_STATUS: DONE."), "roadmap_complete");
+});
+
+void test("a pane DONE line counts only in the newest agent block", () => {
+  const head = "⏺ Phase 2 is green.\n  DISPATCH_STATUS: DONE - demo built\n";
+  const newer = "⏺ Which branch should I rebase on?\n";
+  const footer = "❯ \n  Opus 5.5 · high  │  ██░░░░░░░░   17%  174k/1.0M\n";
+  const newest = detectState(
+    input({ pane: head + footer, completion: "complete" }),
+  );
+  assert.equal(newest.state, "roadmap_complete");
+  assert.ok(newest.evidence.startsWith("pane:"), newest.evidence);
+  const states = feed(head + newer + footer, 3, {
+    completion: "complete",
+  }).map((d) => d.state);
+  assert.ok(!states.includes("roadmap_complete"));
 });
 
 void test("one idle sample is not idle; three equal samples 60 s apart are", () => {

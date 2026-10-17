@@ -43,6 +43,7 @@ import {
   requestHandoffHandler,
   resumeCardHandler,
   resumeLoopHandler,
+  resumeSessionHandler,
   sendInputHandler,
   startCardHandler,
   startGroupHandler,
@@ -278,6 +279,10 @@ orchestratorRouter.post(
 orchestratorRouter.post(
   "/sessions/:cardId/resume",
   tool("resume_loop", resumeLoopHandler),
+);
+orchestratorRouter.post(
+  "/sessions/:cardId/resume-lost",
+  tool("resume_session", resumeSessionHandler),
 );
 orchestratorRouter.post(
   "/sessions/:cardId/stop",
