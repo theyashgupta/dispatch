@@ -579,3 +579,33 @@ void test(
     assert.equal(loop.session().stateReason, "supervisor_gave_up");
   },
 );
+
+void test(
+  "a limit_move action runs move-or-wait and, with no account under the headroom line, waits for the printed reset",
+  { skip: !hasTmux },
+  async () => {
+    const loop = await loopCard("limit-move", {});
+    const { actions } = planActions({
+      from: "working",
+      to: "usage_limit_wait",
+      loop: { engineActive: true, handoffPending: false, unitPhase: "1/3" },
+      usageLimit: "wait",
+      wokeAt: null,
+      now: Date.now(),
+      memory: initialPlanMemory(),
+    });
+    assert.deepEqual(actions, [{ kind: "limit_move" }]);
+    await runActions(
+      loop.card(),
+      loop.session(),
+      actions,
+      "transcript: You've hit your weekly limit · resets Oct 20 at 8:30am (Asia/Calcutta)",
+    );
+    const wait = loop.actions().find((e) => e.data.action === "limit_wait");
+    assert.equal(wait?.data.reason, "no_headroom");
+    assert.equal(wait?.data.source, "transcript");
+    assert.equal(wait?.data.mode, "continue");
+    assert.ok(!loop.actions().some((e) => e.data.action === "limit_move"));
+    assert.deepEqual(loop.userTexts(), []);
+  },
+);

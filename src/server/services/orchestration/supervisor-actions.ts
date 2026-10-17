@@ -19,7 +19,7 @@ import {
   orchestratorResumePromptText,
   runHandoff,
 } from "./supervisor-handoff.js";
-import { answerLimit, escapeLimit } from "./supervisor-limit.js";
+import { answerLimit, escapeLimit, moveOrWait } from "./supervisor-limit.js";
 import {
   continueText,
   markNeedsInput,
@@ -209,7 +209,14 @@ export async function runActions(
         await answerLimit(card, session);
         break;
       case "escape_limit":
-        await escapeLimit(card, session);
+        await escapeLimit(card, session, evidence);
+        break;
+      case "limit_move":
+        await moveOrWait(
+          card,
+          session,
+          `${evidence}\n${await capturePane(`=${session.tmuxSession}:`).catch(() => "")}`,
+        );
         break;
       case "handoff":
         await runHandoff(card, session);

@@ -11,9 +11,21 @@ import {
   limitChoice,
   planLimitKeys,
 } from "../domain/limit-surface.js";
+import {
+  pickHeadroomAccount,
+  type BucketedCandidate,
+} from "../domain/account-selection.js";
 import { parseResetAt } from "../domain/supervisor-plan.js";
-import { limitSurfaceOf } from "../domain/supervisor-state.js";
+import { limitSurfaceOf, paneReady } from "../domain/supervisor-state.js";
+import { getClaudeAccountsSettings } from "../infra/config-holder.js";
+import { limitMoveCandidates } from "./account-chain.js";
 import { getUsage } from "./claude-usage.js";
+import {
+  moveSessionAccount,
+  sessionOf,
+  type MoveSeen,
+  type SessionMoveOutcome,
+} from "./session-account-move.js";
 import { isHandoffPending, runFreshSession } from "./supervisor-handoff.js";
 import {
   continueText,
@@ -29,15 +41,27 @@ export interface LimitDeps {
   schedule: (run: () => void, ms: number) => void;
   usageResetAt: (session: Session) => number | null;
   cursorWaitMs: number;
+  candidates?: () => Promise<BucketedCandidate[]>;
+  move?: typeof moveSessionAccount;
+  send?: typeof sendConfirmed;
+  sendKeys?: typeof sendKeys;
+  redrawMs?: number;
 }
 
 const RESET_GRACE_MS = 2 * 60_000;
+const MOVE_GUARD_MS = 30 * 60_000;
 const MAX_WAIT_MS = 2 ** 31 - 1;
 const FALLBACK_MS = 5 * 60 * 60_000;
 
+type LimitWaitReason =
+  "pinned" | "recent_move" | "no_headroom" | SessionMoveOutcome | "error";
+
+const accountOf = (session: Session): string =>
+  session.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID;
+
 /** The five hour window reset of the session's account from the usage poll, if known. */
 function usageResetAt(session: Session): number | null {
-  const usage = getUsage(session.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID);
+  const usage = getUsage(accountOf(session));
   const reset = usage.windows.find((w) => w.kind === "session")?.resetsAt;
   const at = reset ? Date.parse(reset) : Number.NaN;
   return Number.isFinite(at) ? at : null;
@@ -52,21 +76,32 @@ const DEFAULT_DEPS: LimitDeps = {
   cursorWaitMs: 2_000,
 };
 
+const DEFAULT_COLLABORATORS = {
+  candidates: limitMoveCandidates,
+  move: moveSessionAccount,
+  send: sendConfirmed,
+  sendKeys,
+  redrawMs: 1_000,
+};
+
 const scheduled = new Set<string>();
+const limitMoves = new Map<string, number>();
 const escaped = new Set<string>();
 
 /**
  * The card and session a reset timer may still act on, or null.
  *
  * @remarks The timer fires hours after it was set, so it re-checks that the session is live, that
- * its board still runs the supervisor with the `wait` policy, and that no stop reason was set since.
+ * it still runs on the account it waited on when `accountId` is given, that its board still runs
+ * the supervisor with the `wait` policy, and that no stop reason was set since.
  */
-function liveSession(cardId: string, sessionId: string) {
+function liveSession(cardId: string, sessionId: string, accountId?: string) {
   const card = store.getCard(cardId);
   const session = card?.sessions?.find((s) => s.id === sessionId);
   const policy = card && ownerPolicy(card);
   return card &&
     session?.tmuxSession &&
+    (accountId === undefined || accountOf(session) === accountId) &&
     session.stateReason === undefined &&
     policy?.supervisor === "on" &&
     policy.usageLimit === "wait"
@@ -77,8 +112,9 @@ function liveSession(cardId: string, sessionId: string) {
 /**
  * Schedule the one wait-policy action for after the limit resets.
  *
- * @remarks The reset time comes from the pane, else the usage poll, else five hours after now;
- * the action runs two minutes after it. One timer per session.
+ * @remarks The reset time comes from the text, else the usage poll, else five hours after now; a
+ * reset at or before now is ignored, so the timer never fires at once. One timer per session and account, and only a `continue` action checks that the session is
+ * still on that account.
  */
 function scheduleAfterReset(
   card: Card,
@@ -86,27 +122,47 @@ function scheduleAfterReset(
   pane: string,
   mode: "continue" | "fresh",
   deps: LimitDeps,
+  reason?: LimitWaitReason,
 ): void {
-  if (scheduled.has(session.id)) return;
+  const accountId = accountOf(sessionOf(card.id, session.id) ?? session);
+  const key = `${session.id}:${accountId}`;
+  if (scheduled.has(key)) return;
   const now = deps.now();
-  const fromPane = parseResetAt(pane, now);
-  const fromUsage = fromPane === null ? deps.usageResetAt(session) : null;
-  const resetAt = fromPane ?? fromUsage ?? now + FALLBACK_MS;
+  const parsed = parseResetAt(pane, now);
+  const fromText = parsed !== null && parsed > now ? parsed : null;
+  const polled = fromText === null ? deps.usageResetAt(session) : null;
+  const fromUsage = polled !== null && polled > now ? polled : null;
+  const resetAt = fromText ?? fromUsage ?? now + FALLBACK_MS;
+  const resetLine =
+    fromText === null
+      ? undefined
+      : pane.split("\n").find((line) => parseResetAt(line, now) !== null);
   const source =
-    fromPane !== null ? "pane" : fromUsage !== null ? "usage" : "fallback";
+    fromText !== null
+      ? resetLine?.startsWith("transcript:")
+        ? "transcript"
+        : "pane"
+      : fromUsage !== null
+        ? "usage"
+        : "fallback";
   const due = resetAt + RESET_GRACE_MS;
-  scheduled.add(session.id);
+  scheduled.add(key);
   record(card, session, {
     action: "limit_wait",
     mode,
     source,
     until: new Date(due).toISOString(),
+    ...(reason === undefined ? {} : { reason }),
   });
   deps.schedule(
     () => {
-      scheduled.delete(session.id);
+      scheduled.delete(key);
       escaped.delete(session.id);
-      const live = liveSession(card.id, session.id);
+      const live = liveSession(
+        card.id,
+        session.id,
+        mode === "continue" ? accountId : undefined,
+      );
       if (live === null) return;
       if (mode === "fresh" && !isHandoffPending(live.card)) return;
       void (async () => {
@@ -202,33 +258,150 @@ export async function answerLimit(
     await markNeedsInput(card, session, "usage_stop", "limit: policy stop");
     return;
   }
-  scheduleAfterReset(
-    card,
-    session,
-    pane,
-    isHandoffPending(card) ? "fresh" : "continue",
-    deps,
+  if (isHandoffPending(card))
+    scheduleAfterReset(card, session, pane, "fresh", deps);
+  else await moveOrWait(card, session, pane, deps);
+}
+
+async function tryMove(
+  card: Card,
+  session: Session,
+  targetId: string,
+  seen: MoveSeen,
+  move: typeof moveSessionAccount,
+): Promise<SessionMoveOutcome | "error"> {
+  try {
+    return await move(card.id, targetId, session.id, "usage limit", seen);
+  } catch (err) {
+    console.warn(`[supervisor] limit move failed: ${(err as Error).message}`);
+    return "error";
+  }
+}
+
+/**
+ * Move a session that stopped on the usage limit to the account with the most weekly headroom, else wait for the reset.
+ *
+ * @remarks A move that settles must also get the continue prompt confirmed, else the session goes
+ * to `needs_input`, because the old account's reset no longer applies. A pinned session, a second
+ * move inside 30 minutes and a move that does not settle wait for the reset instead.
+ */
+export async function moveOrWait(
+  card: Card,
+  session: Session,
+  pane: string,
+  deps: LimitDeps = DEFAULT_DEPS,
+): Promise<void> {
+  const io = { ...DEFAULT_COLLABORATORS, ...deps };
+  const target = `=${session.tmuxSession}:`;
+  const seen: MoveSeen = {};
+  const wait = (reason: LimitWaitReason) => {
+    if (seen.leftLimit !== true && limitSurfaceOf(pane)?.kind === "a") {
+      record(card, session, {
+        action: "limit_wait",
+        mode: "continue",
+        reason,
+        auto_continue: true,
+      });
+      return;
+    }
+    scheduleAfterReset(card, session, pane, "continue", deps, reason);
+  };
+  const current = sessionOf(card.id, session.id) ?? session;
+  if (current.accountPinned === true) return wait("pinned");
+  const last = limitMoves.get(session.id);
+  if (last !== undefined && deps.now() - last < MOVE_GUARD_MS)
+    return wait("recent_move");
+  const from = accountOf(current);
+  const { thresholdPercent, hysteresisPercent } = getClaudeAccountsSettings();
+  const to = pickHeadroomAccount(
+    await io.candidates(),
+    from,
+    thresholdPercent,
+    hysteresisPercent,
   );
+  if (to === null) return wait("no_headroom");
+  const recordMove = (result: string, extra: Record<string, unknown> = {}) =>
+    record(card, session, { action: "limit_move", from, to, result, ...extra });
+
+  await store.setPendingAccount(card.id, session.id, undefined);
+  let outcome = await tryMove(card, session, to, seen, io.move);
+  if (
+    outcome === "busy" &&
+    !card.paused &&
+    !paneReady(await capturePane(target).catch(() => ""))
+  ) {
+    const redrawn = await io.sendKeys(target, ["C-l"]).then(
+      () => true,
+      () => false,
+    );
+    if (redrawn) {
+      await sleep(io.redrawMs);
+      outcome = await tryMove(card, session, to, seen, io.move);
+    }
+  }
+  if (outcome !== "moved" && outcome !== "same") {
+    recordMove(outcome);
+    return wait(outcome);
+  }
+  limitMoves.set(session.id, deps.now());
+  const liveCard = store.getCard(card.id);
+  const movedSession = sessionOf(card.id, session.id);
+  if (!liveCard || !movedSession) return recordMove("gone");
+  let result: string = outcome;
+  let confirmed = false;
+  const extra: Record<string, unknown> = {};
+  try {
+    if (seen.ready === false) result = "not_ready";
+    else {
+      const sent = await io.send(
+        liveCard,
+        movedSession,
+        continueText(liveCard, movedSession, "usage_limit"),
+        "usage_limit",
+      );
+      extra.continue = sent;
+      confirmed = sent === "confirmed";
+    }
+  } catch (err) {
+    console.warn(
+      `[supervisor] limit continue failed: ${(err as Error).message}`,
+    );
+    result = "error";
+  }
+  recordMove(result, extra);
+  if (!confirmed)
+    await markNeedsInput(
+      liveCard,
+      movedSession,
+      "supervisor_gave_up",
+      `limit: moved to ${to}, continue not confirmed`,
+    );
 }
 
 /**
  * Leave the auto continue surface of a loop that waits for a handoff, and start it fresh after the reset.
  *
  * @remarks Escape is sent once per surface; a resumed old conversation would spend the fresh
- * context the handoff prepared.
+ * context the handoff prepared. A pane with no surface only schedules the fresh start, reading the
+ * reset time from the evidence as well.
  */
 export async function escapeLimit(
   card: Card,
   session: Session,
+  evidence: string,
   deps: LimitDeps = DEFAULT_DEPS,
 ): Promise<void> {
   if (escaped.has(session.id)) return;
   const target = `=${session.tmuxSession}:`;
   const pane = await capturePane(target);
+  const text = `${evidence}\n${pane}`;
   const surface = limitSurfaceOf(pane);
-  if (surface?.kind !== "a") return;
+  if (surface?.kind !== "a") {
+    scheduleAfterReset(card, session, text, "fresh", deps);
+    return;
+  }
   escaped.add(session.id);
   await sendKeys(target, planLimitKeys(surface) ?? []);
   record(card, session, { action: "limit_escape", result: "sent" });
-  scheduleAfterReset(card, session, pane, "fresh", deps);
+  scheduleAfterReset(card, session, text, "fresh", deps);
 }

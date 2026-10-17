@@ -391,7 +391,7 @@ void test(
       ],
     });
     const timers: (() => void)[] = [];
-    await escapeLimit(s.card(), s.session(), {
+    await escapeLimit(s.card(), s.session(), "", {
       now: () => new Date(2026, 9, 6, 22, 0).getTime(),
       schedule: (run) => {
         timers.push(run);
