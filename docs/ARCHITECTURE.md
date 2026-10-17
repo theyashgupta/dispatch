@@ -5631,7 +5631,8 @@ question; none of them read prose for truth.
   of a live slot, except in one race: 3 or more gates that act on a guard older than 60 seconds. The gate sets `DISPATCH_CHECK_SLOT_HELD=1` for its command, so the steps of
   `npm run check` run in the slot of the chain and do not take a second slot. The command runs in
   its own process group, and the gate sends SIGINT, SIGTERM and SIGHUP to the full group. After 5400
-  seconds of waiting, the gate exits with code 75. If it cannot use the lock directory, it exits
+  seconds of waiting, the gate exits with code 75. A gate that waited prints
+  `with-check-slot: acquired` when it takes the slot. If it cannot use the lock directory, it exits
   with code 2. `DISPATCH_CHECK_LOCK_DIR` and `DISPATCH_CHECK_WAIT_SECONDS` change the lock directory
   and the wait limit. Limit: if the gate gets SIGKILL, its command continues to run without a slot.
   For this reason, the Stop hook in `.claude/settings.json` sends SIGTERM at its
@@ -6313,7 +6314,10 @@ sentence ends, commas and semicolons) matches the signature rule wording `must h
 signatures`.
 The flow never rebases and never edits code. Every git and gh call has a time limit (120 s, 300 s
 for fetch and push, 30 min for the check command) and a 64 MiB output buffer, and the diffs run
-with fixed color, prefix and path settings. The runner reads the board policy before each step
+with fixed color, prefix and path settings. The check command gets `DISPATCH_CHECK_WAIT_SECONDS=5400`.
+Its 30 min stop while the slot gate prints its waiting line and start again at the gate's
+`with-check-slot: acquired` line, and the call ends after 5400 s plus 30 min in all. The gate lines
+are never the reason of a failed check. The runner reads the board policy before each step
 and poll: `none` stops the flow and `open_prs` stops the merges. The runner keeps its board key,
 and a card that is gone stops it with no write; unwind refuses a group whose flow runs with 409
 `ship-running`. A thrown runner is stored as stopped. A refused move to Done after the last merge
