@@ -53,6 +53,9 @@ export const shipTools: {
 
 const DISPATCH_PACKAGE = "@theyashgupta/dispatch";
 const CHECK_TIMEOUT_MS = 30 * 60_000;
+const SLOT_WAIT_SECONDS = 5400;
+const SLOT_WAITING = "with-check-slot: waiting for a free slot";
+const SLOT_ACQUIRED = "with-check-slot: acquired";
 const CALL_TIMEOUT_MS = 120_000;
 const NETWORK_TIMEOUT_MS = 300_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
@@ -107,16 +110,80 @@ class CardGone extends Error {}
 
 const startingBoards = new Set<string>();
 
-/** The first non-empty line of a failed command's stderr, else of its message. */
-function firstLine(err: unknown): string {
+/** The first non-empty line of a failed command's stderr, else of its message, minus `skip` lines. */
+function firstLine(
+  err: unknown,
+  skip: (line: string) => boolean = () => false,
+): string {
   const e = err as { stderr?: string; message?: string };
-  const text = e.stderr?.trim() ? e.stderr : (e.message ?? String(err));
-  return (
+  const lines = (text: string): string[] =>
     text
       .split("\n")
       .map((l) => l.trim())
-      .find((l) => l !== "") ?? "command failed"
+      .filter((l) => l !== "" && !skip(l));
+  return (
+    lines(e.stderr ?? "")[0] ??
+    lines(e.message ?? String(err))[0] ??
+    "command failed"
   );
+}
+
+/** Tell if a line is the slot gate's waiting or acquired line. */
+function isSlotLine(line: string): boolean {
+  return line.startsWith(SLOT_WAITING) || line === SLOT_ACQUIRED;
+}
+
+/**
+ * Run the repository check command and stop it after 30 minutes of checking.
+ *
+ * @remarks The 30 minutes pause while the slot gate prints that it waits and start again at its
+ * acquired line, so a wait for a slot that loop gates hold does not count. The call itself ends
+ * after the gate's own wait, which is passed to it, plus 30 minutes.
+ */
+export async function runCheck(
+  worktree: string,
+  argv: string[],
+): Promise<void> {
+  const controller = new AbortController();
+  const startBudget = (): NodeJS.Timeout =>
+    setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS);
+  let timer = startBudget();
+  let partial = "";
+  const onStderr = (chunk: string): void => {
+    const lines = (partial + chunk).split("\n");
+    partial = lines.pop() ?? "";
+    for (const line of lines.map((l) => l.trim())) {
+      if (line.startsWith(SLOT_WAITING)) clearTimeout(timer);
+      if (line === SLOT_ACQUIRED) {
+        clearTimeout(timer);
+        timer = startBudget();
+      }
+    }
+  };
+  try {
+    await shipTools.run(
+      "env",
+      [
+        "-u",
+        "NODE_ENV",
+        `DISPATCH_CHECK_WAIT_SECONDS=${SLOT_WAIT_SECONDS}`,
+        ...argv,
+      ],
+      {
+        ...callOptions(worktree, SLOT_WAIT_SECONDS * 1000 + CHECK_TIMEOUT_MS),
+        signal: controller.signal,
+        onStderr,
+      },
+    );
+  } catch (err) {
+    throw new ShipStop(
+      controller.signal.aborted
+        ? "check command failed: timed out after 30 minutes in the check slot"
+        : `check command failed: ${firstLine(err, isSlotLine)}`,
+    );
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** The exec options of one git or gh call in `cwd`, with a time limit and a 64 MiB buffer. */
@@ -583,15 +650,7 @@ async function check(r: Runner, branch: ShipBranch): Promise<void> {
   }
   const argv = r.checkCommand.split(/\s+/).filter((a) => a !== "");
   if (argv.length === 0) return;
-  try {
-    await shipTools.run(
-      "env",
-      ["-u", "NODE_ENV", ...argv],
-      callOptions(r.worktree, CHECK_TIMEOUT_MS),
-    );
-  } catch (err) {
-    throw new ShipStop(`check command failed: ${firstLine(err)}`);
-  }
+  await runCheck(r.worktree, argv);
 }
 
 /**

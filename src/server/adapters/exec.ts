@@ -64,7 +64,8 @@ function armKillEscalation(
  * child may ignore the abort/timeout SIGTERM (headless `claude -p` drafts). `env` adds variables on
  * top of the inherited process environment (a per-account `CLAUDE_CONFIG_DIR`), never replaces it.
  * With escalation armed, an aborted run settles only once the child has exited, so a caller's
- * single flight never releases while the old child still runs.
+ * single flight never releases while the old child still runs. `onStderr` receives each stderr
+ * chunk as it arrives, for a caller that reacts to progress lines before the child exits.
  * @param input written to the child's stdin, which is then closed; for stream-json requests. The
  * stdin error event is swallowed because a child that exits before draining a large input raises
  * EPIPE outside the awaited promise, which would otherwise take the whole server down.
@@ -85,16 +86,18 @@ export async function run(
     killEscalationMs?: number;
     env?: Record<string, string>;
     input?: string;
+    onStderr?: (chunk: string) => void;
   } = {},
 ): Promise<ExecResult> {
   const t0 = perfExec ? performance.now() : 0;
   const shape = perfExec ? [cmd, ...args.slice(0, 2)].join(" ") : "";
-  const { killEscalationMs, env, input, ...execOpts } = opts;
+  const { killEscalationMs, env, input, onStderr, ...execOpts } = opts;
   const pending = execFileP(cmd, args, {
     ...execOpts,
     ...(env ? { env: { ...process.env, ...env } } : {}),
     encoding: "utf8",
   });
+  if (onStderr !== undefined) pending.child.stderr?.on("data", onStderr);
   if (input !== undefined) {
     pending.child.stdin?.on("error", () => {});
     pending.child.stdin?.end(input);
