@@ -217,7 +217,7 @@ void test("a hook limit with no surface left on the pane moves at the safe point
   assert.equal(recordedTurnState(cardId, sessionId), "unknown");
 });
 
-void test("the cancelled post-menu screen with a hook limit moves with no key and does not report a limit left (C-03b)", async () => {
+void test("the cancelled post-menu screen with a hook limit moves with no key and reports a limit left (C-03b)", async () => {
   const { cardId, sessionId } = await limitCard(
     "lim-cancelled",
     CANCELLED_PANE,
@@ -236,7 +236,7 @@ void test("the cancelled post-menu screen with a hook limit moves with no key an
   );
   assertMovedAfter([]);
   assert.equal(accountOf(cardId, sessionId), ACCOUNT_A);
-  assert.equal(seen.leftLimit, undefined);
+  assert.equal(seen.leftLimit, true);
 });
 
 void test.after(() => env.cleanup());

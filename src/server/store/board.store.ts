@@ -1572,15 +1572,19 @@ class BoardStore extends EventEmitter {
    * Store a group card's loop progress, writing only when it differs from the stored value.
    *
    * @remarks The compare runs before the queue because every `enqueue` persists all cards and emits
-   * `change`, so a poll that re-reads identical progress must not enter it. An unknown card id is a
-   * no-op.
+   * `change`, so a poll that re-reads identical progress must not enter it. `force` skips the compare
+   * so a caller can advance `readAt` alone. An unknown card id is a no-op.
    */
-  setLoopProgress(cardId: string, progress: LoopProgress): Promise<void> {
+  setLoopProgress(
+    cardId: string,
+    progress: LoopProgress,
+    force = false,
+  ): Promise<void> {
     const card = this.cards.get(cardId);
     if (card === undefined) return Promise.resolve();
     const stable = (p: LoopProgress | undefined) =>
       JSON.stringify(p === undefined ? null : { ...p, readAt: "" });
-    if (stable(card.loopProgress) === stable(progress))
+    if (!force && stable(card.loopProgress) === stable(progress))
       return Promise.resolve();
     return this.enqueue(() => {
       const current = this.cards.get(cardId);
@@ -4620,6 +4624,17 @@ class BoardStore extends EventEmitter {
       if (!card) return [];
       card.startQueued = queue.startQueued;
       if (queue.dependsOn !== undefined) card.dependsOn = [...queue.dependsOn];
+      return [];
+    });
+  }
+
+  /** Store the blocker ids of a card; an empty list removes the field and an unknown card is a no-op. */
+  setBlockedBy(id: string, ids: string[]): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      if (ids.length === 0) delete card.blockedBy;
+      else card.blockedBy = [...ids];
       return [];
     });
   }

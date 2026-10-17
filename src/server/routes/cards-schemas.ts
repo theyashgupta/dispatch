@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { CROSS_SESSION_INBOUND_VALUES } from "../../shared/types.js";
-import { MOVABLE_COLUMNS } from "../../shared/orchestrator-limits.js";
+import {
+  BLOCKED_BY_MAX,
+  CARD_ID_MAX,
+  MOVABLE_COLUMNS,
+} from "../../shared/orchestrator-limits.js";
 import { validateCommentBody } from "../../shared/comment-body.js";
 import { hasDispatchMarker } from "../services/infra/playbooks.js";
 import {
@@ -165,6 +169,21 @@ export const inboxDismissBodySchema = z.object(
 export const sessionPinBodySchema = sessionBodySchema.extend({
   pinned: z.boolean("invalid-pinned"),
 });
+
+export const blockedByBodySchema = z.object(
+  {
+    blockedBy: z
+      .array(
+        z
+          .string("invalid-blocked-by")
+          .min(1, "invalid-blocked-by")
+          .refine((id) => id.length <= CARD_ID_MAX, "invalid-blocked-by"),
+        "invalid-blocked-by",
+      )
+      .max(BLOCKED_BY_MAX, "invalid-blocked-by"),
+  },
+  "invalid-blocked-by",
+);
 
 export const openEditorBodySchema = z.object(
   { editor: z.enum(["code", "cursor"], EDITOR_CODE) },

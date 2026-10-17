@@ -101,6 +101,13 @@ if (verb === "create") {
 }
 const pr = state.prs[number];
 if (!pr) fail("fake gh: no PR " + number);
+if (verb === "view" && flag("--json") === "headRefOid") {
+  pr.headViews = (pr.headViews ?? 0) + 1;
+  save();
+  const stale = pr.headViews <= (pr.staleViews ?? 0);
+  process.stdout.write(JSON.stringify({ headRefOid: stale ? pr.headRefOid : remoteHead(pr.head) }) + "\n");
+  process.exit(0);
+}
 if (verb === "view" && flag("--json") === "state,statusCheckRollup") {
   pr.polls += 1;
   const conclusion =
@@ -153,7 +160,8 @@ function shellQuote(value: string): string {
  * @remarks Each argv is one JSON line in `<dir>/gh-calls.jsonl`; PR numbers and poll counts live
  * in `<dir>/gh-state.json`. A merge squashes the PR head into the local bare `origin` of the
  * calling worktree, so nothing reaches a network remote. A stored PR may set `base`, `cross` and
- * `headRefOid`; the list answers the head commit of `origin` when it sets none.
+ * `headRefOid`; the list answers the head commit of `origin` when it sets none. A head view answers
+ * the stored `headRefOid` for the first `staleViews` reads, then the head commit of `origin`.
  */
 export function writeFakeGh(
   binDir: string,

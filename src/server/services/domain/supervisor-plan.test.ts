@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import type { SupervisorState } from "../../../shared/types.js";
+import type {
+  SupervisorState,
+  SupervisorStateReason,
+} from "../../../shared/types.js";
 import {
   declineKeys,
   holdsNeedsInput,
@@ -69,6 +72,13 @@ void test("each transition maps to its action list", () => {
       },
       [],
     ],
+    [
+      {
+        to: "roadmap_complete",
+        loop: { ...LOOP, orchestrator: true },
+      },
+      [],
+    ],
     [{ to: "lost" }, [{ kind: "resume" }]],
     [{ to: "shell_prompt", loop: null }, [{ kind: "resume" }]],
     [{ to: "needs_input" }, []],
@@ -79,7 +89,8 @@ void test("each transition maps to its action list", () => {
       { to: "usage_limit_dialog", usageLimit: "stop" },
       [{ kind: "answer_limit" }],
     ],
-    [{ to: "usage_limit_wait" }, []],
+    [{ to: "usage_limit_wait" }, [{ kind: "limit_move" }]],
+    [{ to: "usage_limit_wait", loop: null }, [{ kind: "limit_move" }]],
     [
       {
         to: "usage_limit_wait",
@@ -88,10 +99,23 @@ void test("each transition maps to its action list", () => {
       [{ kind: "escape_limit" }],
     ],
     [
+      { to: "usage_limit_wait", usageLimit: "stop" },
+      [{ kind: "needs_input", reason: "usage_stop" }],
+    ],
+    [
       {
         to: "usage_limit_wait",
         usageLimit: "stop",
         loop: { engineActive: true, handoffPending: true, unitPhase: "2/3" },
+      },
+      [{ kind: "needs_input", reason: "usage_stop" }],
+    ],
+    [{ to: "usage_limit_wait", from: "usage_limit_dialog" }, []],
+    [
+      {
+        to: "usage_limit_wait",
+        from: "usage_limit_dialog",
+        usageLimit: "stop",
       },
       [],
     ],
@@ -193,6 +217,34 @@ void test("a supervisor set needs_input holds until a busy sign, a permission pr
     holdsNeedsInput("idle", "supervisor_gave_up", { state: "idle" }),
     false,
   );
+});
+
+void test("a roadmap_complete detection releases every hold reason only while the engine is open", () => {
+  const reasons: SupervisorStateReason[] = [
+    "usage_stop",
+    "budget",
+    "stop_session",
+    "supervisor_gave_up",
+    "resume_failed",
+  ];
+  const detected = { state: "roadmap_complete" } as const;
+  for (const reason of reasons) {
+    assert.equal(
+      holdsNeedsInput("needs_input", reason, detected, true),
+      false,
+      `open ${reason}`,
+    );
+    assert.equal(
+      holdsNeedsInput("needs_input", reason, detected, false),
+      true,
+      `closed ${reason}`,
+    );
+    assert.equal(
+      holdsNeedsInput("needs_input", reason, detected),
+      true,
+      `absent ${reason}`,
+    );
+  }
 });
 
 void test("the decline keys reach the No row of a dangerous delete prompt", () => {

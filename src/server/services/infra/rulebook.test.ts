@@ -76,11 +76,16 @@ void test("the rule book names release_prep, list_accounts and start_ship for a 
     "Release playbook",
     "send_input",
     "Never choose usage credits",
-    "Ship a single card that `start_card` started",
+    "Do the same for a single card in Agent done.",
+    "Do this when the user started the card.",
   ]) {
     assert.ok(markdown.includes(text), text);
   }
-  for (const text of ["works on group cards only", "has no release tool"]) {
+  for (const text of [
+    "works on group cards only",
+    "has no release tool",
+    "that `start_card` did not start is refused",
+  ]) {
     assert.equal(markdown.includes(text), false, text);
   }
 });

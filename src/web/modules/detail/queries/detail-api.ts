@@ -110,3 +110,40 @@ export function setCardLinearState(
 ): Promise<LinearActionResult> {
   return linearAction(id, "linear-state", { stateId });
 }
+
+type SetBlockedByResult =
+  | { ok: true }
+  | { ok: false; status: number; error: string | null; reason: string | null };
+
+/**
+ * Replace a card's blockers: PUT /api/cards/:id/blocked-by.
+ *
+ * @remarks
+ * A refusal resolves as typed data, with the server's `reason` read from the failure body.
+ * `status` is 0 when the request never got an answer.
+ */
+export async function setCardBlockedBy(
+  id: string,
+  blockedBy: string[],
+): Promise<SetBlockedByResult> {
+  try {
+    const result = await http(
+      `/api/cards/${encodeURIComponent(id)}/blocked-by`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ blockedBy }),
+      },
+    );
+    if (result.ok) return { ok: true };
+    const reason = (result.body as { reason?: unknown } | null)?.reason;
+    return {
+      ok: false,
+      status: result.status,
+      error: result.error,
+      reason: typeof reason === "string" ? reason : null,
+    };
+  } catch {
+    return { ok: false, status: 0, error: null, reason: null };
+  }
+}

@@ -19,7 +19,7 @@ import {
 } from "../infra/config-holder.js";
 import { ConflictError, ValidationError } from "../domain/errors.js";
 import { recordGroupState } from "./group-state-events.js";
-import { launchableCard } from "./card-move.js";
+import { launchableCard } from "./card-target.js";
 import { getBoard } from "./boards.js";
 import { restatRepos } from "./workspaces.js";
 import {

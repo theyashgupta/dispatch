@@ -19,6 +19,7 @@ const { store } = await import("../../store/board.store.js");
 const { upsertAccount, accountDir } = await import("./claude-accounts.js");
 const {
   applyAccountChoice,
+  applyAutomaticMove,
   moveOrQueue,
   runPendingMove,
   startPendingMoveSweep,
@@ -161,6 +162,19 @@ void test("all moves a session on the cancelled limit screen with a hook limit a
   );
   const calls = fs.readFileSync(path.join(fake.state, "calls.log"), "utf8");
   assert.equal(calls.includes("Continue."), false);
+});
+
+void test("an automatic move of a session with a hook limit and no surface on the pane sends Continue.", async () => {
+  const hooked = await sessionCard("ap-auto-hook", IDLE_PANE);
+  recordTurnEvent(hooked.cardId, hooked.sessionId, "StopFailure", "rate_limit");
+  const result = await applyAutomaticMove("default", ACCOUNT_A);
+  assert.deepEqual(result.moved, [hooked]);
+  assert.equal(
+    sessionOf(hooked.cardId, hooked.sessionId)?.claudeAccountId,
+    ACCOUNT_A,
+  );
+  const calls = fs.readFileSync(path.join(fake.state, "calls.log"), "utf8");
+  assert.equal(calls.includes("Continue."), true);
 });
 
 void test("none touches no tmux session", async () => {

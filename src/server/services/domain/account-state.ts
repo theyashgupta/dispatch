@@ -93,8 +93,8 @@ function latest(times: (string | null)[]): string | null {
  *
  * @remarks `limitedUntil` is the latest reset of the buckets at or above the threshold, so a 7 day
  * bucket at the limit holds the account until the 7 day reset even when a shorter bucket is also
- * full. A logged out folder with a rejected or missing token is `login-expired` before any other
- * signal, so the selection never launches on it.
+ * full, and a bucket whose reset has passed is not full. A logged out folder with a rejected or
+ * missing token is `login-expired` before any other signal, so the selection never launches on it.
  */
 export function deriveAccountState(
   usage: ClaudeUsageSnapshot,
@@ -106,7 +106,11 @@ export function deriveAccountState(
     return { state: "login-expired", limitedUntil: null };
   }
   const windows = usableWindows(usage);
-  const full = windows.filter((w) => w.percent >= thresholdPercent);
+  const full = windows.filter(
+    (w) =>
+      w.percent >= thresholdPercent &&
+      (w.resetsAt === null || Date.parse(w.resetsAt) > now.getTime()),
+  );
   if (full.length > 0 || signals.limit) {
     const limitedUntil =
       latest(full.map((w) => w.resetsAt)) ??
@@ -118,4 +122,21 @@ export function deriveAccountState(
   if (windows.length === 0) return { state: "unknown", limitedUntil: null };
   const near = windows.some((w) => w.percent >= NEAR_LIMIT_PERCENT);
   return { state: near ? "near-limit" : "available", limitedUntil: null };
+}
+
+/**
+ * Read a stored chain state as of `now`, so a `limited` state whose `limitedUntil` passed is `unknown`.
+ */
+export function expireLimit(
+  entry: DerivedAccountState,
+  now: Date,
+): DerivedAccountState {
+  if (
+    entry.state === "limited" &&
+    entry.limitedUntil !== null &&
+    Date.parse(entry.limitedUntil) <= now.getTime()
+  ) {
+    return { state: "unknown", limitedUntil: null };
+  }
+  return entry;
 }

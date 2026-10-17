@@ -47,6 +47,7 @@ import { store, type ReservedSession } from "./board.store.js";
 
 export {
   BoardUnavailableError,
+  compareTodoOrder,
   redactArchivedGroup,
   redactCard,
   type ReservedSession,
@@ -105,7 +106,11 @@ export interface BoardRepository {
     sinceId: number,
     limit: number,
   ): ActivityEvent[];
-  setLoopProgress(cardId: string, progress: LoopProgress): Promise<void>;
+  setLoopProgress(
+    cardId: string,
+    progress: LoopProgress,
+    force?: boolean,
+  ): Promise<void>;
   appendOrchestrationEvent(
     e: Omit<OrchestrationEvent, "id">,
   ): OrchestrationEvent;
@@ -391,6 +396,7 @@ export interface BoardRepository {
     id: string,
     queue: { startQueued: boolean; dependsOn?: string[] },
   ): Promise<void>;
+  setBlockedBy(id: string, ids: string[]): Promise<void>;
   setOrchestratorFields(
     id: string,
     fields: Pick<

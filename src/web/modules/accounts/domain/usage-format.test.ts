@@ -1,15 +1,19 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { ClaudeUsageSnapshot } from "../../../../shared/types.js";
+import type {
+  ClaudeAccountSummary,
+  ClaudeUsageSnapshot,
+} from "../../../../shared/types.js";
 import {
+  accountStateLine,
   chipState,
+  findWindow,
   formatReset,
   loginExpiryView,
   PACE_BADGE,
   pacedAtFor,
-  paceTitle,
   pacingFor,
-  projectionCopy,
+  popoverWindows,
   statusCopy,
   tightestWindow,
   toneFor,
@@ -148,8 +152,6 @@ void test("pacingFor: period start is On track with no projection and no throw",
     exhaustsAt: null,
     capped: false,
   });
-  assert.equal(projectionCopy(spend, p, T0), null);
-  assert.equal(paceTitle(spend, p), "Used 26% · Elapsed 0%");
   assert.equal(pacingFor(spend, T0 - DAY)?.percentElapsed, 0);
   const fresh = pacingFor(win("session", 3, 5 * HOUR), T0 + 10_000)!;
   assert.equal(fresh.state, "on-track");
@@ -167,32 +169,16 @@ void test("pacingFor: projection is linear from the period start and never past 
   assert.equal(p.state, "will-run-out");
   assert.equal(p.exhaustsAt, T0 + 100 * 60 * 1000);
   assert.equal(p.capped, false);
-  assert.equal(
-    projectionCopy(session, p, T0 + HOUR),
-    "At this rate, limit hits in 40m",
-  );
   const slow = pacingFor(win("session", 10, 5 * HOUR), T0 + HOUR)!;
   assert.equal(slow.exhaustsAt, T0 + 5 * HOUR);
   assert.equal(slow.capped, true);
-  assert.equal(
-    projectionCopy(win("session", 10, 5 * HOUR), slow, T0 + HOUR),
-    "At this rate, limit holds until reset",
-  );
   const idle = pacingFor(win("session", 0, 5 * HOUR), T0 + 2.5 * HOUR)!;
   assert.equal(idle.exhaustsAt, T0 + 5 * HOUR);
   assert.equal(idle.state, "on-track");
   assert.equal(idle.capped, true);
-  assert.equal(
-    projectionCopy(win("session", 0, 5 * HOUR), idle, T0 + 2.5 * HOUR),
-    "At this rate, limit holds until reset",
-  );
   const exact = pacingFor(win("session", 20, 5 * HOUR), T0 + HOUR)!;
   assert.equal(exact.capped, true);
   assert.equal(exact.exhaustsAt, T0 + 5 * HOUR);
-  assert.equal(
-    projectionCopy(session, p, T0 + 2 * HOUR),
-    "At this rate, limit hits soon",
-  );
   for (const used of [0, 1, 50, 99, 100]) {
     for (const t of [T0 + 1, T0 + HOUR, T0 + 4.99 * HOUR]) {
       const q = pacingFor(win("weekly_all", used, 7 * DAY), t)!;
@@ -201,16 +187,10 @@ void test("pacingFor: projection is linear from the period start and never past 
   }
 });
 
-void test("pacingFor: a fully used window is Will run out and reads as reached", () => {
+void test("pacingFor: a fully used window is Will run out", () => {
   const late = win("session", 100, 5 * HOUR);
   const p = pacingFor(late, T0 + 4.5 * HOUR)!;
   assert.equal(p.state, "will-run-out");
-  assert.equal(projectionCopy(late, p, T0 + 4.5 * HOUR), "Limit reached");
-  const spend = win("spend", 100, 30 * DAY);
-  assert.equal(
-    projectionCopy(spend, pacingFor(spend, T0 + DAY)!, T0 + DAY),
-    "Credit used up",
-  );
 });
 
 void test("pacingFor: the ticket's own figures read On track", () => {
@@ -219,10 +199,6 @@ void test("pacingFor: the ticket's own figures read On track", () => {
   const e = pacingFor(enterprise, monthStart + 8 * DAY + 2 * HOUR)!;
   assert.equal(e.state, "on-track");
   assert.equal(Math.round(e.percentElapsed), 27);
-  assert.equal(
-    projectionCopy(enterprise, e, monthStart + 8 * DAY),
-    "At this rate, credit lasts the month",
-  );
   const teams = win("session", 6, 5 * HOUR);
   const t = pacingFor(teams, T0 + 5 * HOUR - (4 * HOUR + 12 * 60 * 1000))!;
   assert.equal(t.state, "on-track");
@@ -237,28 +213,6 @@ void test("pacingFor: a period that is not a calendar month uses its own boundar
   assert.equal(p.state, "on-track");
   const fast = pacingFor(win("spend", 60, 30 * DAY, start), start + 10 * DAY)!;
   assert.equal(fast.exhaustsAt, start + (10 * DAY * 100) / 60);
-  assert.match(
-    projectionCopy(win("spend", 60, 30 * DAY, start), fast, start + 10 * DAY)!,
-    /^At this rate, credit runs out on /,
-  );
-  assert.equal(
-    paceTitle(win("spend", 60, 30 * DAY, start), fast),
-    "Used 60% · Elapsed 33% · 6.0%/day",
-  );
-  assert.equal(
-    paceTitle(
-      win("session", 60, 5 * HOUR),
-      pacingFor(win("session", 60, 5 * HOUR), T0 + HOUR)!,
-    ),
-    "Used 60% · Elapsed 20% · 60.0%/hour",
-  );
-  assert.equal(
-    paceTitle(
-      win("weekly_all", 7, 7 * DAY),
-      pacingFor(win("weekly_all", 7, 7 * DAY), T0 + DAY)!,
-    ),
-    "Used 7% · Elapsed 14% · 7.0%/day",
-  );
 });
 
 void test("pacingFor: missing, unparseable, inverted or ended periods yield null", () => {
@@ -372,4 +326,213 @@ void test("loginExpiryView warns within 3 days or past, stays neutral later, nul
   assert.ok(past?.text.startsWith("Login expired"));
   assert.equal(loginExpiryView(undefined, now), null);
   assert.equal(loginExpiryView("not-a-date", now), null);
+});
+
+void test("findWindow returns the first window of a kind, null when absent", () => {
+  const usage: ClaudeUsageSnapshot = {
+    status: "ok",
+    windows: [w("weekly_all", 40), w("session", 55), w("session", 80)],
+    fetchedAt: null,
+  };
+  assert.equal(findWindow(usage, "session")?.percent, 55);
+  assert.equal(findWindow(usage, "weekly_all")?.percent, 40);
+  assert.equal(findWindow(usage, "weekly_scoped"), null);
+  assert.equal(findWindow({ ...usage, windows: [] }, "session"), null);
+});
+
+void test("popoverWindows returns session then weekly_all, only those present", () => {
+  const snap = (...windows: ReturnType<typeof w>[]): ClaudeUsageSnapshot => ({
+    status: "ok",
+    windows,
+    fetchedAt: null,
+  });
+  assert.deepEqual(
+    popoverWindows(
+      snap(w("weekly_all", 40), w("weekly_scoped", 12), w("session", 55)),
+    ).map((x) => x.kind),
+    ["session", "weekly_all"],
+  );
+  assert.deepEqual(
+    popoverWindows(snap(w("weekly_scoped", 12), w("session", 55))).map(
+      (x) => x.kind,
+    ),
+    ["session"],
+  );
+  assert.deepEqual(
+    popoverWindows(snap(w("weekly_all", 40))).map((x) => x.kind),
+    ["weekly_all"],
+  );
+  assert.deepEqual(popoverWindows(snap(w("weekly_scoped", 12))), []);
+  assert.deepEqual(popoverWindows(snap()), []);
+});
+
+const account = (
+  overrides: Partial<ClaudeAccountSummary> = {},
+  usage: Partial<ClaudeUsageSnapshot> = {},
+): ClaudeAccountSummary => ({
+  id: "a1",
+  email: "a@example.com",
+  orgName: "Org",
+  subscriptionType: "max",
+  isDefault: true,
+  usage: { status: "ok", windows: [], fetchedAt: null, ...usage },
+  position: 0,
+  state: "available",
+  buckets: [],
+  limitedUntil: null,
+  inUse: true,
+  ...overrides,
+});
+
+void test("accountStateLine: login expired by state or by a past loginExpiresAt, and it wins over limited", () => {
+  const now = T0 + HOUR;
+  const expired = { text: "Login expired, sign in again", tone: "down" };
+  assert.deepEqual(
+    accountStateLine(account({ state: "login-expired" }), now),
+    expired,
+  );
+  assert.deepEqual(
+    accountStateLine(
+      account(
+        { state: "available" },
+        { loginExpiresAt: "2026-08-31T00:00:00Z" },
+      ),
+      now,
+    ),
+    expired,
+  );
+  assert.deepEqual(
+    accountStateLine(
+      account(
+        { state: "limited", limitedUntil: "2026-09-01T10:30:00Z" },
+        {
+          loginExpiresAt: "2026-08-31T00:00:00Z",
+        },
+      ),
+      now,
+    ),
+    expired,
+  );
+  assert.equal(
+    accountStateLine(
+      account({}, { loginExpiresAt: "2026-09-30T00:00:00Z" }),
+      now,
+    ),
+    null,
+  );
+});
+
+void test("accountStateLine: limited names the reset time, or just Limited without one", () => {
+  const now = T0 + HOUR;
+  const soon = accountStateLine(
+    account({ state: "limited", limitedUntil: "2026-09-01T10:30:00Z" }),
+    now,
+  )!;
+  assert.ok(soon.text.startsWith("Limited until "));
+  assert.equal(soon.tone, "down");
+  const later = accountStateLine(
+    account({ state: "limited", limitedUntil: "2026-09-03T10:30:00Z" }),
+    now,
+  )!;
+  assert.ok(later.text.startsWith("Limited until "));
+  assert.notEqual(later.text, soon.text);
+  assert.deepEqual(
+    accountStateLine(account({ state: "limited", limitedUntil: null }), now),
+    { text: "Limited", tone: "down" },
+  );
+  assert.deepEqual(
+    accountStateLine(
+      account({ state: "limited", limitedUntil: "2026-09-01T00:30:00Z" }),
+      now,
+    ),
+    { text: "Limited", tone: "down" },
+  );
+  assert.deepEqual(
+    accountStateLine(
+      account({ state: "limited", limitedUntil: new Date(now).toISOString() }),
+      now,
+    ),
+    { text: "Limited", tone: "down" },
+  );
+  const localNoon = new Date(2026, 8, 1, 10, 0).getTime();
+  const at = (offsetMs: number) =>
+    accountStateLine(
+      account({
+        state: "limited",
+        limitedUntil: new Date(localNoon + offsetMs).toISOString(),
+      }),
+      localNoon,
+    )!.text;
+  assert.notEqual(at(2 * HOUR), at(26 * HOUR));
+  assert.ok(at(26 * HOUR).length > at(2 * HOUR).length);
+  assert.deepEqual(
+    accountStateLine(
+      account({ state: "limited", limitedUntil: "garbage" }),
+      now,
+    ),
+    { text: "Limited", tone: "down" },
+  );
+});
+
+void test("accountStateLine: each non-ok status gives its copy, muted for unavailable and stale otherwise", () => {
+  const now = T0 + HOUR;
+  const line = (status: ClaudeUsageSnapshot["status"]) =>
+    accountStateLine(account({}, { status }), now);
+  assert.deepEqual(line("stale"), {
+    text: "Usage stale, refreshes on the next session",
+    tone: "stale",
+  });
+  assert.deepEqual(line("unavailable"), {
+    text: "Usage unavailable, sign in to see it",
+    tone: "muted",
+  });
+  assert.deepEqual(line("rate-limited"), {
+    text: "Usage rate limited, try again later",
+    tone: "stale",
+  });
+  assert.deepEqual(line("error"), {
+    text: "Usage could not be fetched",
+    tone: "stale",
+  });
+});
+
+void test("accountStateLine: ok status reports the worst pace of session and weekly", () => {
+  const now = T0 + HOUR;
+  const fetchedAt = new Date(T0 + HOUR).toISOString();
+  const line = (session: number, weekly: number) =>
+    accountStateLine(
+      account(
+        {},
+        {
+          fetchedAt,
+          windows: [
+            win("session", session, 5 * HOUR),
+            win("weekly_all", weekly, 7 * DAY, T0 - DAY),
+          ],
+        },
+      ),
+      now,
+    );
+  assert.deepEqual(line(60, 5), { text: "Will run out", tone: "down" });
+  assert.deepEqual(line(10, 5), { text: "On track", tone: "ok" });
+  assert.deepEqual(line(24, 5), { text: "Ahead of budget", tone: "stale" });
+  assert.deepEqual(line(10, 60), { text: "Will run out", tone: "down" });
+});
+
+void test("accountStateLine: ok without period data falls back to Checked, then to null", () => {
+  const now = T0 + HOUR;
+  const checked = accountStateLine(
+    account(
+      {},
+      { fetchedAt: "2026-09-01T01:00:00Z", windows: [w("session", 50)] },
+    ),
+    now,
+  )!;
+  assert.ok(checked.text.startsWith("Checked "));
+  assert.equal(checked.tone, "muted");
+  assert.equal(accountStateLine(account(), now), null);
+  assert.equal(
+    accountStateLine(account({}, { fetchedAt: "garbage" }), now),
+    null,
+  );
 });

@@ -152,7 +152,7 @@ Mount prefix: `/api/orchestrator`.
 | GET    | `/api/orchestrator/board-workspace`                | Orchestrator token | Tool `get_board_workspace`: read the board folder, repositories, playbook names and group playbook. |
 | POST   | `/api/orchestrator/boards`                         | Orchestrator token | Tool `create_board`: create a board from a name and answer the key and the link.                    |
 | POST   | `/api/orchestrator/tickets`                        | Orchestrator token | Tool `create_ticket`: create a local ticket marked as created by the caller.                        |
-| PATCH  | `/api/orchestrator/tickets/:id`                    | Orchestrator token | Tool `update_ticket`: change the title or description of a local ticket.                            |
+| PATCH  | `/api/orchestrator/tickets/:id`                    | Orchestrator token | Tool `update_ticket`: change the title or description of a local ticket, or the `blockedBy` list.   |
 | POST   | `/api/orchestrator/tickets/:id/move`               | Orchestrator token | Tool `move_card`: move a card to a column under the manual move rules.                              |
 | POST   | `/api/orchestrator/tickets/:id/comments`           | Orchestrator token | Tool `add_comment`: add a comment to a card, local or on Linear.                                    |
 | POST   | `/api/orchestrator/base-branches`                  | Orchestrator token | Tool `create_base_branch`: create a local base branch in a board repository.                        |
@@ -162,12 +162,13 @@ Mount prefix: `/api/orchestrator`.
 | POST   | `/api/orchestrator/groups/:cardId/approve-roadmap` | Orchestrator token | Tool `approve_roadmap`: tell a group loop that its plan is approved.                                |
 | POST   | `/api/orchestrator/sessions/:cardId/handoff`       | Orchestrator token | Tool `request_handoff`: ask a session loop to hand off its context.                                 |
 | POST   | `/api/orchestrator/sessions/:cardId/resume`        | Orchestrator token | Tool `resume_loop`: resume a loop that `stop_session` or a supervisor give-up stopped.              |
+| POST   | `/api/orchestrator/sessions/:cardId/resume-lost`   | Orchestrator token | Tool `resume_session`: resume a lost session through the Resume saga, refused while memory is low.  |
 | POST   | `/api/orchestrator/sessions/:cardId/stop`          | Orchestrator token | Tool `stop_session`: press Escape in a session pane and park it at Needs input.                     |
 | POST   | `/api/orchestrator/sessions/:cardId/pause`         | Orchestrator token | Tool `pause_card`: stop the processes of a loop in place with a user pause mark.                    |
 | POST   | `/api/orchestrator/sessions/:cardId/unpause`       | Orchestrator token | Tool `resume_card`: continue a paused loop, refused while memory is low.                            |
 | POST   | `/api/orchestrator/decisions`                      | Orchestrator token | Tool `create_decision_item`: raise a decision item for the user to answer.                          |
 | POST   | `/api/orchestrator/events/wait`                    | Orchestrator token | Tool `wait_for_event`: hold the call until a board event matches or the time limit passes.          |
-| POST   | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `start_ship`: start the ship flow of a finished group card or a launched single card.          |
+| POST   | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `start_ship`: start the ship flow of a finished group card or a finished single card.          |
 | GET    | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `get_ship_state`: read the stored ship flow of a group card.                                   |
 | GET    | `/api/orchestrator/state`                          | Orchestrator token | Tool `read_state`: read the saved state of the calling orchestrator.                                |
 | PUT    | `/api/orchestrator/state`                          | Orchestrator token | Tool `write_state`: replace the saved state of the calling orchestrator.                            |
@@ -284,6 +285,7 @@ Mount prefix: `/api`.
 | POST   | `/api/cards/:id/run-claude`          | User | Start Claude in a live session whose terminal is at a shell prompt.                       |
 | POST   | `/api/cards/:id/session/account`     | User | Move a session to another Claude account, or queue the move.                              |
 | PUT    | `/api/cards/:id/session/account-pin` | User | Pin or unpin the Claude account of a session.                                             |
+| PUT    | `/api/cards/:id/blocked-by`          | User | Set or clear the blockers of a ticket card.                                               |
 | POST   | `/api/cards/:id/inbox-dismiss`       | User | Dismiss or restore an Inbox card.                                                         |
 | POST   | `/api/cards/:id/session`             | User | Switch the active session of a card.                                                      |
 | POST   | `/api/cards/:id/open-editor`         | User | Open the workspace of a card in an editor.                                                |
@@ -790,6 +792,34 @@ team key) returns `400` with only `error`, as the other routes do.
 (`cardSessionsRoot` in `services/orchestration/steps.ts`). A `LOCAL` card keeps
 `Config.workspaceRoot`. The escape check compares the session path with the board folder. The
 viewer allows the folder of each board and the path of each live session.
+
+**Blocked-by relation (LOCAL-147).** A ticket card can hold `blockedBy`, a list of at most 50 card
+ids on its own board. `PUT /api/cards/:id/blocked-by` with `{ blockedBy }` sets the list; an empty list
+clears it. The orchestrator tools `create_ticket` and `update_ticket` take the same field. The pure
+check `services/domain/blocked-by.ts#checkBlockers` refuses before any write: `400`
+`invalid-blocked-card` for a group card, a grouped member or a hidden card; `400` `invalid-blocker` for
+an unknown id, a card on another board, a grouped member or a hidden card; and `400`
+`blocked-by-cycle` when the card blocks itself through any chain, with `reason` naming the chain of
+identifiers (`LOCAL-1 -> LOCAL-2 -> LOCAL-1`). Existing guards answer first on two paths: the user
+route answers `409` for a grouped member (`card-target.ts#actionableCard`), and `update_ticket` answers
+`409` `not-a-ticket` for a group card. A group card can be a blocker. A blocker is done by the
+group dependency rule (`shared/blocked-by.ts#isBlockerDone`): in Done, or with at least one PR and every
+PR merged. A blocker that is no longer in the store is not done, so the card waits.
+
+**Auto start.** `card-move.ts#moveCard` runs `blocked-start.ts#startUnblockedCards` after a move to
+Done. The manual move, the orchestrator `move_card` and the ship flow merge all use `moveCard`. The
+sweep takes each To Do ticket of the board whose blockers are all done and that never started (no
+`startError`, no session), in To Do order, and starts it inside the cap lock: `prepareCardStart`, then
+the memory guard and the cap of the owner policy (the board policy when no orchestrator owns the card)
+with no await before `commitCardStart`, which writes `launch` first, so the card holds a cap slot. The playbook is the first
+that exists of `launch.playbook`, `startIntent.playbook` and the board `groupPlaybook`; the direction is
+`launch.direction`, else `extraDirection`. When the cap or the memory guard refuses, the card stays in To
+Do, the server logs `[blocked-start] <identifier> waits: <reason>`, and a 60 s timer runs the sweep
+again. A memory refusal stops the sweep for that board; a cap refusal goes on to the next card, because
+cards of different owners can have different caps. The next Done on the board also runs the sweep. The
+timer lives in memory, so a restart drops it until the next Done. A card that failed to start or already
+ran a session is left to the user. `start_card` refuses a card with an open blocker with `409`
+`blocked`; the user start dialog does not. The card face chip shows on To Do and Inbox cards only.
 
 ### Items
 
@@ -1534,6 +1564,7 @@ legal source column(s), target, and owning code path:
 | Card creation                                                | — (new card)                                                                     | `todo` or `inbox`                                | `createLocalCard` / `createGroupCard` / `newInboxCard` via `store/mapping.ts#applyIssues` |
 | Boot hydration legacy migration                              | `in_planning` (retired)                                                          | `todo` / `in_progress`                           | `board.store.ts#hydrateFromParsed`, one-way, skips `mirrorMemberColumn`                   |
 | Start-saga success                                           | any                                                                              | `in_progress`                                    | `board.store.ts#completeStart` / `#attachExistingSession`                                 |
+| Blocker reaches Done (auto start, LOCAL-147)                 | `todo`, every `blockedBy` blocker done                                           | `in_progress` through the start saga             | `card-move.ts#moveCard` -> `blocked-start.ts#startUnblockedCards`                         |
 | Marker while Parked (LOCAL-17)                               | `MARKER_CONSUMED_SOURCES` (`parked`)                                             | column-preserving (key recorded)                 | `board.store.ts#applyMarker` consume branch                                               |
 | Manual drag into Parked                                      | any (no automatic in-edge exists)                                                | `parked`                                         | `board.store.ts#moveCardManual`, same `isManualMoveAllowed` gate                          |
 | Unwind (LOCAL-17)                                            | group card in any column                                                         | members to `todo` / `inbox`; group card archived | `services/orchestration/unwind.ts#unwindGroup` -> `board.store.ts#unwindGroup`            |
@@ -1816,6 +1847,22 @@ the tmux pane itself is gone it marks the session lost instead of recording a `d
 exists). The `/terminal` route goes through `reconnectTerminal`, which reattaches when the pane is
 live and otherwise marks the session lost and runs the resume saga, so one Reconnect click
 relaunches `claude --resume` in the same worktree.
+
+**Boot resume sweep (LOCAL-155).** Boot reconcile emits its `session_lost` events before the
+supervisor's `session_lost` listener exists, so `bootstrap/index.ts` calls
+`resumeLostAtBoot` (`services/orchestration/supervisor-boot.ts`) at the end of `main()`, in the
+background. It takes the lost cards in In progress and Needs input on a board with
+`supervisor: on`, skips orchestrator cards (their own lifecycle relaunches them), and runs
+`superviseLost` for each, oldest `columnSince` first, one awaited card at a time. Each card is
+checked again just before its turn, so a card moved meanwhile is left alone. A card held by
+`stop_session`, a `usage_stop` or the `budget` is skipped, because only the user or the
+orchestrator resumes it. Before each card the sweep takes a fresh memory reading, because the
+governor has no sample yet at boot and `admitStart` admits on no reading. A failed memory check
+stops the sweep. A card that holds a loop slot (a group, or a card with `launch`) is skipped while
+its board is at the concurrency cap. Each card logs one
+`[supervisor] boot resume <identifier>: <result>` line, and `resumed` means the session is live and
+not at `resume_failed`. Cards in Agent done or a later column stay lost until the user or the
+orchestrator (`resume_session`, which also runs the `resume_loop` cap check) resumes them.
 
 **Bounded consecutive probe-failure ceiling — 3 consecutive detection-tool failures (`RESIL-02`).**
 The same shape as `RESIL-01`, applied to the artifact-detection probes (`adapters/artifact-detect.ts`):
@@ -2946,6 +2993,11 @@ rule that applies sets the state:
 - `login-expired`: the token read failed (401, 403 or no token) and the folder is logged out.
 - `limited`: a bucket is at or above the threshold, or a limit signal arrived. `limitedUntil` is the
   latest reset of the full buckets, so a full 7 day bucket holds the account until the 7 day reset.
+  A bucket whose reset passed is not full. A stored `limited` state stays until `limitedUntil` only
+  while the reads are not good (rate limited, failed, stale or unavailable). A good read that gives
+  another state replaces it (LOCAL-152). `GET /accounts` and the orchestrator `list_accounts` show a
+  stored `limited` state whose `limitedUntil` passed as `unknown` with no `limitedUntil`
+  (`account-state.ts#expireLimit`).
 - `unknown`: no good read exists, a 401 or 403 read comes from a logged in folder, or a good read
   has no buckets.
 - `near-limit`: a bucket is at 80 percent or more.
@@ -3052,6 +3104,22 @@ hysteresis rule and ranks above the account in use, the sessions return to it wi
 policy. If it does not pass the hysteresis rule, the timer is set again 15 minutes on. If it is still
 limited, the timer is set again. A usage read that clears the account does not cancel the timer,
 so a usage read never starts a return.
+
+**Usage limit move (LOCAL-152).** The controller moves only the sessions of the account in use. A
+session on another account, or a session marked stale, gets no chain move. The supervisor covers
+it. When a supervised session stops on the usage limit message, the supervisor reads the chain
+(`account-chain.ts#limitMoveCandidates`) and picks the target with
+`account-selection.ts#pickHeadroomAccount`:
+
+- The target is not the account of the session, and its state is `available` or `near-limit`.
+- Its weekly percent is the highest bucket of a `weekly` kind (`weekly_all`, `weekly_scoped`). An
+  account with no weekly bucket is not a target.
+- The weekly percent is below `thresholdPercent` minus `hysteresisPercent` (90 with the defaults).
+- The account with the lowest weekly percent wins. A tie keeps chain order.
+
+The move uses `session-account-move.ts#moveSessionAccount` with the cause `usage limit`: `/exit` at
+the ready prompt, the account environment, then `--resume` on the same conversation. It does not
+read `autoMove`. A pinned session does not move.
 
 **Timers.** A timer task that fails runs again 15 minutes later. The 30 s scan also runs each timer
 whose time is past, because a timer does not count the time while the computer sleeps. A delay is
@@ -3919,7 +3987,7 @@ freshness guarantee for the point where a start actually gets requested.
 
 **Wire shape.** `GET /api/system/memory` and the named `memory` frame of `GET /api/stream` carry the same `SystemMemory` body: `{ supported: false }` when there is no sample (Linux, or before the first read), else `{ supported: true, sample, stale }`. The frame is sent on connect after the board and tunnel frames, and to every client after each sample. Memory is not a field of the board snapshot: the snapshot is per board and rebuilt on each board change, while the reading is per machine and changes every 15 seconds.
 
-**Admission gate.** `assertMemoryHeadroom(boardKey)` in the governor checks the latest reading against the board's `memoryFloorMb` and `swapCeilingMb` through the pure `admitStart` (`services/domain/memory-admission.ts`) and throws the 409 `{ error: "memory-pressure", reason }`. The reason is `free memory <n> MB is below the <floor> MB floor` or `swap used <n> MB is above the <ceiling> MB ceiling`, the free-memory check first. No reading or a stale reading admits, so a sampler fault never blocks every start. The gate runs on the human card start, the human group start (`createAndStartGroup`, before the group card exists; `createGroup` itself stays ungated because the orchestrator `create_group` tool creates without starting), the human resume of a lost session (`beginResume`, so the route answers the 409), and the orchestrator `start_card`, `start_group` and `resume_loop` (inside the cap lock, before the cap check). `resumeSession` checks again before it relaunches claude, so a Reconnect on a dead pane does not relaunch under pressure either: the session stays lost and the card shows `Resume failed: <reason>`. The supervisor's `resume` action checks before its shell-prompt relaunch, and its plain resume goes through `resumeSession`; either refusal sets `needs_input` with `resume_failed` and evidence that carries the reason. Nothing retries it when memory recovers.
+**Admission gate.** `assertMemoryHeadroom(boardKey)` in the governor checks the latest reading against the board's `memoryFloorMb` and `swapCeilingMb` through the pure `admitStart` (`services/domain/memory-admission.ts`) and throws the 409 `{ error: "memory-pressure", reason }`. The reason is `free memory <n> MB is below the <floor> MB floor` or `swap used <n> MB is above the <ceiling> MB ceiling`, the free-memory check first. No reading or a stale reading admits, so a sampler fault never blocks every start. The gate runs on the human card start, the human group start (`createAndStartGroup`, before the group card exists; `createGroup` itself stays ungated because the orchestrator `create_group` tool creates without starting), the human resume of a lost session (`beginResume`, so the route answers the 409), and the orchestrator `start_card`, `start_group` and `resume_loop` (inside the cap lock, before the cap check). The orchestrator `resume_session` runs `memoryCheck` itself before `beginResume` and answers 409 `{ error: "memory-low", reason }`. `resumeSession` checks again before it relaunches claude, so a Reconnect on a dead pane does not relaunch under pressure either: the session stays lost and the card shows `Resume failed: <reason>`. The supervisor's `resume` action checks before its shell-prompt relaunch, and its plain resume goes through `resumeSession`; either refusal sets `needs_input` with `resume_failed` and evidence that carries the reason. Nothing retries it when memory recovers.
 
 **Pause and unpause.** `services/orchestration/pause-card.ts` stops a loop card in place. `pauseCard` and `unpauseCard` run under the per-card lock (`card-lock.ts#withCardLock`, shared with Run Claude and the account move), so two pauses, two unpauses, or a pause and a relaunch never interleave; a second caller answers 409 `busy`. The lock also answers `busy` for a paused card, so Run Claude, the account move and the orchestrator and user resume-loop paths never type into a stopped pane (resume-loop answers `session-state-refused`, reason `session is paused`), and a stored `needs_input` does not hold against a `paused` detection. `pauseCard` writes the mark first, `paused: { at, by, sessionId, pids, reason, swapMb }` with empty pids (`by` is `memory` or `user`, and only a governor pause writes `swapMb`, the swap reading of that pause), through `markCardPaused`, a compare-and-set that refuses when the card is lost or its active session is not the one pause read. It then sends SIGSTOP to the pane process tree of that session (the pane roots first, then their descendants, with one re-scan for children forked in between), stores the signalled pids with `setPausedPids`, and logs one `supervisor_action` event with `action: "pause"`. When the signal fails or stops nothing, pause continues what it stopped, removes the mark and answers 409 `not-pausable` with reason `process read failed` or `no live session`. A legacy session whose pane root is claude itself has no shell and answers reason `no shell session`, because tmux continues a stopped pane root. `unpauseCard` continues the stored pids first (this works when `ps` or tmux fails and reaches children reparented to pid 1), then the live tree. The pane shell takes the terminal while claude is stopped, so unpause waits up to 1 s for the shell to own the terminal, types `C-u`, `fg` and Enter to the exact target `=<session>:`, and checks within 1 s that the shell let go, with one retry. If the shell still holds the terminal, the mark stays and unpause answers 409 `unpause-incomplete`. With no live pane, unpause only continues the stored pids and clears the mark, and it logs `action: "resume"`. The tree signal skips any per-pid error and never signals pid 0, pid 1, the server or its parent. Whenever the store clears a mark outside unpause (lost session, reset, Done cleanup, unwind), the emitted event carries `pausedPids`, and one listener, `onPausedPidsReleased`, registered in bootstrap before boot reconcile, continues them. Every session kill sends SIGCONT first, to the live tree and to the stored pids of a card paused in that session, because a stopped process ignores SIGHUP and SIGTERM. A start of a new session on a paused card answers 409 `card-paused`. The supervisor reports a paused card as the `paused` state: a lost session wins over paused, the growth clock resets so the pause time does not count as no progress. Paused loops still count in the concurrency cap. `POST /api/cards/:id/pause` and `POST /api/cards/:id/unpause` answer 200 with the redacted card. A repeat answers 409 `already-paused` or `not-paused`, a card that cannot pause answers 409 `{ error: "not-pausable", reason }` (`not a loop`, `orchestrator session`, `start in progress`, `no live session`, `no shell session` or `process read failed`), and an unknown id answers 404.
 
@@ -5928,6 +5996,12 @@ Scenario 6 part B (tests/e2e/scenario-6b-ship-order.e2e.ts) proves the ship orde
 
 Scenario 8 (tests/e2e/scenario-8-memory-pause.e2e.ts) proves that the memory governor pauses and resumes loops end to end. The sandbox sets `DISPATCH_MEMORY_SAMPLE_FILE` through the `memorySampleFile` option of `startSandbox`, so the test drives swap by rewriting a JSON sample file that the server reads every 15 s. The board has three loops started through `start_card` 2 s apart, a swap ceiling of 8192 MB and the supervisor off. The test sets swap to 9000 MB and checks that only the newest loop gets a `by: "memory"` mark, that one `pause` row carries the reason, and that a child process of its pane is in state T. A rise to 9100 MB, which is under 256 MB of growth, must pause nothing more. The test then pauses the second loop as the user and sets swap to 6000 MB, and checks that the first memory-paused loop resumes with one `resume` row, that none of its processes stay stopped, and that the user-paused loop stays paused through three more readings. The test then sets swap to 9000 MB, checks that the newest loop gets a `by: "memory"` mark again with `swapMb` 9000, and sets swap to 9100 MB. It stops the server and starts a new server on the same data folder, and the tmux sessions continue. Through two readings after the restart, the memory-paused loop stays paused, the user-paused loop stays paused and the oldest loop gets no pause. The test then sets swap to 8000 MB, which is under the ceiling and over the resume floor, and restarts the server again. In 20 s the memory-paused loop must resume with the reason `swap used 8000 MB is not above the 8192 MB ceiling after a restart`, none of its processes stay stopped, and the user-paused loop stays paused. The scenario types no key into any pane.
 
+Scenario 9 (tests/e2e/scenario-9-unit-branch-ship.e2e.ts) proves that a finished Roadmap loop group whose two unit branches use the `feat/` prefix, recorded only in the roadmap Status lines with no progress table, ships through `start_ship`: a branch name with a space answers 400 `invalid-branch-name` with no flow, and the two unit branches reach `gh pr create` in stack order and the flow ends `done`.
+
+Scenario 10 (tests/e2e/scenario-10-engine-close.e2e.ts) proves that the supervisor closes the engine file of a finished PRD loop with no human Restart. The board has the supervisor on and the ship rights **merge**, and the test starts one "PRD + Ralph Loop" card. The session commits on its branch, and the test seeds a PRD, a state file with `gate=pass` for every phase and an engine file that stays open. The test checks that `get_card_progress` shows `completion: "complete"` with an open engine and that `start_ship` answers 409 `engine-not-closed`. The test then writes a session transcript whose last assistant message ends with the `RALPH COMPLETE` promise and the `DISPATCH_STATUS: DONE` line, and posts the Stop hook with that message and path while the pane shows no promise line. In 60 s the board holds one `close_loop` row with the result `closed`, the engine shows `closed`, `loopProgress.readAt` is not before the Stop hook, and the card has no `resume` row and no `continue` row with the duty `restart`. `start_ship` then answers 202, the fake `gh` log creates and merges one PR, and the bare origin `main` holds the work file. The test does not rename the engine file, and it types no key into any pane.
+
+Scenario 11 (tests/e2e/scenario-11-user-started-ship.e2e.ts) proves that a single ticket card that the user started from the board start dialog ships through `start_ship`: the board has the ship rights **merge**, and the test starts ticket card A with `POST /api/cards/:id/start`, the route of the start dialog, not with the orchestrator tool `start_card`. The card read has a session branch and no `launch`. The session commits a work file on that branch, and the Stop hook moves the card to Agent done. `start_ship` with the session branch as the one branch answers 202, the flow ends `done`, the fake `gh` log creates and merges one PR, and the bare origin `main` holds the work file. A second ticket card B that nobody started has no `launch` and no session branch, so `start_ship` answers 400 `not-group-card` and the card has no ship flow. The test types no key into any pane.
+
 The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
 ## Orchestration Initiative
@@ -6044,11 +6118,25 @@ action that finds nothing to do, such as an `Escape` already sent, writes no row
 - Usage limit (`supervisor-limit.ts`): both policies select the stop and wait row, else the wait
   here row, and never a credits row. Before each `Enter` the supervisor reads the menu again and
   never presses `Enter` on a credits row. Then policy `stop` sets `needs_input` with
-  `usage_stop`. Policy `wait` continues after the reset time plus 2 minutes; when the engine file
-  says `handoff-pending`, it sends `Escape` at the auto continue notice and starts a fresh session
-  after the reset instead. The timer re-checks at that time that the session is live, has no stop
-  reason, and that its board still has `supervisor: on` and `usageLimit: wait`. A timer delay is
-  capped at the Node timer maximum (2^31 - 1 ms).
+  `usage_stop`. Policy `wait` first runs `supervisor-limit.ts#moveOrWait`. It moves the session to
+  the chain account with the most weekly headroom (see Account Chain, Usage limit move), sends the
+  usage limit continue prompt and records `limit_move` with `from`, `to` and `result`. When the
+  continue is not confirmed after a move, the session gets `needs_input` with
+  `supervisor_gave_up`. When a move answers `busy` and the pane is not ready (for example after a
+  memory resume), the supervisor sends one `C-l` so Claude redraws its screen, and tries once more.
+  It waits for the reset when no account has headroom (`no_headroom`), the session is pinned
+  (`pinned`), the session moved at a limit in the last 30 minutes (`recent_move`), or the move did
+  not settle; the `limit_wait` row carries that `reason`. At the auto continue notice it schedules
+  nothing, because the CLI continues by itself. The wait continues after the reset time plus 2
+  minutes. The timer re-checks at that time that the session is live, still runs on the account
+  it waited on, has no stop reason, and that its board still has `supervisor: on` and
+  `usageLimit: wait`. A timer delay is capped at the Node timer maximum (2^31 - 1 ms). When the
+  engine file says `handoff-pending`, the supervisor sends `Escape` at the auto continue notice, or
+  with no notice on screen only schedules, and starts a fresh session after the reset instead.
+  The CLI can also stop on the limit with no menu. The state is then `usage_limit_wait` when two
+  samples agree that the last assistant text of the transcript is `You've hit your limit`, with
+  or without a kind such as `weekly`, and the session is not busy. The transcript counts because
+  a pane after a memory resume can show no Claude text.
 - The 60 s pass (`supervisor-pass.ts`): it holds the keep awake child, records a
   `machine_wake` row when its timer fires more than 30 s late, records a `pr_state` row for each
   change of the PR list of a group, starts a queued group when each group in `dependsOn` is done
@@ -6088,6 +6176,21 @@ Two reasons hold longer. A `budget` stop sends no key, so only a lost session or
 releases it; the 60 s pass clears its reason when a raised or removed budget allows the cost. A
 `resume_failed` hold releases only on a busy sign, so a failed resume is not planned again on
 every sample.
+
+**Engine close on the completion marker.** A finished loop closes its engine without a restart
+(LOCAL-151). A completion signal is a `<promise>RALPH COMPLETE` or `<promise>ROADMAP COMPLETE`
+line, or a `DISPATCH_STATUS: DONE` line. The detector looks for it in the agent lines of the pane
+(a DONE line only in the newest agent block) and, while the engine is open, in the last assistant
+message of the transcript tail, because after a memory pause the pane can show only shell job
+control lines. The signal gives `roadmap_complete` only when the loop progress says
+`completion: complete`, and while the engine is open no hold reason keeps it back. The planner
+then runs the same `close_loop` as after a relaunch, only while the engine is active and not
+closed and never for an orchestrator, and every close attempt refreshes the loop progress at
+once, so `engine.closed` is true for `start_ship` within one sample. A session that stays at
+`roadmap_complete` with an open engine, after a failed rename or a server stop between the state
+write and the rename, gets one more close attempt at most once a minute. A `status_agent_done` activity
+also forces a progress write, so `readAt` is never older than the last DONE marker; a gate line
+changes the state file, which the folder watch reads.
 
 **Keep awake.** `adapters/power.ts` holds one `caffeinate -is -w <server pid>` child while a
 session of a supervised board is live. It spawns the child through `adapters/exec.ts`. The `-w`
@@ -6198,7 +6301,7 @@ order. The branch states are `queued`, `merging_main`, `checking`, `pushing`, `w
 `waiting_merge` (with `open_prs`) or `merging` (with `merge`), `verifying`, `merged` and `failed`.
 Each branch must be a loop unit branch or `test/<slug>-specs` (the session branch of the group for a
 group with no loop progress, D-10), with a local `refs/heads/<name>`, and never `main`, `master`,
-`HEAD`, a full ref name or the repository base. The first step checks that the worktree is clean, then runs `git fetch origin`, a checkout with the no-guess option and
+`HEAD`, a full ref name or the repository base. A unit branch is the `Branch` cell of the progress table, else the name in backticks after `branch` in the roadmap unit Status line, and the name schema accepts every name that git accepts as a branch name (the `git check-ref-format` branch rules), up to 255 characters. The first step checks that the worktree is clean, then runs `git fetch origin`, a checkout with the no-guess option and
 a merge of `origin/main` with no edit, and records the merged commit as `checked`. The check
 runs on that commit, the push uses the refspec `<checked>:refs/heads/<name>`, and the merge
 passes gh's match head commit option with it; a resumed flow whose HEAD moved stops. Each gh
@@ -6234,7 +6337,7 @@ reads the identity or writes, `assertAheadAndClean` resolves the base once. The 
 `branch-not-ahead`) and the worktree must be clean (409 `worktree-dirty`). A failed git call of
 these two checks answers 409 `no-workspace`. A group with loop progress keeps the D-8 rules.
 
-**MCP server.** `dispatch mcp` serves the 35 tools over stdio. `bootstrap/cli.ts` reads and checks
+**MCP server.** `dispatch mcp` serves the 36 tools over stdio. `bootstrap/cli.ts` reads and checks
 `DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and
 `bootstrap/mcp-tools.ts` holds the zod input and the description of each tool. The dependency
 cruiser rule `mcp-server-isolated` refuses an import of `routes`, `services`, `store`, `adapters`

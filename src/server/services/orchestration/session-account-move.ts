@@ -40,7 +40,7 @@ import {
 } from "./steps.js";
 
 export type MoveCause =
-  "switch" | "turn end" | "session action" | "automatic move";
+  "switch" | "turn end" | "session action" | "automatic move" | "usage limit";
 
 export type SessionMoveOutcome =
   | "moved"
@@ -281,10 +281,9 @@ export async function moveSessionAccount(
       let pane = await capturePane(paneTarget);
       let turn = turnStateOf(card.id, session.id, pane);
       if (turn === "limit") {
-        const surfaced = parseLimitSurface(pane) !== null;
         const cleared = await clearLimitSurface(paneTarget, pane);
         if (cleared === null) return warnLimitUnknown(card.id, paneTarget);
-        if (surfaced) seen.leftLimit = true;
+        seen.leftLimit = true;
         pane = cleared;
         turn = paneTurnState(cleared);
       }

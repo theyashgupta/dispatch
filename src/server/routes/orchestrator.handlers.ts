@@ -56,6 +56,7 @@ import {
   orchestratorResumeCard,
   requestHandoff,
   resumeLoop,
+  resumeLostSession,
   sendInput,
   stopSession,
 } from "../services/orchestration/orchestrator-sessions.js";
@@ -425,6 +426,19 @@ export const resumeLoopHandler: ToolHandler = async (
   const result = await resumeLoop(caller, scopedCard(caller, call, cardId));
   call.result = result;
   res.status(200).json({ result });
+};
+
+/** Resume a card whose session is lost, the way the Resume button does. */
+export const resumeSessionHandler: ToolHandler = async (
+  req,
+  res,
+  caller,
+  call,
+) => {
+  const { cardId } = parseOrThrow(sessionCardParamsSchema, req.params);
+  await resumeLostSession(caller, scopedCard(caller, call, cardId));
+  call.result = "resuming";
+  res.status(202).json({ result: "resuming" });
 };
 
 /** Press Escape in a session pane and park it at `needs_input`. */

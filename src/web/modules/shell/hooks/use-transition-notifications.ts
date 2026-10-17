@@ -1,12 +1,17 @@
 import { useEffect, useRef } from "react";
-import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import type {
   BoardSnapshot,
   Column,
   ConnectionStatus,
 } from "../../../../shared/types.js";
 import { playChime } from "@/components/ui/hooks/chime";
-import { needsSeed } from "@/modules/shell/domain/transition-seed";
+import {
+  INITIAL_NOTICE_STATE,
+  noticeConnection,
+  noticeSnapshot,
+  noticeVisible,
+  type NoticeState,
+} from "@/modules/shell/domain/transition-notices";
 
 const LABEL: Partial<Record<Column, string>> = {
   needs_input: "Needs Input",
@@ -17,10 +22,6 @@ const FALLBACK: Partial<Record<Column, string>> = {
   needs_input: "Waiting on your input",
   agent_done: "Agent finished",
 };
-
-function isAttentionColumn(col: Column): col is "needs_input" | "agent_done" {
-  return col === "needs_input" || col === "agent_done";
-}
 
 /**
  * Fire one desktop notification per card that moves into an attention column, and at most one chime per batch.
@@ -37,8 +38,7 @@ export function useTransitionNotifications(
   onOpenCard: (id: string) => void,
   soundEnabled: boolean,
 ): void {
-  const prevCols = useRef(new Map<string, Column>());
-  const seededBoard = useRef<string | null>(null);
+  const notices = useRef<NoticeState>(INITIAL_NOTICE_STATE);
 
   useEffect(() => {
     if ("Notification" in window && Notification.permission === "default") {
@@ -47,49 +47,42 @@ export function useTransitionNotifications(
   }, []);
 
   useEffect(() => {
-    if (connection !== "connected") seededBoard.current = null;
+    notices.current = noticeConnection(notices.current, connection);
   }, [connection]);
 
   useEffect(() => {
-    if (!board) return;
-    const next = new Map<string, Column>(
-      board.cards.map((c) => [c.id, c.column]),
-    );
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") {
+        notices.current = noticeVisible(notices.current, Date.now());
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
 
-    if (needsSeed(seededBoard.current, board)) {
-      prevCols.current = next;
-      seededBoard.current = board.boardKey ?? DEFAULT_BOARD_KEY;
-      return;
-    }
+  useEffect(() => {
+    if (!board) return;
+    const result = noticeSnapshot(notices.current, board, Date.now());
+    notices.current = result.state;
+
+    if (soundEnabled && result.notices.length > 0) playChime();
 
     const notifyGranted =
       "Notification" in window && Notification.permission === "granted";
-    let chimed = false;
+    if (!notifyGranted) return;
 
-    for (const card of board.cards) {
-      const prev = prevCols.current.get(card.id);
+    for (const card of result.notices) {
       const col = card.column;
-      if (col === prev || !isAttentionColumn(col)) continue;
-
-      if (soundEnabled && !chimed) {
-        playChime();
-        chimed = true;
-      }
-
-      if (notifyGranted) {
-        const title = `${card.identifier} - ${LABEL[col]}`;
-        const body = card.statusReason?.trim() || FALLBACK[col] || "";
-        try {
-          const n = new Notification(title, { body, tag: card.id });
-          n.onclick = () => {
-            window.focus();
-            onOpenCard(card.id);
-            n.close();
-          };
-        } catch {}
-      }
+      const title = `${card.identifier} - ${LABEL[col]}`;
+      const body = card.statusReason?.trim() || FALLBACK[col] || "";
+      try {
+        const n = new Notification(title, { body, tag: card.id });
+        n.onclick = () => {
+          window.focus();
+          onOpenCard(card.id);
+          n.close();
+        };
+      } catch {}
     }
-
-    prevCols.current = next;
   }, [board, onOpenCard, soundEnabled]);
 }

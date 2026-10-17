@@ -81,6 +81,8 @@ function loadScenario(file) {
     const trimmed = text.replace(/\n+$/, "");
     scenario = { statusRows: trimmed === "" ? [] : trimmed.split("\n") };
   }
+  const own = scenario.byConfigDir?.[path.basename(process.env.CLAUDE_CONFIG_DIR ?? "")];
+  if (own && typeof own === "object") scenario = { ...scenario, ...own };
   const d = scenario.dialog;
   dialog = d
     ? { title: d.title, rows: d.rows, cursor: d.cursor ?? 0, jumpTo: d.jumpTo }
@@ -149,7 +151,9 @@ function submit() {
     wasCleared = true;
     return clearConversation();
   }
-  const reply = scenario.reply ?? "ok";
+  if (text === "/exit" && scenario.exitOnExit) process.exit(0);
+  const limit = scenario.limitStop;
+  const reply = limit ?? scenario.reply ?? "ok";
   const file = transcriptFile ?? scenario.transcriptPath;
   if (file) {
     const user = {
@@ -159,7 +163,11 @@ function submit() {
     };
     const assistant = {
       type: "assistant",
-      message: { role: "assistant", content: [{ type: "text", text: reply }] },
+      message: {
+        role: "assistant",
+        ...(limit ? { model: "<synthetic>" } : {}),
+        content: [{ type: "text", text: reply }],
+      },
       timestamp: new Date().toISOString(),
     };
     fs.appendFileSync(
@@ -167,7 +175,21 @@ function submit() {
       JSON.stringify(user) + "\n" + JSON.stringify(assistant) + "\n",
     );
   }
-  shown.push("> " + text, "● " + reply);
+  if (limit) {
+    shown.push(
+      "> " + text,
+      "⏺ Working on the next step.",
+      "  ⎿  " + limit,
+      "/upgrade or /usage-credits to finish what you’re working on.",
+      "✻ Worked for 9m 41s · done 9:07 AM",
+    );
+    postToHookPort(
+      "/api/hook/claude",
+      { hook_event_name: "StopFailure", error: "rate_limit" },
+      204,
+      "stop failure",
+    ).catch(() => undefined);
+  } else shown.push("> " + text, "● " + reply);
   input = "";
   if (clearedAt === 1) {
     clearedAt = 2;
@@ -611,7 +633,9 @@ function shellQuote(value: string): string {
 /**
  * Write a fake interactive `claude` that reads its scenario from `FAKE_CLAUDE_SCENARIO_DIR` or `FAKE_CLAUDE_SCENARIO`.
  *
- * @remarks Lookup order is `<dir>/<DISPATCH_CARD_ID>.json`, `<dir>/default.json`, then the variable. A `loop` scenario writes only inside its cwd and sends reports and hook events to the hook port, and the fake is test-only. The fake sets its stdout non-blocking because a blocking write stalls on a full pty during a large paste.
+ * @remarks Lookup order is `<dir>/<DISPATCH_CARD_ID>.json`, `<dir>/default.json`, then the variable. Scenario keys: `byConfigDir`
+ * merges a partial scenario by `CLAUDE_CONFIG_DIR` folder name, `limitStop` answers each prompt as a usage limit stop, and
+ * `exitOnExit` ends the process on `/exit`. The fake is test-only and sets stdout non-blocking, since a blocking write stalls on a full pty.
  */
 export function writeFakeClaudeTui(binDir: string): string {
   const script = path.join(binDir, "fake-claude-tui.mjs");

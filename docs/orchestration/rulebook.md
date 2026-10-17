@@ -137,12 +137,15 @@ Start work in these ways:
 `start_card` starts one ticket card the way the start dialog does. It refuses these cases:
 
 - The cap is reached (403 `policy-refused`).
-- Memory on this Mac is low (409 `memory-pressure`, with the reading and the limit in `reason`). `start_group`, `resume_loop` and `resume_card` refuse the same way. Do not retry at once. Try again after a running loop finishes or the next wake.
+- Memory on this Mac is low (409 `memory-pressure`, with the reading and the limit in `reason`). `start_group`, `resume_loop` and `resume_card` refuse the same way, and `resume_session` refuses with 409 `memory-low`. Do not retry at once. Try again after a running loop finishes or the next wake.
 - The card is a group card.
 - The card is in Done or Inbox.
 - The card is running.
 - The playbook is the Board Orchestrator playbook.
 - The account is not in `list_accounts` (400 `unknown-account`).
+- The card has a blocker that is not done (409 `blocked`, with the open blockers in `reason`).
+
+A card with a blocker starts on its own when the blocker reaches Done. The orchestrator does not start it by hand. Set the blockers with `blockedBy` in `create_ticket` or `update_ticket`. The server starts the card inside the concurrency cap and the memory guard. When the cap is reached, the card stays in To Do and the server tries again after the next Done on the board or after 60 seconds.
 
 `start_card` answers when the start began, not when the worktree exists. After it, confirm that the session of the card appears with `read_state` or `list_sessions` before you treat the card as started.
 
@@ -230,7 +233,7 @@ Read the progress of a group with `get_group_progress`. Read the progress of a s
 
 Never select usage credits.
 
-When usageLimit is `wait`, the supervisor waits for the reset and then continues.
+When usageLimit is `wait`, the supervisor moves the session to the account with the most weekly headroom. The session continues there with the same conversation. `list_sessions` shows the new account. The supervisor waits for the reset and then continues only when no other account has headroom. The supervisor event of the wait gives the reason.
 
 After a limit, check `get_group_progress` for a group or `get_card_progress` for a single card. Call `read_pane_tail` for every session. Do this before any `send_input`.
 
@@ -261,6 +264,23 @@ Call `resume_loop` only for a loop that you stopped with `stop_session`. You can
 
 Call `pause_card` to stop a loop in place when memory is low or the user asks. The server pauses and resumes loops on its own under swap pressure, so do not resume a loop that it paused. Call `resume_card` only for a loop that you paused. On a 409 `memory-pressure`, wait for the next wake.
 
+### Lost sessions
+
+A server restart or a reboot marks the live sessions lost. At boot the supervisor resumes the lost cards in In progress and Needs input, one at a time, until memory is low or the cap is full. It does not resume a card that `stop_session`, a usage stop or the budget stopped. Cards in Agent done or a later column stay lost.
+
+For a card that is still lost, call `resume_session`. Do not raise a decision item that asks the user to press Restart or Resume. Call it only below the cap. For a card in Agent done or a later column, call it only when that card needs more work. For a card that `stop_session`, a usage stop or the budget stopped, follow the rules for that stop.
+
+A resumed session gets no kickoff prompt and sits at its prompt, so send_input a continue line after the session is live. Use `list_sessions` or `read_pane_tail` to see that it is live.
+
+`resume_session` refuses in these cases:
+
+- 409 `session-live`: the session is live. Use `send_input` instead.
+- 409 `no-lost-session`: there is nothing to resume.
+- 409 `start-in-flight`: a start or a resume of the card runs now. Wait for the next wake.
+- 409 `memory-low`: memory on this Mac is low. Wait for the next wake.
+- 400 `invalid-identifier`: the card id is not a ticket id. Raise a decision item.
+- 403 `policy-refused`: the cap is reached. Wait until a loop finishes.
+
 ### Loop count
 
 Keep at most the cap of loops. Never start a loop above the cap.
@@ -273,7 +293,7 @@ Ship a group that is in Agent done and has shipRights of `open_prs` or `merge`. 
 
 Give `start_ship` these items:
 
-- The branches in stack order: the unit branches first, then the specs branch.
+- The branches in stack order: the unit branches first, then the specs branch. A unit branch is the name that the progress table or the roadmap Status line of the unit records, such as `feat/LOCAL-131-unit-1-dashboards-dropdown`, and any name that git accepts as a branch name (the `git check-ref-format` branch rules) is valid.
 - For each branch, a conventional commit title that holds the ticket ids.
 - For each branch, a body with the sections What, Why and How.
 
@@ -296,7 +316,7 @@ To fix a failed check, call `send_input` with the fix instruction to the group s
 
 With shipRights `none`, call `create_decision_item`. Name the branches so the user can ship them.
 
-Ship a single card that `start_card` started in the same way. When it is in Agent done, call `start_ship` with its session branch as the one branch, in plan order with the groups. The flow checks that the branch is ahead of its base and that the worktree is clean. A single card that `start_card` did not start is refused with `not-group-card`; raise a decision item that names its branch, and the user ships it.
+Do the same for a single card in Agent done. Do this when `start_card` started the card. Do this when the user started the card. Call `start_ship` with its session branch as the one branch, in plan order with the groups. The flow checks that the branch is ahead of its base and that the worktree is clean.
 
 ## 10. Release procedure
 

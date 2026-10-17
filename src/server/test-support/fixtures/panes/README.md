@@ -26,6 +26,8 @@ Source folder: `~/.claude/projects/-Users-yash-dispatch-workspaces-LOCAL-22/` (r
 | `auto-continue-3.txt` | live "Continuing shortly · esc to cancel" notice below the prompt, a persisted "continuing automatically" line above it | `4d1c1cad-ea85-4eda-8b6a-6b2df4b0c078.jsonl` | 3137 | 2026-10-02T10:10:59.166Z | none |
 | `warming-up.txt`           | status line warming up                                                     | `f28703a9-bfe1-47a5-b3fb-9712e55dfa29.jsonl` | 723  | 2026-09-24T21:45:45.071Z | none   |
 | `warming-up-2.txt`         | warming up with the startup banner and a queued prompt                     | `f28703a9-bfe1-47a5-b3fb-9712e55dfa29.jsonl` | 2778 | 2026-09-25T05:30:34.463Z | none   |
+| `after-pause-job-lines.txt` | synthetic: the shape of the LOCAL-153 pane after a memory pause and resume on 2026-10-16 (shell job lines `fg %1`, `continued`, `suspended`) | none (synthetic) | none | 2026-10-16 | paths scrubbed to `/Users/x` |
+| `limit-weekly-line.txt` | synthetic: the shape of the LOCAL-152 pane at the weekly limit with no menu (agent block, the limit line and the `/usage-credits` line, a `Worked for` recap, rules, an empty input line, `bypass permissions on` footer) | none (synthetic, from the LOCAL-152 evidence) | none | 2026-10-15 | none |
 
 ## Extraction notes
 

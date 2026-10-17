@@ -41,9 +41,14 @@ import { createDecisionItem } from "./decision-items.js";
 import { recordGroupState } from "./group-state-events.js";
 import { enforce } from "./orchestrator-groups.js";
 
-export const shipTools: { run: typeof run; pollMs: number } = {
+export const shipTools: {
+  run: typeof run;
+  pollMs: number;
+  headPollMs: number;
+} = {
   run,
   pollMs: 30_000,
+  headPollMs: 2_000,
 };
 
 const DISPATCH_PACKAGE = "@theyashgupta/dispatch";
@@ -52,6 +57,7 @@ const CALL_TIMEOUT_MS = 120_000;
 const NETWORK_TIMEOUT_MS = 300_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
 const MAX_POLL_FAILURES = 5;
+const HEAD_READS = 5;
 const PLAIN_BASE_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const FINISHED_STATUSES = new Set(["built, awaiting /ship", "shipped"]);
 const RESERVED_BRANCHES = new Set(["main", "master", "HEAD"]);
@@ -185,7 +191,7 @@ function assertShipBranches(
 /**
  * True for a group card whose loop progress vouches for its branches.
  *
- * @remarks A launched ticket card takes the ahead and clean checks even with Part A progress, because its one
+ * @remarks A single ticket card takes the ahead and clean checks even with Part A progress, because its one
  * unit names no branch and so cannot vouch for the session branch.
  */
 function isGroupLoop(
@@ -219,18 +225,21 @@ function assertNoRunningFlow(boardKey: BoardKey): void {
 }
 
 /**
- * Check the ship preconditions of a loop card in their fixed order, with no git call and no write.
+ * Check the ship preconditions of a group card or a single ticket card in their fixed order, with no git call and no write.
  *
  * @remarks A card whose engine is active and not closed is refused whatever its unit count. A group
- * with no loop progress and every launched ticket card need the Agent done column, and a refusal is
- * a typed error, so a refused call stores no flow.
+ * with no loop progress and every single ticket card need the Agent done column, and a refusal is
+ * a typed error, so a refused call stores no flow. A ticket card with no launch passes only with a
+ * session branch, and never as a group member or a review card, whose branch is not its own work.
  */
 function assertShippable(
   caller: OrchestratorIdentity,
   card: Card,
   { repository, branches }: ShipInput,
 ): ShipFlow["rights"] {
-  if (!isLoopCard(card)) throw new ValidationError("not-group-card");
+  if (!isLoopCard(card) && (!card.branch || card.groupId || card.reviewPr)) {
+    throw new ValidationError("not-group-card");
+  }
   if (
     !mayShip(resolveBoard(caller.boardKey).orchestrators, caller.orchestratorId)
   ) {
@@ -281,7 +290,7 @@ function assertShippable(
  * Throw the typed 409 unless each branch is ahead of its base and the worktree is clean.
  *
  * @remarks Only a card whose loop cannot vouch for its branches runs it: a group with no loop
- * progress or a launched ticket card. The base is `origin/<base>` when that ref exists, because the session
+ * progress or a single ticket card. The base is `origin/<base>` when that ref exists, because the session
  * branch is cut from it, else the local base. It runs before any write, so a refusal stores no flow.
  */
 async function assertAheadAndClean(
@@ -588,8 +597,9 @@ async function check(r: Runner, branch: ShipBranch): Promise<void> {
 /**
  * The number of the open PR the branch can reuse, or null when there is none.
  *
- * @remarks Only a same-repository PR into main whose head is the checked commit counts, so an older
- * PR into another base or a fork PR with the same head name is never adopted.
+ * @remarks Only a same-repository PR into main counts, so a PR into another base or a fork PR with
+ * the same head name is never adopted. The head commit is not compared here: right after the push
+ * the list can still answer the previous head, so `waitPrHead` reads it instead.
  */
 async function openPrOf(r: Runner, branch: ShipBranch): Promise<number | null> {
   const out = await exec(
@@ -605,18 +615,39 @@ async function openPrOf(r: Runner, branch: ShipBranch): Promise<number | null> {
       "--state",
       "open",
       "--json",
-      "number,baseRefName,isCrossRepository,headRefOid",
+      "number,baseRefName,isCrossRepository",
     ]),
   );
   const match = (JSON.parse(out) as Record<string, unknown>[]).find(
     (pr) =>
       pr.baseRefName === "main" &&
       pr.isCrossRepository === false &&
-      pr.headRefOid === branch.checked &&
       Number.isSafeInteger(pr.number) &&
       (pr.number as number) > 0,
   );
   return match === undefined ? null : (match.number as number);
+}
+
+/**
+ * Read the head commit of an adopted PR until it is `expected`; the fifth miss stops the flow.
+ *
+ * @remarks GitHub can answer the previous head for a few seconds after a push.
+ */
+async function waitPrHead(
+  r: Runner,
+  pr: number,
+  expected: string,
+): Promise<void> {
+  for (let read = 1; ; read += 1) {
+    const seen = (await viewPr(r, pr, "headRefOid")).headRefOid;
+    if (seen === expected) return;
+    if (read === HEAD_READS) {
+      throw new ShipStop(
+        `PR ${pr} head is ${String(seen)} after ${HEAD_READS} reads, expected ${expected}`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, shipTools.headPollMs));
+  }
 }
 
 /**
@@ -637,6 +668,7 @@ async function pushAndOpen(r: Runner, branch: ShipBranch): Promise<void> {
   if (branch.pr !== null) return;
   const open = await openPrOf(r, branch);
   if (open !== null) {
+    await waitPrHead(r, open, branch.checked);
     branch.pr = open;
     await persist(r);
     return;

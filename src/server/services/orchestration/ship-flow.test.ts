@@ -24,6 +24,7 @@ import type {
   ShipFlow,
 } from "../../../shared/types.js";
 import type { HttpError } from "../domain/errors.js";
+import { buildLoopProgress } from "../domain/loop-progress.js";
 
 const env = isolateEnv();
 const { store } = await import("../../store/board.store.js");
@@ -79,6 +80,7 @@ const afterCall: { hook: (call: Call) => Promise<void> } = {
   hook: () => Promise.resolve(),
 };
 shipTools.pollMs = 50;
+shipTools.headPollMs = 10;
 shipTools.run = async (cmd, args, opts) => {
   const call = { cmd, args: [...args], opts: { ...opts } };
   calls.push(call);
@@ -660,6 +662,40 @@ void test("with merge rights a two unit stack and its specs branch ship in order
   assert.deepEqual(checkRuns[0]?.args, ["-u", "NODE_ENV", "git", "status"]);
 });
 
+void test("startShip ships loop unit branches that only the unit Status line names", async () => {
+  const stack = await newStack();
+  const names = [
+    "feat/LOCAL-131-unit-1-dashboards-dropdown",
+    "feat/LOCAL-132-unit-2-remove-sessions",
+  ];
+  await gitOutput(stack.worktree, "branch", names[0], "unit-1");
+  await gitOutput(stack.worktree, "branch", names[1], "unit-2");
+  const built = buildLoopProgress({
+    slug: "s",
+    roadmapFile: "units.md",
+    readAt: "2026-10-06T12:00:00.000Z",
+    roadmapText:
+      `### Unit 1: Dashboards dropdown\n- **Status:** built, awaiting /ship (branch \`${names[0]}\`, 8073bafe, 676d3279)\n` +
+      `### Unit 2: Remove sessions\n- **Status:** built, awaiting /ship (branch \`${names[1]}\`, 8073bafe, 676d3279)\n`,
+    progressText:
+      "Ledger of slug s\n\n## Unit statuses\n- Unit 1: committed 048f1d0d\n- Unit 2: committed 5755e79d\n",
+    engine: null,
+    files: new Map(),
+    refused: new Set(),
+    warnings: [],
+  });
+  await store.setLoopProgress(stack.card.id, built);
+  const started = await startShip(stack, names);
+  assert.equal(started.state, "running");
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  const gh = ghCalls(stack);
+  assert.deepEqual(
+    gh.filter((a) => a[1] === "create").map((a) => a[a.indexOf("--head") + 1]),
+    names,
+  );
+});
+
 void test("with open_prs rights the flow waits for the user merge and leaves the card in place", async () => {
   await setPolicy({ shipRights: "open_prs" });
   try {
@@ -1157,7 +1193,7 @@ void test("a new start_ship reuses the open PR of a branch in place of a second 
       "-".repeat(2) + "state",
       "open",
       "-".repeat(2) + "json",
-      "number,baseRefName,isCrossRepository,headRefOid",
+      "number,baseRefName,isCrossRepository",
     ]),
   );
   assert.deepEqual(
@@ -1304,12 +1340,8 @@ function seedPr(stack: Stack, head: string, extra: Record<string, unknown>) {
   );
 }
 
-void test("an open PR into another base, from a fork or with a stale head is not reused", async () => {
-  for (const extra of [
-    { base: "base/other" },
-    { cross: true },
-    { headRefOid: "0".repeat(40) },
-  ]) {
+void test("an open PR into another base or from a fork is not reused", async () => {
+  for (const extra of [{ base: "base/other" }, { cross: true }]) {
     const stack = await newStack();
     seedPr(stack, "unit-1", extra);
     await startShip(stack, ["unit-1"]);
@@ -1323,6 +1355,54 @@ void test("an open PR into another base, from a fork or with a stale head is not
       ["8"],
     );
   }
+});
+
+/** The `gh pr view <n> --json headRefOid` calls of a stack. */
+function headViews(stack: Stack): string[][] {
+  return ghCalls(stack).filter(
+    (a) => a[1] === "view" && a[a.indexOf("--json") + 1] === "headRefOid",
+  );
+}
+
+void test("an open PR listed with a stale head is adopted once its head reads the pushed commit", async () => {
+  const stack = await newStack();
+  seedPr(stack, "unit-1", { headRefOid: "0".repeat(40), staleViews: 2 });
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.equal(flow.branches[0]?.pr, 7);
+  const gh = ghCalls(stack);
+  assert.equal(gh.filter((a) => a[1] === "create").length, 0);
+  assert.equal(headViews(stack).length, 3);
+  assert.ok(
+    gh.some(
+      (a) =>
+        a[1] === "view" &&
+        a[2] === "7" &&
+        a.includes("state,statusCheckRollup"),
+    ),
+  );
+  assert.deepEqual(
+    gh.filter((a) => a[1] === "merge").map((a) => a[2]),
+    ["7"],
+  );
+});
+
+void test("an adopted PR whose head stays stale for 5 reads stops the flow at pushing", async () => {
+  const stack = await newStack();
+  const stale = "0".repeat(40);
+  seedPr(stack, "unit-1", { headRefOid: stale, staleViews: 5 });
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "stopped");
+  assert.equal(flow.failedStep, "pushing");
+  const pushed = await gitOutput(stack.bare, "rev-parse", "unit-1");
+  assert.equal(
+    flow.reason,
+    `PR 7 head is ${stale} after 5 reads, expected ${pushed}`,
+  );
+  assert.equal(headViews(stack).length, 5);
+  assert.equal(ghCalls(stack).filter((a) => a[1] === "create").length, 0);
 });
 
 void test("a resumed flow whose HEAD is not the checked commit stops before it pushes", async () => {
@@ -1748,4 +1828,62 @@ void test("two overlapping start_ship calls on one board start one flow and refu
   assert.equal(flow.state, "done", flow.reason ?? "");
   assert.equal(store.getCard(other.g.id)?.shipFlow, undefined);
   assert.equal(ghCalls(stack).filter((a) => a[1] === "create").length, 1);
+});
+
+void test("startShip treats a ticket card with no launch and a session branch as a single card: Done is already-shipped, Inbox is card-not-done, and no branch, a group member or a review card is not-group-card", async () => {
+  const stack = await newStack();
+  const base = { ...store.getCard(stack.card.id)! };
+  delete base.loopProgress;
+  const ticket = {
+    ...base,
+    source: "local",
+    launch: undefined,
+    branch: "unit-1",
+  };
+  await refusedCard(
+    { ...ticket, column: "done" },
+    stack,
+    "unit-1",
+    409,
+    "already-shipped",
+  );
+  await refusedCard(
+    { ...ticket, column: "inbox" },
+    stack,
+    "unit-1",
+    409,
+    "card-not-done",
+  );
+  await refusedCard(
+    { ...ticket, column: "agent_done", branch: undefined },
+    stack,
+    "unit-1",
+    400,
+    "not-group-card",
+  );
+  await refusedCard(
+    { ...ticket, column: "agent_done", groupId: "SBX-999" },
+    stack,
+    "unit-1",
+    400,
+    "not-group-card",
+  );
+  await refusedCard(
+    {
+      ...ticket,
+      column: "agent_done",
+      reviewPr: {
+        repo: "acme/app",
+        number: 7,
+        url: "https://github.com/acme/app/pull/7",
+        head: "feat/x",
+        base: "main",
+      },
+    },
+    stack,
+    "unit-1",
+    400,
+    "not-group-card",
+  );
+  assert.deepEqual(calls, []);
 });
