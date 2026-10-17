@@ -126,6 +126,8 @@ export const GRANOLA_ERROR_COPY: Record<GranolaError, string> = {
   "needs-auth":
     "The Granola connector needs you to sign in. Open Claude Code and authenticate it.",
   failed: "Claude couldn't use the Granola connector. Try again later.",
+  "connector-unavailable":
+    "Claude Code lists the Granola connector, but the background call could not load it. Press Check connection to try again.",
   timeout: "The round took longer than 5 minutes and was stopped.",
   unreadable: "Claude returned no readable action items.",
 };

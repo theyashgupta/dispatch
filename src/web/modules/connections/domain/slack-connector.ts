@@ -19,6 +19,7 @@ export const SLACK_CONNECTOR_LABEL: Record<SlackConnectorState, string> = {
   "not-found": "not found",
   failed: "failed",
   "claude-missing": "Claude Code not found",
+  "connector-unavailable": "unavailable to background calls",
 };
 
 const CONNECTOR_ONLY_ERRORS: ReadonlySet<SlackRoundError> = new Set([
@@ -35,6 +36,7 @@ const SLACK_ROUND_ERROR_COPY: Record<SlackRoundError, string> = {
   "not-found": `Slack connector: ${SLACK_CONNECTOR_LABEL["not-found"]}. Connect Slack in claude.ai first, then run claude mcp list.`,
   failed: `Slack connector: ${SLACK_CONNECTOR_LABEL.failed}. Claude could not use the Slack connector. Try again later.`,
   "claude-missing": `Slack connector: ${SLACK_CONNECTOR_LABEL["claude-missing"]}. Install Claude Code and put it on your PATH.`,
+  "connector-unavailable": `Slack connector: ${SLACK_CONNECTOR_LABEL["connector-unavailable"]}. Claude Code lists the Slack connector, but the background call could not load it. Try again later.`,
   timeout: "The last round took longer than 5 minutes and stopped.",
   "invalid-output":
     "The last round returned output Dispatch could not read. No item was created.",
