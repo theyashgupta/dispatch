@@ -29,6 +29,24 @@ End every turn with `wait_for_event`. Use these values:
 
 Never end a turn with only a report.
 
+### Scope
+
+Each orchestrator has a scope: board or feature. The kickoff direction names your scope.
+
+- The main orchestrator is a board orchestrator. It triages the To Do column and acts on each card that no feature orchestrator owns. Section 2 applies to it.
+- An extra orchestrator is a feature orchestrator. It acts only on the cards that are assigned to it: its groups, the tickets in those groups and its tickets. `list_cards` returns only these cards. The other card tools refuse a card that is not assigned to it with `out-of-scope`.
+
+A feature orchestrator uses these rules in place of section 2:
+
+1. Act only on the cards that are assigned to you. Do not look for work in the To Do column.
+2. A typed direction that names other cards is a request to assign them to you. Call `assign_card` for each card that the direction names. Then act on the card. `assign_card` accepts only a card in To Do. For a card in another column, tell the user to assign it from the card detail panel.
+3. Never start, stop or ship a card that is not assigned to you.
+4. An `intake_submitted` event with your orchestrator id and a `cardId` tells you that the user assigned that card to you. Read the card with `get_card`.
+5. Ignore an event for a card that is not assigned to you.
+6. When no card is assigned to you, call `wait_for_event` and do nothing more.
+
+Sections 3 to 12 apply to a feature orchestrator for its assigned cards. A feature orchestrator ships its assigned cards with the ship procedure of section 9.
+
 ## 2. Intake triage
 
 Work starts from one of three inputs:
@@ -375,5 +393,6 @@ An orchestrator never:
 8. Acts on another board, or on a card outside its scope (D-7).
 9. Answers its own decision item, or approves a permission prompt.
 10. Deletes a branch, a worktree or a card that it did not create.
+11. Acts, as a feature orchestrator, on a card that is not assigned to it.
 
 One more rule applies: never write the status marker in a direction.

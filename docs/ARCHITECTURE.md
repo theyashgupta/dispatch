@@ -176,6 +176,7 @@ Mount prefix: `/api/orchestrator`.
 | GET    | `/api/orchestrator/rulebook`                       | Orchestrator token | Tool `get_rulebook`: read the orchestration rule book.                                              |
 | GET    | `/api/orchestrator/accounts`                       | Orchestrator token | Tool `list_accounts`: list the Claude accounts with state and usage windows, from the cached meter. |
 | POST   | `/api/orchestrator/cards/:cardId/start`            | Orchestrator token | Tool `start_card`: start the session of one ticket card with a playbook and a direction.            |
+| POST   | `/api/orchestrator/cards/:cardId/assign`           | Orchestrator token | Tool `assign_card`: a feature orchestrator takes one card of the main orchestrator into its scope.  |
 | POST   | `/api/orchestrator/releases`                       | Orchestrator token | Tool `release_prep`: create a To Do release card with the next version from the base branch.        |
 
 ### `routes/board.route.ts`
@@ -236,16 +237,17 @@ Mount prefix: `/api`.
 
 Mount prefix: `/api`.
 
-| Method | Path                                              | Auth | Purpose                                                                                                                                                                                                  |
-| ------ | ------------------------------------------------- | ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| GET    | `/api/boards/:key/orchestrators`                  | User | List the orchestrators of a board with their session views.                                                                                                                                              |
-| POST   | `/api/boards/:key/orchestrators`                  | User | Add an orchestrator record, main or extra.                                                                                                                                                               |
-| PATCH  | `/api/boards/:key/orchestrators/:id`              | User | Edit the name, scope or policy override of an orchestrator.                                                                                                                                              |
-| DELETE | `/api/boards/:key/orchestrators/:id`              | User | Remove a stopped orchestrator and revoke its token.                                                                                                                                                      |
-| POST   | `/api/boards/:key/orchestrators/:id/start`        | User | Start the session of a stopped orchestrator.                                                                                                                                                             |
-| POST   | `/api/boards/:key/orchestrators/:id/stop`         | User | Stop a running orchestrator.                                                                                                                                                                             |
-| POST   | `/api/boards/:key/orchestrators/:id/resume`       | User | Bring an orchestrator back after a lost session or a Claude exit.                                                                                                                                        |
-| GET    | `/api/boards/:key/orchestrators/:id/conversation` | User | Read the conversation of an orchestrator from its transcript: user turns, text replies and the lines that Dispatch typed, in order, with no tool calls. `limit` 1 to 200. Refuses an orchestrator token. |
+| Method | Path                                              | Auth | Purpose                                                                                                                                                                                                             |
+| ------ | ------------------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/boards/:key/orchestrators`                  | User | List the orchestrators of a board with their session views.                                                                                                                                                         |
+| POST   | `/api/boards/:key/orchestrators`                  | User | Add an orchestrator record, main or extra.                                                                                                                                                                          |
+| PATCH  | `/api/boards/:key/orchestrators/:id`              | User | Edit the name, scope or policy override of an orchestrator.                                                                                                                                                         |
+| DELETE | `/api/boards/:key/orchestrators/:id`              | User | Remove a stopped orchestrator and revoke its token.                                                                                                                                                                 |
+| POST   | `/api/boards/:key/orchestrators/:id/start`        | User | Start the session of a stopped orchestrator.                                                                                                                                                                        |
+| POST   | `/api/boards/:key/orchestrators/:id/stop`         | User | Stop a running orchestrator.                                                                                                                                                                                        |
+| POST   | `/api/boards/:key/orchestrators/:id/resume`       | User | Bring an orchestrator back after a lost session or a Claude exit.                                                                                                                                                   |
+| GET    | `/api/boards/:key/orchestrators/:id/conversation` | User | Read the conversation of an orchestrator from its transcript: user turns, text replies and the lines that Dispatch typed, in order, with no tool calls. `limit` 1 to 200. Refuses an orchestrator token.            |
+| PUT    | `/api/boards/:key/cards/:cardId/orchestrator`     | User | Move the owner of one card to the named orchestrator in one record write. Refuses a group member with 400 `group-member` and an orchestrator token with 403. Appends `intake_submitted` for a feature orchestrator. |
 
 ### `routes/intake.route.ts`
 
@@ -5089,6 +5091,7 @@ is a behavior change, not a refactor.
    `startQueued`.
    `Board.orchestrators` (an `OrchestratorRecord[]`, LOCAL-91, see
    [Orchestrator Session](#orchestrator-session)) holds `id`, `name`, `role` (`main` or `extra`),
+   `kind` (`board` for the main and `feature` for an extra; a record without `kind` has the kind of its role),
    `scope` (`groupIds` and `ticketIds`), `policyOverride`, `cardId`, `state` (`stopped`, `starting`,
    `running` or `stopping`), `createdAt` and the state fields `stateMarkdown`, `stateUpdatedAt` and
    `handoffReady`. A group card that an orchestrator creates stores `ownerOrchestrator` as provenance only (the
@@ -5148,7 +5151,7 @@ real membership directly, independent of windowing` below for the full envelope 
    `PATCH /orchestrators/:id` answers `200`; `DELETE /orchestrators/:id` answers `204`;
    `POST /orchestrators/:id/start`, `/stop` and `/resume` answer `202` with the transitional record;
    `POST /intake` answers `202` with `{ eventId }`. A refusal is `400` (a body outside the strict
-   schema, `wider-override`, `extra-needs-scope`, `ticket-owned`), `404` `unknown-orchestrator` or
+   schema, `wider-override`, `kind-mismatch`, `ticket-owned`), `404` `unknown-orchestrator` or
    `unknown-board`, or `409` (`main-exists`, `duplicate-id`, `group-owned`, `orchestrator-running`,
    `orchestrator-not-running`, `orchestrator-not-resumable`, `orchestrator-session-live`,
    `no-main-orchestrator`); a start or resume with `supervisor: off` is refused as a policy refusal, and
@@ -6002,6 +6005,8 @@ Scenario 10 (tests/e2e/scenario-10-engine-close.e2e.ts) proves that the supervis
 
 Scenario 11 (tests/e2e/scenario-11-user-started-ship.e2e.ts) proves that a single ticket card that the user started from the board start dialog ships through `start_ship`: the board has the ship rights **merge**, and the test starts ticket card A with `POST /api/cards/:id/start`, the route of the start dialog, not with the orchestrator tool `start_card`. The card read has a session branch and no `launch`. The session commits a work file on that branch, and the Stop hook moves the card to Agent done. `start_ship` with the session branch as the one branch answers 202, the flow ends `done`, the fake `gh` log creates and merges one PR, and the bare origin `main` holds the work file. A second ticket card B that nobody started has no `launch` and no session branch, so `start_ship` answers 400 `not-group-card` and the card has no ship flow. The test types no key into any pane.
 
+Scenario 13 (tests/e2e/scenario-13-feature-scope.e2e.ts) proves that a feature orchestrator with an empty scope sees and starts only the ticket that the user assigns to it: the board has a main orchestrator (kind **board**) and an extra orchestrator `feat` (kind **feature**) with no scope, and the test mints both tokens with `POST /api/boards/:key/orchestrators/:id/token` without a start of either orchestrator. One user ticket is in To Do. `list_cards` for `feat` answers `total` 0, and `list_cards` for the main includes the ticket. `start_card` from `feat` on the ticket answers 403 `out-of-scope`, and the card has no `launch` and no session. The user then assigns the ticket to `feat` with `PUT /api/boards/:key/cards/:cardId/orchestrator`, which answers 200 with `changed` true and adds exactly one `intake_submitted` event for `feat` and the ticket. After the assignment, `list_cards` for `feat` answers `total` 1, `start_card` from `feat` answers 202 with the Write code directly playbook, and the card carries `launch.playbook`. `start_card` from the main on the same card then answers 403 `other-owner`. All sandbox folders are under the sandbox root and not under `~/.dispatch`. The test types no key into any pane.
+
 The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
 ## Orchestration Initiative
@@ -6337,7 +6342,7 @@ reads the identity or writes, `assertAheadAndClean` resolves the base once. The 
 `branch-not-ahead`) and the worktree must be clean (409 `worktree-dirty`). A failed git call of
 these two checks answers 409 `no-workspace`. A group with loop progress keeps the D-8 rules.
 
-**MCP server.** `dispatch mcp` serves the 36 tools over stdio. `bootstrap/cli.ts` reads and checks
+**MCP server.** `dispatch mcp` serves the 37 tools over stdio. `bootstrap/cli.ts` reads and checks
 `DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and
 `bootstrap/mcp-tools.ts` holds the zod input and the description of each tool. The dependency
 cruiser rule `mcp-server-isolated` refuses an import of `routes`, `services`, `store`, `adapters`
@@ -6381,11 +6386,17 @@ ownership source, and `Card.ownerOrchestrator` is provenance only, so a group th
 follows the move. A group or ticket that an extra creates (`create_group`, `create_ticket`) joins that
 extra's scope through `appendToExtraScope`, a queued append that runs no scope or override check, so the
 card write never fails on a stale scope. `create_group` refuses a member outside the scope of the caller
-with 403 `other-owner`, and any hidden orchestrator card as an ineligible member (409). A member follows
+with 403 `other-owner` (403 `out-of-scope` for a feature caller), and any hidden orchestrator card as an ineligible member (409). A member follows
 its group, and a loose ticket follows `scope.ticketIds`, else the main. `scopeTargetOf` in `boards.ts` passes that owner to `checkScope`,
-so a call on a card of another orchestrator answers 403 `other-owner`. A board with no records has no
-owner, and only the board is checked. The ship routes skip the owner check and `mayShip` lets only the
-main start a ship flow (403 `main-only`). The concurrency cap counts the running loops of the whole
+so a call on a card of another orchestrator answers 403 `other-owner`. A feature orchestrator
+(`orchestratorKind` is `feature`) gets 403 `out-of-scope` instead, through `scopeRefusalCode`, for each card it does not own, and
+`list_cards` gives it only its own cards. The tool `assign_card` (`assignCard` with `by: "orchestrator"`) adds a card
+of the main orchestrator to the scope of the calling feature orchestrator; it refuses a call from the board orchestrator with 400
+`not-feature-orchestrator`, a card of another extra with 403 `other-owner`, a group member with 400 `group-member` and a card outside To Do with 409 `not-todo`.
+A board with no records has no
+owner, and only the board is checked. The ship routes skip the owner check for the board orchestrator only, and `mayShip` lets the
+main and a feature orchestrator start a ship flow. A feature orchestrator ships only the cards that it owns (403 `out-of-scope` for
+another card), and a caller with no record gets 403 `main-only`. The concurrency cap counts the running loops of the whole
 board, whoever owns them. A `ticket_proposal` or other decision item about a card goes to the owner of
 that card.
 

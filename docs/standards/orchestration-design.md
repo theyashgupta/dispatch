@@ -213,6 +213,8 @@ Usage credits are not a value of any field. With `supervisor` off, the board beh
 
 **Decision:** A board has at most one main orchestrator. The user can add extra orchestrators. An extra orchestrator needs a main orchestrator on the same board. The board row holds `orchestrators`: for each, an id, a main flag, a scope, a policy override and its session name. Each extra has an explicit scope: a list of group ids or ticket ids. The scope is the one source of ownership: the owner of a group or ticket is the extra whose scope holds it, else the main orchestrator. A group card also holds `ownerOrchestrator`, the orchestrator that created it, as provenance only. A group or ticket that an extra creates joins its scope. Each group has exactly one owner orchestrator. Only the user moves ownership. A tool call on a card outside the scope of the caller returns 403. Only the main orchestrator ships. The concurrency cap counts all loops on the board, from all orchestrators. An extra can have a policy override that only narrows the board policy. Narrow means a lower `concurrencyCap`, `budgetPerGroup` or `shipRights`, `ask` in place of `rules` or `all`, `rules` in place of `all`, and `stop` in place of `wait`. The model fields have no override. A decision item goes to the owner of its group and shows in the board attention queue. The user answers it, and the answer reaches the owner orchestrator as an event.
 
+**Amendment (LOCAL-150):** Each orchestrator has a kind: board or feature. The main is a board orchestrator. An extra is a feature orchestrator, and its scope can be empty. A feature orchestrator ships the cards that it owns; the ship routes check the owner of each card for a feature caller. The main ships any card. A feature orchestrator does not triage To Do.
+
 **Reason:** one owner per group means two orchestrators never send input to the same loop or ship the same branch.
 
 **Rejected:**
@@ -322,7 +324,7 @@ Amendment, 2026-10-14 (LOCAL-109 part B): a ticket card that `start_card` starte
 
 ## Tool reference
 
-This section is the reference for the 36 tools. Each tool calls one route under `/api/orchestrator/`. Each call is checked against the board scope and, for a write, the policy (D-6), and is recorded as a `tool_call` row in `orchestration_events`. A tool call on a card that another orchestrator owns (D-7) returns 403 `other-owner`.
+This section is the reference for the 37 tools. Each tool calls one route under `/api/orchestrator/`. Each call is checked against the board scope and, for a write, the policy (D-6), and is recorded as a `tool_call` row in `orchestration_events`. A tool call on a card that another orchestrator owns (D-7) returns 403 `other-owner`.
 
 | Family    | Tools                                                                                                                                                                                        | Notes                                                                                    |
 | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
@@ -612,6 +614,14 @@ When `handoffReady` is `true`, the supervisor reads the handoff as pending, as i
 - Refusals: 400 `invalid-playbook`, `invalid-direction`, `invalid-folder`, `invalid-repos`, `invalid-account`, `unknown-account` (the account is not in `list_accounts`; the call answers it before the cap check), `no-repositories` (an omitted `repos` on a board with no repository), `missing-base` with `path`, `unknown-repository`, `not-ticket-card` (the card is a group card), `orchestrator-playbook` (the playbook is Board Orchestrator), `unknown-playbook`, and the marker reason of `create_group`. 403 `policy-refused` with `reason` `concurrency cap reached: <running> of <cap> loops running`. 409 `memory-pressure` with `reason` `free memory <free> MB is below the <floor> MB floor` or `swap used <used> MB is above the <ceiling> MB ceiling`, checked before the cap. 409 `already-started` when the card runs or has a live session. 409 for a card in Done or Inbox. 409 `a session start is already in progress` when a start of the card is running. Every refusal comes before the first write, so a refused call leaves no `launch` and no session.
 - The tool writes `launch` on the card with the playbook and the direction, so the card counts as a running loop until it reaches Agent done or Done.
 - With `account`, the session starts on that account and the card is not pinned to it. With no `account`, the session starts on the active account. The start dialog of the user is unchanged.
+
+### `assign_card`
+
+- Route: `POST /cards/:cardId/assign`. It answers 200 with `{ cardId, orchestratorId, changed }`. `changed` is false when the card is already in the scope of the caller. The call writes no event.
+- Input: `cardId` (card id).
+- Description: "Assign one card to you. Use it only when a direction that the user typed in your terminal names the card. Only a feature orchestrator can use it, and only for a card that the main orchestrator owns. A card of another feature orchestrator is refused with other-owner, a member of a group with group-member, and a call from the board orchestrator with not-feature-orchestrator."
+- Refusals: 400 `not-feature-orchestrator` (the caller is the board orchestrator), 400 `group-member`, 403 `other-owner` (another feature orchestrator owns the card), 404 `unknown-card` (unknown, hidden or on another board).
+- A feature orchestrator gets 403 `out-of-scope`, and not `other-owner`, on every other card tool for a card it does not own.
 
 ### `release_prep`
 
