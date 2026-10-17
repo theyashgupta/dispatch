@@ -19,11 +19,7 @@ const LINE_CLASS: Record<PatchLineKind, string> = {
 
 export function PrFiles({ detail }: PrFilesProps) {
   return (
-    <CollapsibleSection
-      title="Files"
-      badge={<Badge tone="neutral">{detail.changedFiles}</Badge>}
-      defaultOpen
-    >
+    <div className="flex flex-col gap-(--space-sm)">
       {detail.files.map((file) => (
         <CollapsibleSection
           key={file.filename}
@@ -59,6 +55,6 @@ export function PrFiles({ detail }: PrFilesProps) {
           Showing the first {detail.files.length} files.
         </div>
       )}
-    </CollapsibleSection>
+    </div>
   );
 }

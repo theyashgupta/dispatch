@@ -1,24 +1,31 @@
-import type { PrDetail as PrDetailModel } from "../../../../shared/types.js";
+import { ArrowRight, ExternalLink } from "lucide-react";
+import { formatAge, nowMs } from "../../../../shared/format-age.js";
+import type {
+  PrDetail as PrDetailModel,
+  PrReviewEvent,
+} from "../../../../shared/types.js";
 import type { PrRow } from "../../../../shared/pr-rows.js";
-import type { PrReviewEvent } from "../../../../shared/types.js";
-import { CollapsibleSection } from "@/components/CollapsibleSection";
 import {
   DetailActions,
   DetailHeader,
   DetailScroll,
 } from "@/components/DetailPaneBody";
-import { ErrorAlert } from "@/components/ErrorAlert";
 import { LoadingButton } from "@/components/LoadingButton";
-import { Markdown } from "@/components/markdown/Markdown";
 import { Badge } from "@/components/ui/badge";
-import { Spinner } from "@/components/ui/spinner";
-import { Textarea } from "@/components/ui/textarea";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ExternalTextLink } from "@/components/ExternalTextLink";
+import { PrAuthorAvatar } from "./PrAuthorAvatar";
 import { PrChecks } from "./PrChecks";
+import { PrDetailLoadError } from "./PrDetailLoadError";
+import { PrDetailLoading } from "./PrDetailLoading";
 import { PrFiles } from "./PrFiles";
+import { PrOverviewTab } from "./PrOverviewTab";
+import type { PrComposer } from "./PrReviewActions";
 import { prStateBadge } from "@/modules/pull-requests/domain/pr-detail-state";
-
-export type PrComposer = "REQUEST_CHANGES" | "COMMENT" | null;
+import {
+  reviewButtonLabel,
+  type ReviewStep,
+} from "@/modules/pull-requests/domain/review-flow";
 
 interface PrDetailProps {
   row: PrRow;
@@ -26,8 +33,10 @@ interface PrDetailProps {
   detail: PrDetailModel | null;
   loading: boolean;
   loadError: string | null;
+  retrying: boolean;
   busy: string | null;
-  reviewing: boolean;
+  reviewBusy: boolean;
+  reviewStep: ReviewStep | null;
   error: string | null;
   composer: PrComposer;
   draft: string;
@@ -41,6 +50,7 @@ interface PrDetailProps {
   onReviewWithAgent: () => void;
   onFixCi: () => void;
   onOpenOnGithub: () => void;
+  onRetry: () => void;
 }
 
 export function PrDetail({
@@ -49,8 +59,10 @@ export function PrDetail({
   detail,
   loading,
   loadError,
+  retrying,
   busy,
-  reviewing,
+  reviewBusy,
+  reviewStep,
   error,
   composer,
   draft,
@@ -64,119 +76,114 @@ export function PrDetail({
   onReviewWithAgent,
   onFixCi,
   onOpenOnGithub,
+  onRetry,
 }: PrDetailProps) {
   const failing = detail?.checks.some((c) => c.state === "fail") ?? false;
-  const open = detail?.state === "open";
   const state = detail ? prStateBadge(detail) : null;
 
   return (
     <DetailScroll testId="pr-detail">
       <DetailHeader onBack={onBack} title={row.title}>
-        <ExternalTextLink href={row.url}>{label}</ExternalTextLink>
-        {detail && state && (
-          <>
-            <span>{detail.author}</span>
-            <span>
-              {detail.head} into {detail.base}
-            </span>
-            <span>
-              +{detail.additions} -{detail.deletions}
-            </span>
-            <Badge tone={state.tone}>{state.label}</Badge>
-          </>
-        )}
+        <ExternalTextLink href={row.url}>
+          <span className="font-mono text-xs font-semibold">{label}</span>
+        </ExternalTextLink>
+        {state && <Badge tone={state.tone}>{state.label}</Badge>}
       </DetailHeader>
-      {loading && <Spinner />}
-      {loadError && <ErrorAlert>{loadError}</ErrorAlert>}
       {detail && (
-        <>
-          <DetailActions>
-            <LoadingButton
-              variant="secondary"
-              disabled={!open || busy !== null}
-              loading={busy === "APPROVE"}
-              onClick={onApprove}
-            >
-              Approve
-            </LoadingButton>
-            <LoadingButton
-              variant="secondary"
-              disabled={!open || busy !== null}
-              aria-pressed={composer === "REQUEST_CHANGES"}
-              onClick={() => onOpenComposer("REQUEST_CHANGES")}
-            >
-              Request changes
-            </LoadingButton>
-            <LoadingButton
-              variant="secondary"
-              disabled={!open || busy !== null}
-              aria-pressed={composer === "COMMENT"}
-              onClick={() => onOpenComposer("COMMENT")}
-            >
-              Comment
-            </LoadingButton>
-            <LoadingButton
-              disabled={!open || busy !== null}
-              onClick={onSquashMerge}
-            >
-              Squash merge
-            </LoadingButton>
-            <LoadingButton
-              variant="secondary"
-              loading={reviewing}
-              onClick={onReviewWithAgent}
-            >
-              Review
-            </LoadingButton>
-            <LoadingButton
-              variant="secondary"
-              disabled={!failing}
-              onClick={onFixCi}
-            >
-              Fix CI with agent
-            </LoadingButton>
-            <LoadingButton variant="secondary" onClick={onOpenOnGithub}>
-              Open on GitHub
-            </LoadingButton>
-          </DetailActions>
-          {composer && (
-            <div className="flex flex-col gap-2">
-              <Textarea
-                aria-label={
-                  composer === "COMMENT" ? "Comment" : "Requested changes"
-                }
-                value={draft}
-                maxLength={20000}
-                className="min-h-24"
-                onChange={(event) => onDraftChange(event.target.value)}
-              />
-              <DetailActions>
-                <LoadingButton
-                  disabled={draft.trim() === "" || busy !== null}
-                  loading={busy === composer}
-                  onClick={() => onSend(composer)}
-                >
-                  Send
-                </LoadingButton>
-                <LoadingButton variant="secondary" onClick={onCancelComposer}>
-                  Cancel
-                </LoadingButton>
-              </DetailActions>
-            </div>
-          )}
-          {error && <ErrorAlert>{error}</ErrorAlert>}
-          <CollapsibleSection title="Description" defaultOpen>
-            {detail.body.trim() ? (
-              <Markdown source={detail.body} />
-            ) : (
-              <div className="text-base text-muted-foreground">
-                No description
-              </div>
-            )}
-          </CollapsibleSection>
-          <PrChecks detail={detail} failing={failing} />
-          <PrFiles detail={detail} />
-        </>
+        <div className="flex flex-wrap items-center gap-(--space-sm) text-sm text-muted-foreground">
+          <PrAuthorAvatar
+            author={detail.author}
+            authorAvatar={row.authorAvatar}
+          />
+          <span>{detail.author}</span>
+          <span aria-hidden="true">·</span>
+          <span className="font-mono text-xs wrap-anywhere">{detail.head}</span>
+          <ArrowRight className="size-3.5" role="img" aria-label="into" />
+          <span className="font-mono text-xs wrap-anywhere">{detail.base}</span>
+          <span aria-hidden="true">·</span>
+          <span>
+            +{detail.additions} -{detail.deletions}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>{formatAge(row.createdAt, nowMs())}</span>
+        </div>
+      )}
+      <DetailActions>
+        <LoadingButton
+          loading={reviewStep !== null}
+          disabled={reviewBusy}
+          onClick={onReviewWithAgent}
+        >
+          {reviewButtonLabel(reviewStep)}
+        </LoadingButton>
+        <LoadingButton
+          variant="secondary"
+          disabled={!failing}
+          onClick={onFixCi}
+        >
+          Fix CI with agent
+        </LoadingButton>
+        <LoadingButton variant="secondary" onClick={onOpenOnGithub}>
+          <ExternalLink aria-hidden="true" />
+          Open on GitHub
+        </LoadingButton>
+      </DetailActions>
+      {loading && <PrDetailLoading />}
+      {loadError && (
+        <PrDetailLoadError
+          message={loadError}
+          retrying={retrying}
+          onRetry={onRetry}
+          onOpenOnGithub={onOpenOnGithub}
+        />
+      )}
+      {detail && (
+        <Tabs defaultValue="overview" className="gap-(--space-md)">
+          <TabsList
+            variant="line"
+            className="w-full flex-wrap justify-start group-data-[orientation=horizontal]/tabs:h-auto"
+          >
+            <TabsTrigger value="overview" className="flex-none">
+              Overview
+            </TabsTrigger>
+            <TabsTrigger value="files" className="flex-none">
+              Files
+              <Badge tone="neutral">{detail.changedFiles}</Badge>
+            </TabsTrigger>
+            <TabsTrigger value="checks" className="flex-none">
+              Checks
+              <Badge tone="neutral">{detail.checks.length}</Badge>
+              {failing && (
+                <span
+                  role="img"
+                  aria-label="A check fails"
+                  className="size-1.5 rounded-full bg-destructive"
+                />
+              )}
+            </TabsTrigger>
+          </TabsList>
+          <PrOverviewTab
+            row={row}
+            detail={detail}
+            open={detail.state === "open"}
+            busy={busy}
+            error={error}
+            composer={composer}
+            draft={draft}
+            onApprove={onApprove}
+            onOpenComposer={onOpenComposer}
+            onDraftChange={onDraftChange}
+            onSend={onSend}
+            onCancelComposer={onCancelComposer}
+            onSquashMerge={onSquashMerge}
+          />
+          <TabsContent value="files">
+            <PrFiles detail={detail} />
+          </TabsContent>
+          <TabsContent value="checks">
+            <PrChecks detail={detail} />
+          </TabsContent>
+        </Tabs>
       )}
     </DetailScroll>
   );

@@ -1,5 +1,4 @@
 import type { PrDetail } from "../../../../shared/types.js";
-import { CollapsibleSection } from "@/components/CollapsibleSection";
 import { Badge } from "@/components/ui/badge";
 import { ExternalTextLink } from "@/components/ExternalTextLink";
 import {
@@ -9,16 +8,11 @@ import {
 
 interface PrChecksProps {
   detail: PrDetail;
-  failing: boolean;
 }
 
-export function PrChecks({ detail, failing }: PrChecksProps) {
+export function PrChecks({ detail }: PrChecksProps) {
   return (
-    <CollapsibleSection
-      title="CI checks"
-      badge={<Badge tone="neutral">{detail.checks.length}</Badge>}
-      defaultOpen={failing}
-    >
+    <div className="flex flex-col gap-(--space-xs)">
       {detail.checks.length === 0 ? (
         <div className="text-base text-muted-foreground">No checks</div>
       ) : (
@@ -43,6 +37,6 @@ export function PrChecks({ detail, failing }: PrChecksProps) {
           Showing the first {detail.checks.length} checks.
         </div>
       )}
-    </CollapsibleSection>
+    </div>
   );
 }
