@@ -690,3 +690,120 @@ void test("paneDialog sees a dialog in a pane with no input line", () => {
 void test("paneDialog is false for a plain idle pane", () => {
   assert.equal(paneDialog("output\n────\n❯ \n────\n  ? for shortcuts"), false);
 });
+
+const LIMIT_TAIL =
+  "You've hit your weekly limit · resets Oct 20 at 8:30am (Asia/Calcutta)";
+
+function tailStates(
+  text: string,
+  lastAssistantText: string | null,
+  sizes: number[] = [100, 100, 100],
+): Detection[] {
+  const out: Detection[] = [];
+  let memory = initialMemory();
+  sizes.forEach((size, i) => {
+    const d = detectState(
+      input({
+        now: i * MINUTE,
+        pane: text,
+        memory,
+        transcript: { size, lastAssistantText },
+      }),
+    );
+    out.push(d);
+    memory = d.memory;
+  });
+  return out;
+}
+
+void test("a usage limit message at the transcript tail gives usage_limit_wait on the second agreeing sample", () => {
+  const states = tailStates(pane("after-pause-job-lines.txt"), LIMIT_TAIL);
+  assert.notEqual(states[0].state, "usage_limit_wait");
+  assert.equal(states[1].state, "usage_limit_wait");
+  assert.equal(states[2].state, "usage_limit_wait");
+  assert.equal(states[1].evidence, `transcript: ${LIMIT_TAIL}`);
+});
+
+void test("a usage limit message is read in a quiet pane, with a curly apostrophe and after a first line", () => {
+  for (const text of [
+    LIMIT_TAIL.replaceAll("'", "\u2019"),
+    `${LIMIT_TAIL}\nsecond line`,
+    "You've hit your session limit",
+    "You've hit your limit · resets 8:30am (Asia/Calcutta)",
+    "You've hit your Opus weekly limit · resets Oct 20 at 8:30am",
+  ]) {
+    const states = tailStates(pane("idle.txt"), text, [100, 100]);
+    assert.equal(states[1].state, "usage_limit_wait", text);
+  }
+});
+
+void test("the weekly footer warning at the transcript tail never gives usage_limit_wait", () => {
+  for (const text of [
+    "You've used 90% of your weekly limit",
+    "You\u2019ve used 90% of your weekly limit · resets Oct 20 at 8:30am",
+    "I hit the weekly limit of the API earlier",
+  ]) {
+    const states = tailStates(
+      pane("after-pause-job-lines.txt"),
+      text,
+      [100, 100, 100, 100],
+    );
+    assert.ok(
+      states.every((d) => d.state !== "usage_limit_wait"),
+      text,
+    );
+  }
+});
+
+void test("a busy pane with a usage limit message at the transcript tail never gives usage_limit_wait", () => {
+  const states = tailStates(pane("working.txt"), LIMIT_TAIL, [100, 100, 100]);
+  assert.ok(states.every((d) => d.state !== "usage_limit_wait"));
+});
+
+void test("a growing transcript with a usage limit message at the tail never gives usage_limit_wait", () => {
+  const states = tailStates(
+    pane("after-pause-job-lines.txt"),
+    LIMIT_TAIL,
+    [100, 200, 300, 400],
+  );
+  assert.ok(states.every((d) => d.state !== "usage_limit_wait"));
+});
+
+void test("a transcript that grows after two agreeing samples leaves usage_limit_wait", () => {
+  const states = tailStates(
+    pane("after-pause-job-lines.txt"),
+    LIMIT_TAIL,
+    [100, 100, 100, 200],
+  );
+  assert.equal(states[2].state, "usage_limit_wait");
+  assert.equal(states[3].state, "working");
+});
+
+void test("an open limit menu wins over a usage limit message at the transcript tail", () => {
+  const states = tailStates(pane("limit-menu.txt"), LIMIT_TAIL, [100, 100]);
+  assert.equal(states[1].state, "usage_limit_dialog");
+});
+
+void test("a changed limit message restarts the two sample rule", () => {
+  let memory = initialMemory();
+  const sample = (text: string) => {
+    const d = detectState(
+      input({
+        pane: pane("idle.txt"),
+        memory,
+        transcript: { size: 100, lastAssistantText: text },
+      }),
+    );
+    memory = d.memory;
+    return d.state;
+  };
+  assert.notEqual(sample(LIMIT_TAIL), "usage_limit_wait");
+  assert.notEqual(
+    sample("You've hit your session limit · resets 3pm"),
+    "usage_limit_wait",
+  );
+  assert.equal(
+    sample("You've hit your session limit · resets 3pm"),
+    "usage_limit_wait",
+  );
+});

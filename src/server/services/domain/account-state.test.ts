@@ -8,6 +8,7 @@ import type {
 import { selectAccount } from "./account-selection.js";
 import {
   deriveAccountState,
+  expireLimit,
   isStaleSurface,
   parseSurfaceResetAt,
 } from "./account-state.js";
@@ -130,6 +131,82 @@ void test("the 7 day limit holds the account until the 7 day reset", () => {
     state: "limited",
     limitedUntil: WEEKLY_RESET,
   });
+});
+
+void test("a full bucket whose reset passed is not full", () => {
+  const passed = "2026-10-06T11:00:00.000Z";
+  const derive = (windows: ClaudeUsageWindow[]) =>
+    deriveAccountState(usage(windows), {}, 100, NOW);
+  assert.deepEqual(derive([win("weekly_all", 100, passed)]), {
+    state: "near-limit",
+    limitedUntil: null,
+  });
+  assert.deepEqual(derive([win("weekly_all", 100, NOW.toISOString())]), {
+    state: "near-limit",
+    limitedUntil: null,
+  });
+  assert.equal(
+    derive([win("weekly_all", 40, WEEKLY_RESET), win("session", 100, passed)])
+      .state,
+    "near-limit",
+  );
+  assert.deepEqual(
+    derive([
+      win("weekly_all", 100, passed),
+      win("session", 100, SESSION_RESET),
+    ]),
+    { state: "limited", limitedUntil: SESSION_RESET },
+  );
+  assert.equal(derive([win("weekly_all", 100, null)]).state, "limited");
+});
+
+void test("expireLimit turns a passed limit into unknown and leaves every other state alone", () => {
+  const future = "2026-10-06T12:00:00.001Z";
+  const cases: [
+    Parameters<typeof expireLimit>[0],
+    ReturnType<typeof expireLimit>,
+  ][] = [
+    [
+      { state: "limited", limitedUntil: future },
+      { state: "limited", limitedUntil: future },
+    ],
+    [
+      { state: "limited", limitedUntil: NOW.toISOString() },
+      { state: "unknown", limitedUntil: null },
+    ],
+    [
+      { state: "limited", limitedUntil: "2026-10-06T11:00:00.000Z" },
+      { state: "unknown", limitedUntil: null },
+    ],
+    [
+      { state: "limited", limitedUntil: null },
+      { state: "limited", limitedUntil: null },
+    ],
+    [
+      { state: "available", limitedUntil: null },
+      { state: "available", limitedUntil: null },
+    ],
+    [
+      { state: "near-limit", limitedUntil: null },
+      { state: "near-limit", limitedUntil: null },
+    ],
+    [
+      { state: "login-expired", limitedUntil: null },
+      { state: "login-expired", limitedUntil: null },
+    ],
+    [
+      { state: "unknown", limitedUntil: null },
+      { state: "unknown", limitedUntil: null },
+    ],
+  ];
+  for (const [entry, expected] of cases) {
+    assert.deepEqual(expireLimit(entry, NOW), expected, JSON.stringify(entry));
+  }
+});
+
+void test("expireLimit returns the entry it was given when nothing expired", () => {
+  const entry = { state: "available" as const, limitedUntil: null };
+  assert.equal(expireLimit(entry, NOW), entry);
 });
 
 void test("a 7 day limited account stays out of the selection until the 7 day reset", () => {

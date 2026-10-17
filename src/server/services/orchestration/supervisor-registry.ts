@@ -237,7 +237,9 @@ export async function superviseLost(cardId: string): Promise<void> {
  * @remarks Sessions on a board with `supervisor: off` get no watcher, no state and no event. A sample
  * that arrives while the same session is still being sampled, or while a wake line is being typed
  * into the pane, is skipped. A group card's loop files are read before its first plan, and an orchestrator
- * card gets the wake duty after the sample's own state work, which a state change skips.
+ * card gets the wake duty after the sample's own state work, which a state change skips. The first sample
+ * of a new watcher that reads a stored `usage_limit_wait` plans once as if from no state, so a restart
+ * re-arms the limit move or wait.
  */
 export async function supervisePane(
   sample: PaneSample,
@@ -251,6 +253,7 @@ export async function supervisePane(
     watchers.delete(sample.tmuxSession);
     return;
   }
+  const created = !watchers.has(sample.tmuxSession);
   const watcher = ensureWatcher(sample.tmuxSession, session.state ?? null);
   if (watcher.running || wakeInFlight(card)) return;
   watcher.running = true;
@@ -305,6 +308,25 @@ export async function supervisePane(
         [{ kind: "close_loop" }],
         detection.evidence,
       );
+    }
+    if (
+      created &&
+      !changed &&
+      detection.state === "usage_limit_wait" &&
+      session.stateReason === undefined
+    ) {
+      const planned = planActions({
+        from: null,
+        to: detection.state,
+        loop: loopOf(card, now),
+        usageLimit: ownerPolicy(card)?.usageLimit ?? "wait",
+        wokeAt: lastWakeAt,
+        now,
+        memory: watcher.plan,
+      });
+      watcher.plan = planned.memory;
+      if (planned.actions.length > 0)
+        await runActions(card, session, planned.actions, detection.evidence);
     }
     if (
       (detection.state === "working" || detection.state === "idle") &&

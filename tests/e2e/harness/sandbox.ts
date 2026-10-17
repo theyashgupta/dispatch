@@ -75,6 +75,8 @@ interface SandboxOptions {
   buildRoot?: string;
   reuseDir?: boolean;
   memorySampleFile?: string;
+  usageUrl?: string;
+  seed?: (folders: { dir: string; home: string }) => void;
 }
 
 export interface OrchestrationEventRow {
@@ -372,6 +374,7 @@ export async function startSandbox(opts: SandboxOptions): Promise<Sandbox> {
   for (const d of [dir, home, workspaces, bin, scenarios, logs]) {
     fs.mkdirSync(d, { recursive: true });
   }
+  opts.seed?.({ dir, home });
 
   const claude = writeFakeClaudeTui(bin);
   const gh = writeFakeGh(bin, root);
@@ -389,7 +392,7 @@ export async function startSandbox(opts: SandboxOptions): Promise<Sandbox> {
     HOME: home,
     PATH: `${bin}:${process.env.PATH ?? ""}`,
     FAKE_CLAUDE_SCENARIO_DIR: scenarios,
-    DISPATCH_USAGE_URL: "http://127.0.0.1:1",
+    DISPATCH_USAGE_URL: opts.usageUrl ?? "http://127.0.0.1:1",
     ...(opts.memorySampleFile
       ? { DISPATCH_MEMORY_SAMPLE_FILE: opts.memorySampleFile }
       : {}),

@@ -2993,6 +2993,11 @@ rule that applies sets the state:
 - `login-expired`: the token read failed (401, 403 or no token) and the folder is logged out.
 - `limited`: a bucket is at or above the threshold, or a limit signal arrived. `limitedUntil` is the
   latest reset of the full buckets, so a full 7 day bucket holds the account until the 7 day reset.
+  A bucket whose reset passed is not full. A stored `limited` state stays until `limitedUntil` only
+  while the reads are not good (rate limited, failed, stale or unavailable). A good read that gives
+  another state replaces it (LOCAL-152). `GET /accounts` and the orchestrator `list_accounts` show a
+  stored `limited` state whose `limitedUntil` passed as `unknown` with no `limitedUntil`
+  (`account-state.ts#expireLimit`).
 - `unknown`: no good read exists, a 401 or 403 read comes from a logged in folder, or a good read
   has no buckets.
 - `near-limit`: a bucket is at 80 percent or more.
@@ -3099,6 +3104,22 @@ hysteresis rule and ranks above the account in use, the sessions return to it wi
 policy. If it does not pass the hysteresis rule, the timer is set again 15 minutes on. If it is still
 limited, the timer is set again. A usage read that clears the account does not cancel the timer,
 so a usage read never starts a return.
+
+**Usage limit move (LOCAL-152).** The controller moves only the sessions of the account in use. A
+session on another account, or a session marked stale, gets no chain move. The supervisor covers
+it. When a supervised session stops on the usage limit message, the supervisor reads the chain
+(`account-chain.ts#limitMoveCandidates`) and picks the target with
+`account-selection.ts#pickHeadroomAccount`:
+
+- The target is not the account of the session, and its state is `available` or `near-limit`.
+- Its weekly percent is the highest bucket of a `weekly` kind (`weekly_all`, `weekly_scoped`). An
+  account with no weekly bucket is not a target.
+- The weekly percent is below `thresholdPercent` minus `hysteresisPercent` (90 with the defaults).
+- The account with the lowest weekly percent wins. A tie keeps chain order.
+
+The move uses `session-account-move.ts#moveSessionAccount` with the cause `usage limit`: `/exit` at
+the ready prompt, the account environment, then `--resume` on the same conversation. It does not
+read `autoMove`. A pinned session does not move.
 
 **Timers.** A timer task that fails runs again 15 minutes later. The 30 s scan also runs each timer
 whose time is past, because a timer does not count the time while the computer sleeps. A delay is
@@ -6097,11 +6118,25 @@ action that finds nothing to do, such as an `Escape` already sent, writes no row
 - Usage limit (`supervisor-limit.ts`): both policies select the stop and wait row, else the wait
   here row, and never a credits row. Before each `Enter` the supervisor reads the menu again and
   never presses `Enter` on a credits row. Then policy `stop` sets `needs_input` with
-  `usage_stop`. Policy `wait` continues after the reset time plus 2 minutes; when the engine file
-  says `handoff-pending`, it sends `Escape` at the auto continue notice and starts a fresh session
-  after the reset instead. The timer re-checks at that time that the session is live, has no stop
-  reason, and that its board still has `supervisor: on` and `usageLimit: wait`. A timer delay is
-  capped at the Node timer maximum (2^31 - 1 ms).
+  `usage_stop`. Policy `wait` first runs `supervisor-limit.ts#moveOrWait`. It moves the session to
+  the chain account with the most weekly headroom (see Account Chain, Usage limit move), sends the
+  usage limit continue prompt and records `limit_move` with `from`, `to` and `result`. When the
+  continue is not confirmed after a move, the session gets `needs_input` with
+  `supervisor_gave_up`. When a move answers `busy` and the pane is not ready (for example after a
+  memory resume), the supervisor sends one `C-l` so Claude redraws its screen, and tries once more.
+  It waits for the reset when no account has headroom (`no_headroom`), the session is pinned
+  (`pinned`), the session moved at a limit in the last 30 minutes (`recent_move`), or the move did
+  not settle; the `limit_wait` row carries that `reason`. At the auto continue notice it schedules
+  nothing, because the CLI continues by itself. The wait continues after the reset time plus 2
+  minutes. The timer re-checks at that time that the session is live, still runs on the account
+  it waited on, has no stop reason, and that its board still has `supervisor: on` and
+  `usageLimit: wait`. A timer delay is capped at the Node timer maximum (2^31 - 1 ms). When the
+  engine file says `handoff-pending`, the supervisor sends `Escape` at the auto continue notice, or
+  with no notice on screen only schedules, and starts a fresh session after the reset instead.
+  The CLI can also stop on the limit with no menu. The state is then `usage_limit_wait` when two
+  samples agree that the last assistant text of the transcript is `You've hit your limit`, with
+  or without a kind such as `weekly`, and the session is not busy. The transcript counts because
+  a pane after a memory resume can show no Claude text.
 - The 60 s pass (`supervisor-pass.ts`): it holds the keep awake child, records a
   `machine_wake` row when its timer fires more than 30 s late, records a `pr_state` row for each
   change of the PR list of a group, starts a queued group when each group in `dependsOn` is done

@@ -144,6 +144,32 @@ void test("a server restart with the session still idle writes no new event", as
   );
 });
 
+void test("a stored usage_limit_wait read by a fresh watcher runs the limit duty once, and the next sample does not", async () => {
+  const ids = await startedCard(SBX, "restart-limit");
+  await store.setSessionStateIfSession(
+    ids.cardId,
+    ids.sessionId,
+    "usage_limit_wait",
+  );
+  dropWatcher(ids.tmuxSession);
+  const limitWaits = () =>
+    store
+      .listOrchestrationEvents(SBX, 0, 500)
+      .filter(
+        (e) =>
+          e.cardId === ids.cardId &&
+          e.kind === "supervisor_action" &&
+          e.data.action === "limit_wait",
+      ).length;
+  await supervisePane({ ...ids, pane: pane("auto-continue.txt") });
+  assert.equal(sessionOf(ids.cardId)?.state, "usage_limit_wait");
+  assert.equal(stateEvents(SBX, ids.cardId).length, 0);
+  assert.equal(limitWaits(), 1);
+  await supervisePane({ ...ids, pane: pane("auto-continue.txt") });
+  assert.equal(limitWaits(), 1);
+  dropWatcher(ids.tmuxSession);
+});
+
 void test("a paused card gets the paused state and no action even over an api error pane", async () => {
   const ids = await startedCard(SBX, "paused-card");
   await supervisePane({ ...ids, pane: pane("working.txt") });

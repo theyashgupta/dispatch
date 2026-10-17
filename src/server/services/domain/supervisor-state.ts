@@ -78,6 +78,7 @@ const DONE_MARKER =
   /^\s*(?:⏺\s*)?DISPATCH_STATUS:\s*DONE\b(?:\s*[\u2014\u2013-]\s*.*)?\s*$/;
 const API_ERROR_HEAD = /^\s*⏺\s*API Error\b/;
 const LIMIT_RESET_LINE = /limit\b.*\bresets?\s+\S/i;
+const LIMIT_MESSAGE = /^\s*You[\u2019']ve hit your (?:[\w-]+ )*limit\b/;
 
 function isCompleteLine(line: string): boolean {
   return COMPLETE_PROMISE.test(line) || DONE_MARKER.test(line);
@@ -339,7 +340,7 @@ export function detectState(input: DetectInput): Detection {
       { dialogKey: dialog.key },
     );
   }
-  const dialogMem = { dialogKey: dialog?.key ?? null };
+  let dialogMem = { dialogKey: dialog?.key ?? null };
 
   const transcriptLines = agentLines(
     inputAt >= 0 ? lines.slice(0, inputAt) : lines,
@@ -401,6 +402,24 @@ export function detectState(input: DetectInput): Detection {
       memory.state === "usage_limit_wait")
   ) {
     return done("usage_limit_wait", evidence("pane", resetLine), {}, dialogMem);
+  }
+  const limitTail = transcript?.lastAssistantText?.split("\n")[0];
+  if (
+    limitTail !== undefined &&
+    LIMIT_MESSAGE.test(limitTail) &&
+    !busy &&
+    dialog === null
+  ) {
+    const key = `tail-limit:${limitTail}`;
+    if (memory.dialogKey === key) {
+      return done(
+        "usage_limit_wait",
+        evidence("transcript", limitTail),
+        {},
+        { dialogKey: key },
+      );
+    }
+    dialogMem = { dialogKey: key };
   }
 
   if (busy) {

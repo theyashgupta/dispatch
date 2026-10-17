@@ -20,6 +20,7 @@ import {
   readRegistry,
   removeAccount,
 } from "./claude-accounts.js";
+import { expireLimit } from "../domain/account-state.js";
 import { readChainState } from "./account-chain-state.js";
 import { forgetChainAccount } from "./account-chain.js";
 import { forgetUsage, getUsage, usageBuckets } from "./claude-usage.js";
@@ -57,7 +58,8 @@ export function cacheHomeIdentity(identity: ClaudeIdentity): void {
  * List every account in chain order with its usage snapshot and chain fields for `GET /accounts`.
  *
  * @remarks `state`, `buckets` and `limitedUntil` come from the chain state file; an account the
- * controller has not read yet is `unknown` with the buckets of its usage snapshot.
+ * controller has not read yet is `unknown` with the buckets of its usage snapshot. A stored
+ * `limited` state whose `limitedUntil` passed reads `unknown` with no `limitedUntil`.
  */
 export async function listAccountSummaries(): Promise<ClaudeAccountSummary[]> {
   const [accounts, order, chain] = await Promise.all([
@@ -70,13 +72,19 @@ export async function listAccountSummaries(): Promise<ClaudeAccountSummary[]> {
     .map((a) => {
       const usage = getUsage(a.id);
       const entry = chain.accounts[a.id];
+      const stored = expireLimit(
+        {
+          state: entry?.state ?? "unknown",
+          limitedUntil: entry?.limitedUntil ?? null,
+        },
+        new Date(),
+      );
       return {
         ...a,
         usage,
         position: order.indexOf(a.id),
-        state: entry?.state ?? "unknown",
+        ...stored,
         buckets: entry?.buckets ?? usageBuckets(usage),
-        limitedUntil: entry?.limitedUntil ?? null,
         inUse: a.id === activeId,
       } satisfies ClaudeAccountSummary;
     })
