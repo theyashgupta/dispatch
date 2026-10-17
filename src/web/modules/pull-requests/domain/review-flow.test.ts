@@ -4,7 +4,9 @@ import type { BoardKey, Column, PrDetail } from "../../../../shared/types.js";
 import type { StartRequest } from "../../../../shared/start-request.js";
 import {
   reviewPullRequestWithAgent,
+  reviewButtonLabel,
   type ReviewFlowDeps,
+  type ReviewStep,
 } from "./review-flow.js";
 
 const target = { owner: "o", name: "r", repo: "o/r", number: 7 };
@@ -139,4 +141,38 @@ test("a failed move shows one notice and opens no dialog", async () => {
     "card",
     "notice Couldn't start the review. Try again.",
   ]);
+});
+
+test("a successful review reports loading, card, then start", async () => {
+  const steps: ReviewStep[] = [];
+  const { deps } = setup("inbox", { onStep: (step) => steps.push(step) });
+  await reviewPullRequestWithAgent(deps, target);
+  assert.deepEqual(steps, ["loading", "card", "start"]);
+});
+
+test("a detail failure reports only loading", async () => {
+  const steps: ReviewStep[] = [];
+  const { deps } = setup("inbox", {
+    onStep: (step) => steps.push(step),
+    loadDetail: () => Promise.resolve({ ok: false, error: "not-found" }),
+  });
+  await reviewPullRequestWithAgent(deps, target);
+  assert.deepEqual(steps, ["loading"]);
+});
+
+test("a card failure reports loading then card", async () => {
+  const steps: ReviewStep[] = [];
+  const { deps } = setup("inbox", {
+    onStep: (step) => steps.push(step),
+    openReviewCard: () => Promise.resolve({ ok: false, error: "no-workspace" }),
+  });
+  await reviewPullRequestWithAgent(deps, target);
+  assert.deepEqual(steps, ["loading", "card"]);
+});
+
+test("reviewButtonLabel names each step and the idle state", () => {
+  assert.equal(reviewButtonLabel(null), "Review with Claude");
+  assert.equal(reviewButtonLabel("loading"), "Reading pull request");
+  assert.equal(reviewButtonLabel("card"), "Opening review card");
+  assert.equal(reviewButtonLabel("start"), "Opening Start dialog");
 });

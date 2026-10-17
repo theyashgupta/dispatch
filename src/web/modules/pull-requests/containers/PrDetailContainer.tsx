@@ -5,10 +5,9 @@ import { fixCiPrompt } from "../../../../shared/agent-prompt.js";
 import { isWebUrl } from "../../../../shared/web-url.js";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { useSingleFlight } from "@/queries/single-flight";
-import {
-  PrDetail,
-  type PrComposer,
-} from "@/modules/pull-requests/components/PrDetail";
+import { PrDetail } from "@/modules/pull-requests/components/PrDetail";
+import type { PrComposer } from "@/modules/pull-requests/components/PrReviewActions";
+import type { ReviewStep } from "@/modules/pull-requests/domain/review-flow";
 import { prFailureText } from "@/modules/pull-requests/domain/pr-error-copy";
 import { reviewNotice } from "@/modules/pull-requests/domain/pr-detail-state";
 import {
@@ -20,7 +19,8 @@ import {
 interface PrDetailContainerProps {
   row: PrRow;
   onBack?: () => void;
-  reviewing: boolean;
+  reviewBusy: boolean;
+  reviewStep: ReviewStep | null;
   onReview: (row: PrRow) => void;
   onStartAgent: (row: PrRow, prompt: string) => void;
   onNotice: (text: string) => void;
@@ -29,7 +29,8 @@ interface PrDetailContainerProps {
 export function PrDetailContainer({
   row,
   onBack,
-  reviewing,
+  reviewBusy,
+  reviewStep,
   onReview,
   onStartAgent,
   onNotice,
@@ -41,7 +42,11 @@ export function PrDetailContainer({
 
   const label = `${row.repo}#${row.number}`;
   const ref = { owner: row.owner, repo: row.name, number: row.number };
-  const { data: result } = usePullRequestQuery(row.owner, row.name, row.number);
+  const {
+    data: result,
+    refetch,
+    isFetching,
+  } = usePullRequestQuery(row.owner, row.name, row.number);
   const detail = result?.ok ? result.detail : null;
   const loadError =
     result && !result.ok
@@ -95,8 +100,10 @@ export function PrDetailContainer({
         detail={detail}
         loading={result === undefined}
         loadError={loadError}
+        retrying={isFetching}
         busy={busy}
-        reviewing={reviewing}
+        reviewBusy={reviewBusy}
+        reviewStep={reviewStep}
         error={error}
         composer={composer}
         draft={draft}
@@ -114,6 +121,7 @@ export function PrDetailContainer({
         onFixCi={() =>
           detail && onStartAgent(row, fixCiPrompt(detail, row.repo, row.number))
         }
+        onRetry={() => void refetch()}
         onOpenOnGithub={() => {
           if (isWebUrl(row.url)) window.open(row.url, "_blank", "noopener");
         }}
