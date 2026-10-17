@@ -34,6 +34,7 @@ const { gitOutput, pushToBranch, pushToMain, shipStack, SHIP_IDENTITY } =
 const { setOrchestrationConfig } = await import("../infra/config-holder.js");
 const {
   resumeShipFlows,
+  runCheck,
   shipTools,
   startShip: startShipFlow,
 } = await import("./ship-flow.js");
@@ -232,7 +233,8 @@ async function assertSafeCalls(stack: Stack): Promise<void> {
     assert.equal(opts.maxBuffer, 64 * 1024 * 1024, line);
     const network =
       cmd === "git" && (args[0] === "push" || args[0] === "fetch");
-    const timeout = cmd === "env" ? 30 * 60_000 : network ? 300_000 : 120_000;
+    const timeout =
+      cmd === "env" ? 5400_000 + 30 * 60_000 : network ? 300_000 : 120_000;
     assert.equal(opts.timeout, timeout, line);
     if (cmd === "git" && args[0] === "push") {
       assert.equal(args.length, 4, line);
@@ -659,7 +661,13 @@ void test("with merge rights a two unit stack and its specs branch ship in order
   await assertSafeCalls(stack);
   const checkRuns = calls.filter((c) => c.cmd === "env");
   assert.equal(checkRuns.length, 3);
-  assert.deepEqual(checkRuns[0]?.args, ["-u", "NODE_ENV", "git", "status"]);
+  assert.deepEqual(checkRuns[0]?.args, [
+    "-u",
+    "NODE_ENV",
+    "DISPATCH_CHECK_WAIT_SECONDS=5400",
+    "git",
+    "status",
+  ]);
 });
 
 void test("startShip ships loop unit branches that only the unit Status line names", async () => {
@@ -1133,6 +1141,7 @@ void test("a LOCAL group finds the default check command of a workspace folder r
     assert.deepEqual(checkRun?.args, [
       "-u",
       "NODE_ENV",
+      "DISPATCH_CHECK_WAIT_SECONDS=5400",
       ...DEFAULT_CHECK_COMMAND.split(" "),
     ]);
   } finally {
@@ -1886,4 +1895,90 @@ void test("startShip treats a ticket card with no launch and a session branch as
     "not-group-card",
   );
   assert.deepEqual(calls, []);
+});
+
+type RunOptions = Parameters<typeof shipTools.run>[2];
+
+/**
+ * Replace the check call with one that ends only when `finish` is called or its signal aborts.
+ *
+ * @remarks The returned `opts` is the options object the check passed, so a test can feed slot
+ * gate lines to `onStderr` and read the abort state of `signal`.
+ */
+function heldCheck(): {
+  opts: () => NonNullable<RunOptions>;
+  finish: (err?: Error) => void;
+  restore: () => void;
+} {
+  const saved = shipTools.run;
+  let seen: RunOptions;
+  let settle: (err?: Error) => void = () => {};
+  shipTools.run = (_cmd, _args, opts) => {
+    seen = opts;
+    return new Promise((resolve, reject) => {
+      settle = (err) =>
+        err ? reject(err) : resolve({ stdout: "", stderr: "" });
+      opts?.signal?.addEventListener("abort", () =>
+        reject(new Error("aborted")),
+      );
+    });
+  };
+  return {
+    opts: () => seen!,
+    finish: (err) => settle(err),
+    restore: () => {
+      shipTools.run = saved;
+    },
+  };
+}
+
+const WAITING = "with-check-slot: waiting for a free slot, holders: 42 (/l)\n";
+
+void test("a check that waits 40 minutes for the slot and runs 5 minutes passes", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const check = heldCheck();
+  try {
+    const done = runCheck("/sbx", ["npm", "run", "check"]);
+    check.opts().onStderr?.(WAITING);
+    t.mock.timers.tick(40 * 60_000);
+    check.opts().onStderr?.("with-check-slot: acq");
+    check.opts().onStderr?.("uired\n");
+    t.mock.timers.tick(5 * 60_000);
+    check.finish();
+    await done;
+    assert.equal(check.opts().signal?.aborted, false);
+    assert.equal(check.opts().timeout, 5400_000 + 30 * 60_000);
+  } finally {
+    check.restore();
+  }
+});
+
+void test("a check that holds the slot 31 minutes fails", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const check = heldCheck();
+  try {
+    const done = runCheck("/sbx", ["npm", "run", "check"]);
+    check.opts().onStderr?.(WAITING + "with-check-slot: acquired\n");
+    t.mock.timers.tick(31 * 60_000);
+    await assert.rejects(done, /timed out after 30 minutes in the check slot/);
+  } finally {
+    check.restore();
+  }
+});
+
+void test("a failed check reports its own first line, not the slot gate lines", async () => {
+  const check = heldCheck();
+  try {
+    const done = runCheck("/sbx", ["npm", "run", "check"]);
+    check.finish(
+      Object.assign(new Error("Command failed: env"), {
+        stderr: WAITING + "with-check-slot: acquired\nlint: 2 problems\n",
+      }),
+    );
+    await assert.rejects(done, {
+      message: "check command failed: lint: 2 problems",
+    });
+  } finally {
+    check.restore();
+  }
 });

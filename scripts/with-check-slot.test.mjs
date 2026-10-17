@@ -199,6 +199,33 @@ test("keeps a slot held by a live process and gives up with 75", async () => {
   assert.equal(readFileSync(slot, "utf8"), String(process.pid));
 });
 
+test("prints the acquired line only after a wait", async () => {
+  const lockDir = scratchDir();
+  const slot = holdSlot(lockDir, 0, process.pid);
+  const waited = startGate(
+    lockDir,
+    { DISPATCH_CHECK_SLOTS: "1", DISPATCH_CHECK_WAIT_SECONDS: "10" },
+    process.execPath,
+    "-e",
+    "",
+  );
+  let seen = "";
+  waited.gate.stderr.on("data", (chunk) => (seen += chunk));
+  await waitFor(() => seen.includes("waiting for a free slot"));
+  rmSync(slot);
+  const { code, stderr } = await waited.done;
+  assert.equal(code, 0);
+  assert.match(stderr, /\nwith-check-slot: acquired\n$/);
+  const direct = startGate(
+    lockDir,
+    { DISPATCH_CHECK_SLOTS: "1" },
+    process.execPath,
+    "-e",
+    "",
+  );
+  assert.deepEqual(await direct.done, { code: 0, stderr: "" });
+});
+
 test("runs at once without a slot when DISPATCH_CHECK_SLOT_HELD is 1", async () => {
   const lockDir = scratchDir();
   const marker = join(scratchDir(), "ran");

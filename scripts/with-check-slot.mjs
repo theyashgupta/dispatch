@@ -265,4 +265,5 @@ try {
   );
   process.exit(2);
 }
+if (announced) console.error("with-check-slot: acquired");
 process.exit(await run({ ...env, DISPATCH_CHECK_SLOT_HELD: "1" }));
