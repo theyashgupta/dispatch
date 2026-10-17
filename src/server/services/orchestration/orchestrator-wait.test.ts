@@ -21,13 +21,14 @@ function append(
   board: BoardKey,
   kind: OrchestrationEventKind,
   cardId: string | null = null,
+  data: Record<string, unknown> = {},
 ): OrchestrationEvent {
   return store.appendOrchestrationEvent({
     boardKey: board,
     cardId,
     sessionId: null,
     kind,
-    data: {},
+    data,
     ts: new Date().toISOString(),
   });
 }
@@ -64,6 +65,25 @@ void test("a wrong kind, a wrong card or another board does not end the wait", a
   await sleep(100);
   assert.equal(ended, false);
   const event = append(SBX, "pr_state", "c1");
+  assert.deepEqual(await wait, { event });
+  assert.equal(listeners(), base);
+});
+
+void test("an intake_submitted event for another orchestrator does not end the wait, one for the caller does", async () => {
+  const base = listeners();
+  const wait = waitForEvent(
+    SBX,
+    { since: 0, kinds: ["intake_submitted"], orchestratorId: "feat-a" },
+    10_000,
+  );
+  let ended = false;
+  void wait.then(() => (ended = true));
+  append(SBX, "intake_submitted", "c9", { orchestratorId: "feat-b" });
+  await sleep(100);
+  assert.equal(ended, false);
+  const event = append(SBX, "intake_submitted", "c9", {
+    orchestratorId: "feat-a",
+  });
   assert.deepEqual(await wait, { event });
   assert.equal(listeners(), base);
 });

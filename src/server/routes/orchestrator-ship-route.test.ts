@@ -858,3 +858,53 @@ void test("start_ship does not refuse already-shipped for a card whose done flow
   assert.equal((reply.body.flow as ShipFlow).repository, stack.repo);
   await settled(card);
 });
+
+void test("a feature orchestrator ships a group that it owns, and another feature orchestrator gets out-of-scope", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const card = await finishedGroup();
+  const before = structuredClone(store.getBoard(SBX)!.orchestrators);
+  const feature = (id: string, groupIds: string[]) => ({
+    id,
+    name: id,
+    role: "extra" as const,
+    kind: "feature" as const,
+    scope: { groupIds, ticketIds: [] },
+    policyOverride: {},
+    cardId: null,
+    state: "stopped" as const,
+    createdAt: "2026-10-07T00:00:00.000Z",
+  });
+  try {
+    await store.setBoardOrchestrators(SBX, [
+      ...before,
+      feature("feat-a", [card.id]),
+      feature("feat-b", []),
+    ]);
+    const tokenOf = async (id: string) =>
+      (await raw("POST", `/boards/SBX/orchestrators/${id}/token`)).body
+        .token as string;
+    const tree = await freshTree("feature-tree");
+    await store.setLoopProgress(card.id, {
+      ...FINISHED,
+      units: FINISHED.units.map((u) => ({ ...u, branch: tree })),
+    });
+    const body = { repository: stack.repo, branches: [branch(tree)] };
+    const route = `/orchestrator/groups/${card.id}/ship`;
+    const denied = await raw("POST", route, body, await tokenOf("feat-b"));
+    assert.equal(denied.status, 403, JSON.stringify(denied.body));
+    assert.equal(denied.body.error, "out-of-scope");
+    assert.equal(store.getCard(card.id)?.shipFlow, undefined);
+    const allowed = await raw("POST", route, body, await tokenOf("feat-a"));
+    assert.equal(allowed.status, 202, JSON.stringify(allowed.body));
+    const flow = allowed.body.flow as ShipFlow;
+    assert.equal(flow.orchestratorId, "feat-a");
+    assert.equal(flow.rights, "merge");
+    await waitFor(
+      () => Promise.resolve(store.getCard(card.id)?.shipFlow?.state === "done"),
+      30_000,
+      "flow done",
+    );
+  } finally {
+    await store.setBoardOrchestrators(SBX, before);
+  }
+});

@@ -18,6 +18,7 @@ import { httpErrorHandler } from "./error-handler.js";
 import {
   addCommentHandler,
   approveRoadmapHandler,
+  assignCardHandler,
   createBaseBranchHandler,
   createBoardHandler,
   createDecisionItemHandler,
@@ -323,6 +324,10 @@ orchestratorRouter.get("/rulebook", tool("get_rulebook", getRulebookHandler));
 orchestratorRouter.post(
   "/cards/:cardId/start",
   tool("start_card", startCardHandler),
+);
+orchestratorRouter.post(
+  "/cards/:cardId/assign",
+  tool("assign_card", assignCardHandler),
 );
 
 orchestratorRouter.use(httpErrorHandler);

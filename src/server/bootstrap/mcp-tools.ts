@@ -81,7 +81,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "list_cards",
     description:
-      "List the cards on your board. You can filter by column, source or text.",
+      "List the cards on your board. You can filter by column, source or text. For a feature orchestrator, the list has only the cards assigned to you.",
     input: {
       column: columnField.optional(),
       source: z.string().min(1).optional(),
@@ -464,7 +464,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "start_card",
     description:
-      "Start the session of one ticket card with a playbook and a direction, the way the start dialog does. Omit repos to use the stored workspace of the card, else the board repositories with their base branch. A stored workspace with no repository counts as none, and a board with no repository answers no-repositories. A group card, a running card, a card in Done or Inbox, the Board Orchestrator playbook and a start at the concurrency cap are refused. Pass account, an account id from list_accounts or default, to start on that account; an unknown account is refused with unknown-account. Omit it to use the active account.",
+      "Start the session of one ticket card with a playbook and a direction, the way the start dialog does. Omit repos to use the stored workspace of the card, else the board repositories with their base branch. A stored workspace with no repository counts as none, and a board with no repository answers no-repositories. A group card, a running card, a card in Done or Inbox, the Board Orchestrator playbook and a start at the concurrency cap are refused. Pass account, an account id from list_accounts or default, to start on that account; an unknown account is refused with unknown-account. Omit it to use the active account. A feature orchestrator can start only its assigned cards; a card that is not assigned to it is refused with out-of-scope.",
     input: {
       ...cardIdParam,
       playbook: z.string().min(1).max(200),
@@ -475,5 +475,13 @@ export const MCP_TOOLS: readonly McpTool[] = [
     },
     method: "POST",
     path: "/cards/:cardId/start",
+  },
+  {
+    name: "assign_card",
+    description:
+      "Assign one card to you. Use it only when a direction that the user typed in your terminal names the card. Only a feature orchestrator can use it, and only for a card that the main orchestrator owns. A card of another feature orchestrator is refused with other-owner, a member of a group with group-member, and a call from the board orchestrator with not-feature-orchestrator. Only a card in To Do is accepted; another column is refused with not-todo.",
+    input: { ...cardIdParam },
+    method: "POST",
+    path: "/cards/:cardId/assign",
   },
 ];

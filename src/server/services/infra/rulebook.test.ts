@@ -93,3 +93,14 @@ void test("the rule book names release_prep, list_accounts and start_ship for a 
 void test("the rule book tells the orchestrator to read get_policy before it sends the ship rights to the release session", () => {
   assert.ok(markdown.includes("call `get_policy`. Then call `send_input`"));
 });
+
+void test("the rule book holds the feature orchestrator scope rules", () => {
+  for (const text of [
+    "### Scope",
+    "A feature orchestrator uses these rules in place of section 2:",
+    "Never start, stop or ship a card that is not assigned to you.",
+    "11. Acts, as a feature orchestrator, on a card that is not assigned to it.",
+  ]) {
+    assert.ok(markdown.includes(text), text);
+  }
+});
