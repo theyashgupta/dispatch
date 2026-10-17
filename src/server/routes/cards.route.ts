@@ -28,8 +28,9 @@ import {
   actionableCard,
   groupedMemberError,
   launchableCard,
-  moveCard,
-} from "../services/orchestration/card-move.js";
+} from "../services/orchestration/card-target.js";
+import { moveCard } from "../services/orchestration/card-move.js";
+import { setCardBlockedBy } from "../services/orchestration/card-blocked-by.js";
 import { unwindGroup } from "../services/orchestration/unwind.js";
 import { resetCard } from "../services/orchestration/reset.js";
 import { runClaude } from "../services/orchestration/run-claude.js";
@@ -63,6 +64,7 @@ import {
   attachmentParamsSchema,
   cardIdParamsSchema,
   cardListQuerySchema,
+  blockedByBodySchema,
   commentBodySchema,
   createCardBodySchema,
   createGroupBodySchema,
@@ -296,6 +298,12 @@ cardsRouter.put("/cards/:id/session/account-pin", async (req, res) => {
   }
   await store.setAccountPinned(card.id, sessionId, pinned);
   res.status(200).json({ pinned });
+});
+
+cardsRouter.put("/cards/:id/blocked-by", async (req, res) => {
+  const { blockedBy } = parseOrThrow(blockedByBodySchema, req.body);
+  const card = await setCardBlockedBy(actionableCard(req.params.id), blockedBy);
+  res.status(200).json({ card });
 });
 
 cardsRouter.post("/cards/:id/inbox-dismiss", async (req, res) => {
