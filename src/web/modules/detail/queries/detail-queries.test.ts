@@ -8,6 +8,7 @@ import {
   getCardComments,
   postCardComment,
   runClaude,
+  setCardBlockedBy,
   setCardLinearState,
 } from "./detail-api.js";
 import { openEditor, switchSession } from "@/queries/cards-api";
@@ -240,4 +241,36 @@ test("assignCardToMe and setCardLinearState resolve ok on a 2xx", async () => {
   reply(200, {}, "OK");
   assert.deepEqual(await assignCardToMe("c1"), { ok: true });
   assert.deepEqual(await setCardLinearState("c1", "st1"), { ok: true });
+});
+
+test("setCardBlockedBy sends a PUT with the JSON body and resolves ok", async () => {
+  reply(200, { card: {} }, "OK");
+  assert.deepEqual(await setCardBlockedBy("c1", ["a", "b"]), { ok: true });
+  assert.equal(calls[0]?.url, "/api/cards/c1/blocked-by");
+  assert.equal(calls[0]?.init?.method, "PUT");
+  assert.equal(calls[0]?.init?.body, JSON.stringify({ blockedBy: ["a", "b"] }));
+});
+
+test("setCardBlockedBy keeps a 400 refusal with its reason", async () => {
+  reply(
+    400,
+    { error: "blocked-by-cycle", reason: "A -> B -> A" },
+    "Bad Request",
+  );
+  assert.deepEqual(await setCardBlockedBy("c1", ["b"]), {
+    ok: false,
+    status: 400,
+    error: "blocked-by-cycle",
+    reason: "A -> B -> A",
+  });
+});
+
+test("setCardBlockedBy resolves status 0 on a network failure", async () => {
+  globalThis.fetch = () => Promise.reject(new TypeError("offline"));
+  assert.deepEqual(await setCardBlockedBy("c1", []), {
+    ok: false,
+    status: 0,
+    error: null,
+    reason: null,
+  });
 });
