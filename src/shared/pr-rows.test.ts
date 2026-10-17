@@ -98,6 +98,46 @@ test("each non-done GitHub item becomes a row with its meta", () => {
   );
 });
 
+const AVATAR = "https://avatars.githubusercontent.com/u/1?v=4";
+
+function rowWith(meta: Record<string, string>) {
+  return buildPrRows([item(1, "acme/api", {}, meta)], [])[0];
+}
+
+test("the avatar guard keeps a URL on the GitHub avatars host", () => {
+  assert.equal(rowWith({ authorAvatar: AVATAR })?.authorAvatar, AVATAR);
+});
+
+test("the avatar guard empties every other URL", () => {
+  for (const bad of [
+    "http://avatars.githubusercontent.com/u/1",
+    "https://evil.example/a.png",
+    "javascript:alert(1)",
+    "https://avatars.githubusercontent.com.evil.example/x",
+    "",
+  ]) {
+    assert.equal(rowWith({ authorAvatar: bad })?.authorAvatar, "", bad);
+  }
+  assert.equal(rowWith({})?.authorAvatar, "");
+});
+
+test("mergeable maps the GitHub value and falls back to unknown", () => {
+  assert.equal(rowWith({ mergeable: "MERGEABLE" })?.mergeable, "mergeable");
+  assert.equal(rowWith({ mergeable: "CONFLICTING" })?.mergeable, "conflicting");
+  assert.equal(rowWith({ mergeable: "UNKNOWN" })?.mergeable, "unknown");
+  assert.equal(rowWith({})?.mergeable, "unknown");
+  assert.equal(rowWith({ mergeable: "weird" })?.mergeable, "unknown");
+});
+
+test("card-derived rows have no avatar and an unknown mergeable state", () => {
+  const rows = buildPrRows(
+    [],
+    [card("LOCAL-9", [pr("https://github.com/acme/api/pull/5")])],
+  );
+  assert.equal(rows[0]?.authorAvatar, "");
+  assert.equal(rows[0]?.mergeable, "unknown");
+});
+
 test("a session PR matching an item merges into that row with Yours", () => {
   const rows = buildPrRows(
     [item(12)],

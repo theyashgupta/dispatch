@@ -5,6 +5,7 @@ import {
   bindShortcuts,
   GLOBAL_SHORTCUTS,
   INBOX_SHORTCUTS,
+  isEditableRole,
   SESSIONS_SHORTCUTS,
   resolveShortcut,
   type ShortcutBinding,
@@ -281,4 +282,17 @@ test("b is inert in a text field, with a modifier, in a dialog and in a menu", (
     resolveShortcut(key("b"), switchBoard, { ...idle, menuOpen: true }),
     null,
   );
+});
+
+test("isEditableRole flags a combobox or listbox and nothing else", () => {
+  const withRole = (role: string | null) => ({
+    tagName: "BUTTON",
+    getAttribute: (name: string) => (name === "role" ? role : null),
+  });
+  assert.equal(isEditableRole(withRole("combobox")), true);
+  assert.equal(isEditableRole(withRole("listbox")), true);
+  assert.equal(isEditableRole(withRole("button")), false);
+  assert.equal(isEditableRole(withRole(null)), false);
+  assert.equal(isEditableRole({ tagName: "BUTTON" }), false);
+  assert.equal(isEditableRole(null), false);
 });

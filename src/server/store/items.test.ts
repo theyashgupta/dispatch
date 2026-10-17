@@ -281,6 +281,26 @@ test("buildPromotedCard leaves the Slack relevance meta out of the description",
   assert.equal(card.description, "Snippet a\n\n- channel: #ops");
 });
 
+test("buildPromotedCard leaves the GitHub author avatar out of the description and keeps mergeable", () => {
+  const card = buildPromotedCard(
+    item("a", {
+      meta: {
+        repo: "acme/app",
+        authorAvatar: "https://avatars.example.test/u/1",
+        mergeable: "mergeable",
+      },
+    }),
+    DEFAULT_BOARD_KEY,
+    "LOCAL-9",
+    NOW,
+  );
+  assert.equal(
+    card.description,
+    "Snippet a\n\n- repo: acme/app\n- mergeable: mergeable",
+  );
+  assert.ok(!card.description?.includes("authorAvatar"));
+});
+
 test("buildPromotedCard caps the title and description and drops an empty description", () => {
   const long = buildPromotedCard(
     item("a", { title: "t".repeat(400), snippet: "s".repeat(30000), meta: {} }),

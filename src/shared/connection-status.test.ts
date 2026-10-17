@@ -119,6 +119,10 @@ test("Granola status maps to checking, off, each error copy and connected with t
     GRANOLA_ERROR_COPY["claude-missing"],
     "Claude Code is not installed or not on PATH.",
   );
+  assert.equal(
+    GRANOLA_ERROR_COPY["connector-unavailable"],
+    "Claude Code lists the Granola connector, but the background call could not load it. Press Check connection to try again.",
+  );
   assert.deepEqual(
     granolaCardStatus({ ...base, server: "claude.ai Granola" }),
     {
