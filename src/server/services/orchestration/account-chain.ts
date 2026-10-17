@@ -15,7 +15,7 @@ import {
   filterByHysteresis,
   passesHysteresis,
   selectAccount,
-  type ChainCandidate,
+  type BucketedCandidate,
 } from "../domain/account-selection.js";
 import {
   deriveAccountState,
@@ -234,9 +234,8 @@ async function persist(): Promise<void> {
   await writeChainState(chain);
 }
 
-async function candidates(): Promise<
-  (ChainCandidate & Pick<ChainAccountEntry, "buckets">)[]
-> {
+/** Read the chain accounts in position order with their stored state and buckets. */
+export async function limitMoveCandidates(): Promise<BucketedCandidate[]> {
   return (await readChainOrder()).map((id) => ({
     id,
     state: chain.accounts[id]?.state ?? "unknown",
@@ -248,8 +247,9 @@ async function candidates(): Promise<
 /**
  * Derive and store one account's chain state from a usage snapshot and an optional limit signal.
  *
- * @remarks A limited account stays limited until its `limitedUntil` passes, and its return timer
- * outlives any read that clears it, so only the timer returns the work.
+ * @remarks A read that is not ok, or is ok with no windows, keeps a limited account limited until its `limitedUntil` passes,
+ * while a fresh ok read that derives another state replaces it. The return timer outlives that
+ * clear, so only the timer returns the work.
  */
 async function ingest(
   id: string,
@@ -267,6 +267,7 @@ async function ingest(
   );
   const prior = chain.accounts[id];
   const held =
+    (usage.status !== "ok" || usage.windows.length === 0) &&
     prior?.state === "limited" &&
     derived.state !== "limited" &&
     derived.state !== "login-expired" &&
@@ -382,7 +383,7 @@ async function moveTo(
 async function failover(reason: string, hysteresis = false): Promise<void> {
   const from = getActiveAccountId();
   const now = new Date(deps.now());
-  const all = await candidates();
+  const all = await limitMoveCandidates();
   const { thresholdPercent, hysteresisPercent } = getClaudeAccountsSettings();
   const selection = selectAccount(
     hysteresis
@@ -567,7 +568,10 @@ async function checkExhausted(): Promise<void> {
     fresh.add(id);
   }
   const inUse = getActiveAccountId();
-  const selection = selectAccount(await candidates(), new Date(deps.now()));
+  const selection = selectAccount(
+    await limitMoveCandidates(),
+    new Date(deps.now()),
+  );
   if (selection.exhausted) {
     await markExhausted(inUse, selection.earliestReset);
     return;
@@ -625,7 +629,7 @@ export function forgetChainAccount(id: string): Promise<void> {
 export function requestFailover(reason: string): Promise<FailoverResult> {
   return enqueue(async (): Promise<FailoverResult> => {
     const from = getActiveAccountId();
-    const others = (await candidates()).filter((c) => c.id !== from);
+    const others = (await limitMoveCandidates()).filter((c) => c.id !== from);
     const selection = selectAccount(others, new Date(deps.now()));
     if (selection.exhausted) return { ok: false, error: "no-eligible-account" };
     const moves = await moveTo(selection.id, "failover", reason);

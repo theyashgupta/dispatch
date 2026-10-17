@@ -736,13 +736,13 @@ void test("turning autoMove off drops every move the chain queued (U2-15)", asyn
   assert.equal(sessionOf(busy)?.pendingClaudeAccountId, undefined);
 });
 
-void test("a hook limit with no surface on screen moves the session without Continue. (C-03b)", async () => {
+void test("a hook limit with no surface on screen moves the session and sends Continue. (C-03b)", async () => {
   await begin();
   const s = await sessionCard("hl-idle");
   recordTurnEvent(s.cardId, s.sessionId, "StopFailure", "rate_limit");
   await whenChainIdle();
   assert.equal(sessionOf(s)?.claudeAccountId, ACCOUNT_A);
-  assert.equal(continued("hl-idle"), false);
+  assert.equal(continued("hl-idle"), true);
 });
 
 void test("Continue. is not typed when Claude is not ready after the move or the pane shows a surface (C-05)", async () => {
@@ -1056,13 +1056,32 @@ void test("a return never moves work down the chain", async () => {
   assert.deepEqual(events, []);
 });
 
-void test("a read below the threshold before limitedUntil keeps the account limited, so a failover skips it", async () => {
+void test("an ok read below the threshold before limitedUntil clears the limit, so a failover may select the account", async () => {
+  await begin();
+  const s = await sessionCard("hd-clear");
+  await handleUsageRead("default", usage(100, iso(BASE + 60 * MIN)));
+  assert.equal(getActiveAccountId(), ACCOUNT_A);
+  await advance(5 * MIN);
+  await handleUsageRead("default", usage(10));
+  const saved = await readChainState();
+  assert.equal(saved.accounts.default?.state, "available");
+  assert.equal(saved.accounts.default?.limitedUntil, null);
+  assert.equal(getActiveAccountId(), ACCOUNT_A);
+  assert.ok(chainTimers().some((t) => t.key === "return:default"));
+
+  await handleUsageRead(ACCOUNT_A, usage(100, iso(BASE + 90 * MIN)));
+  claudeInForeground();
+  await handleLimitSignal(s.cardId, s.sessionId, null);
+  assert.equal(getActiveAccountId(), "default");
+});
+
+void test("a rate-limited read before limitedUntil keeps the account limited, so a failover skips it", async () => {
   await begin();
   const s = await sessionCard("hd-held");
   await handleUsageRead("default", usage(100, iso(BASE + 60 * MIN)));
   assert.equal(getActiveAccountId(), ACCOUNT_A);
   await advance(5 * MIN);
-  await handleUsageRead("default", usage(10));
+  await handleUsageRead("default", failedRead("rate-limited"));
   const saved = await readChainState();
   assert.equal(saved.accounts.default?.state, "limited");
   assert.equal(saved.accounts.default?.limitedUntil, iso(BASE + 60 * MIN));
@@ -1070,6 +1089,28 @@ void test("a read below the threshold before limitedUntil keeps the account limi
   claudeInForeground();
   await handleLimitSignal(s.cardId, s.sessionId, null);
   assert.equal(getActiveAccountId(), ACCOUNT_B);
+});
+
+void test("an ok read with no windows before limitedUntil keeps the account limited", async () => {
+  await begin();
+  await sessionCard("hd-empty");
+  await handleUsageRead("default", usage(100, iso(BASE + 60 * MIN)));
+  await advance(5 * MIN);
+  await handleUsageRead("default", { ...usage(10), windows: [] });
+  const saved = await readChainState();
+  assert.equal(saved.accounts.default?.state, "limited");
+  assert.equal(saved.accounts.default?.limitedUntil, iso(BASE + 60 * MIN));
+});
+
+void test("an ok read at the threshold before limitedUntil keeps the account limited", async () => {
+  await begin();
+  await sessionCard("hd-at");
+  await handleUsageRead("default", usage(100, iso(BASE + 60 * MIN)));
+  await advance(5 * MIN);
+  await handleUsageRead("default", usage(100, iso(BASE + 90 * MIN)));
+  const saved = await readChainState();
+  assert.equal(saved.accounts.default?.state, "limited");
+  assert.equal(saved.accounts.default?.limitedUntil, iso(BASE + 90 * MIN));
 });
 
 void test("the exhausted check never continues on an account it has no fresh ok read for, even when a poll cleared it", async () => {
