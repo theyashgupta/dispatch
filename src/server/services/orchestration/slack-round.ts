@@ -1,4 +1,3 @@
-import { run } from "../../adapters/exec.js";
 import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
 import { startEnabledPollers } from "../../adapters/poller.js";
 import {
@@ -16,6 +15,7 @@ import type {
   SlackThread,
 } from "../../../shared/types.js";
 import { nextRunDelay, roundSince } from "./granola-actions.js";
+import { connectorLoaded, runConnectorCall } from "./connector-call.js";
 import {
   mcpToolPrefix,
   pickConnector,
@@ -23,7 +23,6 @@ import {
   type ConnectorCheck,
 } from "./connector-list.js";
 import { getOrchestrationConfig, slackMode } from "../infra/config-holder.js";
-import { DISPATCH_DIR } from "../infra/paths.js";
 import {
   parseChannelsOutput,
   parseRoundOutput,
@@ -36,16 +35,11 @@ const CURSOR_KEY = "mcp";
 const ORIGIN = /^https:\/\/[a-z0-9-]+\.slack\.com$/;
 const SLACK_SERVER = /slack/i;
 const ROUND_TIMEOUT_MS = 300_000;
-const KILL_GRACE_MS = 5_000;
 const FIRST_ROUND_HOURS = 24;
 const DEFAULT_INTERVAL_MINUTES = 30;
 const CALL_TIMEOUT_MS = 90_000;
 const CONNECTOR_MAX_AGE_MS = 60_000;
 const CHANNELS_TTL_MS = 600_000;
-const MCP_WAIT_ENV = {
-  CLAUDE_CODE_MCP_STARTUP_WAIT_MS: "60000",
-  MCP_TIMEOUT: "60000",
-};
 const FORBID_LINE =
   "Read only with the Slack tools. Never send, post, reply, react, edit, delete, schedule, draft or upload anything in Slack.";
 
@@ -53,7 +47,9 @@ export type SlackRunResult =
   "started" | "running" | "disabled" | "not-connected";
 
 type SlackConnectorRead =
-  ConnectorCheck | { state: "claude-missing" | "failed" };
+  | ConnectorCheck
+  | { state: "claude-missing" | "failed" }
+  | { state: "connector-unavailable"; server: string };
 
 export const SLACK_READ_TOOLS: readonly string[] = [
   "mcp__claude_ai_Slack__slack_read_user_profile",
@@ -88,6 +84,7 @@ export const SLACK_HIDDEN_TOOLS: readonly string[] = [
   "mcp__claude_ai_Slack__slack_complete_file_upload",
 ];
 
+const PROFILE_TOOL = "mcp__claude_ai_Slack__slack_read_user_profile";
 const THREAD_TOOL = "mcp__claude_ai_Slack__slack_read_thread";
 const CHANNELS_TOOL = "mcp__claude_ai_Slack__slack_list_user_channels";
 
@@ -182,12 +179,10 @@ export function buildSlackRoundPrompt(
 }
 
 /**
- * Run one restricted `claude -p` call with only the given tools allowed and return its stdout.
+ * Run one isolated `claude -p` call with only the given tools allowed and return its stdout.
  *
- * @remarks The restricted flag keeps the user's settings files out of the call, and an empty tools
- * list drops every built-in tool, so the allowed list is the whole reach of the model. The deny list
- * hides every other Slack tool, and the `dontAsk` mode refuses a write tool even when a prompt injection
- * asks for one.
+ * @remarks The shared connector call builder isolates the call. The deny list hides every other Slack
+ * tool, and the `dontAsk` mode refuses a write tool even when a prompt injection asks for one.
  */
 export async function runSlackCall(input: {
   tools: readonly string[];
@@ -198,39 +193,14 @@ export async function runSlackCall(input: {
 }): Promise<string> {
   const claude = await resolveBinaryPath("claude");
   if (claude === null) throw new Error("claude-missing");
-  const { stdout } = await run(
-    claude,
-    [
-      "-p",
-      "--restricted",
-      "--output-format",
-      "stream-json",
-      "--verbose",
-      "--model",
-      "sonnet",
-      "--tools",
-      "",
-      "--allowedTools",
-      input.tools.join(","),
-      "--disallowedTools",
-      input.blocked.join(","),
-      "--permission-mode",
-      "dontAsk",
-      "--permission-prompts",
-      "none",
-      "--no-session-persistence",
-    ],
-    {
-      cwd: DISPATCH_DIR,
-      timeout: input.timeoutMs + KILL_GRACE_MS,
-      maxBuffer: 10 * 1024 * 1024,
-      signal: input.signal,
-      killEscalationMs: KILL_GRACE_MS,
-      input: input.prompt,
-      env: MCP_WAIT_ENV,
-    },
-  );
-  return stdout;
+  return runConnectorCall(claude, {
+    allowed: input.tools,
+    blocked: input.blocked,
+    outputFormat: "stream-json",
+    prompt: input.prompt,
+    signal: input.signal,
+    timeoutMs: input.timeoutMs,
+  });
 }
 
 function slackIntervalMs(): number {
@@ -299,6 +269,36 @@ export async function slackConnector(): Promise<SlackConnectorRead> {
       connectorFlight = null;
     });
   return connectorFlight;
+}
+
+/**
+ * Check connection: a fresh `claude mcp list`, then the background call, and cache the answer for the status route.
+ */
+export async function checkSlackConnection(): Promise<SlackConnectorRead> {
+  try {
+    const claude = await resolveBinaryPath("claude");
+    if (claude === null) return { state: "claude-missing" };
+    const read = pickConnector(await readMcpList(claude), SLACK_SERVER);
+    let result: SlackConnectorRead = read;
+    if (read.state === "connected") {
+      const tools = [serverTool(read.server, PROFILE_TOOL)];
+      const stdout = await runConnectorCall(claude, {
+        allowed: tools,
+        blocked: slackBlockedTools(read.server, tools),
+        outputFormat: "stream-json",
+        prompt: [FORBID_LINE, "Reply with only OK."].join("\n"),
+        timeoutMs: CALL_TIMEOUT_MS,
+      });
+      if (!connectorLoaded(stdout, read.server)) {
+        result = { state: "connector-unavailable", server: read.server };
+      }
+    }
+    connectorCache = { at: Date.now(), read: result };
+    return result;
+  } catch {
+    connectorCache = null;
+    return { state: "failed" };
+  }
 }
 
 /**
@@ -377,6 +377,11 @@ async function runRound(
     });
     const parsed = parseRoundOutput(stdout, tools);
     if (!parsed.ok) {
+      if (parsed.reason === "no-connector") {
+        console.warn("[slack] round had no Slack tool");
+        finish({ lastError: "connector-unavailable" });
+        return;
+      }
       if (parsed.reason === "no-slack-tool") {
         console.warn("[slack] round had no Slack tool");
         finish({ lastError: "failed" });
