@@ -1,4 +1,5 @@
 import { isHiddenCard } from "../../../../shared/hidden-card.js";
+import { scopeLabel } from "../../../../shared/orchestrator-owner.js";
 import type {
   Card,
   OrchestratorPolicyOverride,
@@ -13,7 +14,7 @@ import {
 
 export type OwnerRecord = Pick<
   OrchestratorRecord,
-  "id" | "name" | "role" | "scope" | "policyOverride" | "lastWake"
+  "id" | "name" | "role" | "kind" | "scope" | "policyOverride" | "lastWake"
 >;
 
 export interface ScopeRow {
@@ -33,11 +34,6 @@ export interface MovePlan {
   steps: ScopeStep[];
   blocked: string | null;
 }
-
-export const MAIN_SCOPE_TEXT = "Each group that no extra owns";
-
-export const NEEDS_SCOPE_HINT =
-  "An extra orchestrator needs at least one group or ticket.";
 
 function isOpen(card: Card): boolean {
   return card.column !== "done" && !isHiddenCard(card);
@@ -256,7 +252,7 @@ export function orchestratorRows(
       id: record.id,
       name: record.name,
       role: isMain ? "Main" : "Extra",
-      scope: isMain ? MAIN_SCOPE_TEXT : owned.join(", "),
+      scope: scopeLabel(record, cards),
       owns: owned.length === 0 ? "None" : owned.join(", "),
       policy: policy.length === 0 ? "Board policy" : policy.join(", "),
       lastWake: lastWakeLabel(record.lastWake, timeZone),

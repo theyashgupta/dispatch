@@ -1,4 +1,4 @@
-import type { LinearComment } from "../../../../shared/types.js";
+import type { BoardKey, LinearComment } from "../../../../shared/types.js";
 import { http, httpError } from "@/lib/http";
 
 /**
@@ -145,5 +145,36 @@ export async function setCardBlockedBy(
     };
   } catch {
     return { ok: false, status: 0, error: null, reason: null };
+  }
+}
+
+type SetCardOrchestratorResult =
+  { ok: true } | { ok: false; status: number; error: string | null };
+
+/**
+ * Move a card to an orchestrator: PUT /api/boards/:board/cards/:id/orchestrator.
+ *
+ * @remarks
+ * A refusal resolves as typed data, with the server's `error` code read from the failure body.
+ * `status` is 0 when the request never got an answer.
+ */
+export async function setCardOrchestrator(
+  board: BoardKey,
+  id: string,
+  orchestratorId: string,
+): Promise<SetCardOrchestratorResult> {
+  try {
+    const result = await http(
+      `/api/boards/${encodeURIComponent(board)}/cards/${encodeURIComponent(id)}/orchestrator`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orchestratorId }),
+      },
+    );
+    if (result.ok) return { ok: true };
+    return { ok: false, status: result.status, error: result.error };
+  } catch {
+    return { ok: false, status: 0, error: null };
   }
 }

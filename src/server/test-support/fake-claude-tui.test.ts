@@ -634,7 +634,7 @@ void test(
 );
 
 void test(
-  "the second-claim fixture run by a second extra is refused with other-owner and starts nothing",
+  "the second-claim fixture run by a second extra is refused with out-of-scope and starts nothing",
   { timeout: 60000 },
   async () => {
     const CLM = parseBoardKey("CLM") as BoardKey;
@@ -681,7 +681,7 @@ void test(
       ],
     );
     assert.equal(lines[0]?.isError, true);
-    assert.match(String(lines[0]?.excerpt), /other-owner/);
+    assert.match(String(lines[0]?.excerpt), /out-of-scope/);
     assert.equal(JSON.stringify(store.getCard(group)), before);
   },
 );

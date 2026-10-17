@@ -56,6 +56,7 @@ const SERVER: Record<string, ServerSide> = {
     params: schemas.sessionCardParamsSchema,
     body: schemas.startCardBodySchema,
   },
+  assign_card: { params: schemas.sessionCardParamsSchema },
   send_input: {
     params: schemas.sessionCardParamsSchema,
     body: schemas.sendInputBodySchema,
@@ -127,6 +128,7 @@ const VALID: Record<string, Record<string, unknown>> = {
     folder: "/f",
     repos: [{ path: "/r", base: "main" }],
   },
+  assign_card: { cardId: ID },
   send_input: { cardId: ID, text: "go" },
   approve_roadmap: { cardId: ID, decisionIds: ["d-1"] },
   request_handoff: { cardId: ID, hard: true },
@@ -225,6 +227,7 @@ const REFUSED: [string, Record<string, unknown>][] = [
       direction: "d".repeat(limits.DIRECTION_MAX + 1),
     },
   ],
+  ["assign_card", { cardId: "" }],
   ["send_input", { cardId: ID, text: "" }],
   [
     "send_input",

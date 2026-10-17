@@ -26,10 +26,11 @@ import {
   boardRefusal,
   callerPolicy,
   dependencyDone,
-  isLiveSessionCard,
   getBoard,
+  isLiveSessionCard,
   isRunningCard,
   runningLoops,
+  scopeRefusalCode,
   scopeTargetOf,
   withCapLock,
 } from "./boards.js";
@@ -164,7 +165,7 @@ export async function createOrchestratorGroup(
     const member = store.getCard(id);
     const scope = member && checkScope(caller, scopeTargetOf(member));
     if (scope && !scope.ok && scope.reason === "other-owner") {
-      throw new ForbiddenError("other-owner");
+      throw new ForbiddenError(scopeRefusalCode(caller, scope.reason));
     }
   }
   const dependsOn = input.dependsOn ?? [];

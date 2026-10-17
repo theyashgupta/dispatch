@@ -101,6 +101,7 @@ import { CardTimelineContainer } from "./CardTimelineContainer";
 import { canBeBlocked } from "../../../../shared/blocked-by.js";
 import { BlockedByFieldContainer } from "./BlockedByFieldContainer";
 import { LinearSectionContainer } from "./LinearSectionContainer";
+import { OrchestratorFieldContainer } from "./OrchestratorFieldContainer";
 
 export function DetailPanelContainer() {
   const { appStore } = useRouteContext({ from: "__root__" });
@@ -396,6 +397,13 @@ export function DetailPanelContainer() {
       />
       {c != null && canBeBlocked(c) && (
         <BlockedByFieldContainer key={c.id} card={c} cards={cards ?? []} />
+      )}
+      {c != null && (
+        <OrchestratorFieldContainer
+          key={c.id}
+          card={c}
+          board={c.boardKey ?? DEFAULT_BOARD_KEY}
+        />
       )}
       {c != null && (c.source ?? "linear") === "linear" && (
         <LinearSectionContainer key={c.id} card={c} />

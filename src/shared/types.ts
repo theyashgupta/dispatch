@@ -1859,6 +1859,8 @@ export type OrchestratorPolicyOverride = Partial<
   >
 >;
 
+export type OrchestratorKind = "board" | "feature";
+
 export interface OrchestratorScope {
   groupIds: string[];
   ticketIds: string[];
@@ -1868,6 +1870,7 @@ export interface OrchestratorRecord {
   id: string;
   name: string;
   role: "main" | "extra";
+  kind?: OrchestratorKind;
   scope: OrchestratorScope;
   policyOverride: OrchestratorPolicyOverride;
   cardId: string | null;

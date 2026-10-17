@@ -151,6 +151,39 @@ void test("add accepts a main and an extra and lists both with their session vie
   assert.equal(rows[0]?.session, null);
 });
 
+void test("add stores the kind: an extra with an empty scope is a feature, the main is a board, a role and kind mismatch is 400", async () => {
+  const keptRecords = records();
+  try {
+    const empty = await call("POST", R, {
+      id: "feat",
+      name: "Feature",
+      role: "extra",
+    });
+    assert.equal(empty.status, 201);
+    assert.equal(
+      (empty.body.orchestrator as OrchestratorRecord).kind,
+      "feature",
+    );
+    const before = JSON.stringify(records());
+    const mismatch = await call("POST", R, {
+      id: "wrong",
+      name: "Wrong",
+      role: "extra",
+      kind: "board",
+    });
+    assert.equal(mismatch.status, 400);
+    assert.equal(mismatch.body.error, "kind-mismatch");
+    assert.equal(JSON.stringify(records()), before);
+    const patched = await call("PATCH", `${R}/feat`, { kind: "board" });
+    assert.equal(patched.status, 400);
+    assert.equal(patched.body.error, "unknown-field");
+    assert.equal(JSON.stringify(records()), before);
+  } finally {
+    await store.setBoardOrchestrators(SBX, keptRecords);
+  }
+  assert.equal(records().find((r) => r.id === "lead")?.kind, "board");
+});
+
 void test("add refuses bad bodies before any write", async () => {
   const before = JSON.stringify(records());
   const cases: [unknown, number, string][] = [
@@ -492,4 +525,100 @@ void test("a start whose mcp config write fails answers the JSON error shape, ne
     store.listAllCards(FLR).filter((c) => c.source === "orchestrator").length,
     1,
   );
+});
+
+void test("assign moves the owner of a card, wakes a feature orchestrator once and refuses bad requests", async () => {
+  const ASN = parseBoardKey("ASN") as BoardKey;
+  await store.createBoard({
+    key: ASN,
+    name: "ASN",
+    workspaceRoot: "/asn/sessions",
+    repositories: [],
+    linearTeamKeys: [],
+  });
+  for (const id of ["lead", "feata", "featb"]) {
+    const reply = await call("POST", "/boards/ASN/orchestrators", {
+      id,
+      name: id,
+      role: id === "lead" ? "main" : "extra",
+    });
+    assert.equal(reply.status, 201);
+  }
+  const ticket = await store.createLocalCard(ASN, "loose", "");
+  const m1 = await store.createLocalCard(ASN, "member 1", "");
+  const m2 = await store.createLocalCard(ASN, "member 2", "");
+  const grouped = await store.createGroupCard(ASN, "bundle", [m1.id, m2.id]);
+  if (!grouped.ok) throw new Error("group not created");
+  const stranger = await store.createLocalCard(OFF, "other board", "");
+  const scopeOf = (id: string) =>
+    records(ASN).find((r) => r.id === id)?.scope as {
+      groupIds: string[];
+      ticketIds: string[];
+    };
+  const intakes = () =>
+    store
+      .listOrchestrationEvents(ASN, 0, 100)
+      .filter((e) => e.kind === "intake_submitted");
+  const put = (cardId: string, orchestratorId: string, token?: string) =>
+    call(
+      "PUT",
+      `/boards/ASN/cards/${cardId}/orchestrator`,
+      { orchestratorId },
+      token,
+    );
+
+  const first = await put(ticket.id, "feata");
+  assert.equal(first.status, 200);
+  assert.deepEqual(first.body, {
+    cardId: ticket.id,
+    orchestratorId: "feata",
+    changed: true,
+  });
+  assert.deepEqual(scopeOf("feata").ticketIds, [ticket.id]);
+  assert.equal(intakes().length, 1);
+  assert.deepEqual(intakes()[0]?.data, {
+    orchestratorId: "feata",
+    cardId: ticket.id,
+    goal: `Assigned card ${ticket.identifier}: ${ticket.title}`,
+    requirements: null,
+  });
+
+  const again = await put(ticket.id, "feata");
+  assert.equal(again.status, 200);
+  assert.equal(again.body.changed, false);
+  assert.equal(intakes().length, 1);
+
+  assert.equal((await put(ticket.id, "featb")).status, 200);
+  assert.deepEqual(scopeOf("feata").ticketIds, []);
+  assert.deepEqual(scopeOf("featb").ticketIds, [ticket.id]);
+  assert.equal(intakes().length, 2);
+
+  const home = await put(ticket.id, "lead");
+  assert.equal(home.status, 200);
+  assert.equal(home.body.changed, true);
+  assert.deepEqual(scopeOf("feata").ticketIds, []);
+  assert.deepEqual(scopeOf("featb").ticketIds, []);
+  assert.equal(intakes().length, 2);
+
+  assert.equal((await put(grouped.card.id, "feata")).status, 200);
+  assert.deepEqual(scopeOf("feata").groupIds, [grouped.card.id]);
+
+  const before = JSON.stringify(records(ASN));
+  const member = await put(m1.id, "feata");
+  assert.equal(member.status, 400);
+  assert.equal(member.body.error, "group-member");
+  assert.equal((await put("nope", "feata")).status, 404);
+  assert.equal((await put(stranger.id, "feata")).status, 404);
+  const unknown = await put(ticket.id, "ghost");
+  assert.equal(unknown.status, 404);
+  assert.equal(unknown.body.error, "unknown-orchestrator");
+  const token = mintOrchestratorToken({
+    boardKey: ASN,
+    orchestratorId: "lead",
+  });
+  const refused = await put(ticket.id, "featb", token);
+  assert.equal(refused.status, 403);
+  assert.equal(refused.body.error, "orchestrator-token-on-user-route");
+  assert.equal(JSON.stringify(records(ASN)), before);
+  assert.equal(intakes().length, 3);
 });

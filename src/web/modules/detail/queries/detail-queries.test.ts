@@ -10,6 +10,7 @@ import {
   runClaude,
   setCardBlockedBy,
   setCardLinearState,
+  setCardOrchestrator,
 } from "./detail-api.js";
 import { openEditor, switchSession } from "@/queries/cards-api";
 import {
@@ -272,5 +273,36 @@ test("setCardBlockedBy resolves status 0 on a network failure", async () => {
     status: 0,
     error: null,
     reason: null,
+  });
+});
+
+test("setCardOrchestrator sends a PUT with the orchestrator id and resolves ok", async () => {
+  reply(200, { cardId: "c1", orchestratorId: "feat", changed: true }, "OK");
+  assert.deepEqual(await setCardOrchestrator(LOCAL, "c1", "feat"), {
+    ok: true,
+  });
+  assert.equal(calls[0]?.url, `/api/boards/${LOCAL}/cards/c1/orchestrator`);
+  assert.equal(calls[0]?.init?.method, "PUT");
+  assert.equal(
+    calls[0]?.init?.body,
+    JSON.stringify({ orchestratorId: "feat" }),
+  );
+});
+
+test("setCardOrchestrator keeps a 400 refusal with its error code", async () => {
+  reply(400, { error: "group-member" }, "Bad Request");
+  assert.deepEqual(await setCardOrchestrator(LOCAL, "c1", "feat"), {
+    ok: false,
+    status: 400,
+    error: "group-member",
+  });
+});
+
+test("setCardOrchestrator resolves status 0 on a network failure", async () => {
+  globalThis.fetch = () => Promise.reject(new TypeError("offline"));
+  assert.deepEqual(await setCardOrchestrator(LOCAL, "c1", "feat"), {
+    ok: false,
+    status: 0,
+    error: null,
   });
 });

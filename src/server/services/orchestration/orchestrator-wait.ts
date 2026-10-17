@@ -9,6 +9,7 @@ export interface WaitFilter {
   since: number;
   kinds?: OrchestrationEventKind[] | undefined;
   cardIds?: string[] | undefined;
+  orchestratorId?: string | undefined;
 }
 
 export type WaitResult =
@@ -20,13 +21,21 @@ const SCAN_LIMIT = 200;
  * Whether an event is one the wait is for.
  *
  * @remarks A `tool_call` row never matches unless `kinds` names it, else every orchestrator call,
- * the wait call's own record included, would end every wait.
+ * the wait call's own record included, would end every wait. An `intake_submitted` row names its
+ * target orchestrator and matches only that one when the filter sets `orchestratorId`.
  */
 function matches(event: OrchestrationEvent, filter: WaitFilter): boolean {
   if (event.id <= filter.since) return false;
   if (filter.kinds) {
     if (!filter.kinds.includes(event.kind)) return false;
   } else if (event.kind === "tool_call") {
+    return false;
+  }
+  if (
+    event.kind === "intake_submitted" &&
+    filter.orchestratorId !== undefined &&
+    event.data.orchestratorId !== filter.orchestratorId
+  ) {
     return false;
   }
   return (

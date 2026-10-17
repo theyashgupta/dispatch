@@ -14,7 +14,10 @@ import { isBlockerDone } from "../../../shared/blocked-by.js";
 import { BOARD_NAME_MAX } from "../../../shared/orchestrator-limits.js";
 import { buildAttentionQueue } from "../../../shared/attention-queue.js";
 import { loopView } from "../../../shared/loop-view.js";
-import { cardOwner } from "../../../shared/orchestrator-owner.js";
+import {
+  cardOwner,
+  orchestratorKind,
+} from "../../../shared/orchestrator-owner.js";
 import {
   hasLiveSession,
   hasLoopProgress,
@@ -144,6 +147,29 @@ export function callerPolicy(caller: OrchestratorIdentity): BoardPolicy {
   );
 }
 
+/** Whether the caller is a feature orchestrator; a missing record answers false. */
+export function isFeatureCaller(caller: OrchestratorIdentity): boolean {
+  const record = store
+    .getBoard(caller.boardKey)
+    ?.orchestrators.find((r) => r.id === caller.orchestratorId);
+  return record !== undefined && orchestratorKind(record) === "feature";
+}
+
+/**
+ * The error code of a scope refusal for this caller.
+ *
+ * @remarks A feature orchestrator sees only its own cards, so a card it does not own is out of its
+ * scope, not another owner's. The board orchestrator keeps the exact reason.
+ */
+export function scopeRefusalCode(
+  caller: OrchestratorIdentity,
+  reason: "other-board" | "other-owner",
+): string {
+  return reason === "other-owner" && isFeatureCaller(caller)
+    ? "out-of-scope"
+    : reason;
+}
+
 /** The board and the owner orchestrator of a card, for the scope check of an orchestrator call. */
 export function scopeTargetOf(card: Card): ScopeTarget {
   const records =
@@ -234,12 +260,15 @@ interface CardListFilters {
  * The cards of one board that match the filters, redacted for the wire.
  *
  * @remarks Each card passes through `redactCard`, so no `hookToken` or session record leaves. A
- * missing filter matches every card; `total` counts the matches.
+ * missing filter matches every card; `total` counts the matches. `owner` keeps only the cards that
+ * orchestrator owns.
  */
 export function listBoardCards(
   board: BoardKey,
   filters: CardListFilters,
+  owner?: string,
 ): { cards: Card[]; total: number } {
+  const records = store.getBoard(board)?.orchestrators ?? [];
   const cards = store
     .listCards(board)
     .filter(
@@ -249,7 +278,13 @@ export function listBoardCards(
           (card.source ?? "linear") === filters.source) &&
         (filters.hasSession === undefined ||
           hasSession(card) === filters.hasSession) &&
-        (filters.text === undefined || matchesText(card, filters.text)),
+        (filters.text === undefined || matchesText(card, filters.text)) &&
+        (owner === undefined ||
+          cardOwner(
+            records,
+            card,
+            card.groupId ? store.getCard(card.groupId) : undefined,
+          ) === owner),
     )
     .map(redactCard);
   return { cards, total: cards.length };

@@ -14,9 +14,11 @@ import {
 } from "../services/domain/orchestrator-scope.js";
 import {
   createBoardForOrchestrator,
+  isFeatureCaller,
   listBoardCards,
   listBoardSessions,
   repositoryEntry,
+  scopeRefusalCode,
   scopeTargetOf,
 } from "../services/orchestration/boards.js";
 import {
@@ -47,6 +49,7 @@ import {
 } from "../services/orchestration/orchestrator-groups.js";
 import { startOrchestratorCard } from "../services/orchestration/orchestrator-cards.js";
 import {
+  assignCard,
   readState,
   writeState,
 } from "../services/orchestration/orchestrator-session.js";
@@ -111,7 +114,8 @@ function assertInScope(
   target: ScopeTarget,
 ): void {
   const scope = checkScope(caller, target);
-  if (!scope.ok) throw new ForbiddenError(scope.reason);
+  if (!scope.ok)
+    throw new ForbiddenError(scopeRefusalCode(caller, scope.reason));
 }
 
 /**
@@ -133,7 +137,9 @@ function scopedCard(
   if (!card || isHiddenCard(card)) throw new NotFoundError("unknown-card");
   assertInScope(
     caller,
-    ownerCheck ? scopeTargetOf(card) : { boardKey: card.boardKey },
+    ownerCheck || isFeatureCaller(caller)
+      ? scopeTargetOf(card)
+      : { boardKey: card.boardKey },
   );
   return card;
 }
@@ -141,7 +147,11 @@ function scopedCard(
 /** List the cards of the caller board, filtered by column, source or text. */
 export const listCardsHandler: ToolHandler = (req, res, caller, call) => {
   const filters = parseOrThrow(listCardsQuerySchema, req.query);
-  const listed = listBoardCards(caller.boardKey, filters);
+  const listed = listBoardCards(
+    caller.boardKey,
+    filters,
+    isFeatureCaller(caller) ? caller.orchestratorId : undefined,
+  );
   call.result = `${listed.total} cards`;
   res.status(200).json(listed);
 };
@@ -501,7 +511,7 @@ export const waitForEventHandler: ToolHandler = async (
   res.on("close", () => gone.abort());
   const outcome = await waitForEvent(
     caller.boardKey,
-    filter,
+    { ...filter, orchestratorId: caller.orchestratorId },
     timeoutSeconds * 1000,
     gone.signal,
   );
@@ -605,4 +615,23 @@ export const startCardHandler: ToolHandler = async (req, res, caller, call) => {
   );
   call.result = `started ${outcome.playbook}`;
   res.status(202).json(outcome);
+};
+
+/** Assign one To Do card that the main owns to the calling feature orchestrator. */
+export const assignCardHandler: ToolHandler = async (
+  req,
+  res,
+  caller,
+  call,
+) => {
+  const { cardId } = parseOrThrow(sessionCardParamsSchema, req.params);
+  call.cardId = cardId;
+  const outcome = await assignCard(
+    caller.boardKey,
+    cardId,
+    caller.orchestratorId,
+    "orchestrator",
+  );
+  call.result = outcome.changed ? "assigned" : "already assigned";
+  res.status(200).json(outcome);
 };

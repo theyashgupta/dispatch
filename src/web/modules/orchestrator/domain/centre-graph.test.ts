@@ -1216,7 +1216,24 @@ test("the centre node carries the record fields, the session meters and the coun
     cost: 2.25,
     branchCount: 4,
     needYouCount: 2,
+    scope: "Board",
   });
+});
+
+test("the centre node names the scope of a main and of an extra", () => {
+  const extra = record("extra-1", "extra", { ticketIds: ["CEN-1", "CEN-2"] });
+  assert.equal(graph().centre?.scope, "Board");
+  assert.equal(
+    graph({
+      records: [main, extra],
+      selectedId: "extra-1",
+      cards: [
+        card("CEN-1", { column: "todo" }),
+        card("CEN-2", { column: "todo" }),
+      ],
+    }).centre?.scope,
+    "Feature, 2 cards",
+  );
 });
 
 test("a centre with no session has null meters", () => {
