@@ -98,6 +98,8 @@ import {
   useSwitchSessionMutation,
 } from "@/modules/detail/queries/detail-queries";
 import { CardTimelineContainer } from "./CardTimelineContainer";
+import { canBeBlocked } from "../../../../shared/blocked-by.js";
+import { BlockedByFieldContainer } from "./BlockedByFieldContainer";
 import { LinearSectionContainer } from "./LinearSectionContainer";
 
 export function DetailPanelContainer() {
@@ -392,6 +394,9 @@ export function DetailPanelContainer() {
           cleanupCard(id).catch(console.error);
         }}
       />
+      {c != null && canBeBlocked(c) && (
+        <BlockedByFieldContainer key={c.id} card={c} cards={cards ?? []} />
+      )}
       {c != null && (c.source ?? "linear") === "linear" && (
         <LinearSectionContainer key={c.id} card={c} />
       )}

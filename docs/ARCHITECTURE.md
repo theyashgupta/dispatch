@@ -152,7 +152,7 @@ Mount prefix: `/api/orchestrator`.
 | GET    | `/api/orchestrator/board-workspace`                | Orchestrator token | Tool `get_board_workspace`: read the board folder, repositories, playbook names and group playbook. |
 | POST   | `/api/orchestrator/boards`                         | Orchestrator token | Tool `create_board`: create a board from a name and answer the key and the link.                    |
 | POST   | `/api/orchestrator/tickets`                        | Orchestrator token | Tool `create_ticket`: create a local ticket marked as created by the caller.                        |
-| PATCH  | `/api/orchestrator/tickets/:id`                    | Orchestrator token | Tool `update_ticket`: change the title or description of a local ticket.                            |
+| PATCH  | `/api/orchestrator/tickets/:id`                    | Orchestrator token | Tool `update_ticket`: change the title or description of a local ticket, or the `blockedBy` list.   |
 | POST   | `/api/orchestrator/tickets/:id/move`               | Orchestrator token | Tool `move_card`: move a card to a column under the manual move rules.                              |
 | POST   | `/api/orchestrator/tickets/:id/comments`           | Orchestrator token | Tool `add_comment`: add a comment to a card, local or on Linear.                                    |
 | POST   | `/api/orchestrator/base-branches`                  | Orchestrator token | Tool `create_base_branch`: create a local base branch in a board repository.                        |
@@ -168,7 +168,7 @@ Mount prefix: `/api/orchestrator`.
 | POST   | `/api/orchestrator/sessions/:cardId/unpause`       | Orchestrator token | Tool `resume_card`: continue a paused loop, refused while memory is low.                            |
 | POST   | `/api/orchestrator/decisions`                      | Orchestrator token | Tool `create_decision_item`: raise a decision item for the user to answer.                          |
 | POST   | `/api/orchestrator/events/wait`                    | Orchestrator token | Tool `wait_for_event`: hold the call until a board event matches or the time limit passes.          |
-| POST   | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `start_ship`: start the ship flow of a finished group card or a launched single card.          |
+| POST   | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `start_ship`: start the ship flow of a finished group card or a finished single card.          |
 | GET    | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `get_ship_state`: read the stored ship flow of a group card.                                   |
 | GET    | `/api/orchestrator/state`                          | Orchestrator token | Tool `read_state`: read the saved state of the calling orchestrator.                                |
 | PUT    | `/api/orchestrator/state`                          | Orchestrator token | Tool `write_state`: replace the saved state of the calling orchestrator.                            |
@@ -285,6 +285,7 @@ Mount prefix: `/api`.
 | POST   | `/api/cards/:id/run-claude`          | User | Start Claude in a live session whose terminal is at a shell prompt.                       |
 | POST   | `/api/cards/:id/session/account`     | User | Move a session to another Claude account, or queue the move.                              |
 | PUT    | `/api/cards/:id/session/account-pin` | User | Pin or unpin the Claude account of a session.                                             |
+| PUT    | `/api/cards/:id/blocked-by`          | User | Set or clear the blockers of a ticket card.                                               |
 | POST   | `/api/cards/:id/inbox-dismiss`       | User | Dismiss or restore an Inbox card.                                                         |
 | POST   | `/api/cards/:id/session`             | User | Switch the active session of a card.                                                      |
 | POST   | `/api/cards/:id/open-editor`         | User | Open the workspace of a card in an editor.                                                |
@@ -791,6 +792,34 @@ team key) returns `400` with only `error`, as the other routes do.
 (`cardSessionsRoot` in `services/orchestration/steps.ts`). A `LOCAL` card keeps
 `Config.workspaceRoot`. The escape check compares the session path with the board folder. The
 viewer allows the folder of each board and the path of each live session.
+
+**Blocked-by relation (LOCAL-147).** A ticket card can hold `blockedBy`, a list of at most 50 card
+ids on its own board. `PUT /api/cards/:id/blocked-by` with `{ blockedBy }` sets the list; an empty list
+clears it. The orchestrator tools `create_ticket` and `update_ticket` take the same field. The pure
+check `services/domain/blocked-by.ts#checkBlockers` refuses before any write: `400`
+`invalid-blocked-card` for a group card, a grouped member or a hidden card; `400` `invalid-blocker` for
+an unknown id, a card on another board, a grouped member or a hidden card; and `400`
+`blocked-by-cycle` when the card blocks itself through any chain, with `reason` naming the chain of
+identifiers (`LOCAL-1 -> LOCAL-2 -> LOCAL-1`). Existing guards answer first on two paths: the user
+route answers `409` for a grouped member (`card-target.ts#actionableCard`), and `update_ticket` answers
+`409` `not-a-ticket` for a group card. A group card can be a blocker. A blocker is done by the
+group dependency rule (`shared/blocked-by.ts#isBlockerDone`): in Done, or with at least one PR and every
+PR merged. A blocker that is no longer in the store is not done, so the card waits.
+
+**Auto start.** `card-move.ts#moveCard` runs `blocked-start.ts#startUnblockedCards` after a move to
+Done. The manual move, the orchestrator `move_card` and the ship flow merge all use `moveCard`. The
+sweep takes each To Do ticket of the board whose blockers are all done and that never started (no
+`startError`, no session), in To Do order, and starts it inside the cap lock: `prepareCardStart`, then
+the memory guard and the cap of the owner policy (the board policy when no orchestrator owns the card)
+with no await before `commitCardStart`, which writes `launch` first, so the card holds a cap slot. The playbook is the first
+that exists of `launch.playbook`, `startIntent.playbook` and the board `groupPlaybook`; the direction is
+`launch.direction`, else `extraDirection`. When the cap or the memory guard refuses, the card stays in To
+Do, the server logs `[blocked-start] <identifier> waits: <reason>`, and a 60 s timer runs the sweep
+again. A memory refusal stops the sweep for that board; a cap refusal goes on to the next card, because
+cards of different owners can have different caps. The next Done on the board also runs the sweep. The
+timer lives in memory, so a restart drops it until the next Done. A card that failed to start or already
+ran a session is left to the user. `start_card` refuses a card with an open blocker with `409`
+`blocked`; the user start dialog does not. The card face chip shows on To Do and Inbox cards only.
 
 ### Items
 
@@ -1535,6 +1564,7 @@ legal source column(s), target, and owning code path:
 | Card creation                                                | — (new card)                                                                     | `todo` or `inbox`                                | `createLocalCard` / `createGroupCard` / `newInboxCard` via `store/mapping.ts#applyIssues` |
 | Boot hydration legacy migration                              | `in_planning` (retired)                                                          | `todo` / `in_progress`                           | `board.store.ts#hydrateFromParsed`, one-way, skips `mirrorMemberColumn`                   |
 | Start-saga success                                           | any                                                                              | `in_progress`                                    | `board.store.ts#completeStart` / `#attachExistingSession`                                 |
+| Blocker reaches Done (auto start, LOCAL-147)                 | `todo`, every `blockedBy` blocker done                                           | `in_progress` through the start saga             | `card-move.ts#moveCard` -> `blocked-start.ts#startUnblockedCards`                         |
 | Marker while Parked (LOCAL-17)                               | `MARKER_CONSUMED_SOURCES` (`parked`)                                             | column-preserving (key recorded)                 | `board.store.ts#applyMarker` consume branch                                               |
 | Manual drag into Parked                                      | any (no automatic in-edge exists)                                                | `parked`                                         | `board.store.ts#moveCardManual`, same `isManualMoveAllowed` gate                          |
 | Unwind (LOCAL-17)                                            | group card in any column                                                         | members to `todo` / `inbox`; group card archived | `services/orchestration/unwind.ts#unwindGroup` -> `board.store.ts#unwindGroup`            |
@@ -5969,6 +5999,8 @@ Scenario 8 (tests/e2e/scenario-8-memory-pause.e2e.ts) proves that the memory gov
 Scenario 9 (tests/e2e/scenario-9-unit-branch-ship.e2e.ts) proves that a finished Roadmap loop group whose two unit branches use the `feat/` prefix, recorded only in the roadmap Status lines with no progress table, ships through `start_ship`: a branch name with a space answers 400 `invalid-branch-name` with no flow, and the two unit branches reach `gh pr create` in stack order and the flow ends `done`.
 
 Scenario 10 (tests/e2e/scenario-10-engine-close.e2e.ts) proves that the supervisor closes the engine file of a finished PRD loop with no human Restart. The board has the supervisor on and the ship rights **merge**, and the test starts one "PRD + Ralph Loop" card. The session commits on its branch, and the test seeds a PRD, a state file with `gate=pass` for every phase and an engine file that stays open. The test checks that `get_card_progress` shows `completion: "complete"` with an open engine and that `start_ship` answers 409 `engine-not-closed`. The test then writes a session transcript whose last assistant message ends with the `RALPH COMPLETE` promise and the `DISPATCH_STATUS: DONE` line, and posts the Stop hook with that message and path while the pane shows no promise line. In 60 s the board holds one `close_loop` row with the result `closed`, the engine shows `closed`, `loopProgress.readAt` is not before the Stop hook, and the card has no `resume` row and no `continue` row with the duty `restart`. `start_ship` then answers 202, the fake `gh` log creates and merges one PR, and the bare origin `main` holds the work file. The test does not rename the engine file, and it types no key into any pane.
+
+Scenario 11 (tests/e2e/scenario-11-user-started-ship.e2e.ts) proves that a single ticket card that the user started from the board start dialog ships through `start_ship`: the board has the ship rights **merge**, and the test starts ticket card A with `POST /api/cards/:id/start`, the route of the start dialog, not with the orchestrator tool `start_card`. The card read has a session branch and no `launch`. The session commits a work file on that branch, and the Stop hook moves the card to Agent done. `start_ship` with the session branch as the one branch answers 202, the flow ends `done`, the fake `gh` log creates and merges one PR, and the bare origin `main` holds the work file. A second ticket card B that nobody started has no `launch` and no session branch, so `start_ship` answers 400 `not-group-card` and the card has no ship flow. The test types no key into any pane.
 
 The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 

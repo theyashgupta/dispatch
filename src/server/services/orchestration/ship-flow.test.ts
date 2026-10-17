@@ -1829,3 +1829,61 @@ void test("two overlapping start_ship calls on one board start one flow and refu
   assert.equal(store.getCard(other.g.id)?.shipFlow, undefined);
   assert.equal(ghCalls(stack).filter((a) => a[1] === "create").length, 1);
 });
+
+void test("startShip treats a ticket card with no launch and a session branch as a single card: Done is already-shipped, Inbox is card-not-done, and no branch, a group member or a review card is not-group-card", async () => {
+  const stack = await newStack();
+  const base = { ...store.getCard(stack.card.id)! };
+  delete base.loopProgress;
+  const ticket = {
+    ...base,
+    source: "local",
+    launch: undefined,
+    branch: "unit-1",
+  };
+  await refusedCard(
+    { ...ticket, column: "done" },
+    stack,
+    "unit-1",
+    409,
+    "already-shipped",
+  );
+  await refusedCard(
+    { ...ticket, column: "inbox" },
+    stack,
+    "unit-1",
+    409,
+    "card-not-done",
+  );
+  await refusedCard(
+    { ...ticket, column: "agent_done", branch: undefined },
+    stack,
+    "unit-1",
+    400,
+    "not-group-card",
+  );
+  await refusedCard(
+    { ...ticket, column: "agent_done", groupId: "SBX-999" },
+    stack,
+    "unit-1",
+    400,
+    "not-group-card",
+  );
+  await refusedCard(
+    {
+      ...ticket,
+      column: "agent_done",
+      reviewPr: {
+        repo: "acme/app",
+        number: 7,
+        url: "https://github.com/acme/app/pull/7",
+        head: "feat/x",
+        base: "main",
+      },
+    },
+    stack,
+    "unit-1",
+    400,
+    "not-group-card",
+  );
+  assert.deepEqual(calls, []);
+});

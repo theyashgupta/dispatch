@@ -505,3 +505,96 @@ void test("create_ticket on an archived board and on a board that is gone create
     assert.deepEqual(store.getDecisionItem(id)?.proposal?.usedIndexes, []);
   }
 });
+
+void test("update_ticket sets and clears blockedBy on a local card and on a Linear card", async () => {
+  const own = await ownTicket("blocked one");
+  const blocker = await ownTicket("blocker");
+  const set = await call("PATCH", `/tickets/${own.id}`, {
+    blockedBy: [blocker.id, blocker.id],
+  });
+  assert.equal(set.reply.status, 200);
+  assert.deepEqual(store.getCard(own.id)?.blockedBy, [blocker.id]);
+  assert.deepEqual((set.reply.body.card as Card).blockedBy, [blocker.id]);
+
+  const onLinear = await call("PATCH", `/tickets/${linear.id}`, {
+    blockedBy: [own.id],
+  });
+  assert.equal(onLinear.reply.status, 200);
+  assert.deepEqual(store.getCard(linear.id)?.blockedBy, [own.id]);
+  assert.equal(store.getCard(linear.id)?.title, linear.title);
+
+  const cleared = await call("PATCH", `/tickets/${linear.id}`, {
+    blockedBy: [],
+  });
+  assert.equal(cleared.reply.status, 200);
+  assert.equal(store.getCard(linear.id)?.blockedBy, undefined);
+});
+
+void test("update_ticket with a title on the Linear card is still refused, even with blockedBy", async () => {
+  const own = await ownTicket("blocker for linear");
+  const { reply } = await call("PATCH", `/tickets/${linear.id}`, {
+    title: "nope",
+    blockedBy: [own.id],
+  });
+  assert.equal(reply.status, 409);
+  assert.equal(reply.body.error, "linear-card");
+  assert.equal(store.getCard(linear.id)?.blockedBy, undefined);
+});
+
+void test("update_ticket refuses a cycle and an invalid blocker and writes nothing", async () => {
+  const a = await ownTicket("cycle a");
+  const b = await ownTicket("cycle b");
+  assert.equal(
+    (await call("PATCH", `/tickets/${b.id}`, { blockedBy: [a.id] })).reply
+      .status,
+    200,
+  );
+  const cycle = await call("PATCH", `/tickets/${a.id}`, {
+    title: "renamed",
+    blockedBy: [b.id],
+  });
+  assert.equal(cycle.reply.status, 400);
+  assert.equal(cycle.reply.body.error, "blocked-by-cycle");
+  assert.equal(
+    cycle.reply.body.reason,
+    `${a.identifier} -> ${b.identifier} -> ${a.identifier}`,
+  );
+  assert.equal(store.getCard(a.id)?.title, "cycle a");
+  assert.equal(store.getCard(a.id)?.blockedBy, undefined);
+
+  const foreign = await call("PATCH", `/tickets/${a.id}`, {
+    blockedBy: [othCard.id],
+  });
+  assert.equal(foreign.reply.status, 400);
+  assert.equal(foreign.reply.body.error, "invalid-blocker");
+  const unknown = await call("PATCH", `/tickets/${a.id}`, {
+    blockedBy: ["no-such-card"],
+  });
+  assert.equal(unknown.reply.body.error, "invalid-blocker");
+  assert.equal(store.getCard(a.id)?.blockedBy, undefined);
+});
+
+void test("create_ticket with blockedBy stores it, and an invalid blocker creates nothing", async () => {
+  const blocker = await ownTicket("create blocker");
+  const id = await proposal([{ title: "waits", description: "d" }], "approve");
+  const before = cardCount();
+  const bad = await call("POST", "/tickets", {
+    proposalItemId: id,
+    index: 0,
+    blockedBy: [othCard.id],
+  });
+  assert.equal(bad.reply.status, 400);
+  assert.equal(bad.reply.body.error, "invalid-blocker");
+  assert.equal(cardCount(), before);
+  assert.deepEqual(store.getDecisionItem(id)?.proposal?.usedIndexes, []);
+
+  const ok = await call("POST", "/tickets", {
+    proposalItemId: id,
+    index: 0,
+    blockedBy: [blocker.id],
+  });
+  assert.equal(ok.reply.status, 201);
+  const created = ok.reply.body.card as Card;
+  assert.deepEqual(created.blockedBy, [blocker.id]);
+  assert.deepEqual(store.getCard(created.id)?.blockedBy, [blocker.id]);
+});

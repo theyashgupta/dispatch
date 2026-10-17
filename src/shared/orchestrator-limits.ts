@@ -5,6 +5,7 @@ export const BOARD_NAME_MAX = 100;
 export const ITEM_DESCRIPTION_MAX = 20000;
 export const TEAM_KEY_RE = /^[A-Z][A-Z0-9]{0,9}$/;
 export const CARD_ID_MAX = 200;
+export const BLOCKED_BY_MAX = 50;
 export const MOVABLE_COLUMNS: readonly Column[] = [...COLUMNS, "inbox"];
 export const DIRECTION_MAX = 10000;
 export const ORCHESTRATOR_TOKEN_HEADER = "x-orchestrator-token";

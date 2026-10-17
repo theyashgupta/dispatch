@@ -13,6 +13,7 @@ import {
   getCardComments,
   postCardComment,
   runClaude,
+  setCardBlockedBy,
   setCardLinearState,
 } from "./detail-api.js";
 
@@ -143,5 +144,13 @@ export function useSetCardLinearStateMutation() {
   return useMutation({
     mutationFn: ({ id, stateId }: { id: string; stateId: string }) =>
       setCardLinearState(id, stateId),
+  });
+}
+
+/** Replace a card's blockers; a refusal resolves as typed data. */
+export function useSetCardBlockedByMutation() {
+  return useMutation({
+    mutationFn: ({ id, blockedBy }: { id: string; blockedBy: string[] }) =>
+      setCardBlockedBy(id, blockedBy),
   });
 }
