@@ -3,6 +3,7 @@ import { COMMENT_BODY_MAX } from "../../shared/comment-body.js";
 import {
   ACCOUNT_ID_MAX,
   BOARD_NAME_MAX,
+  BLOCKED_BY_MAX,
   CARD_ID_MAX,
   DECISION_ID_RE,
   DECISION_LABEL_MAX,
@@ -168,10 +169,11 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "create_ticket",
     description:
-      "Create a local ticket from one entry of a ticket proposal that the user approved. A proposal that is open, rejected or unknown, and an entry that is already used, are refused.",
+      "Create a local ticket from one entry of a ticket proposal that the user approved. A proposal that is open, rejected or unknown, and an entry that is already used, are refused. Pass blockedBy with card ids on this board to start the ticket on its own when every blocker reaches Done; a cycle is refused.",
     input: {
       proposalItemId: z.string().regex(DECISION_ID_RE),
       index: z.number().int().min(0),
+      blockedBy: z.array(looseId).max(BLOCKED_BY_MAX).optional(),
     },
     method: "POST",
     path: "/tickets",
@@ -201,11 +203,12 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "update_ticket",
     description:
-      "Change the title or the description of a ticket. Text that holds the status marker is refused.",
+      "Change the title or the description of a local ticket, or set blockedBy (card ids on this board, an empty list clears it) on any ticket. Text that holds the status marker is refused.",
     input: {
       ...idParam,
       title: titleField.optional(),
       description: descriptionField.optional(),
+      blockedBy: z.array(looseId).max(BLOCKED_BY_MAX).optional(),
     },
     method: "PATCH",
     path: "/tickets/:id",

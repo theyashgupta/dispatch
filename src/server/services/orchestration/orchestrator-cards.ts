@@ -1,4 +1,8 @@
 import path from "node:path";
+import {
+  blockerIdentifiers,
+  openBlockers,
+} from "../../../shared/blocked-by.js";
 import type { Card } from "../../../shared/types.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import { ConflictError, ValidationError } from "../domain/errors.js";
@@ -8,6 +12,7 @@ import { playbookExists } from "../infra/playbooks.js";
 import { isLaunchableAccount } from "./claude-accounts.js";
 import {
   callerPolicy,
+  dependencyDone,
   getBoard,
   isLiveSessionCard,
   isRunningCard,
@@ -46,6 +51,12 @@ export async function startOrchestratorCard(
   input: CardStartRequest,
 ): Promise<{ started: true; cardId: string; playbook: string }> {
   if (card.source === "group") throw new ValidationError("not-ticket-card");
+  const open = openBlockers(card, dependencyDone);
+  if (open.length > 0) {
+    throw new ConflictError("blocked", {
+      reason: blockerIdentifiers(open, (id) => store.getCard(id)).join(", "),
+    });
+  }
   if (isRunningCard(card) || isLiveSessionCard(card)) {
     throw new ConflictError("already-started");
   }
