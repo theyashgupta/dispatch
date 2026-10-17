@@ -70,9 +70,11 @@ export type ParsedRound =
       costUsd?: number;
       durationMs?: number;
     }
-  | { ok: false; reason: "no-slack-tool" | "invalid" };
+  | { ok: false; reason: "no-connector" | "no-slack-tool" | "invalid" };
 
 class NoSlackToolError extends Error {}
+
+class NoConnectorError extends NoSlackToolError {}
 
 const initSchema = z.object({
   tools: z.array(z.string()),
@@ -178,7 +180,7 @@ const resultText = (content: unknown): string => {
  *
  * @remarks Evidence is each non-error tool result text after its call input, because a thread result names
  * no channel. The call counts only when the init event lists an allowed tool, the model used one and a data
- * tool returned a non-error result, else it throws `NoSlackToolError`, because a call that lost its reads can
+ * tool returned a non-error result, else it throws `NoConnectorError` for an init with no allowed tool and `NoSlackToolError` otherwise, because a call that lost its reads can
  * answer a valid empty result. Denials and error results are counted, not fatal, so one bad channel does not
  * fail the other reads.
  */
@@ -245,9 +247,10 @@ function unwrapResult(
     }
   }
   if (init === undefined) throw new Error("no init event");
-  if (!init.tools.some((tool) => allowed.has(tool)) || used.size === 0) {
-    throw new NoSlackToolError("no Slack tool");
+  if (!init.tools.some((tool) => allowed.has(tool))) {
+    throw new NoConnectorError("no Slack connector");
   }
+  if (used.size === 0) throw new NoSlackToolError("no Slack tool");
   const envelope = envelopeSchema.parse(result);
   if (envelope.is_error === true) throw new Error("model error");
   const good = results.filter((r) => !r.error);
@@ -309,7 +312,12 @@ export function parseRoundOutput(
   } catch (error) {
     return {
       ok: false,
-      reason: error instanceof NoSlackToolError ? "no-slack-tool" : "invalid",
+      reason:
+        error instanceof NoConnectorError
+          ? "no-connector"
+          : error instanceof NoSlackToolError
+            ? "no-slack-tool"
+            : "invalid",
     };
   }
 }

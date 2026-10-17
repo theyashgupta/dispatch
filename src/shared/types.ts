@@ -1239,7 +1239,12 @@ export type CalendarSettingsPatch = Partial<
 >;
 
 export type GranolaCheckState =
-  "connected" | "needs-auth" | "failed" | "not-found" | "claude-missing";
+  | "connected"
+  | "needs-auth"
+  | "failed"
+  | "not-found"
+  | "claude-missing"
+  | "connector-unavailable";
 
 export type GranolaCheckResult =
   | { state: "connected"; server: string }

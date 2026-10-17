@@ -1,7 +1,7 @@
 import type { SessionMeters } from "../../../shared/types.js";
 
 const ROW_ONE =
-  /^\s*([^│·\s](?:[^│·]*[^│·\s])?)(?:\s+·[^│]*|\s*)│\s+[█░]{10}\s+(?:(\d{1,3})%\s+[^\s/]+\/\S+|warming up)\s*$/;
+  /^\s*([^│·\s](?:[^│·]*[^│·\s])?)(?:\s+·[^│]*|\s*)│\s+[█░]{10}\s+(?:(\d{1,3})%\s+[^\s/]+\/\S+|warming up)(?:\s+.*)?$/;
 
 function segmentNumber(segments: string[], pattern: RegExp): number | null {
   for (const segment of segments) {
@@ -18,7 +18,8 @@ function segmentNumber(segments: string[], pattern: RegExp): number | null {
  * Parse the two-row Claude status line from a captured pane into session meters.
  *
  * @remarks Scans from the bottom so a status-like row quoted in the transcript above the live
- * footer never wins. Returns null when no row 1 matches the full shape.
+ * footer never wins. Row 1 can carry a Claude Code banner after the token count, such as the weekly
+ * limit or update notice. Returns null when no row 1 matches the full shape.
  */
 export function parseStatusLine(pane: string): SessionMeters | null {
   const lines = pane.split("\n");

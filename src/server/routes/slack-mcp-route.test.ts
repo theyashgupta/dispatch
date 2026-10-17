@@ -401,3 +401,11 @@ test("T8 thread and channels answer 409 not-connected with a needs auth list and
   });
   assert.equal(modelCalls(), 0);
 });
+
+test("T-check POST /slack/mcp/check answers 200 with the connector state", async () => {
+  await setup(NEEDS_AUTH);
+  const res = await send("POST", "/slack/mcp/check");
+  assert.equal(res.status, 200);
+  assert.equal((res.body as { state: string }).state, "needs-auth");
+  assert.equal(modelCalls(), 0);
+});
