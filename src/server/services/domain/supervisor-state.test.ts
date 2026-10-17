@@ -726,7 +726,7 @@ void test("a usage limit message at the transcript tail gives usage_limit_wait o
 
 void test("a usage limit message is read in a quiet pane, with a curly apostrophe and after a first line", () => {
   for (const text of [
-    LIMIT_TAIL.replace("'", "\u2019"),
+    LIMIT_TAIL.replaceAll("'", "\u2019"),
     `${LIMIT_TAIL}\nsecond line`,
     "You've hit your session limit",
     "You've hit your limit · resets 8:30am (Asia/Calcutta)",
