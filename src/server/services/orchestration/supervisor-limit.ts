@@ -46,6 +46,7 @@ export interface LimitDeps {
   send?: typeof sendConfirmed;
   sendKeys?: typeof sendKeys;
   redrawMs?: number;
+  fresh?: typeof runFreshSession;
 }
 
 const RESET_GRACE_MS = 2 * 60_000;
@@ -167,7 +168,7 @@ function scheduleAfterReset(
       if (mode === "fresh" && !isHandoffPending(live.card)) return;
       void (async () => {
         if (mode === "fresh") {
-          await runFreshSession(live.card, live.session);
+          await (deps.fresh ?? runFreshSession)(live.card, live.session);
           return;
         }
         const result = await sendConfirmed(

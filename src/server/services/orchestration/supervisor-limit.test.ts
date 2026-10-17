@@ -987,17 +987,17 @@ void test(
       },
     });
     const { timers, deps } = fakeDeps();
+    const started: string[] = [];
+    deps.fresh = (_card, session) => {
+      started.push(session.id);
+      return Promise.resolve(true);
+    };
     await answerLimit(s.card(), s.session(), deps);
     assert.equal(timers.length, 1);
     await store.setSessionAccount(s.card().id, s.session().id, "acct-b");
     timers[0].run();
-    const until = Date.now() + 15_000;
-    while (
-      !s.actions().some((e) => e.data.action === "handoff") &&
-      Date.now() < until
-    )
-      await new Promise((resolve) => setTimeout(resolve, 200));
-    assert.ok(s.actions().some((e) => e.data.action === "handoff"));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.deepEqual(started, [s.session().id]);
   },
 );
 
