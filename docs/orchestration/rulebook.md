@@ -143,6 +143,9 @@ Start work in these ways:
 - The card is running.
 - The playbook is the Board Orchestrator playbook.
 - The account is not in `list_accounts` (400 `unknown-account`).
+- The card has a blocker that is not done (409 `blocked`, with the open blockers in `reason`).
+
+A card with a blocker starts on its own when the blocker reaches Done. The orchestrator does not start it by hand. Set the blockers with `blockedBy` in `create_ticket` or `update_ticket`. The server starts the card inside the concurrency cap and the memory guard. When the cap is reached, the card stays in To Do and the server tries again after the next Done on the board or after 60 seconds.
 
 `start_card` answers when the start began, not when the worktree exists. After it, confirm that the session of the card appears with `read_state` or `list_sessions` before you treat the card as started.
 
