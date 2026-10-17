@@ -73,7 +73,7 @@ export interface RawSearchItem {
   body?: string | null;
   html_url: string;
   repository_url: string;
-  user?: { login?: string } | null;
+  user?: { login?: string; avatar_url?: string } | null;
   draft?: boolean;
   updated_at: string;
 }
@@ -177,6 +177,7 @@ export function mergeSearchResults(
           priority: result.category.priority,
           meta: {
             author: raw.user?.login ?? "",
+            authorAvatar: raw.user?.avatar_url ?? "",
             draft: raw.draft === true ? "true" : "false",
             category: result.category.category,
           },
