@@ -54,6 +54,7 @@ export function CentreNode({
         />
       </div>
       <p className="m-0 flex flex-wrap gap-x-(--space-md) text-sm text-muted-foreground">
+        <span>{node.scope}</span>
         {node.contextPercent !== null && (
           <span>{contextText(node.contextPercent)}</span>
         )}

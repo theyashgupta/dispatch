@@ -455,7 +455,7 @@ test("a failed target patch restores the source scope and reports the failure", 
 
 test("a move that fails on the first step restores nothing", async () => {
   const client = newClient();
-  stubFetch({ status: 400, body: { error: "extra-needs-scope" } });
+  stubFetch({ status: 400, body: { error: "kind-mismatch" } });
   const scope = (ids: string[]) => ({ groupIds: ids, ticketIds: [] });
   const result = await new MutationObserver(
     client,

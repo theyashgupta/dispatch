@@ -16,10 +16,7 @@ import type {
   OverrideOptions,
   OverrideValues,
 } from "@/modules/orchestrator/domain/override-form";
-import {
-  NEEDS_SCOPE_HINT,
-  type ScopeRow,
-} from "@/modules/orchestrator/domain/ownership";
+import type { ScopeRow } from "@/modules/orchestrator/domain/ownership";
 import { DialogFailure } from "./DialogFailure";
 import { OverrideFields } from "./OverrideFields";
 
@@ -82,10 +79,14 @@ export function ExtraFormDialog({
             <DialogDescription className="sr-only">{title}</DialogDescription>
           </DialogHeader>
           <div className="scroll-stable-y flex min-h-0 flex-col gap-4 overflow-y-auto p-1">
+            <p className="m-0 text-sm text-muted-foreground">
+              Scope: Feature. This orchestrator acts only on the cards that you
+              assign to it.
+            </p>
             {scopeRows !== null && (
               <fieldset className="m-0 flex min-w-0 flex-col gap-(--space-sm) border-0 p-0">
                 <legend className="mb-(--space-sm) p-0 text-sm font-semibold text-foreground">
-                  Scope
+                  Assigned cards
                 </legend>
                 {scopeRows.length === 0 && (
                   <p className="m-0 text-sm text-muted-foreground">
@@ -110,11 +111,6 @@ export function ExtraFormDialog({
                     )}
                   </Label>
                 ))}
-                {picked.length === 0 && (
-                  <p className="m-0 text-sm text-muted-foreground">
-                    {NEEDS_SCOPE_HINT}
-                  </p>
-                )}
               </fieldset>
             )}
             <OverrideFields

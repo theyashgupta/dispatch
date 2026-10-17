@@ -7,6 +7,7 @@ import { loopView } from "../../../../shared/loop-view.js";
 import {
   cardOwner,
   mainOrchestrator,
+  scopeLabel,
 } from "../../../../shared/orchestrator-owner.js";
 import { hasLoopProgress } from "../../../../shared/running-group.js";
 import {
@@ -68,6 +69,7 @@ export interface CentreNode {
   cost: number | null;
   branchCount: number;
   needYouCount: number;
+  scope: string;
 }
 
 export interface CentreBand {
@@ -428,6 +430,7 @@ function centreNode(
   record: OrchestratorView,
   branches: readonly CentreBranch[],
   visible: readonly CentreBranch[],
+  cards: readonly Card[],
 ): CentreNode {
   const state = record.session?.state ?? null;
   const known =
@@ -443,6 +446,7 @@ function centreNode(
     cost: record.session?.cost ?? null,
     branchCount: branches.length,
     needYouCount: visible.filter((b) => b.band === "needs_you").length,
+    scope: scopeLabel(record, cards),
   };
 }
 
@@ -507,7 +511,7 @@ export function centreGraph(input: CentreGraphInput): CentreGraph {
     input.now - Date.parse(b.shippedAt) > OLDER_SHIPPED_MS;
   const visible = all.filter((b) => !hidden(b));
   return {
-    centre: centreNode(selected, all, visible),
+    centre: centreNode(selected, all, visible, input.cards),
     branches: visible,
     bands: BANDS.map((band) => {
       const branches = visible.filter((b) => b.band === band.key);

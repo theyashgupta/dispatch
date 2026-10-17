@@ -21,7 +21,9 @@ export function HeaderStrip({
   action,
   onNeedsClick,
 }: HeaderStripProps) {
-  const items: ReactNode[] = facts.map((fact) => <span>{fact}</span>);
+  const items: ReactNode[] = facts.map((fact) => (
+    <span className="min-w-0 wrap-anywhere">{fact}</span>
+  ));
   if (staleText !== null) items.unshift(<span role="status">{staleText}</span>);
   if (needsText !== null) {
     items.push(
