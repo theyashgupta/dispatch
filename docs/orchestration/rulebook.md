@@ -230,7 +230,7 @@ Read the progress of a group with `get_group_progress`. Read the progress of a s
 
 Never select usage credits.
 
-When usageLimit is `wait`, the supervisor waits for the reset and then continues.
+When usageLimit is `wait`, the supervisor moves the session to the account with the most weekly headroom. The session continues there with the same conversation. `list_sessions` shows the new account. The supervisor waits for the reset and then continues only when no other account has headroom. The supervisor event of the wait gives the reason.
 
 After a limit, check `get_group_progress` for a group or `get_card_progress` for a single card. Call `read_pane_tail` for every session. Do this before any `send_input`.
 

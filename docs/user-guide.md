@@ -716,9 +716,10 @@ Claude shows a usage limit dialog when the account reaches its limit. The field 
 
 1. The supervisor selects the wait or stop row of the dialog. It presses Enter only after a new capture of the pane shows the cursor on that row.
 2. It never selects a row that offers usage credits. If it finds no safe row, it does not press Enter. The session moves to **Needs input**.
-3. It finds the reset time in the pane. If the pane gives none, it uses the usage poll of the account. If that gives none, it waits 5 hours from the dialog.
-4. Two minutes after the reset, it sends one continue prompt.
-5. If the loop waits for a handoff, the supervisor leaves the automatic continue and starts a fresh session after the reset.
+3. If another account of the chain has weekly headroom, the supervisor moves the session to the account with the most headroom and the loop continues there. A pinned session does not move. The steps below apply when no account has headroom.
+4. It finds the reset time in the pane. If the pane gives none, it uses the usage poll of the account. If that gives none, it waits 5 hours from the dialog.
+5. Two minutes after the reset, it sends one continue prompt.
+6. If the loop waits for a handoff, the supervisor leaves the automatic continue and starts a fresh session after the reset.
 
 **Stop and ask me** (`stop`):
 
