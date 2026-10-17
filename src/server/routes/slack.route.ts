@@ -17,6 +17,7 @@ import {
 } from "../services/orchestration/slack.js";
 import {
   applySlackSettings,
+  checkSlackConnection,
   runSlackNow,
   slackMcpStatus,
   slackSettings,
@@ -144,6 +145,10 @@ slackRouter.post("/slack/mcp/run", async (_req, res) => {
   const result = await runSlackNow();
   if (result !== "started") throw new ConflictError(result);
   res.status(202).json({ running: true });
+});
+
+slackRouter.post("/slack/mcp/check", async (_req, res) => {
+  res.json(await checkSlackConnection());
 });
 
 slackRouter.get("/slack/channels", async (_req, res) => {

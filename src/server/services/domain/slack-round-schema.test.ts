@@ -411,11 +411,11 @@ test("a thread author that is empty reads Unknown", () => {
   assert.equal(out.messages[0]?.author, "Unknown");
 });
 
-test("an init without the allowed tool is no-slack-tool, even with a valid empty result", () => {
+test("an init without the allowed tool is no-connector, even with a valid empty result", () => {
   const pending = { ...INIT, tools: [] };
   assert.deepEqual(parseRoundOutput(lines(pending, EMPTY_RESULT), TOOLS), {
     ok: false,
-    reason: "no-slack-tool",
+    reason: "no-connector",
   });
 });
 

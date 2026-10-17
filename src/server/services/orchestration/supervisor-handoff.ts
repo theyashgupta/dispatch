@@ -159,12 +159,19 @@ export function isHandoffPending(card: Card): boolean {
   return handoffFacts(card)?.pending === true;
 }
 
+/** Whether the pane shows the input prompt and no running turn. */
+async function quietAndReady(target: string): Promise<boolean> {
+  const pane = await capturePane(target).catch(() => "");
+  return paneReady(pane) && !paneBusy(pane);
+}
+
 /**
  * Send the handoff request once per threshold crossing, and the hard request once above the hard threshold.
  *
  * @remarks
  * The crossing re-arms when the meter falls under `handoffPercent`, as after a clear. A
- * session that is already `handoff-pending` gets no request.
+ * session that is already `handoff-pending` gets no request. An orchestrator still pending in a
+ * quiet pane runs the fresh session steps here, since a user /clear can wipe its HANDOFF_READY line.
  */
 export async function checkHandoffThreshold(
   card: Card,
@@ -172,8 +179,14 @@ export async function checkHandoffThreshold(
   policy: Pick<BoardPolicy, "handoffPercent" | "handoffHardPercent">,
 ): Promise<void> {
   const facts = handoffFacts(card);
+  if (!facts?.active) return;
+  if (facts.pending && isHiddenCard(card)) {
+    if (await quietAndReady(`=${session.tmuxSession}:`))
+      await runFreshSession(card, session);
+    return;
+  }
   const percent = session.contextPercent;
-  if (!facts?.active || percent == null) return;
+  if (percent == null) return;
   if (percent < policy.handoffPercent) {
     crossings.delete(session.id);
     return;
@@ -282,19 +295,16 @@ export async function runFreshSession(
   if ((!owner && !slug) || old === null) return fail("transcript");
   const dir = path.dirname(old);
   const newest = () => newestJsonl(dir);
-  const quietAndReady = async () => {
-    const pane = await capturePane(target).catch(() => "");
-    return paneReady(pane) && !paneBusy(pane);
-  };
+  const quiet = () => quietAndReady(target);
 
-  if (!(await waitFor(quietAndReady, timing.readyMs, timing.pollMs)))
+  if (!(await waitFor(quiet, timing.readyMs, timing.pollMs)))
     return fail("clear");
   await sendKeys(target, ["C-u"]);
   await sendLiteral(target, "/clear");
   await sleep(SEND_TIMING.settleMs);
-  if (!(await quietAndReady())) return fail("clear");
+  if (!(await quiet())) return fail("clear");
   await sendKeys(target, ["Enter"]);
-  if (!(await waitFor(quietAndReady, timing.readyMs, timing.pollMs)))
+  if (!(await waitFor(quiet, timing.readyMs, timing.pollMs)))
     return fail("clear");
 
   const sent = await sendConfirmed(

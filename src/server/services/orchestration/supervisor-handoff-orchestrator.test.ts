@@ -7,6 +7,8 @@ import { isolateEnv } from "../../test-support/fixtures.js";
 const env = isolateEnv();
 const { store } = await import("../../store/board.store.js");
 const { resolveBinaryPath } = await import("../../adapters/resolve-binary.js");
+const { parseStatusLine } =
+  await import("../../adapters/markers/status-line.js");
 const {
   checkHandoffThreshold,
   orchestratorHandoffRequestText,
@@ -116,7 +118,10 @@ void test(
     await store.setSessionMetersIfSession(s.card().id, s.name, METERS(85));
     await checkHandoffThreshold(s.card(), s.session(), POLICY);
     assert.equal(s.userTexts(s.first).length, 0);
-    assert.deepEqual(s.actions(), []);
+    assert.equal(
+      s.actions().filter((e) => e.data.action === "handoff_request").length,
+      0,
+    );
   },
 );
 
@@ -168,5 +173,69 @@ void test(
     assert.deepEqual(await s.keysSettled(1), []);
     assert.equal(s.session().transcriptPath, s.first);
     assert.equal(s.record().handoffReady, undefined);
+  },
+);
+
+void test(
+  "a banner on the status row still sends the request at 70 percent and the hard request at 80",
+  { skip: !hasTmux },
+  async () => {
+    const s = await orchestratorSession("orch-banner");
+    const policy = { handoffPercent: 70, handoffHardPercent: 80 };
+    for (const percent of [70, 80]) {
+      await s.setScenario({
+        statusRows: [
+          `  Opus 5.5 · high  │  ███████░░░  ${percent}%  ${percent * 2}k/200k  You've used 72% of your weekly limit · resets Oct 22 at 12:30`,
+          "  GROUP-1  │  feat/x  │  $1.25",
+        ],
+      });
+      const meters = parseStatusLine(await s.pane());
+      assert.equal(meters?.contextPercent, percent);
+      await store.setSessionMetersIfSession(s.card().id, s.name, meters);
+      await checkHandoffThreshold(s.card(), s.session(), policy);
+    }
+    assert.deepEqual(
+      s
+        .actions()
+        .filter((e) => e.data.action === "handoff_request")
+        .map((e) => e.data.hard),
+      [false, true],
+    );
+  },
+);
+
+void test(
+  "a quiet orchestrator still marked handoffReady after a user /clear resumes in a fresh session in one pass",
+  { skip: !hasTmux },
+  async () => {
+    const s = await orchestratorSession("orch-cleared");
+    await s.patch({ handoffReady: true });
+    await sampleOf(s)();
+    const fresh = s.session().transcriptPath!;
+    assert.notEqual(fresh, s.first);
+    assert.deepEqual(s.userTexts(fresh), [
+      orchestratorResumePromptText("lead", SBX),
+    ]);
+    assert.equal(s.record().handoffReady, false);
+  },
+);
+
+void test(
+  "a pending orchestrator handoff that cannot confirm a fresh transcript logs the refusing step",
+  { skip: !hasTmux },
+  async () => {
+    const s = await orchestratorSession("orch-refused");
+    await s.patch({ handoffReady: true });
+    await s.setScenario({ transcriptDir: "" });
+    await sampleOf(s)();
+    assert.deepEqual(
+      s
+        .actions()
+        .filter((e) => e.data.action === "handoff")
+        .map((e) => [e.data.result, e.data.step]),
+      [["unconfirmed", "resume prompt"]],
+    );
+    assert.equal(s.session().state, "needs_input");
+    assert.equal(s.record().handoffReady, true);
   },
 );
