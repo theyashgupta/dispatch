@@ -426,7 +426,7 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 ### `create_ticket`
 
 - Route: `POST /tickets`. It answers 201 with `{ card }`.
-- Input: `proposalItemId` (id of a `ticket_proposal` decision item), `index` (integer, 0 or more: the position of one ticket in the proposal). A `title` or `description` field is refused.
+- Input: `proposalItemId` (id of a `ticket_proposal` decision item), `index` (integer, 0 or more: the position of one ticket in the proposal), `blockedBy` (optional array of at most 50 card ids on the board; the ticket starts on its own when every blocker reaches Done). A `title` or `description` field is refused. An invalid blocker is refused with 400 `invalid-blocker` before the index is used.
 - Description: "Create a local ticket from one entry of a ticket proposal that the user approved. A proposal that is open, rejected or unknown, and an entry that is already used, are refused."
 - Refusals: 400 `invalid-proposal-item`, `invalid-index` (also an index outside the list), `unknown-field`, `not-a-proposal` (the item is not a `ticket_proposal`). 403 `other-owner` (another orchestrator raised the item). 404 `unknown-proposal` (the id is unknown or the item is on another board), `unknown-board`. 409 `proposal-open`, `proposal-rejected` (the user answered `reject`), `proposal-index-used`, `board-archived`.
 - The ticket title and description come from the proposal entry. The store marks the index used in one guarded write before the ticket is created, so two calls at the same time create one ticket. If the create fails, the index is free again. The card keeps `createdByOrchestrator`.
@@ -434,9 +434,9 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 ### `update_ticket`
 
 - Route: `PATCH /tickets/:id`.
-- Input: `id` (card id), `title` (optional, as for `create_ticket`), `description` (optional, as for `create_ticket`).
-- Description: "Change the title or the description of a ticket. Text that holds the status marker is refused."
-- Refusals: 400 `empty-ticket-patch` (neither field given), `invalid-title`, `invalid-description`, and the marker text of `create_ticket`. 409 `not-a-ticket` for a group card. 409 `linear-card` with `reason` `linear card: edit in Linear` for any card that is not local.
+- Input: `id` (card id), `title` (optional, as for `create_ticket`), `description` (optional, as for `create_ticket`), `blockedBy` (optional array of at most 50 card ids on the board; an empty list clears it).
+- Description: "Change the title or the description of a local ticket, or set blockedBy (card ids on this board, an empty list clears it) on any ticket. Text that holds the status marker is refused."
+- Refusals: 400 `empty-ticket-patch` (no field given), `invalid-title`, `invalid-description`, `invalid-blocked-by`, `invalid-blocker`, `invalid-blocked-card`, `blocked-by-cycle` (with the chain in `reason`), and the marker text of `create_ticket`. 409 `not-a-ticket` for a group card. 409 `linear-card` with `reason` `linear card: edit in Linear` for a title or description on any card that is not local; `blockedBy` alone is accepted on a Linear card.
 
 ### `move_card`
 
