@@ -14,6 +14,7 @@ export type SupervisorAction =
   | { kind: "resume" }
   | { kind: "answer_limit" }
   | { kind: "escape_limit" }
+  | { kind: "limit_move" }
   | { kind: "handoff" };
 
 export interface LoopFacts {
@@ -143,9 +144,18 @@ export function planActions(input: PlanInput): {
     case "usage_limit_dialog":
       return { actions: [{ kind: "answer_limit" }], memory };
     case "usage_limit_wait":
-      return input.usageLimit === "wait" && loop?.handoffPending
-        ? { actions: [{ kind: "escape_limit" }], memory }
-        : none;
+      if (from === "usage_limit_dialog") return none;
+      if (input.usageLimit === "stop")
+        return {
+          actions: [{ kind: "needs_input", reason: "usage_stop" }],
+          memory,
+        };
+      return {
+        actions: [
+          { kind: loop?.handoffPending ? "escape_limit" : "limit_move" },
+        ],
+        memory,
+      };
     case "handoff_ready":
       return loop?.engineActive
         ? { actions: [{ kind: "handoff" }], memory }

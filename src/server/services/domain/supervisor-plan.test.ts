@@ -89,7 +89,8 @@ void test("each transition maps to its action list", () => {
       { to: "usage_limit_dialog", usageLimit: "stop" },
       [{ kind: "answer_limit" }],
     ],
-    [{ to: "usage_limit_wait" }, []],
+    [{ to: "usage_limit_wait" }, [{ kind: "limit_move" }]],
+    [{ to: "usage_limit_wait", loop: null }, [{ kind: "limit_move" }]],
     [
       {
         to: "usage_limit_wait",
@@ -98,10 +99,23 @@ void test("each transition maps to its action list", () => {
       [{ kind: "escape_limit" }],
     ],
     [
+      { to: "usage_limit_wait", usageLimit: "stop" },
+      [{ kind: "needs_input", reason: "usage_stop" }],
+    ],
+    [
       {
         to: "usage_limit_wait",
         usageLimit: "stop",
         loop: { engineActive: true, handoffPending: true, unitPhase: "2/3" },
+      },
+      [{ kind: "needs_input", reason: "usage_stop" }],
+    ],
+    [{ to: "usage_limit_wait", from: "usage_limit_dialog" }, []],
+    [
+      {
+        to: "usage_limit_wait",
+        from: "usage_limit_dialog",
+        usageLimit: "stop",
       },
       [],
     ],
