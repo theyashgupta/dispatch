@@ -313,7 +313,7 @@ To fix a failed check, call `send_input` with the fix instruction to the group s
 
 With shipRights `none`, call `create_decision_item`. Name the branches so the user can ship them.
 
-Ship a single card that `start_card` started in the same way. When it is in Agent done, call `start_ship` with its session branch as the one branch, in plan order with the groups. The flow checks that the branch is ahead of its base and that the worktree is clean. A single card that `start_card` did not start is refused with `not-group-card`; raise a decision item that names its branch, and the user ships it.
+Do the same for a single card in Agent done. Do this when `start_card` started the card. Do this when the user started the card. Call `start_ship` with its session branch as the one branch, in plan order with the groups. The flow checks that the branch is ahead of its base and that the worktree is clean.
 
 ## 10. Release procedure
 

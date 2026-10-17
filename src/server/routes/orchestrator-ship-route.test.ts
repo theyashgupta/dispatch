@@ -556,12 +556,65 @@ void test("start_ship answers 202 for a launched ticket card with Part A progres
   );
 });
 
-void test("start_ship answers 400 not-group-card for a ticket card with no launch", async () => {
+void test("start_ship answers 202 for a ticket card the user started from the board and the flow merges one PR", async () => {
   await setPolicy({ shipRights: "merge" });
-  const card = await launchedTicket("agent_done", { launched: false });
+  const card = await launchedTicket("agent_done", {
+    launched: false,
+    tree: await freshTree("user-started-tree"),
+  });
+  assert.equal(card.launch, undefined);
   const reply = await shipOf(card, card.id);
+  assert.equal(reply.status, 202, JSON.stringify(reply.body));
+  await waitFor(
+    () => Promise.resolve(store.getCard(card.id)?.shipFlow?.state === "done"),
+    30_000,
+    "flow done",
+  );
+  const flow = store.getCard(card.id)?.shipFlow as ShipFlow;
+  assert.equal(flow.branches.length, 1);
+  assert.equal(flow.branches[0]?.state, "merged");
+  assert.notEqual(flow.branches[0]?.pr, null);
+});
+
+void test("start_ship answers 400 not-group-card for a ticket card with no launch and no session branch", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const card = await store.createLocalCard(SBX, "no session", "");
+  await store.setCardWorkspace(card.id, {
+    folder: stack.ws,
+    repos: [{ path: stack.repo, base: "main" }],
+  });
+  const reply = await shipOf(store.getCard(card.id)!, card.id);
   assert.equal(reply.status, 400);
   assert.equal(reply.body.error, "not-group-card");
+  assert.equal(store.getCard(card.id)?.shipFlow, undefined);
+});
+
+void test("start_ship refuses a user-started ticket card in Done with already-shipped and in Inbox with card-not-done", async () => {
+  await setPolicy({ shipRights: "merge" });
+  for (const [column, error] of [
+    ["done", "already-shipped"],
+    ["inbox", "card-not-done"],
+  ] as const) {
+    const card = await launchedTicket("agent_done", { launched: false });
+    await store.moveCardManual(card.id, column);
+    assert.equal(store.getCard(card.id)?.column, column);
+    const reply = await shipOf(card, card.id);
+    assert.equal(reply.status, 409, column);
+    assert.equal(reply.body.error, error, column);
+    assert.equal(store.getCard(card.id)?.shipFlow, undefined);
+  }
+});
+
+void test("start_ship answers 403 policy-refused for a user-started ticket card when ship rights are none", async () => {
+  const card = await launchedTicket("agent_done", { launched: false });
+  await setPolicy({ shipRights: "none" });
+  try {
+    const reply = await shipOf(card, card.id);
+    assert.equal(reply.status, 403);
+    assert.equal(reply.body.error, "policy-refused");
+  } finally {
+    await setPolicy({ shipRights: "merge" });
+  }
   assert.equal(store.getCard(card.id)?.shipFlow, undefined);
 });
 

@@ -191,7 +191,7 @@ function assertShipBranches(
 /**
  * True for a group card whose loop progress vouches for its branches.
  *
- * @remarks A launched ticket card takes the ahead and clean checks even with Part A progress, because its one
+ * @remarks A single ticket card takes the ahead and clean checks even with Part A progress, because its one
  * unit names no branch and so cannot vouch for the session branch.
  */
 function isGroupLoop(
@@ -225,18 +225,21 @@ function assertNoRunningFlow(boardKey: BoardKey): void {
 }
 
 /**
- * Check the ship preconditions of a loop card in their fixed order, with no git call and no write.
+ * Check the ship preconditions of a group card or a single ticket card in their fixed order, with no git call and no write.
  *
  * @remarks A card whose engine is active and not closed is refused whatever its unit count. A group
- * with no loop progress and every launched ticket card need the Agent done column, and a refusal is
- * a typed error, so a refused call stores no flow.
+ * with no loop progress and every single ticket card need the Agent done column, and a refusal is
+ * a typed error, so a refused call stores no flow. A ticket card with no launch passes only with a
+ * session branch, and never as a group member or a review card, whose branch is not its own work.
  */
 function assertShippable(
   caller: OrchestratorIdentity,
   card: Card,
   { repository, branches }: ShipInput,
 ): ShipFlow["rights"] {
-  if (!isLoopCard(card)) throw new ValidationError("not-group-card");
+  if (!isLoopCard(card) && (!card.branch || card.groupId || card.reviewPr)) {
+    throw new ValidationError("not-group-card");
+  }
   if (
     !mayShip(resolveBoard(caller.boardKey).orchestrators, caller.orchestratorId)
   ) {
@@ -287,7 +290,7 @@ function assertShippable(
  * Throw the typed 409 unless each branch is ahead of its base and the worktree is clean.
  *
  * @remarks Only a card whose loop cannot vouch for its branches runs it: a group with no loop
- * progress or a launched ticket card. The base is `origin/<base>` when that ref exists, because the session
+ * progress or a single ticket card. The base is `origin/<base>` when that ref exists, because the session
  * branch is cut from it, else the local base. It runs before any write, so a refusal stores no flow.
  */
 async function assertAheadAndClean(
