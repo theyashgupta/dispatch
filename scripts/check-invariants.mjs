@@ -122,7 +122,7 @@ const ATTENTION_FIELDS = ["startError", "sessionLost", "cleanupBlocked"];
 const ATTENTION_EXPORTS = ["needsAttention", "attentionTitle"];
 
 /**
- * The twenty `--col-*`/`--prio-*`/`--status-*`/`--src-*` custom-property names `NEW-24` requires present
+ * The twenty-five `--col-*`/`--prio-*`/`--status-*`/`--src-*` custom-property names `NEW-24` requires present
  * in {@link TOKENS_PATH} with a hex value. Named here rather than derived, so a silently emptied
  * or renamed token is itself a detectable defect, not an empty denylist: the missing-subject
  * sentinel in `checkStatusColorSingleSource` fires per absent name. The hex VALUES themselves are
@@ -143,6 +143,11 @@ const STATUS_COLOR_PALETTE_TOKENS = [
   "--status-ok",
   "--status-stale",
   "--status-down",
+  "--status-running",
+  "--status-idle",
+  "--status-waiting",
+  "--status-stopped",
+  "--status-errored",
   "--src-github",
   "--src-linear",
   "--src-slack",
@@ -1104,7 +1109,7 @@ function checkSourceAccentMechanism() {
  * consumed by `ColumnHeader.tsx`, `SearchField.tsx` and `StatusPillSwitcher.tsx` (columns) and `CardView.tsx`
  * itself (priority). A gate that only fenced literals would pass unchanged against a build that
  * deleted either map and inlined its `var()` strings by hand.
- * @remarks All twenty {@link STATUS_COLOR_PALETTE_TOKENS} names must be present in `tokens.css`
+ * @remarks All twenty-five {@link STATUS_COLOR_PALETTE_TOKENS} names must be present in `tokens.css`
  * with a hex value; any absent one is a named missing-subject sentinel violation, never a silently
  * shrunk denylist.
  * @remarks The literal scan covers `.ts`/`.tsx`/`.css`/`.html` under `src/web`, since a

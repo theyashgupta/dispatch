@@ -4982,12 +4982,12 @@ output is the proof. A reader who sees `PASS: 121/121` alone has not yet seen th
 run.
 
 **No file under `src/web` may carry a status-meaning colour literal (`NEW-24`).** The status,
-priority, column and source palettes each live once, in `src/web/styles/tokens.css`, as twenty
-`--col-*`/`--prio-*`/`--status-*`/`--src-*` custom properties (thirteen status-meaning names plus
+priority, column and source palettes each live once, in `src/web/styles/tokens.css`, as twenty-five
+`--col-*`/`--prio-*`/`--status-*`/`--src-*` custom properties (eighteen status-meaning names plus
 the seven source colours ratified on 2026-09-23 in `docs/standards/design-contract.md`). `checkStatusColorSingleSource` in
-`scripts/check-invariants.mjs` reads those twenty declarations at run time and builds its
+`scripts/check-invariants.mjs` reads those twenty-five declarations at run time and builds its
 denylist from the resulting hex values, rather than hardcoding them, so a future palette retune
-can never leave a stale denylist behind; the check requires all twenty names present with a hex
+can never leave a stale denylist behind; the check requires all twenty-five names present with a hex
 value and reports a named missing-subject sentinel violation, not a silently emptied denylist, if
 any is absent or renamed. The literal scan covers `.ts`, `.tsx`, `.css` and `.html` under
 `src/web`, since a stylesheet reintroduces a palette hex as easily as a component, with one named
@@ -5017,7 +5017,7 @@ trips proving the check can fail: a reintroduced literal at a real consuming sit
 palette declaration hitting the missing-subject sentinel, and a renamed `COLUMN_ACCENT` hitting
 the mechanism half.
 
-Since 2026-09-29 (G9 Unit 1) `tokens.css` holds a light block that names the same tokens again. The count above does not change: the check reads the twenty declarations whose value is a bare hex, all in the `:root` block, and it skips a declaration whose value starts with `color-mix`, which is the only form the light block uses for these names. `--col-parked` is a twenty-first signal token that the check does not fence; the light block treats it the same way. See [Theme Engine](#theme-engine).
+Since 2026-09-29 (G9 Unit 1) `tokens.css` holds a light block that names the same tokens again. The count above does not change: the check reads the twenty-five declarations whose value is a bare hex, all in the `:root` block, and it skips a declaration whose value starts with `color-mix`, which is the only form the light block uses for these names. `--col-parked` is a twenty-sixth signal token that the check does not fence; the light block treats it the same way. See [Theme Engine](#theme-engine).
 
 `scripts/check-invariants.mjs` once covered all six through four checks, and three have retired. The global literal scan (the focus shadow, the float shadow and the wordmark weight) and the board reading rhythm check moved to the lint rules in the record above on 2026-10-07. The strip cascade check retired with the strip (see [App Shell Zones](#app-shell-zones)). The fourth, file-scoped check (`checkTerminalFence`, `NEW-20`, above) still covers the terminal client. It proves only the fenced subject set, never the fenced contents, as stated above.
 
