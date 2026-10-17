@@ -4624,6 +4624,17 @@ class BoardStore extends EventEmitter {
     });
   }
 
+  /** Store the blocker ids of a card; an empty list removes the field and an unknown card is a no-op. */
+  setBlockedBy(id: string, ids: string[]): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      if (ids.length === 0) delete card.blockedBy;
+      else card.blockedBy = [...ids];
+      return [];
+    });
+  }
+
   /** Store the orchestrator that created a card and the launch values of a held group start. */
   setOrchestratorFields(
     id: string,

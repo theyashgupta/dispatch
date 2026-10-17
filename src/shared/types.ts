@@ -364,6 +364,7 @@ export interface Card {
   stateSince?: string;
   transcriptPath?: string;
   dependsOn?: string[];
+  blockedBy?: string[];
   startQueued?: boolean;
   createdByOrchestrator?: string;
   ownerOrchestrator?: string;

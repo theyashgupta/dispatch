@@ -10,6 +10,7 @@ import {
   isReservedBoardKey,
   parseBoardKey,
 } from "../../../shared/board-key.js";
+import { isBlockerDone } from "../../../shared/blocked-by.js";
 import { BOARD_NAME_MAX } from "../../../shared/orchestrator-limits.js";
 import { buildAttentionQueue } from "../../../shared/attention-queue.js";
 import { loopView } from "../../../shared/loop-view.js";
@@ -219,11 +220,7 @@ export function withCapLock<T>(fn: () => Promise<T>): Promise<T> {
 
 /** True for a dependency group in Done, or with at least one PR and every PR merged. */
 export function dependencyDone(id: string): boolean {
-  const dep = store.getCard(id);
-  if (!dep) return false;
-  if (dep.column === "done") return true;
-  const prs = dep.prs ?? [];
-  return prs.length > 0 && prs.every((pr) => pr.state === "merged");
+  return isBlockerDone(store.getCard(id));
 }
 
 interface CardListFilters {
