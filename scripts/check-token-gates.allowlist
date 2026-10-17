@@ -1,0 +1,227 @@
+# Allowlist for scripts/check-token-gates.mjs: raw values that existed when the gate landed.
+# Line format: path TAB match TAB reason. An entry covers every violation with that exact path and match.
+# An entry that matches nothing fails the gate, so delete an entry when its value is gone.
+src/web/components/ActivityRow.tsx	[word-break:break-word]	CSS property with no Tailwind utility
+src/web/components/FlowStage.tsx	[offset-path:var(--token-path)]	CSS property with no Tailwind utility
+src/web/components/FlowStage.tsx	[offset-rotate:0deg]	CSS property with no Tailwind utility
+src/web/components/FlowStage.tsx	[transform:scale(var(--stage-scale))]	CSS property with no Tailwind utility
+src/web/components/FlowStage.tsx	animate-[flow-travel_var(--token-ms)_linear_forwards]	keyframe shorthand built from motion tokens
+src/web/components/FlowStage.tsx	animate-[flow-travel_var(--token-ms)_linear_infinite]	keyframe shorthand built from motion tokens
+src/web/components/FlowStage.tsx	bg-[color-mix(in_srgb,var(--badge-state)_22%,var(--surface-card))]	tint of a signal token, pending a Badge tone or tint token
+src/web/components/FlowStage.tsx	h-[calc(var(--stage-h)*var(--stage-scale))]	viewport or container relative size
+src/web/components/FolderBrowserDialog.tsx	[scrollbar-gutter:stable]	CSS property with no Tailwind utility
+src/web/components/FolderBrowserDialog.tsx	max-h-[70vh]	viewport or container relative size
+src/web/components/GroupCollapsible.tsx	grid-rows-[0fr]	grid track template
+src/web/components/GroupCollapsible.tsx	grid-rows-[1fr]	grid track template
+src/web/components/GroupCollapsible.tsx	transition-[grid-template-rows]	transition property list, no value
+src/web/components/SettingsPanelLayout.tsx	[scrollbar-gutter:stable]	CSS property with no Tailwind utility
+src/web/components/SplitPane.tsx	[transition:var(--hover-transition)]	CSS property with no Tailwind utility
+src/web/components/Wordmark.tsx	tracking-[0.18em]	tracking token lands in LOCAL-144
+src/web/components/badges/PrBadge.tsx	size-[5px]	one-off pixel geometry without a token step
+src/web/components/badges/SourceBadge.tsx	bg-[color-mix(in_srgb,var(--badge-state)_16%,transparent)]	tint of a signal token, pending a Badge tone or tint token
+src/web/components/badges/SourceIcon.tsx	bg-[color-mix(in_srgb,var(--badge-state)_16%,transparent)]	tint of a signal token, pending a Badge tone or tint token
+src/web/components/badges/pr-style.ts	bg-[color-mix(in_srgb,var(--col-done)_16%,var(--surface-card))]	tint of a signal token, pending a Badge tone or tint token
+src/web/components/badges/pr-style.ts	bg-[color-mix(in_srgb,var(--col-in-review)_16%,var(--surface-card))]	tint of a signal token, pending a Badge tone or tint token
+src/web/components/badges/pr-style.ts	bg-[color-mix(in_srgb,var(--status-ok)_16%,var(--surface-card))]	tint of a signal token, pending a Badge tone or tint token
+src/web/components/badges/pr-style.ts	text-[color-mix(in_srgb,var(--col-done)_35%,var(--text))]	tint of a signal token, pending a Badge tone or tint token
+src/web/components/badges/pr-style.ts	text-[color-mix(in_srgb,var(--col-in-review)_35%,var(--text))]	tint of a signal token, pending a Badge tone or tint token
+src/web/components/splash/Splash.tsx	[transform:scale(2)]	CSS property with no Tailwind utility
+src/web/components/splash/Splash.tsx	animate-[splash-in_var(--motion-splash-in)_ease-out_forwards]	keyframe shorthand built from motion tokens
+src/web/components/splash/Splash.tsx	animate-[splash-out_var(--motion-splash-out)_ease-in_forwards]	keyframe shorthand built from motion tokens
+src/web/components/ui/alert-dialog.tsx	animate-[modal-fade-in_var(--motion-panel-open)_var(--easing-enter)_both]	keyframe shorthand built from motion tokens
+src/web/components/ui/alert-dialog.tsx	animate-[modal-fade-out_var(--motion-panel-close)_var(--easing-exit)_forwards]	keyframe shorthand built from motion tokens
+src/web/components/ui/alert-dialog.tsx	animate-[modal-in_var(--motion-panel-open)_var(--easing-enter)_both]	keyframe shorthand built from motion tokens
+src/web/components/ui/alert-dialog.tsx	animate-[modal-layer-hold_var(--motion-panel-close)_linear]	keyframe shorthand built from motion tokens
+src/web/components/ui/alert-dialog.tsx	animate-[modal-out_var(--motion-panel-close)_var(--easing-exit)_forwards]	keyframe shorthand built from motion tokens
+src/web/components/ui/alert-dialog.tsx	grid-rows-[auto_1fr]	grid track template
+src/web/components/ui/alert-dialog.tsx	grid-rows-[auto_auto_1fr]	grid track template
+src/web/components/ui/alert-dialog.tsx	left-[50%]	viewport or container relative size
+src/web/components/ui/alert-dialog.tsx	max-w-[calc(100%-2rem)]	viewport or container relative size
+src/web/components/ui/alert-dialog.tsx	max-w-[calc(100vw-32px)]	viewport or container relative size
+src/web/components/ui/alert-dialog.tsx	top-[50%]	viewport or container relative size
+src/web/components/ui/alert-dialog.tsx	translate-x-[-50%]	viewport or container relative size
+src/web/components/ui/alert-dialog.tsx	translate-y-[-50%]	viewport or container relative size
+src/web/components/ui/alert.tsx	grid-cols-[--spacing(4)_1fr]	grid track template
+src/web/components/ui/alert.tsx	grid-cols-[0_1fr]	grid track template
+src/web/components/ui/badge.tsx	bg-[color-mix(in_srgb,var(--accent)_16%,var(--surface-card))]	tint of a signal token, pending a Badge tone or tint token
+src/web/components/ui/badge.tsx	bg-[color-mix(in_srgb,var(--badge-state)_12%,transparent)]	tint of a signal token, pending a Badge tone or tint token
+src/web/components/ui/badge.tsx	bg-[color-mix(in_srgb,var(--destructive)_16%,var(--surface-card))]	tint of a signal token, pending a Badge tone or tint token
+src/web/components/ui/badge.tsx	bg-[color-mix(in_srgb,var(--status-ok)_16%,var(--surface-card))]	tint of a signal token, pending a Badge tone or tint token
+src/web/components/ui/badge.tsx	bg-[color-mix(in_srgb,var(--status-stale)_16%,var(--surface-card))]	tint of a signal token, pending a Badge tone or tint token
+src/web/components/ui/badge.tsx	content-['']	shadcn primitive geometry
+src/web/components/ui/badge.tsx	text-[color-mix(in_srgb,var(--badge-state)_35%,var(--text))]	tint of a signal token, pending a Badge tone or tint token
+src/web/components/ui/badge.tsx	transition-[color,box-shadow]	transition property list, no value
+src/web/components/ui/button.tsx	transition-[background-color,border-color,color]	transition property list, no value
+src/web/components/ui/card.tsx	grid-cols-[1fr_auto]	grid track template
+src/web/components/ui/card.tsx	grid-rows-[auto_auto]	grid track template
+src/web/components/ui/command.tsx	max-h-[300px]	shadcn primitive geometry
+src/web/components/ui/dialog.tsx	animate-[modal-fade-in_var(--motion-panel-open)_var(--easing-enter)_both]	keyframe shorthand built from motion tokens
+src/web/components/ui/dialog.tsx	animate-[modal-fade-out_var(--motion-panel-close)_var(--easing-exit)_forwards]	keyframe shorthand built from motion tokens
+src/web/components/ui/dialog.tsx	animate-[modal-in_var(--motion-panel-open)_var(--easing-enter)_both]	keyframe shorthand built from motion tokens
+src/web/components/ui/dialog.tsx	animate-[modal-layer-hold_var(--motion-panel-close)_linear]	keyframe shorthand built from motion tokens
+src/web/components/ui/dialog.tsx	animate-[modal-out_var(--motion-panel-close)_var(--easing-exit)_forwards]	keyframe shorthand built from motion tokens
+src/web/components/ui/dialog.tsx	left-[50%]	viewport or container relative size
+src/web/components/ui/dialog.tsx	max-w-[calc(100%-2rem)]	viewport or container relative size
+src/web/components/ui/dialog.tsx	max-w-[calc(100vw-32px)]	viewport or container relative size
+src/web/components/ui/dialog.tsx	top-[50%]	viewport or container relative size
+src/web/components/ui/dialog.tsx	translate-x-[-50%]	viewport or container relative size
+src/web/components/ui/dialog.tsx	translate-y-[-50%]	viewport or container relative size
+src/web/components/ui/dropdown-menu.tsx	min-w-[8rem]	shadcn primitive geometry
+src/web/components/ui/input.tsx	transition-[color,box-shadow]	transition property list, no value
+src/web/components/ui/item.tsx	shadow-[inset_0_0_0_1px_var(--accent)]	ring shadow composed from tokens
+src/web/components/ui/scroll-area.tsx	rounded-[inherit]	shadcn primitive geometry
+src/web/components/ui/scroll-area.tsx	transition-[color,box-shadow]	transition property list, no value
+src/web/components/ui/select.tsx	min-w-[8rem]	shadcn primitive geometry
+src/web/components/ui/select.tsx	transition-[color,box-shadow]	transition property list, no value
+src/web/components/ui/sidebar.tsx	left-[calc(var(--sidebar-width)*-1)]	viewport or container relative size
+src/web/components/ui/sidebar.tsx	right-[calc(var(--sidebar-width)*-1)]	viewport or container relative size
+src/web/components/ui/sidebar.tsx	shadow-[0_0_0_1px_var(--sidebar-accent)]	ring shadow composed from tokens
+src/web/components/ui/sidebar.tsx	shadow-[0_0_0_1px_var(--sidebar-border)]	ring shadow composed from tokens
+src/web/components/ui/sidebar.tsx	transition-[background-color,translate,left,right,width]	transition property list, no value
+src/web/components/ui/sidebar.tsx	transition-[left,right,width]	transition property list, no value
+src/web/components/ui/sidebar.tsx	transition-[margin,opacity]	transition property list, no value
+src/web/components/ui/sidebar.tsx	transition-[width,height,padding]	transition property list, no value
+src/web/components/ui/sidebar.tsx	transition-[width]	transition property list, no value
+src/web/components/ui/sidebar.tsx	w-[2px]	shadcn primitive geometry
+src/web/components/ui/sidebar.tsx	w-[calc(var(--sidebar-width-icon)+(--spacing(4)))]	viewport or container relative size
+src/web/components/ui/sidebar.tsx	w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]	viewport or container relative size
+src/web/components/ui/switch.tsx	h-[1.15rem]	shadcn primitive geometry
+src/web/components/ui/switch.tsx	transition-[background-color,border-color,color]	transition property list, no value
+src/web/components/ui/switch.tsx	translate-x-[calc(100%-2px)]	viewport or container relative size
+src/web/components/ui/table.tsx	translate-y-[2px]	shadcn primitive geometry
+src/web/components/ui/tabs.tsx	bottom-[-5px]	shadcn primitive geometry
+src/web/components/ui/tabs.tsx	h-[calc(100%-1px)]	viewport or container relative size
+src/web/components/ui/tabs.tsx	transition-[background-color,border-color,color]	transition property list, no value
+src/web/components/ui/textarea.tsx	transition-[color,box-shadow]	transition property list, no value
+src/web/components/ui/toggle-group.tsx	gap-[--spacing(var(--gap))]	shadcn primitive geometry
+src/web/components/ui/toggle.tsx	transition-[background-color,border-color,color,box-shadow]	transition property list, no value
+src/web/components/ui/tooltip.tsx	rounded-[2px]	shadcn primitive geometry
+src/web/components/ui/tooltip.tsx	translate-y-[calc(-50%_-_2px)]	viewport or container relative size
+src/web/modules/accounts/components/AccountPopover.tsx	max-h-[40vh]	viewport or container relative size
+src/web/modules/accounts/components/AddAccountDialog.tsx	max-h-[80vh]	viewport or container relative size
+src/web/modules/accounts/components/UsageChip.tsx	flex-[0_1_auto]	flex shorthand
+src/web/modules/accounts/components/UsageWindowRow.tsx	grid-cols-[minmax(72px,auto)_1fr_auto_auto]	grid track template
+src/web/modules/ask/components/AskMessage.tsx	max-w-[85%]	viewport or container relative size
+src/web/modules/ask/views/AskView.tsx	[word-break:break-word]	CSS property with no Tailwind utility
+src/web/modules/board/components/CardView.tsx	grid-cols-[--spacing(3)_1fr]	grid track template
+src/web/modules/board/components/CardView.tsx	transition-[background-color,border-color,color,box-shadow]	transition property list, no value
+src/web/modules/board/components/ColumnHeader.tsx	animate-[count-pulse_var(--motion-count-change)_var(--easing-enter)]	keyframe shorthand built from motion tokens
+src/web/modules/board/components/ColumnHeader.tsx	bg-[color-mix(in_srgb,var(--badge-state)_16%,var(--surface-column))]	tint of a signal token, pending a Badge tone or tint token
+src/web/modules/board/components/ColumnHeader.tsx	text-[color-mix(in_srgb,var(--badge-state)_35%,var(--text))]	tint of a signal token, pending a Badge tone or tint token
+src/web/modules/board/components/ColumnHeader.tsx	tracking-[0.04em]	tracking token lands in LOCAL-144
+src/web/modules/board/components/ColumnResizeHandle.tsx	[transition:var(--resize-handle-transition)]	CSS property with no Tailwind utility
+src/web/modules/board/components/MoveToPicker.tsx	w-[clamp(200px,60vw,260px)]	viewport or container relative size
+src/web/modules/board/components/SearchField.tsx	bg-[color-mix(in_srgb,var(--badge-state)_16%,var(--surface-column))]	tint of a signal token, pending a Badge tone or tint token
+src/web/modules/board/components/SearchField.tsx	max-h-[360px]	one-off pixel geometry without a token step
+src/web/modules/board/components/SearchField.tsx	text-[color-mix(in_srgb,var(--badge-state)_35%,var(--text))]	tint of a signal token, pending a Badge tone or tint token
+src/web/modules/board/components/SearchField.tsx	w-[clamp(280px,60vw,360px)]	viewport or container relative size
+src/web/modules/board/components/SelectionBar.tsx	max-w-[calc(100vw_-_2*var(--space-lg))]	viewport or container relative size
+src/web/modules/board/components/StatusPillSwitcher.tsx	bg-[color-mix(in_srgb,var(--badge-state)_16%,var(--surface-column))]	tint of a signal token, pending a Badge tone or tint token
+src/web/modules/board/components/StatusPillSwitcher.tsx	text-[color-mix(in_srgb,var(--badge-state)_35%,var(--text))]	tint of a signal token, pending a Badge tone or tint token
+src/web/modules/board/components/StatusPillSwitcher.tsx	tracking-[0.04em]	tracking token lands in LOCAL-144
+src/web/modules/board/components/dnd/BoardDragOverlay.tsx	h-[20px]	one-off pixel geometry without a token step
+src/web/modules/board/components/dnd/BoardDragOverlay.tsx	min-w-[20px]	one-off pixel geometry without a token step
+src/web/modules/board/components/dnd/BoardDragOverlay.tsx	translate-[4px]	one-off pixel geometry without a token step
+src/web/modules/board/components/dnd/BoardDragOverlay.tsx	translate-[8px]	one-off pixel geometry without a token step
+src/web/modules/board/components/dnd/DroppableColumn.tsx	bg-[color-mix(in_srgb,var(--accent)_12%,var(--surface-column))]	tint of a signal token, pending a Badge tone or tint token
+src/web/modules/board/components/dnd/DroppableColumn.tsx	bg-[color-mix(in_srgb,var(--status-stale)_14%,var(--surface-column))]	tint of a signal token, pending a Badge tone or tint token
+src/web/modules/board/components/dnd/DroppableColumn.tsx	bg-[color-mix(in_srgb,var(--status-stale)_8%,var(--surface-column))]	tint of a signal token, pending a Badge tone or tint token
+src/web/modules/board/components/dnd/DroppableColumn.tsx	flex-[0_0_80vw]	flex shorthand
+src/web/modules/board/components/dnd/DroppableColumn.tsx	flex-[0_0_90vw]	flex shorthand
+src/web/modules/board/components/dnd/DroppableColumn.tsx	flex-[1_1_0]	flex shorthand
+src/web/modules/board/components/dnd/DroppableColumn.tsx	max-w-[360px]	one-off pixel geometry without a token step
+src/web/modules/board/components/dnd/DroppableColumn.tsx	min-w-[220px]	one-off pixel geometry without a token step
+src/web/modules/board/components/dnd/DroppableColumn.tsx	min-w-[240px]	one-off pixel geometry without a token step
+src/web/modules/boards/components/BoardFormDialog.tsx	max-h-[calc(100dvh-2rem)]	viewport or container relative size
+src/web/modules/calendar/components/AgendaRow.tsx	flex-[1_1_200px]	flex shorthand
+src/web/modules/calendar/components/CalendarAgenda.tsx	grid-cols-[minmax(0,1fr)]	grid track template
+src/web/modules/card-actions/components/GroupStartDialog.tsx	max-h-[80vh]	viewport or container relative size
+src/web/modules/card-actions/components/PlaybookPickerSection.tsx	[contain:inline-size]	CSS property with no Tailwind utility
+src/web/modules/card-actions/components/PlaybookPickerSection.tsx	max-w-[min(28rem,calc(100vw-20px))]	viewport or container relative size
+src/web/modules/card-actions/components/StartDialog.tsx	max-h-[80vh]	viewport or container relative size
+src/web/modules/connections/components/CalendarCard.tsx	[overflow-wrap:anywhere]	CSS property with no Tailwind utility
+src/web/modules/connections/components/ConnectionCard.tsx	[overflow-wrap:anywhere]	CSS property with no Tailwind utility
+src/web/modules/connections/components/ConnectionCard.tsx	grid-cols-[20px_minmax(0,1fr)]	grid track template
+src/web/modules/connections/components/CredentialForm.tsx	flex-[1_1_220px]	flex shorthand
+src/web/modules/connections/components/GranolaCard.tsx	[overflow-wrap:anywhere]	CSS property with no Tailwind utility
+src/web/modules/connections/components/LinearStateMapRows.tsx	grid-cols-[repeat(auto-fill,minmax(min(160px,100%),1fr))]	grid track template
+src/web/modules/connections/components/SlackCard.tsx	[overflow-wrap:anywhere]	CSS property with no Tailwind utility
+src/web/modules/connections/components/SlackCard.tsx	grid-cols-[repeat(auto-fit,minmax(200px,1fr))]	grid track template
+src/web/modules/connections/components/SlackChannelPicker.tsx	[overflow-wrap:anywhere]	CSS property with no Tailwind utility
+src/web/modules/connections/components/SlackChannelPicker.tsx	flex-[1_1_200px]	flex shorthand
+src/web/modules/connections/components/StatusBadge.tsx	[overflow-wrap:anywhere]	CSS property with no Tailwind utility
+src/web/modules/dashboard/components/DashboardSection.tsx	bg-[linear-gradient(var(--danger-soft),var(--danger-soft))]	tint of a signal token, pending a Badge tone or tint token
+src/web/modules/dashboard/components/GroupProgressBar.tsx	animate-[node-breathe_var(--motion-node-breathe)_ease-in-out_infinite]	keyframe shorthand built from motion tokens
+src/web/modules/dashboard/components/TicketTileView.tsx	bg-[linear-gradient(var(--warn-soft),var(--warn-soft))]	tint of a signal token, pending a Badge tone or tint token
+src/web/modules/dashboard/views/DashboardView.tsx	grid-cols-[minmax(0,1fr)_20rem]	grid track template
+src/web/modules/dashboard/views/DashboardView.tsx	grid-cols-[minmax(0,1fr)_24rem]	grid track template
+src/web/modules/dashboard/views/DashboardView.tsx	grid-rows-[repeat(7,auto)_1fr]	grid track template
+src/web/modules/detail/components/LinearSection.tsx	[field-sizing:fixed]	CSS property with no Tailwind utility
+src/web/modules/detail/components/PanelFrame.tsx	flex-[0_1_auto]	flex shorthand
+src/web/modules/detail/components/PanelFrame.tsx	h-[calc(100dvh_-_var(--chrome-top,var(--page-header-height)))]	viewport or container relative size
+src/web/modules/detail/components/PanelFrame.tsx	left-[calc(var(--nav-current,0px)_+_var(--orca-nav-width))]	viewport or container relative size
+src/web/modules/detail/components/PanelFrame.tsx	max-h-[40%]	viewport or container relative size
+src/web/modules/detail/components/PanelFrame.tsx	top-[var(--chrome-top,var(--page-header-height))]	one-off pixel geometry without a token step
+src/web/modules/detail/components/PanelFrame.tsx	transition-[translate]	transition property list, no value
+src/web/modules/detail/components/PanelFrame.tsx	w-[calc(100%_-_var(--nav-current,0px)_-_var(--orca-nav-width))]	viewport or container relative size
+src/web/modules/detail/components/PanelFrame.tsx	w-[var(--panel-live-width,var(--panel-width))]	one-off pixel geometry without a token step
+src/web/modules/detail/components/PanelHeader.tsx	flex-[0_1_auto]	flex shorthand
+src/web/modules/detail/components/PanelNotice.tsx	[word-break:break-word]	CSS property with no Tailwind utility
+src/web/modules/detail/components/PanelNotice.tsx	grid-cols-[--spacing(3)_1fr]	grid track template
+src/web/modules/detail/components/PanelResizeHandle.tsx	[transform:translate(-50%,-50%)]	viewport or container relative size
+src/web/modules/detail/components/PanelResizeHandle.tsx	[transition:var(--resize-handle-transition)]	CSS property with no Tailwind utility
+src/web/modules/detail/components/PrList.tsx	size-[5px]	one-off pixel geometry without a token step
+src/web/modules/detail/components/ReferenceBlocks.tsx	[word-break:break-word]	CSS property with no Tailwind utility
+src/web/modules/detail/components/SessionSwitcher.tsx	bg-[color-mix(in_srgb,var(--accent)_16%,var(--surface-column))]	tint of a signal token, pending a Badge tone or tint token
+src/web/modules/detail/components/SessionSwitcher.tsx	bg-[color-mix(in_srgb,var(--accent)_22%,var(--surface-column))]	tint of a signal token, pending a Badge tone or tint token
+src/web/modules/detail/hooks/use-panel-resize.ts	z-[2147483647]	topmost overlay layer
+src/web/modules/flow/components/FlowDiagram.tsx	animate-[flow-pulse_var(--motion-flow-pulse)_var(--easing-enter)_infinite]	keyframe shorthand built from motion tokens
+src/web/modules/flow/components/FlowWideFrame.tsx	max-w-[calc(var(--flow-stage-w)+2*var(--space-lg))]	viewport or container relative size
+src/web/modules/meetings/components/DraftReviewRow.tsx	grid-cols-[1.25rem_minmax(0,1fr)]	grid track template
+src/web/modules/meetings/components/MeetingNotesDialog.tsx	max-h-[85vh]	viewport or container relative size
+src/web/modules/meetings/components/MeetingTranscript.tsx	max-h-[50vh]	viewport or container relative size
+src/web/modules/orchestrator/components/ExtraFormDialog.tsx	max-h-[calc(100dvh-2rem)]	viewport or container relative size
+src/web/modules/orchestrator/components/MoveGroupsDialog.tsx	max-h-[calc(100dvh-2rem)]	viewport or container relative size
+src/web/modules/orchestrator/components/SelectField.tsx	max-w-[calc(100vw-2rem)]	viewport or container relative size
+src/web/modules/playbooks/components/PlaybookEditorDialog.tsx	max-h-[80vh]	viewport or container relative size
+src/web/modules/sessions/components/SessionsBulkBar.tsx	max-w-[calc(100vw_-_2*var(--space-lg))]	viewport or container relative size
+src/web/modules/settings/components/CrossSessionInboundSection.tsx	max-w-[calc(100vw-2rem)]	viewport or container relative size
+src/web/modules/settings/components/SettingsSidebar.tsx	max-w-[80vw]	viewport or container relative size
+src/web/modules/settings/components/UpdatesSection.tsx	[overflow-wrap:anywhere]	CSS property with no Tailwind utility
+src/web/modules/setup/components/SetupDialog.tsx	max-h-[calc(100vh-2rem)]	viewport or container relative size
+src/web/modules/setup/components/SetupDialog.tsx	max-w-[min(45rem,calc(100%-2rem))]	viewport or container relative size
+src/web/modules/shell/components/AppSidebar.tsx	tracking-[0.04em]	tracking token lands in LOCAL-144
+src/web/modules/shell/components/CheatSheet.tsx	grid-cols-[repeat(auto-fit,minmax(150px,1fr))]	grid track template
+src/web/modules/shell/components/CheatSheet.tsx	max-h-[70vh]	viewport or container relative size
+src/web/modules/shell/components/CheatSheet.tsx	max-w-[760px]	one-off pixel geometry without a token step
+src/web/modules/shell/components/CommandPalette.tsx	max-h-[50vh]	viewport or container relative size
+src/web/modules/shell/components/CommandPalette.tsx	max-w-[560px]	one-off pixel geometry without a token step
+src/web/modules/shell/components/CommandPalette.tsx	top-[15vh]	viewport or container relative size
+src/web/modules/shell/components/NavRow.tsx	bg-[color-mix(in_srgb,var(--accent)_16%,var(--surface-column))]	tint of a signal token, pending a Badge tone or tint token
+src/web/modules/shell/components/ShellFrame.tsx	[--nav-current:0px]	scoped custom property set from tokens
+src/web/modules/shell/components/ShellFrame.tsx	[--nav-current:var(--nav-width)]	scoped custom property set from tokens
+src/web/modules/shell/components/ShellFrame.tsx	[--nav-current:var(--nav-width-collapsed)]	scoped custom property set from tokens
+src/web/modules/shell/components/SidebarBoards.tsx	tracking-[0.04em]	tracking token lands in LOCAL-144
+src/web/modules/shell/containers/ShellContainer.tsx	[--sidebar-width-icon:var(--nav-width-collapsed)]	scoped custom property set from tokens
+src/web/modules/shell/containers/ShellContainer.tsx	[--sidebar-width:var(--nav-width)]	scoped custom property set from tokens
+src/web/modules/today/components/EntryRow.tsx	leading-[normal]	one-off pixel geometry without a token step
+src/web/modules/workspace/components/OrcaGroupSection.tsx	bg-[color-mix(in_srgb,var(--badge-state)_16%,var(--surface-column))]	tint of a signal token, pending a Badge tone or tint token
+src/web/modules/workspace/components/OrcaGroupSection.tsx	text-[color-mix(in_srgb,var(--badge-state)_35%,var(--text))]	tint of a signal token, pending a Badge tone or tint token
+src/web/modules/workspace/components/OrcaGroupSection.tsx	tracking-[0.04em]	tracking token lands in LOCAL-144
+src/web/modules/workspace/components/OrcaSubgroupSection.tsx	bg-[color-mix(in_srgb,var(--badge-state)_16%,var(--surface-column))]	tint of a signal token, pending a Badge tone or tint token
+src/web/modules/workspace/components/OrcaSubgroupSection.tsx	text-[color-mix(in_srgb,var(--badge-state)_35%,var(--text))]	tint of a signal token, pending a Badge tone or tint token
+src/web/modules/workspaces/components/WorkspaceSection.tsx	[overflow-wrap:anywhere]	CSS property with no Tailwind utility
+src/web/modules/workspaces/components/WorkspaceSection.tsx	grid-rows-[0fr]	grid track template
+src/web/modules/workspaces/components/WorkspaceSection.tsx	grid-rows-[1fr]	grid track template
+src/web/modules/workspaces/components/WorkspaceSection.tsx	transition-[grid-template-rows,visibility]	transition property list, no value
+src/web/terminal.html	#0b0c0e	standalone xterm page, loads no tokens.css
+src/web/terminal.html	#111111	standalone xterm page, loads no tokens.css
+src/web/terminal.html	#2a2c30	standalone xterm page, loads no tokens.css
+src/web/terminal.html	#e8e9ea	standalone xterm page, loads no tokens.css
+src/web/terminal.html	160ms	standalone xterm page, loads no tokens.css
+src/web/terminal.html	font-size: 12px	standalone xterm page, loads no tokens.css
+src/web/terminal.html	font-size: 16px	standalone xterm page, loads no tokens.css
+src/web/viewer/viewer.css	--font-body: 15px	viewer reading sizes ratified in the 112 UI spec
+src/web/viewer/viewer.css	--font-label: 13px	viewer reading sizes ratified in the 112 UI spec
+src/web/viewer/viewer.css	--font-md-h1: 24px	viewer reading sizes ratified in the 112 UI spec
+src/web/viewer/viewer.css	--font-md-h2: 19px	viewer reading sizes ratified in the 112 UI spec
