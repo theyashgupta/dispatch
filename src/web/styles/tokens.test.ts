@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const LIGHT_SELECTOR = ':root[data-theme="light"]';
 const SIGNAL_NAME = /^--(?:prio|col|status|src)-[a-z-]+$/;
-const SIGNAL_COUNT = 21;
+const SIGNAL_COUNT = 26;
 const INSTRUMENT = join(WEB_ROOT, "../../scripts/contrast-113.mjs");
 const THEME_NEUTRAL = [
   "--destructive",
@@ -21,6 +21,8 @@ const THEME_NEUTRAL = [
   "--col-in-progress",
   "--col-done",
   "--status-down",
+  "--status-running",
+  "--status-errored",
 ];
 
 /** Reads a stylesheet under the web root with its comments removed. */
@@ -153,6 +155,23 @@ void test("the contrast instrument passes on both themes", () => {
   assert.equal((output.match(/-mark\(computed\) on /g) ?? []).length, 70);
 });
 
+void test("each motion role reads one step of the duration scale", () => {
+  const root = new Map(rootBlock);
+  for (const [name, step] of [
+    ["--motion-press", "instant"],
+    ["--motion-hover", "fast"],
+    ["--motion-count-change", "fast"],
+    ["--motion-panel-close", "fast"],
+    ["--motion-card-move", "fast"],
+    ["--motion-panel-open", "base"],
+    ["--motion-splash-out", "base"],
+    ["--motion-splash-in", "slow"],
+  ]) {
+    assert.equal(root.get(name), `var(--motion-${step})`, name);
+  }
+  assert.equal(root.get("--easing-enter"), "var(--easing-standard)");
+});
+
 void test("each soft tint mixes its state token over transparent in the root block", () => {
   const root = new Map(rootBlock);
   for (const [name, base] of [
@@ -171,4 +190,14 @@ void test("each soft tint mixes its state token over transparent in the root blo
   }
   assert.match(root.get("--glow-current") ?? "", /var\(--accent-soft\)/);
   assert.match(root.get("--motion-node-breathe") ?? "", /^2\.4s$/);
+});
+
+void test("the status pulse and the mono size utility are declared", () => {
+  const globalsCss = readCss("styles/globals.css");
+  assert.match(
+    globalsCss,
+    /--animate-status-pulse:\s*status-pulse var\(--motion-status-pulse\)/,
+  );
+  assert.match(globalsCss, /--text-mono--line-height:\s*var\(--line-label\)/);
+  assert.match(tokensCss, /@keyframes status-pulse\s*\{/);
 });
