@@ -41,9 +41,14 @@ import { createDecisionItem } from "./decision-items.js";
 import { recordGroupState } from "./group-state-events.js";
 import { enforce } from "./orchestrator-groups.js";
 
-export const shipTools: { run: typeof run; pollMs: number } = {
+export const shipTools: {
+  run: typeof run;
+  pollMs: number;
+  headPollMs: number;
+} = {
   run,
   pollMs: 30_000,
+  headPollMs: 2_000,
 };
 
 const DISPATCH_PACKAGE = "@theyashgupta/dispatch";
@@ -52,6 +57,7 @@ const CALL_TIMEOUT_MS = 120_000;
 const NETWORK_TIMEOUT_MS = 300_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
 const MAX_POLL_FAILURES = 5;
+const HEAD_READS = 5;
 const PLAIN_BASE_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const FINISHED_STATUSES = new Set(["built, awaiting /ship", "shipped"]);
 const RESERVED_BRANCHES = new Set(["main", "master", "HEAD"]);
@@ -591,8 +597,9 @@ async function check(r: Runner, branch: ShipBranch): Promise<void> {
 /**
  * The number of the open PR the branch can reuse, or null when there is none.
  *
- * @remarks Only a same-repository PR into main whose head is the checked commit counts, so an older
- * PR into another base or a fork PR with the same head name is never adopted.
+ * @remarks Only a same-repository PR into main counts, so a PR into another base or a fork PR with
+ * the same head name is never adopted. The head commit is not compared here: right after the push
+ * the list can still answer the previous head, so `waitPrHead` reads it instead.
  */
 async function openPrOf(r: Runner, branch: ShipBranch): Promise<number | null> {
   const out = await exec(
@@ -608,18 +615,39 @@ async function openPrOf(r: Runner, branch: ShipBranch): Promise<number | null> {
       "--state",
       "open",
       "--json",
-      "number,baseRefName,isCrossRepository,headRefOid",
+      "number,baseRefName,isCrossRepository",
     ]),
   );
   const match = (JSON.parse(out) as Record<string, unknown>[]).find(
     (pr) =>
       pr.baseRefName === "main" &&
       pr.isCrossRepository === false &&
-      pr.headRefOid === branch.checked &&
       Number.isSafeInteger(pr.number) &&
       (pr.number as number) > 0,
   );
   return match === undefined ? null : (match.number as number);
+}
+
+/**
+ * Read the head commit of an adopted PR until it is `expected`; the fifth miss stops the flow.
+ *
+ * @remarks GitHub can answer the previous head for a few seconds after a push.
+ */
+async function waitPrHead(
+  r: Runner,
+  pr: number,
+  expected: string,
+): Promise<void> {
+  for (let read = 1; ; read += 1) {
+    const seen = (await viewPr(r, pr, "headRefOid")).headRefOid;
+    if (seen === expected) return;
+    if (read === HEAD_READS) {
+      throw new ShipStop(
+        `PR ${pr} head is ${String(seen)} after ${HEAD_READS} reads, expected ${expected}`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, shipTools.headPollMs));
+  }
 }
 
 /**
@@ -640,6 +668,7 @@ async function pushAndOpen(r: Runner, branch: ShipBranch): Promise<void> {
   if (branch.pr !== null) return;
   const open = await openPrOf(r, branch);
   if (open !== null) {
+    await waitPrHead(r, open, branch.checked);
     branch.pr = open;
     await persist(r);
     return;

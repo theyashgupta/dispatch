@@ -32,6 +32,7 @@ const EXPECTED = [
   "request_handoff",
   "resume_card",
   "resume_loop",
+  "resume_session",
   "send_input",
   "start_card",
   "start_group",
@@ -55,7 +56,7 @@ const accepts = (name: string, input: unknown) =>
   assert.equal(z.object(byName(name).input).safeParse(input).success, true);
 
 describe("mcp tool table", () => {
-  it("holds exactly the 35 tools", () => {
+  it("holds exactly the 36 tools", () => {
     assert.deepEqual(MCP_TOOLS.map((t) => t.name).sort(), EXPECTED);
   });
 
@@ -170,6 +171,7 @@ describe("mcp tool table", () => {
       approve_roadmap: `/groups/${id}/approve-roadmap`,
       request_handoff: `/sessions/${id}/handoff`,
       resume_loop: `/sessions/${id}/resume`,
+      resume_session: `/sessions/${id}/resume-lost`,
       stop_session: `/sessions/${id}/stop`,
       pause_card: `/sessions/${id}/pause`,
       resume_card: `/sessions/${id}/unpause`,

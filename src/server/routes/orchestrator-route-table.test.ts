@@ -37,6 +37,7 @@ const ROUTES = [
   "POST /groups/:cardId/approve-roadmap",
   "POST /sessions/:cardId/handoff",
   "POST /sessions/:cardId/resume",
+  "POST /sessions/:cardId/resume-lost",
   "POST /sessions/:cardId/stop",
   "POST /sessions/:cardId/pause",
   "POST /sessions/:cardId/unpause",
@@ -56,8 +57,8 @@ const routes = (orchestratorRouter.stack as Layer[]).flatMap((layer) =>
     : [],
 );
 
-void test("the orchestrator router holds exactly the 35 tool routes", () => {
-  assert.equal(ROUTES.length, 35);
+void test("the orchestrator router holds exactly the 36 tool routes", () => {
+  assert.equal(ROUTES.length, 36);
   assert.deepEqual([...routes].sort(), [...ROUTES].sort());
 });
 

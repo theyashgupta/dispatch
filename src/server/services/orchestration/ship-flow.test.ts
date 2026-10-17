@@ -80,6 +80,7 @@ const afterCall: { hook: (call: Call) => Promise<void> } = {
   hook: () => Promise.resolve(),
 };
 shipTools.pollMs = 50;
+shipTools.headPollMs = 10;
 shipTools.run = async (cmd, args, opts) => {
   const call = { cmd, args: [...args], opts: { ...opts } };
   calls.push(call);
@@ -1192,7 +1193,7 @@ void test("a new start_ship reuses the open PR of a branch in place of a second 
       "-".repeat(2) + "state",
       "open",
       "-".repeat(2) + "json",
-      "number,baseRefName,isCrossRepository,headRefOid",
+      "number,baseRefName,isCrossRepository",
     ]),
   );
   assert.deepEqual(
@@ -1339,12 +1340,8 @@ function seedPr(stack: Stack, head: string, extra: Record<string, unknown>) {
   );
 }
 
-void test("an open PR into another base, from a fork or with a stale head is not reused", async () => {
-  for (const extra of [
-    { base: "base/other" },
-    { cross: true },
-    { headRefOid: "0".repeat(40) },
-  ]) {
+void test("an open PR into another base or from a fork is not reused", async () => {
+  for (const extra of [{ base: "base/other" }, { cross: true }]) {
     const stack = await newStack();
     seedPr(stack, "unit-1", extra);
     await startShip(stack, ["unit-1"]);
@@ -1358,6 +1355,54 @@ void test("an open PR into another base, from a fork or with a stale head is not
       ["8"],
     );
   }
+});
+
+/** The `gh pr view <n> --json headRefOid` calls of a stack. */
+function headViews(stack: Stack): string[][] {
+  return ghCalls(stack).filter(
+    (a) => a[1] === "view" && a[a.indexOf("--json") + 1] === "headRefOid",
+  );
+}
+
+void test("an open PR listed with a stale head is adopted once its head reads the pushed commit", async () => {
+  const stack = await newStack();
+  seedPr(stack, "unit-1", { headRefOid: "0".repeat(40), staleViews: 2 });
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.equal(flow.branches[0]?.pr, 7);
+  const gh = ghCalls(stack);
+  assert.equal(gh.filter((a) => a[1] === "create").length, 0);
+  assert.equal(headViews(stack).length, 3);
+  assert.ok(
+    gh.some(
+      (a) =>
+        a[1] === "view" &&
+        a[2] === "7" &&
+        a.includes("state,statusCheckRollup"),
+    ),
+  );
+  assert.deepEqual(
+    gh.filter((a) => a[1] === "merge").map((a) => a[2]),
+    ["7"],
+  );
+});
+
+void test("an adopted PR whose head stays stale for 5 reads stops the flow at pushing", async () => {
+  const stack = await newStack();
+  const stale = "0".repeat(40);
+  seedPr(stack, "unit-1", { headRefOid: stale, staleViews: 5 });
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "stopped");
+  assert.equal(flow.failedStep, "pushing");
+  const pushed = await gitOutput(stack.bare, "rev-parse", "unit-1");
+  assert.equal(
+    flow.reason,
+    `PR 7 head is ${stale} after 5 reads, expected ${pushed}`,
+  );
+  assert.equal(headViews(stack).length, 5);
+  assert.equal(ghCalls(stack).filter((a) => a[1] === "create").length, 0);
 });
 
 void test("a resumed flow whose HEAD is not the checked commit stops before it pushes", async () => {

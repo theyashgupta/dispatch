@@ -297,6 +297,14 @@ export const MCP_TOOLS: readonly McpTool[] = [
     path: "/sessions/:cardId/resume",
   },
   {
+    name: "resume_session",
+    description:
+      "Resume a card whose session is lost after a restart or a reboot, the way the Resume button does. The resumed session gets no kickoff prompt; send a continue line with send_input after it is live. Refused with session-live, no-lost-session, start-in-flight, invalid-identifier, memory-low, or the cap refusal of resume_loop.",
+    input: cardIdParam,
+    method: "POST",
+    path: "/sessions/:cardId/resume-lost",
+  },
+  {
     name: "stop_session",
     description:
       "Stop the session of a card. A card outside your board is refused.",
