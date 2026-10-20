@@ -11,7 +11,8 @@ export function withGroupCosts(
     const group =
       branch.cardId === null ? undefined : byCard.get(branch.cardId);
     if (group === undefined) return branch;
-    if (branch.cost === null && group.cost === 0) return branch;
+    if (branch.state === "planned" && branch.cost === null && group.cost === 0)
+      return branch;
     return { ...branch, cost: group.cost, budget: group.budget };
   };
   return {

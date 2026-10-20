@@ -61,13 +61,21 @@ test("a branch not in the groups keeps its session cost and has no budget", () =
   assert.equal(out.branches[0]?.budget, undefined);
 });
 
-test("a branch with no session cost of a group with no cost stays unchanged", () => {
-  const notStarted = branch("n", "g1", null);
+test("a planned group branch with no cost stays unchanged, so it keeps Not started", () => {
+  const notStarted = { ...branch("n", "g1", null), state: "planned" as const };
   const out = withGroupCosts(graphOf([notStarted]), [
     { cardId: "g1", cost: 0, budget: 20 },
   ]);
   assert.equal(out.branches[0], notStarted);
   assert.equal(out.bands[0]?.branches[0], notStarted);
+});
+
+test("a running group branch with no session cost shows the group cost of 0 and its budget", () => {
+  const out = withGroupCosts(graphOf([branch("r", "g1", null)]), [
+    { cardId: "g1", cost: 0, budget: 20 },
+  ]);
+  assert.equal(out.branches[0]?.cost, 0);
+  assert.equal(out.branches[0]?.budget, 20);
 });
 
 test("a planned branch with no card is unchanged", () => {
