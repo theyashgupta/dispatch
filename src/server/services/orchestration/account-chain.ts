@@ -5,6 +5,7 @@ import {
   type ChainStateFile,
   type ClaudeAccountsSettings,
   type ClaudeUsageSnapshot,
+  type DecisionItem,
 } from "../../../shared/types.js";
 import { SWITCH_NOW_REASON } from "../../../shared/account-chain.js";
 import { ALL_BOARDS } from "../../../shared/board-key.js";
@@ -18,6 +19,7 @@ import {
   type BucketedCandidate,
 } from "../domain/account-selection.js";
 import {
+  chainStateOf,
   deriveAccountState,
   isShadowOfHome,
   isStaleSurface,
@@ -40,7 +42,7 @@ import {
 import { recordChainEvent, type ChainEvent } from "./account-chain-records.js";
 import {
   closeAccountDecision,
-  raiseExhaustedDecision,
+  raiseExhaustedDecision as raiseAccountExhaustedDecision,
   raiseLoginDecision as raiseAccountLoginDecision,
 } from "./account-decisions.js";
 import {
@@ -89,9 +91,7 @@ export interface ChainDeps {
   emit: (event: ChainEvent) => void;
   startLogin: (accountId?: string) => Promise<{ ok: boolean; error?: string }>;
   raiseLoginDecision: (accountId: string) => Promise<string>;
-  raiseExhaustedDecision: (
-    earliestResetAt: string | null,
-  ) => string | Promise<string>;
+  raiseExhaustedDecision: (earliestResetAt: string | null) => Promise<string>;
   closeDecision: (decisionId: string, optionId: string, note: string) => void;
   scanMs: number;
 }
@@ -113,9 +113,7 @@ const realDeps: ChainDeps = {
       )
     ).loggedIn,
   emit: (event) => {
-    void recordChainEvent(event).catch((err: unknown) => {
-      console.warn(`[account-chain] ${(err as Error).message}`);
-    });
+    void recordChainEvent(event).catch(warnChain);
   },
   startLogin,
   raiseLoginDecision: async (id) => {
@@ -123,9 +121,14 @@ const realDeps: ChainDeps = {
       id === DEFAULT_CLAUDE_ACCOUNT_ID
         ? (await readDefaultIdentity())?.email
         : (await readRegistry()).find((a) => a.id === id)?.email;
-    return raiseAccountLoginDecision(id, email ?? id);
+    return raiseAccountLoginDecision(
+      id,
+      email ?? id,
+      id === DEFAULT_CLAUDE_ACCOUNT_ID,
+    );
   },
-  raiseExhaustedDecision,
+  raiseExhaustedDecision: async (earliestResetAt) =>
+    raiseAccountExhaustedDecision(earliestResetAt),
   closeDecision: closeAccountDecision,
   scanMs: SCAN_MS,
 };
@@ -144,13 +147,18 @@ const timers = new Map<
 >();
 
 /**
+ * Log a controller failure without throwing.
+ */
+function warnChain(err: unknown): void {
+  console.warn(`[account-chain] ${(err as Error).message}`);
+}
+
+/**
  * Run a controller task after every earlier one, so two failovers never overlap.
  */
 function enqueue<T>(task: () => Promise<T>): Promise<T> {
   const run = queue.then(task);
-  queue = run.catch((err: unknown) => {
-    console.warn(`[account-chain] ${(err as Error).message}`);
-  });
+  queue = run.catch(warnChain);
   return run;
 }
 
@@ -256,6 +264,11 @@ function recheckAt(resetAt: string | null): number {
   return at > deps.now() ? at : deps.now() + RECHECK_MS;
 }
 
+/**
+ * Arm the return check of a limited account.
+ *
+ * @remarks The timer outlives a clear of the limit, so only the timer returns the work.
+ */
 function scheduleReturn(id: string, at: number): void {
   schedule(`return:${id}`, at, () => checkReturn(id));
 }
@@ -279,10 +292,27 @@ export async function limitMoveCandidates(): Promise<BucketedCandidate[]> {
 }
 
 /**
+ * Answer the decision stored for `cause` and drop its id.
+ *
+ * @remarks The id is dropped also when the close fails, so a later cause of the same kind can raise
+ * a new decision.
+ */
+function closeCause(cause: string, optionId: string, note: string): void {
+  const stored = chain.decisions[cause];
+  if (stored === undefined) return;
+  delete chain.decisions[cause];
+  try {
+    deps.closeDecision(stored, optionId, note);
+  } catch (err) {
+    warnChain(err);
+  }
+}
+
+/**
  * Raise the login decision of an account that needs a login, or close it once the account recovered.
  *
  * @remarks The decision id is stored per cause, so a restart or a later rejected read never raises a
- * second one. A failure keeps the stored id as it was, so the next read tries again.
+ * second one.
  */
 async function syncLoginDecision(
   id: string,
@@ -293,13 +323,27 @@ async function syncLoginDecision(
   try {
     if (state === "needs-login" && stored === undefined) {
       chain.decisions[cause] = await deps.raiseLoginDecision(id);
-    } else if (state !== "needs-login" && stored !== undefined) {
-      deps.closeDecision(stored, "later", "The account returned to the chain.");
-      delete chain.decisions[cause];
+    } else if (state !== "needs-login") {
+      closeCause(cause, "later", "The account returned to the chain.");
     }
   } catch (err) {
-    console.warn(`[account-chain] ${(err as Error).message}`);
+    warnChain(err);
   }
+}
+
+/**
+ * Copy an entry with a new state, keeping its buckets and read time and dropping the hold.
+ */
+function entryWithState(
+  prior: ChainAccountEntry | undefined,
+  state: ChainAccountEntry["state"],
+): ChainAccountEntry {
+  return {
+    state,
+    limitedUntil: null,
+    buckets: prior?.buckets ?? [],
+    ...(prior?.fetchedAt !== undefined ? { fetchedAt: prior.fetchedAt } : {}),
+  };
 }
 
 /**
@@ -310,9 +354,11 @@ async function syncLoginDecision(
  * `unknown`, so the next read derives its state.
  */
 async function refreshShadows(): Promise<void> {
+  const active = getActiveAccountId();
+  const registry = await readRegistry();
   const next = new Set(
-    (await readRegistry())
-      .filter((record) => isShadowOfHome(record, home))
+    registry
+      .filter((record) => record.id !== active && isShadowOfHome(record, home))
       .map((record) => record.id),
   );
   let changed = false;
@@ -320,13 +366,7 @@ async function refreshShadows(): Promise<void> {
     if (shadowed.has(id)) continue;
     shadowed.add(id);
     changed = true;
-    const prior = chain.accounts[id];
-    chain.accounts[id] = {
-      state: "shadowed-by-home",
-      limitedUntil: null,
-      buckets: prior?.buckets ?? [],
-      ...(prior?.fetchedAt !== undefined ? { fetchedAt: prior.fetchedAt } : {}),
-    };
+    chain.accounts[id] = entryWithState(chain.accounts[id], "shadowed-by-home");
     cancel(`return:${id}`);
     await syncLoginDecision(id, "shadowed-by-home");
   }
@@ -334,14 +374,11 @@ async function refreshShadows(): Promise<void> {
     if (next.has(id)) continue;
     shadowed.delete(id);
     changed = true;
-    const prior = chain.accounts[id];
-    if (prior === undefined) continue;
-    chain.accounts[id] = {
-      state: "unknown",
-      limitedUntil: null,
-      buckets: prior.buckets,
-      ...(prior.fetchedAt !== undefined ? { fetchedAt: prior.fetchedAt } : {}),
-    };
+    if (!registry.some((record) => record.id === id)) {
+      delete chain.accounts[id];
+    } else if (chain.accounts[id] !== undefined) {
+      chain.accounts[id] = entryWithState(chain.accounts[id], "unknown");
+    }
   }
   if (changed) await persist();
 }
@@ -352,7 +389,9 @@ async function refreshShadows(): Promise<void> {
  * @remarks Before the chain starts it only stores the identity, since the boot reads it itself. A
  * failure is logged by the queue and never reaches the caller, so the identity watch keeps going.
  */
-export function noteHomeIdentity(identity: DefaultIdentity): Promise<void> {
+export function noteHomeIdentity(
+  identity: DefaultIdentity | undefined,
+): Promise<void> {
   return enqueue(async () => {
     home = identity;
     if (running) await refreshShadows();
@@ -364,9 +403,8 @@ export function noteHomeIdentity(identity: DefaultIdentity): Promise<void> {
  *
  * @remarks Two consecutive `token-rejected` reads give `needs-login`, and a limit signal never counts
  * as a read because it reuses a cached snapshot. A not ok or empty read keeps a limited account held
- * until `limitedUntil` unless it shows a new period. The return timer outlives a clear, so only the
- * timer returns the work. An account that holds the home login stays `shadowed-by-home` over every
- * other state.
+ * until `limitedUntil` unless it shows a new period. An account that holds the home login stays
+ * `shadowed-by-home` over every other state.
  */
 async function ingest(
   id: string,
@@ -403,13 +441,13 @@ async function ingest(
     Date.parse(prior.limitedUntil) > now &&
     !showsNewPeriod(usage, prior, thresholdPercent);
   const entry: ChainAccountEntry = {
-    ...(isShadow
-      ? { state: "shadowed-by-home", limitedUntil: null }
-      : needsLogin
-        ? { state: "needs-login", limitedUntil: null }
-        : held
-          ? { state: "limited", limitedUntil: prior.limitedUntil }
-          : derived),
+    ...chainStateOf({
+      shadowed: isShadow,
+      needsLogin,
+      held,
+      heldUntil: prior?.limitedUntil ?? null,
+      derived,
+    }),
     buckets: usageBuckets(usage),
     fetchedAt: usage.fetchedAt,
     ...(rejectedReads > 0 ? { rejectedReads } : {}),
@@ -420,6 +458,8 @@ async function ingest(
   }
   if (entry.state === "limited") {
     scheduleReturn(id, recheckAt(entry.limitedUntil));
+  } else if (entry.state === "needs-login") {
+    cancel(`return:${id}`);
   }
   await syncLoginDecision(id, entry.state);
   await persist();
@@ -461,27 +501,11 @@ async function moveOrOffer(
   } else offer(kind, from, to, reason);
 }
 
-/**
- * Close the exhausted decision once an account is usable again.
- *
- * @remarks The caller persists, so the dropped id is saved with the cleared exhausted record.
- */
-function closeExhaustedDecision(): void {
-  const stored = chain.decisions[EXHAUSTED_CAUSE];
-  if (stored === undefined) return;
-  try {
-    deps.closeDecision(stored, "wait", "An account is usable again.");
-  } catch (err) {
-    console.warn(`[account-chain] ${(err as Error).message}`);
-  }
-  delete chain.decisions[EXHAUSTED_CAUSE];
-}
-
 async function clearExhausted(): Promise<void> {
   cancel(EXHAUSTED_TIMER);
   if (chain.exhausted === null) return;
   chain.exhausted = null;
-  closeExhaustedDecision();
+  closeCause(EXHAUSTED_CAUSE, "wait", "An account is usable again.");
   await persist();
 }
 
@@ -505,7 +529,7 @@ async function markExhausted(
       chain.decisions[EXHAUSTED_CAUSE] =
         await deps.raiseExhaustedDecision(earliestResetAt);
     } catch (err) {
-      console.warn(`[account-chain] ${(err as Error).message}`);
+      warnChain(err);
     }
   }
   scheduleExhausted(recheckAt(earliestResetAt));
@@ -529,7 +553,7 @@ async function moveTo(
   lastOffer = null;
   cancel(EXHAUSTED_TIMER);
   chain.exhausted = null;
-  closeExhaustedDecision();
+  closeCause(EXHAUSTED_CAUSE, "wait", "An account is usable again.");
   let moves: AccountApplyResult | null = null;
   try {
     await persist();
@@ -785,12 +809,14 @@ export function forgetChainAccount(id: string): Promise<void> {
     shadowed.delete(id);
     const hadNotice = id in chain.loginExpiryNotified;
     const cause = `${NEEDS_LOGIN_CAUSE}${id}`;
-    const decisionId = chain.decisions[cause];
-    if (chain.accounts[id] === undefined && !hadNotice && !decisionId) return;
-    if (decisionId !== undefined) {
-      deps.closeDecision(decisionId, "later", "The account was removed.");
-      delete chain.decisions[cause];
+    if (
+      chain.accounts[id] === undefined &&
+      !hadNotice &&
+      chain.decisions[cause] === undefined
+    ) {
+      return;
     }
+    closeCause(cause, "later", "The account was removed.");
     delete chain.accounts[id];
     delete chain.loginExpiryNotified[id];
     await persist();
@@ -827,6 +853,30 @@ async function scanInUseSessions(): Promise<void> {
 }
 
 /**
+ * Start the login of a needs-login account when its decision is answered with `login`.
+ */
+function handleDecisionAnswered(item: DecisionItem): void {
+  if (!running) return;
+  const cause = Object.keys(chain.decisions).find(
+    (key) => chain.decisions[key] === item.id,
+  );
+  if (
+    !cause?.startsWith(NEEDS_LOGIN_CAUSE) ||
+    item.answer?.optionId !== "login"
+  ) {
+    return;
+  }
+  const accountId = cause.slice(NEEDS_LOGIN_CAUSE.length);
+  void deps.startLogin(accountId).then((result) => {
+    if (!result.ok) {
+      console.warn(
+        `[account-chain] login for ${accountId} did not start: ${result.error}`,
+      );
+    }
+  }, warnChain);
+}
+
+/**
  * Start the chain controller and return a function that stops it.
  *
  * @remarks `overrides` replace the clock, timers, usage reader and event sink in tests.
@@ -841,37 +891,16 @@ export async function startAccountChain(
   lastOffer = null;
   home = await readDefaultIdentity().catch(() => undefined);
   shadowed.clear();
+  for (const [id, entry] of Object.entries(chain.accounts)) {
+    if (entry.state === "shadowed-by-home") shadowed.add(id);
+  }
   await enqueue(refreshShadows).catch(() => undefined);
   if (!listening) {
     listening = true;
     onUsageRefreshed((id, usage) => {
       if (running) void handleUsageRead(id, usage).catch(() => undefined);
     });
-    onDecisionAnswered((item) => {
-      if (!running) return;
-      const cause = Object.keys(chain.decisions).find(
-        (key) => chain.decisions[key] === item.id,
-      );
-      if (
-        !cause?.startsWith(NEEDS_LOGIN_CAUSE) ||
-        item.answer?.optionId !== "login"
-      ) {
-        return;
-      }
-      const accountId = cause.slice(NEEDS_LOGIN_CAUSE.length);
-      void deps
-        .startLogin(accountId)
-        .then((result) => {
-          if (!result.ok) {
-            console.warn(
-              `[account-chain] login for ${accountId} did not start: ${result.error}`,
-            );
-          }
-        })
-        .catch((err: unknown) => {
-          console.warn(`[account-chain] ${(err as Error).message}`);
-        });
-    });
+    onDecisionAnswered(handleDecisionAnswered);
     onLimitSignal((cardId, sessionId, pane) => {
       if (running) {
         void handleLimitSignal(cardId, sessionId, pane).catch(() => undefined);

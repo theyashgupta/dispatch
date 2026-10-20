@@ -169,7 +169,7 @@ void test("the watch timer checks and stops", async () => {
   assert.equal(staleOf(s), true);
 });
 
-void test("a check hands the home login to the chain, which shadows the account with the same login", async () => {
+void test("a check hands the home login to the chain, which shadows the account with the same login and keeps it through a failed read", async () => {
   const SHADOW_ID = "55555555-5555-4555-8555-555555555555";
   await accounts.upsertAccount({
     id: SHADOW_ID,
@@ -190,6 +190,13 @@ void test("a check hands the home login to the chain, which shadows the account 
     "shadowed-by-home",
   );
   setHome(read({ email: "shadow@example.com", orgId: "" }));
+  await watch.checkDefaultIdentity();
+  await whenChainIdle();
+  assert.equal(
+    (await readChainState()).accounts[SHADOW_ID]?.state,
+    "shadowed-by-home",
+  );
+  setHome(read({ loggedIn: false, email: "", orgId: "" }));
   await watch.checkDefaultIdentity();
   await whenChainIdle();
   assert.equal(

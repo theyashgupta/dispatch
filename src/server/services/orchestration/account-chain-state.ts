@@ -67,7 +67,7 @@ function validAccounts(
   return accounts;
 }
 
-function validNotified(raw: unknown): Record<string, string> {
+function stringRecord(raw: unknown): Record<string, string> {
   if (!isRecord(raw)) return {};
   return Object.fromEntries(
     Object.entries(raw).filter(
@@ -105,8 +105,8 @@ export async function readChainState(): Promise<ChainStateFile> {
     moves: Array.isArray(parsed.moves)
       ? (parsed.moves as ChainMove[]).slice(-MAX_CHAIN_MOVES)
       : [],
-    loginExpiryNotified: validNotified(parsed.loginExpiryNotified),
-    decisions: validNotified(parsed.decisions),
+    loginExpiryNotified: stringRecord(parsed.loginExpiryNotified),
+    decisions: stringRecord(parsed.decisions),
   };
 }
 

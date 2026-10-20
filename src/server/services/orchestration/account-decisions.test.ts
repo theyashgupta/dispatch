@@ -24,7 +24,6 @@ void test("raiseLoginDecision stores one open item on the default board with log
   assert.equal(item.state, "open");
   assert.equal(item.boardKey, DEFAULT_BOARD_KEY);
   assert.equal(item.orchestratorId, ACCOUNT_DECISIONS_ORCHESTRATOR);
-  assert.equal(item.orchestratorId, "dispatch-accounts");
   assert.equal(item.cardId, null);
   assert.ok(item.question.startsWith("Account a@example.com needs a login"));
   assert.ok(item.question.includes(`/#/accounts/${ID}`));
@@ -37,6 +36,18 @@ void test("raiseLoginDecision stores one open item on the default board with log
     .listDecisionItems(DEFAULT_BOARD_KEY)
     .filter((i) => i.id === decisionId);
   assert.equal(open.length, 1);
+});
+
+void test("raiseLoginDecision for Default tells the user to run claude /login and offers only later", () => {
+  const item = store.getDecisionItem(
+    raiseLoginDecision("default", "home@example.com", true),
+  );
+  assert.equal(
+    item?.question,
+    "Account home@example.com needs a login. Run claude /login in a terminal on this Mac.",
+  );
+  assert.deepEqual(item?.options, [{ id: "later", label: "Not now" }]);
+  assert.equal(item?.recommendedOptionId, "later");
 });
 
 void test("closeAccountDecision answers the item with the option and note", () => {
@@ -72,7 +83,6 @@ void test("raiseExhaustedDecision names the reset time and offers wait and add",
   assert.equal(item.state, "open");
   assert.equal(item.boardKey, DEFAULT_BOARD_KEY);
   assert.equal(item.boardKey, "LOCAL");
-  assert.equal(item.orchestratorId, "dispatch-accounts");
   assert.equal(item.cardId, null);
   assert.equal(
     item.question,

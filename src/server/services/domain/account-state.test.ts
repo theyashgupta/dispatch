@@ -9,6 +9,7 @@ import { selectAccount } from "./account-selection.js";
 import {
   deriveAccountState,
   expireLimit,
+  chainStateOf,
   isShadowOfHome,
   isStaleSurface,
   NEEDS_LOGIN_READS,
@@ -536,7 +537,7 @@ void test("nextRejectedReads counts consecutive token-rejected reads and needs t
   assert.equal(NEEDS_LOGIN_READS, 2);
 });
 
-void test("nextRejectedReads keeps the count on a 429, an error or an unavailable read, and an ok read resets it", () => {
+void test("nextRejectedReads keeps the count on a 429, an error or an unavailable read, and an ok read or an expired access token resets it", () => {
   for (const status of ["rate-limited", "error", "unavailable"] as const) {
     const snapshot: ClaudeUsageSnapshot = {
       ...usage([], status),
@@ -546,10 +547,14 @@ void test("nextRejectedReads keeps the count on a 429, an error or an unavailabl
     assert.equal(nextRejectedReads(undefined, snapshot), 0, status);
   }
   assert.equal(nextRejectedReads(1, usage([])), 0);
+  assert.equal(
+    nextRejectedReads(1, { ...usage([], "stale"), error: "token-expired" }),
+    0,
+  );
   assert.equal(nextRejectedReads(5, usage([win("session", 10, null)])), 0);
 });
 
-void test("isShadowOfHome matches the home email with an equal or missing organisation id", () => {
+void test("isShadowOfHome needs an equal email and equal non-empty organisation ids", () => {
   const home = { email: "a@example.com", orgId: "org" };
   assert.equal(
     isShadowOfHome({ email: "a@example.com", orgId: "org" }, home),
@@ -557,14 +562,21 @@ void test("isShadowOfHome matches the home email with an equal or missing organi
   );
   assert.equal(
     isShadowOfHome({ email: "a@example.com", orgId: "" }, home),
-    true,
+    false,
   );
   assert.equal(
     isShadowOfHome(
       { email: "a@example.com", orgId: "org" },
       { email: "a@example.com", orgId: "" },
     ),
-    true,
+    false,
+  );
+  assert.equal(
+    isShadowOfHome(
+      { email: "a@example.com", orgId: "" },
+      { email: "a@example.com", orgId: "" },
+    ),
+    false,
   );
   assert.equal(
     isShadowOfHome({ email: "a@example.com", orgId: "other" }, home),
@@ -582,4 +594,30 @@ void test("isShadowOfHome matches the home email with an equal or missing organi
     isShadowOfHome({ email: "", orgId: "org" }, { email: "", orgId: "org" }),
     false,
   );
+});
+
+void test("chainStateOf picks shadowed, then needs-login, then the hold, then the derived state", () => {
+  const derived = { state: "available", limitedUntil: null } as const;
+  const base = {
+    shadowed: false,
+    needsLogin: false,
+    held: false,
+    heldUntil: null,
+    derived,
+  };
+  const until = "2026-10-20T14:00:00.000Z";
+  const all = { ...base, shadowed: true, needsLogin: true, held: true };
+  assert.deepEqual(chainStateOf({ ...all, heldUntil: until }), {
+    state: "shadowed-by-home",
+    limitedUntil: null,
+  });
+  assert.deepEqual(chainStateOf({ ...all, shadowed: false }), {
+    state: "needs-login",
+    limitedUntil: null,
+  });
+  assert.deepEqual(chainStateOf({ ...base, held: true, heldUntil: until }), {
+    state: "limited",
+    limitedUntil: until,
+  });
+  assert.deepEqual(chainStateOf(base), derived);
 });

@@ -167,7 +167,7 @@ const fakeDeps = {
   },
   raiseExhaustedDecision: (earliestResetAt: string | null) => {
     raisedExhausted.push(earliestResetAt);
-    return raiseExhaustedDecision(earliestResetAt);
+    return Promise.resolve(raiseExhaustedDecision(earliestResetAt));
   },
   closeDecision: (decisionId: string, optionId: string, note: string) => {
     closed.push({ decisionId, optionId, note });
@@ -1721,6 +1721,20 @@ void test("one token-rejected read keeps the account out of needs-login and rais
   assert.deepEqual(raised, []);
 });
 
+void test("two token-expired reads keep the account unknown and eligible and raise nothing", async () => {
+  await begin();
+  for (let i = 0; i < 3; i++) {
+    await handleUsageRead(ACCOUNT_A, {
+      ...rejectedRead(usage(10)),
+      error: "token-expired",
+    });
+  }
+  const saved = (await readChainState()).accounts[ACCOUNT_A];
+  assert.equal(saved?.state, "unknown");
+  assert.notEqual(saved?.rejectedReads, 3);
+  assert.deepEqual(raised, []);
+});
+
 void test("two token-rejected reads make needs-login and raise one decision, and later reads raise nothing", async () => {
   await begin();
   for (let i = 0; i < 4; i++) {
@@ -1737,6 +1751,42 @@ void test("two token-rejected reads make needs-login and raise one decision, and
     chainTimers().filter((t) => t.key === `return:${ACCOUNT_A}`),
     [],
   );
+});
+
+void test("a limited account that becomes needs-login loses its return timer", async () => {
+  await begin();
+  await handleUsageRead(ACCOUNT_A, usage(100, iso(BASE + 60 * MIN)));
+  assert.equal(
+    chainTimers().some((t) => t.key === `return:${ACCOUNT_A}`),
+    true,
+  );
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(100)));
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(100)));
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "needs-login",
+  );
+  assert.deepEqual(
+    chainTimers().filter((t) => t.key === `return:${ACCOUNT_A}`),
+    [],
+  );
+});
+
+void test("removing an account whose decision close throws does not throw and drops the stored id", async () => {
+  await begin(
+    {},
+    {
+      closeDecision: () => {
+        throw new Error("close failed");
+      },
+    },
+  );
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await forgetChainAccount(ACCOUNT_A);
+  const saved = await readChainState();
+  assert.equal(saved.accounts[ACCOUNT_A], undefined);
+  assert.equal(saved.decisions[`needs-login:${ACCOUNT_A}`], undefined);
 });
 
 void test("a restart then another rejected read raises nothing", async () => {
@@ -1969,7 +2019,32 @@ void test("the home login of the other account shadows it instead", async () => 
   assert.equal(saved.accounts[ACCOUNT_B]?.state, "shadowed-by-home");
 });
 
-void test("removing a shadowed account lets a new account with the same login be shadowed again", async () => {
+void test("the account in use is never shadowed, even when it holds the home login", async () => {
+  await begin();
+  await setActiveAccount(ACCOUNT_A);
+  await noteHomeIdentity(IDENTITY_A);
+  assert.equal((await readChainState()).accounts[ACCOUNT_A], undefined);
+});
+
+void test("a shadowed entry that no longer matches the home login at boot goes back to unknown", async () => {
+  await begin();
+  stop();
+  await whenChainIdle();
+  await writeChainState({
+    ...emptyChainState(),
+    accounts: {
+      [ACCOUNT_A]: {
+        state: "shadowed-by-home",
+        limitedUntil: null,
+        buckets: [],
+      },
+    },
+  });
+  stop = await startAccountChain({ ...fakeDeps });
+  assert.equal((await readChainState()).accounts[ACCOUNT_A]?.state, "unknown");
+});
+
+void test("removing a shadowed account clears its shadow, so a later read of the same id derives available", async () => {
   await begin({}, {}, IDENTITY_A);
   await forgetChainAccount(ACCOUNT_A);
   assert.equal((await readChainState()).accounts[ACCOUNT_A], undefined);

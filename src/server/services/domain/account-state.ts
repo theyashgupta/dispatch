@@ -32,32 +32,52 @@ export function isTokenReadFailed(usage: ClaudeUsageSnapshot): boolean {
 /**
  * Tell whether a registry account holds the same login as the home `~/.claude` login.
  *
- * @remarks The emails must match. A missing organisation id on either side compares the email
- * alone, since the CLI sometimes omits the field.
+ * @remarks The emails must match and both organisation ids must be non-empty and equal. A missing
+ * id on either side is not a match, since a wrong shadow hides a live account from the chain.
  */
 export function isShadowOfHome(
   record: { email: string; orgId: string },
   home: { email: string; orgId: string } | undefined,
 ): boolean {
-  if (home === undefined || home.email === "") return false;
-  if (record.email !== home.email) return false;
-  return (
-    record.orgId === home.orgId || record.orgId === "" || home.orgId === ""
-  );
+  if (home === undefined || home.email === "" || home.orgId === "") {
+    return false;
+  }
+  return record.email === home.email && record.orgId === home.orgId;
+}
+
+/**
+ * Pick the stored chain state of one account from the signals of a read.
+ *
+ * @remarks A home login shadow wins over every other state, then `needs-login`, then a limited
+ * hold, and the derived state is the last resort.
+ */
+export function chainStateOf(input: {
+  shadowed: boolean;
+  needsLogin: boolean;
+  held: boolean;
+  heldUntil: string | null;
+  derived: DerivedAccountState;
+}): DerivedAccountState {
+  if (input.shadowed) return { state: "shadowed-by-home", limitedUntil: null };
+  if (input.needsLogin) return { state: "needs-login", limitedUntil: null };
+  if (input.held) return { state: "limited", limitedUntil: input.heldUntil };
+  return input.derived;
 }
 
 /**
  * Count consecutive reads whose token the server rejected.
  *
- * @remarks A rejected read adds one and an ok read resets the count. Any other read, such as a 429
- * or a network error, says nothing about the token, so it keeps the count.
+ * @remarks A rejected read adds one. An ok read or an expired access token resets the count, since
+ * the next launch renews that token. A 429 or a network error says nothing about the token.
  */
 export function nextRejectedReads(
   prior: number | undefined,
   usage: ClaudeUsageSnapshot,
 ): number {
   if (usage.error === "token-rejected") return (prior ?? 0) + 1;
-  return usage.status === "ok" ? 0 : (prior ?? 0);
+  return usage.status === "ok" || usage.error === "token-expired"
+    ? 0
+    : (prior ?? 0);
 }
 
 /**

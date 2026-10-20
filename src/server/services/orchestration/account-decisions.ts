@@ -6,8 +6,15 @@ export const ACCOUNT_DECISIONS_ORCHESTRATOR = "dispatch-accounts";
 
 /**
  * Raise the decision that asks the user to log an account in again and return its id.
+ *
+ * @remarks The login flow repairs only registry accounts, so the Default account gets a note to run
+ * `claude /login` in a terminal and the single answer `later`.
  */
-export function raiseLoginDecision(accountId: string, email: string): string {
+export function raiseLoginDecision(
+  accountId: string,
+  email: string,
+  isDefault = false,
+): string {
   const item = createDecisionItem(
     {
       boardKey: DEFAULT_BOARD_KEY,
@@ -16,12 +23,16 @@ export function raiseLoginDecision(accountId: string, email: string): string {
     {
       cardId: null,
       kind: "other",
-      question: `Account ${email} needs a login. Open /#/accounts/${accountId} to finish the login.`,
-      options: [
-        { id: "login", label: "Start the login" },
-        { id: "later", label: "Not now" },
-      ],
-      recommendedOptionId: "login",
+      question: isDefault
+        ? `Account ${email} needs a login. Run claude /login in a terminal on this Mac.`
+        : `Account ${email} needs a login. Open /#/accounts/${accountId} to finish the login.`,
+      options: isDefault
+        ? [{ id: "later", label: "Not now" }]
+        : [
+            { id: "login", label: "Start the login" },
+            { id: "later", label: "Not now" },
+          ],
+      recommendedOptionId: isDefault ? "later" : "login",
     },
   );
   return item.id;

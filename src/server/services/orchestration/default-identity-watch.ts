@@ -46,7 +46,7 @@ async function runCheck(): Promise<void> {
     orgId: read.orgId || (stored?.orgId ?? ""),
   };
   if (verdict !== "same") await writeDefaultIdentity(identity);
-  await noteHomeIdentity(identity);
+  void noteHomeIdentity(identity);
   if (verdict === "same" || stored === undefined) return;
   for (const { card, session } of store.sessionsWithTmux(ALL_BOARDS)) {
     if (
