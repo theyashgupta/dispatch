@@ -1861,7 +1861,7 @@ void test("an ok read after needs-login clears the state and closes the decision
   await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
   const decisionId = (await readChainState()).decisions[
     `needs-login:${ACCOUNT_A}`
-  ] as string;
+  ];
   await handleUsageRead(ACCOUNT_A, usage(10));
   const saved = await readChainState();
   assert.equal(saved.accounts[ACCOUNT_A]?.state, "available");
@@ -1900,12 +1900,12 @@ void test("answering the login decision with login starts the login of that acco
   await handleUsageRead(ACCOUNT_B, rejectedRead(usage(10)));
   await handleUsageRead(ACCOUNT_B, rejectedRead(usage(10)));
   const { decisions } = await readChainState();
-  answerDecisionItem(decisions[`needs-login:${ACCOUNT_B}`] as string, {
+  answerDecisionItem(decisions[`needs-login:${ACCOUNT_B}`], {
     optionId: "later",
     note: null,
   });
   assert.deepEqual(logins, []);
-  answerDecisionItem(decisions[`needs-login:${ACCOUNT_A}`] as string, {
+  answerDecisionItem(decisions[`needs-login:${ACCOUNT_A}`], {
     optionId: "login",
     note: null,
   });
@@ -1970,7 +1970,7 @@ void test("the home login arriving after a needs-login account closes its open d
   await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
   const decisionId = (await readChainState()).decisions[
     `needs-login:${ACCOUNT_A}`
-  ] as string;
+  ];
   assert.equal(store.getDecisionItem(decisionId)?.state, "open");
   await noteHomeIdentity(IDENTITY_A);
   const saved = await readChainState();
@@ -2083,7 +2083,7 @@ async function beginExhausted(): Promise<string> {
   for (const id of [ACCOUNT_A, ACCOUNT_B, "default"]) {
     await handleUsageRead(id, reads.get(id) as ClaudeUsageSnapshot);
   }
-  return (await readChainState()).decisions.exhausted as string;
+  return (await readChainState()).decisions.exhausted;
 }
 
 void test("an exhausted chain raises one decision with the earliest reset", async () => {
@@ -2171,7 +2171,7 @@ void test("answering the exhausted decision starts no login, since the user adds
   const decisionId = await beginExhausted();
   answerDecisionItem(decisionId, { optionId: "wait", note: null });
   await beginExhausted();
-  const second = (await readChainState()).decisions.exhausted as string;
+  const second = (await readChainState()).decisions.exhausted;
   answerDecisionItem(second, { optionId: "add", note: null });
   assert.deepEqual(logins, []);
 });

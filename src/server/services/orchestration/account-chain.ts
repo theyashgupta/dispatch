@@ -127,8 +127,8 @@ const realDeps: ChainDeps = {
       id === DEFAULT_CLAUDE_ACCOUNT_ID,
     );
   },
-  raiseExhaustedDecision: async (earliestResetAt) =>
-    raiseAccountExhaustedDecision(earliestResetAt),
+  raiseExhaustedDecision: (earliestResetAt) =>
+    Promise.resolve(raiseAccountExhaustedDecision(earliestResetAt)),
   closeDecision: closeAccountDecision,
   scanMs: SCAN_MS,
 };
