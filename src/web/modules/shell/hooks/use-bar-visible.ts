@@ -12,13 +12,15 @@ const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
  */
 export function useBarVisible(column: HTMLElement | null, page: Page): boolean {
   const reducedMotion = useMediaQuery(REDUCED_MOTION);
+  const inactive = column === null;
+  const resetKey = `${page}|${reducedMotion}|${inactive}`;
   const [visible, setVisible] = useState(true);
-  const [shownPage, setShownPage] = useState(page);
+  const [shownKey, setShownKey] = useState(resetKey);
   const visibleRef = useRef(true);
   const anchors = useRef(new WeakMap<Element, number>());
 
-  if (shownPage !== page) {
-    setShownPage(page);
+  if (shownKey !== resetKey) {
+    setShownKey(resetKey);
     setVisible(true);
   }
 
@@ -27,10 +29,17 @@ export function useBarVisible(column: HTMLElement | null, page: Page): boolean {
   }, [visible]);
 
   useEffect(() => {
+    anchors.current = new WeakMap();
+  }, [page, reducedMotion, inactive]);
+
+  useEffect(() => {
     if (column === null || reducedMotion) return;
     function onScroll(event: Event) {
       const el = event.target;
       if (!(el instanceof Element)) return;
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        return;
+      }
       const top = el.scrollTop;
       const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
       const anchor = anchors.current.get(el) ?? top;
@@ -50,5 +59,5 @@ export function useBarVisible(column: HTMLElement | null, page: Page): boolean {
     return () => column.removeEventListener("scroll", onScroll, true);
   }, [column, reducedMotion]);
 
-  return reducedMotion ? true : visible;
+  return reducedMotion || inactive ? true : visible;
 }

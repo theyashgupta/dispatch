@@ -42,6 +42,13 @@ test("an upward clamp at the bottom edge keeps a hidden bar hidden", () => {
   });
 });
 
+test("a clamp inside the top zone on a short page keeps a hidden bar hidden", () => {
+  assert.deepEqual(nextBarState({ visible: false, anchor: 100 }, 36, true), {
+    visible: false,
+    anchor: 36,
+  });
+});
+
 test("scrolling up at the bottom edge keeps a visible bar visible", () => {
   assert.deepEqual(nextBarState({ visible: true, anchor: 900 }, 836, true), {
     visible: true,

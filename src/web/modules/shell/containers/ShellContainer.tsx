@@ -112,6 +112,13 @@ export interface ShellContainerProps {
   children?: ReactNode;
 }
 
+const TOAST_OFFSET = {
+  top: "var(--space-xl)",
+  right: "var(--space-xl)",
+  left: "var(--space-xl)",
+  bottom: "calc(var(--space-xl) + var(--bottom-bar-height, 0px))",
+};
+
 const SHORTCUT_GROUPS_AFTER_GLOBAL = [
   { title: "Board", rows: BOARD_SHORTCUTS },
   { title: "Inbox", rows: INBOX_SHORTCUTS },
@@ -559,13 +566,8 @@ export function ShellContainer({
         <Toaster
           theme={theme}
           position="bottom-center"
-          offset="var(--space-xl)"
-          mobileOffset={{
-            top: "var(--space-xl)",
-            right: "var(--space-xl)",
-            left: "var(--space-xl)",
-            bottom: "calc(var(--space-xl) + var(--bottom-bar-height, 0px))",
-          }}
+          offset={TOAST_OFFSET}
+          mobileOffset={TOAST_OFFSET}
           toastOptions={{
             closeButtonAriaLabel: "Dismiss",
             classNames: {

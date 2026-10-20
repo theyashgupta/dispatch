@@ -28,7 +28,7 @@ export function BottomBar({
   return (
     <nav
       ref={setEl}
-      aria-label="Bottom navigation"
+      aria-label="Primary"
       inert={hidden}
       className={cn(
         "grid shrink-0 grid-cols-5 overflow-hidden border-border bg-(--surface-column) transition-[height] duration-(--motion-panel-open) ease-(--easing-enter) select-none",
@@ -64,7 +64,7 @@ export function BottomBar({
               )}
               {badged ? (
                 <Badge tone="accent" className="absolute -top-2 left-3">
-                  {needsYouCount}
+                  {needsYouCount > 99 ? "99+" : needsYouCount}
                 </Badge>
               ) : null}
             </span>

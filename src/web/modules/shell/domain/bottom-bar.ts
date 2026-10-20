@@ -31,9 +31,11 @@ export function nextBarState(
   top: number,
   atBottom: boolean,
 ): BarState {
+  if (atBottom && !state.visible && top < state.anchor) {
+    return { visible: false, anchor: top };
+  }
   if (top <= BAR_TOP_ZONE) return { visible: true, anchor: top };
   if (Math.abs(top - state.anchor) < BAR_SCROLL_THRESHOLD) return state;
   if (top > state.anchor) return { visible: false, anchor: top };
-  if (atBottom && !state.visible) return { visible: false, anchor: top };
   return { visible: true, anchor: top };
 }

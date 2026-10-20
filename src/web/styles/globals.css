@@ -162,7 +162,7 @@
   input,
   textarea,
   select,
-  [contenteditable="true"] {
+  [contenteditable]:not([contenteditable="false"]) {
     font-size: max(16px, 1em);
   }
 }
