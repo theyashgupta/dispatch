@@ -1705,6 +1705,19 @@ void test("a rate-limited read that repeats the old windows and fetchedAt keeps 
   assert.equal(saved.accounts.default?.fetchedAt, TICKET_OLD_FETCH);
 });
 
+void test("a stale token-rejected read with a newer fetchedAt and new period windows keeps a limited account limited", async () => {
+  await beginWithStoredWeeklyLimit();
+  await handleUsageRead("default", {
+    status: "stale",
+    error: "token-rejected",
+    fetchedAt: iso(clock - MIN),
+    windows: newPeriodWindows(),
+  });
+  const saved = await readChainState();
+  assert.equal(saved.accounts.default?.state, "limited");
+  assert.equal(saved.accounts.default?.limitedUntil, TICKET_LIMITED_UNTIL);
+});
+
 const rejectedRead = (prior: ClaudeUsageSnapshot): ClaudeUsageSnapshot => ({
   status: "stale",
   error: "token-rejected",
