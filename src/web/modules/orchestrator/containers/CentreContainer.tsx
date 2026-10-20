@@ -1,7 +1,6 @@
 import {
   useEffect,
   useMemo,
-  useState,
   useSyncExternalStore,
   type KeyboardEvent,
 } from "react";
@@ -55,7 +54,6 @@ export function CentreContainer() {
   const decisions = useOrchestratorDecisions(boardKey);
   const wide = !useMediaQuery(NARROW_QUERY);
   const now = useSyncExternalStore(subscribeClock, readClock);
-  const [showOlderShipped, setShowOlderShipped] = useState(false);
   const cards = snapshot.data?.cards ?? NO_CARDS;
   const actions = useBranchActions(boardKey, cards);
   const start = useCentreControl(boardKey, null, stale);
@@ -68,9 +66,8 @@ export function CentreContainer() {
         selectedId: record?.id ?? null,
         decisions: decisions.decisions,
         now,
-        showOlderShipped,
       }),
-    [cards, records, record, decisions.decisions, now, showOlderShipped],
+    [cards, records, record, decisions.decisions, now],
   );
   const order = useMemo(() => focusOrder(graph), [graph]);
   const { register, onKeyDown } = useTileFocus(order);
@@ -121,7 +118,6 @@ export function CentreContainer() {
     draftOf: actions.draftOf,
     setDraft: actions.setDraft,
   };
-  const toggleShipped = () => setShowOlderShipped((shown) => !shown);
 
   const startReason = start.control?.reason ?? null;
   const ready = state === "ready";
@@ -168,8 +164,6 @@ export function CentreContainer() {
           containerRef={container}
           nodeRef={register(CENTRE_FOCUS_ID)}
           onNodeKeyDown={nodeKeyDown}
-          showOlderShipped={showOlderShipped}
-          onToggleShipped={toggleShipped}
           tile={tile}
         />
       </>
@@ -187,13 +181,7 @@ export function CentreContainer() {
       reason={stale ? <StaleReason id={REASON_ID} padded={false} /> : null}
       branches={
         ready ? (
-          <BranchList
-            bands={graph.bands}
-            hiddenShipped={graph.hiddenShipped}
-            showOlderShipped={showOlderShipped}
-            onToggleShipped={toggleShipped}
-            tile={tile}
-          />
+          <BranchList bands={graph.bands} tile={tile} />
         ) : (
           notReady
         )

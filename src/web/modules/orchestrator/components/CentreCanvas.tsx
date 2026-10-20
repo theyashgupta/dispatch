@@ -12,8 +12,6 @@ interface CentreCanvasProps {
   containerRef: Ref<HTMLDivElement>;
   nodeRef: Ref<HTMLElement>;
   onNodeKeyDown: KeyboardEventHandler<HTMLElement>;
-  showOlderShipped: boolean;
-  onToggleShipped: () => void;
   tile: TileBehaviour;
 }
 
@@ -23,8 +21,6 @@ export function CentreCanvas({
   containerRef,
   nodeRef,
   onNodeKeyDown,
-  showOlderShipped,
-  onToggleShipped,
   tile,
 }: CentreCanvasProps) {
   const { centre } = graph;
@@ -45,13 +41,7 @@ export function CentreCanvas({
           />
         </div>
         <div className="relative min-w-0 flex-1">
-          <BranchList
-            bands={graph.bands}
-            hiddenShipped={graph.hiddenShipped}
-            showOlderShipped={showOlderShipped}
-            onToggleShipped={onToggleShipped}
-            tile={tile}
-          />
+          <BranchList bands={graph.bands} tile={tile} />
         </div>
       </div>
     </div>
