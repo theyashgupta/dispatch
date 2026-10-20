@@ -1988,6 +1988,17 @@ below the hooks floor) records the newest file of the folder after the kickoff a
 `GET /api/cards/:id/resume-target` returns the same choice and writes nothing; the detail panel shows
 it beside the Resume button.
 
+**Resume refuses a missing workspace folder (LOCAL-163).** Before the relaunch path of
+`resumeSession` launches claude, it checks that `card.workspacePath` is a folder. If the folder is
+missing, `resumeSession` launches nothing. It sets the session to `needs_input` with
+`resume_failed`, and `recordResumeFailure` writes `Resume failed: workspace-missing: <path>` and
+emits one `resume_failed` event. The reason: tmux starts a pane in the home folder when its cwd is
+missing, and a continued claude there resumes the newest conversation of a different session. This
+rule applies to the Resume route, Reconnect, the orchestrator `resume_session` tool and the boot
+resume sweep, because all of them go through `resumeSession`. On the boot sweep the supervisor also
+moves the card to Needs input. A reattach to a live tmux session does not launch claude, so it does
+not check the folder.
+
 In Review's opposite in-edge/out-edge asymmetry versus Agent Done, and the full trigger-by-trigger
 spec, are homed in [Column Transition Specification](#column-transition-specification) (`BOARD-06`).
 
@@ -6017,6 +6028,8 @@ Scenario 10 (tests/e2e/scenario-10-engine-close.e2e.ts) proves that the supervis
 Scenario 11 (tests/e2e/scenario-11-user-started-ship.e2e.ts) proves that a single ticket card that the user started from the board start dialog ships through `start_ship`: the board has the ship rights **merge**, and the test starts ticket card A with `POST /api/cards/:id/start`, the route of the start dialog, not with the orchestrator tool `start_card`. The card read has a session branch and no `launch`. The session commits a work file on that branch, and the Stop hook moves the card to Agent done. `start_ship` with the session branch as the one branch answers 202, the flow ends `done`, the fake `gh` log creates and merges one PR, and the bare origin `main` holds the work file. A second ticket card B that nobody started has no `launch` and no session branch, so `start_ship` answers 400 `not-group-card` and the card has no ship flow. The test types no key into any pane.
 
 Scenario 13 (tests/e2e/scenario-13-feature-scope.e2e.ts) proves that a feature orchestrator with an empty scope sees and starts only the ticket that the user assigns to it: the board has a main orchestrator (kind **board**) and an extra orchestrator `feat` (kind **feature**) with no scope, and the test mints both tokens with `POST /api/boards/:key/orchestrators/:id/token` without a start of either orchestrator. One user ticket is in To Do. `list_cards` for `feat` answers `total` 0, and `list_cards` for the main includes the ticket. `start_card` from `feat` on the ticket answers 403 `out-of-scope`, and the card has no `launch` and no session. The user then assigns the ticket to `feat` with `PUT /api/boards/:key/cards/:cardId/orchestrator`, which answers 200 with `changed` true and adds exactly one `intake_submitted` event for `feat` and the ticket. After the assignment, `list_cards` for `feat` answers `total` 1, `start_card` from `feat` answers 202 with the Write code directly playbook, and the card carries `launch.playbook`. `start_card` from the main on the same card then answers 403 `other-owner`. All sandbox folders are under the sandbox root and not under `~/.dispatch`. The test types no key into any pane.
+
+Scenario 14 (tests/e2e/scenario-14-missing-workspace.e2e.ts) proves that the boot resume sweep refuses a lost session whose workspace folder is missing (LOCAL-163). The test starts one card with the fake `claude`, sets `supervisor: on`, stops the server, stops the sandbox tmux server and renames the workspace folder of the card. It then boots the server again on the same data folder. The card must show `Resume failed: workspace-missing: <path>`, stay lost, be in Needs input with `resume_failed`, and have exactly one `resume_failed` event. The fake `claude` must record no new launch, and the sandbox tmux server must have no session.
 
 The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
