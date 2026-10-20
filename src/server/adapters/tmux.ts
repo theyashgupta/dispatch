@@ -260,6 +260,58 @@ export async function pinPaneBorderOff(name: string): Promise<void> {
   ]);
 }
 
+const WINDOW_COLUMNS = "200";
+const WINDOW_ROWS = "50";
+const MIN_WINDOW_WIDTH = 120;
+
+/**
+ * Pin tmux `window-size manual` for session `name`, idempotently.
+ *
+ * @remarks LOCAL-162: tmux's default `latest` sizes the window to the most recent client and keeps
+ * that size after the client detaches, so one phone attach left a pane 44 columns wide, Claude Code
+ * truncated its status row, and the context meter froze. Manual keeps the `-x 200 -y 50` geometry
+ * the pane parsers need; a smaller ttyd client renders a clipped view of the same window.
+ */
+export async function pinWindowSizeManual(name: string): Promise<void> {
+  await tmux(["set-option", "-t", name, "window-size", "manual"]);
+}
+
+/**
+ * Resize session `name`'s window to 200x50 when it is narrower than 120 columns, and log it.
+ *
+ * @remarks LOCAL-162: heals a window that a client shrank before {@link pinWindowSizeManual} held it.
+ * `resize-window` also sets `window-size manual`, so the heal runs once and the next probe passes.
+ * Never throws: a failed probe leaves the window as it is for the next caller to try.
+ */
+export async function widenNarrowWindow(name: string): Promise<void> {
+  const target = `=${name}:`;
+  try {
+    const { stdout } = await tmux([
+      "display",
+      "-p",
+      "-t",
+      target,
+      "#{window_width}",
+    ]);
+    const width = Number.parseInt(stdout.trim(), 10);
+    if (Number.isNaN(width) || width >= MIN_WINDOW_WIDTH) return;
+    await tmux([
+      "resize-window",
+      "-t",
+      target,
+      "-x",
+      WINDOW_COLUMNS,
+      "-y",
+      WINDOW_ROWS,
+    ]);
+    console.warn(
+      `[tmux] widened ${name} from ${width} to ${WINDOW_COLUMNS} columns`,
+    );
+  } catch (err) {
+    console.warn(`[tmux] could not widen ${name}: ${(err as Error).message}`);
+  }
+}
+
 /**
  * True if tmux session `name` exists (`has-session -t <name>` exits 0).
  * Swallows failure into `false` (never rethrows) — a dead tmux server means "no session",
@@ -411,15 +463,16 @@ export async function newSession(
     "-c",
     cwd,
     "-x",
-    "200",
+    WINDOW_COLUMNS,
     "-y",
-    "50",
+    WINDOW_ROWS,
     ...envArgs,
     ...wrapWithPtyShim(commandArgv),
   ]);
   await pinMouseOff(name);
   await pinStatusOff(name);
   await pinPaneBorderOff(name);
+  await pinWindowSizeManual(name);
   await ensureHyperlinksTerminalFeature();
   await ensureNoAltScreenOverride();
 }

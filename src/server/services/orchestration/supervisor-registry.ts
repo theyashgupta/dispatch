@@ -3,7 +3,11 @@ import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { isLoopCard } from "../../../shared/running-group.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import type { PaneSample } from "../../adapters/markers/watcher.js";
-import { paneAtPrompt, sessionEnvHas } from "../../adapters/tmux.js";
+import {
+  paneAtPrompt,
+  sessionEnvHas,
+  widenNarrowWindow,
+} from "../../adapters/tmux.js";
 import { readTranscriptTail } from "../../adapters/transcript.js";
 import {
   detectState,
@@ -258,6 +262,7 @@ export async function supervisePane(
   if (watcher.running || wakeInFlight(card)) return;
   watcher.running = true;
   try {
+    await widenNarrowWindow(sample.tmuxSession);
     if (isLoopCard(card) && !watcher.progressRead) {
       await refreshLoopProgress(card.id);
       watcher.progressRead = true;
