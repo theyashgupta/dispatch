@@ -195,6 +195,22 @@ export async function refreshUsage(
   return snapshot;
 }
 
+/**
+ * Tell whether a 401 comes from an access token that only aged out while its refresh token lives.
+ *
+ * @remarks An idle account's access token lives 8 hours and only a CLI launch renews it, so such a
+ * rejection is not a sign of a dead login.
+ */
+function isIdleExpiry(
+  accessExpiresAt: number | undefined,
+  loginExpiresAt: string | null,
+): boolean {
+  if (accessExpiresAt === undefined || accessExpiresAt > Date.now()) {
+    return false;
+  }
+  return loginExpiresAt === null || Date.parse(loginExpiresAt) > Date.now();
+}
+
 async function fetchAccountUsage(
   id: string,
   caller: UsageCaller,
@@ -214,7 +230,7 @@ async function fetchAccountUsage(
       loginExpiresAt: null,
     });
   }
-  const { token, loginExpiresAt } = credential;
+  const { token, loginExpiresAt, accessExpiresAt } = credential;
   let result: UsageFetchResult;
   try {
     result = await fetchUsage(token, USER_AGENT);
@@ -267,7 +283,9 @@ async function fetchAccountUsage(
     replanAndLog(id, caller, result.status, { kind: "rejected" });
     return mergeSnapshot(id, {
       status: "stale",
-      error: "token-rejected",
+      error: isIdleExpiry(accessExpiresAt, loginExpiresAt)
+        ? "token-expired"
+        : "token-rejected",
       loginExpiresAt,
     });
   }

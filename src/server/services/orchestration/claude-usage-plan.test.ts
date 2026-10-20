@@ -123,6 +123,39 @@ void test("a 401 re-plans the next read 600 seconds out", async () => {
   assert.equal(plan.holdUntil, null);
 });
 
+void test("a 401 is token-expired when the access token expired and the refresh token lives, else token-rejected", async () => {
+  const ADDED = "44444444-4444-4444-8444-444444444444";
+  fs.mkdirSync(accountDir(ADDED), { recursive: true });
+  const write = (oauth: Record<string, number>): void =>
+    fs.writeFileSync(
+      path.join(accountDir(ADDED), ".credentials.json"),
+      JSON.stringify({
+        claudeAiOauth: { accessToken: "sk-ant-oat01-FAKE-IDLE", ...oauth },
+      }),
+    );
+  const errorFor = async (oauth: Record<string, number>): Promise<unknown> => {
+    write(oauth);
+    usage.forgetUsage(ADDED);
+    const snapshot = await usage.refreshUsage(ADDED);
+    assert.equal(snapshot.status, "stale");
+    return snapshot.error;
+  };
+  status = 401;
+  const past = Date.now() - 60_000;
+  const future = Date.now() + 3_600_000;
+  assert.equal(await errorFor({ expiresAt: past }), "token-expired");
+  assert.equal(
+    await errorFor({ expiresAt: past, refreshTokenExpiresAt: future }),
+    "token-expired",
+  );
+  assert.equal(
+    await errorFor({ expiresAt: past, refreshTokenExpiresAt: past }),
+    "token-rejected",
+  );
+  assert.equal(await errorFor({ expiresAt: future }), "token-rejected");
+  assert.equal(await errorFor({}), "token-rejected");
+});
+
 void test("a 429 holds the account for Retry-After plus 900 seconds", async () => {
   const before = Date.now();
   await hold();
