@@ -30,6 +30,7 @@ const {
   upsertAccount,
   accountDir,
   getActiveAccountId,
+  removeAccount,
   setActiveAccount,
   writeDefaultIdentity,
 } = await import("./claude-accounts.js");
@@ -2174,4 +2175,170 @@ void test("answering the exhausted decision starts no login, since the user adds
   const second = (await readChainState()).decisions.exhausted;
   answerDecisionItem(second, { optionId: "add", note: null });
   assert.deepEqual(logins, []);
+});
+
+void test("a limited account that then becomes shadowed loses its return timer and is never read or returned to", async () => {
+  await begin({}, {}, { email: "other@example.com", orgId: "org" });
+  await handleUsageRead(ACCOUNT_A, usage(100, iso(BASE + 60 * MIN)));
+  assert.ok(chainTimers().some((t) => t.key === `return:${ACCOUNT_A}`));
+  await noteHomeIdentity(IDENTITY_A);
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "shadowed-by-home",
+  );
+  assert.equal(
+    chainTimers().some((t) => t.key === `return:${ACCOUNT_A}`),
+    false,
+  );
+  await advance(90 * MIN);
+  assert.equal(readLog.includes(ACCOUNT_A), false);
+  assert.equal(getActiveAccountId(), "default");
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "shadowed-by-home",
+  );
+});
+
+void test("a login decision dep that throws leaves needs-login without a stored decision, and the next rejected read raises one", async () => {
+  let failing = true;
+  await begin(
+    {},
+    {
+      raiseLoginDecision: (accountId: string) => {
+        if (failing) throw new Error("raise failed");
+        return fakeDeps.raiseLoginDecision(accountId);
+      },
+    },
+  );
+  const warn = mock.method(console, "warn", () => undefined);
+  try {
+    await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+    await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+    const saved = await readChainState();
+    assert.equal(saved.accounts[ACCOUNT_A]?.state, "needs-login");
+    assert.equal(saved.decisions[`needs-login:${ACCOUNT_A}`], undefined);
+    assert.deepEqual(raised, []);
+    assert.equal(warn.mock.callCount() > 0, true);
+    failing = false;
+    await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  } finally {
+    warn.mock.restore();
+  }
+  assert.deepEqual(raised, [ACCOUNT_A]);
+  assert.equal(
+    typeof (await readChainState()).decisions[`needs-login:${ACCOUNT_A}`],
+    "string",
+  );
+});
+
+void test("an exhausted decision dep that rejects keeps the chain exhausted without a stored decision, and the next check raises one", async () => {
+  let failing = true;
+  await begin(
+    {},
+    {
+      raiseExhaustedDecision: (earliestResetAt: string | null) =>
+        failing
+          ? Promise.reject(new Error("raise failed"))
+          : fakeDeps.raiseExhaustedDecision(earliestResetAt),
+    },
+  );
+  await sessionCard("ex-dep-held");
+  holdAllLimited();
+  const warn = mock.method(console, "warn", () => undefined);
+  try {
+    for (const id of [ACCOUNT_A, ACCOUNT_B, "default"]) {
+      await handleUsageRead(id, reads.get(id) as ClaudeUsageSnapshot);
+    }
+    const saved = await readChainState();
+    assert.notEqual(saved.exhausted, null);
+    assert.equal(saved.decisions.exhausted, undefined);
+    assert.deepEqual(raisedExhausted, []);
+    assert.equal(warn.mock.callCount() > 0, true);
+    failing = false;
+    reads.set(ACCOUNT_A, usage(100, iso(BASE + 90 * MIN)));
+    await advance(33 * MIN);
+  } finally {
+    warn.mock.restore();
+  }
+  assert.deepEqual(raisedExhausted, [iso(BASE + 90 * MIN)]);
+  assert.equal(typeof (await readChainState()).decisions.exhausted, "string");
+});
+
+void test("answering a login decision when startLogin resolves not ok or rejects does not throw and keeps the decision answered", async () => {
+  const outcomes = [
+    () => Promise.resolve({ ok: false, error: "in-flight" }),
+    () => Promise.reject(new Error("login failed")),
+  ];
+  for (const outcome of outcomes) {
+    const attempts: (string | undefined)[] = [];
+    await begin(
+      {},
+      {
+        startLogin: (accountId?: string) => {
+          attempts.push(accountId);
+          return outcome();
+        },
+      },
+    );
+    await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+    await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+    const decisionId = (await readChainState()).decisions[
+      `needs-login:${ACCOUNT_A}`
+    ];
+    const warn = mock.method(console, "warn", () => undefined);
+    try {
+      assert.doesNotThrow(() =>
+        answerDecisionItem(decisionId, { optionId: "login", note: null }),
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.deepEqual(attempts, [ACCOUNT_A]);
+      assert.equal(warn.mock.callCount(), 1);
+    } finally {
+      warn.mock.restore();
+    }
+    assert.equal(store.getDecisionItem(decisionId)?.state, "answered");
+  }
+});
+
+void test("a shadowed account removed from the registry file loses its chain entry at the next home identity note", async () => {
+  await begin({}, {}, IDENTITY_A);
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "shadowed-by-home",
+  );
+  await removeAccount(ACCOUNT_A);
+  try {
+    await noteHomeIdentity(IDENTITY_A);
+    assert.equal((await readChainState()).accounts[ACCOUNT_A], undefined);
+  } finally {
+    await removeAccount(ACCOUNT_B);
+    for (const [id, day] of [
+      [ACCOUNT_A, "01"],
+      [ACCOUNT_B, "02"],
+    ]) {
+      await upsertAccount({
+        id,
+        email: `${id.slice(0, 4)}@example.com`,
+        orgId: "org",
+        orgName: "Org",
+        subscriptionType: "max",
+        createdAt: `2026-10-${day}T00:00:00.000Z`,
+        lastLoginAt: `2026-10-${day}T00:00:00.000Z`,
+      });
+      fs.mkdirSync(accountDir(id), { recursive: true });
+    }
+  }
+});
+
+void test("a home identity noted while the chain is stopped resolves and changes nothing, and the next start shadows from the stored identity", async () => {
+  await begin();
+  stop();
+  await whenChainIdle();
+  await noteHomeIdentity(IDENTITY_B);
+  assert.equal((await readChainState()).accounts[ACCOUNT_B], undefined);
+  await writeDefaultIdentity(IDENTITY_A);
+  stop = await startAccountChain({ ...fakeDeps });
+  const saved = await readChainState();
+  assert.equal(saved.accounts[ACCOUNT_A]?.state, "shadowed-by-home");
+  assert.equal(saved.accounts[ACCOUNT_B], undefined);
 });
