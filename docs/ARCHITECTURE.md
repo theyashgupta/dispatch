@@ -3155,17 +3155,24 @@ option shows, and then sends `Continue.`. A session with no limit surface on the
 key. No key path selects a credits option.
 
 **Home login duplicate.** `account-state.ts#isShadowOfHome` is true when the email of a registry
-account equals the email of the home identity and the organization ids are equal or one of them is
-empty. The controller checks it at the start of the chain, against the registry `defaultIdentity`,
-and after each identity watch check (`account-chain.ts#noteHomeIdentity`). A shadowed account gets
+account equals the email of the home identity and both organization ids are set and equal. The
+controller checks it at the start of the chain, against the registry `defaultIdentity`, and after
+each identity watch check that reads a logged in home (`account-chain.ts#noteHomeIdentity`). The
+account in use is never shadowed. A failed or logged out home read changes nothing, because the CLI
+reports every failure as logged out. A shadowed account gets
 `shadowed-by-home`, loses its return timer, gets no login decision and is never a return target. A
 registry account that stops matching goes back to `unknown`. The Accounts row shows the badge
 `Same login as Default` and the button `Remove duplicate`. The button removes the account and signs
 out only the config directory of that account.
 
 **Needs login.** `account-state.ts#nextRejectedReads` counts the consecutive `token-rejected` reads
-in the entry field `rejectedReads`. An ok read sets the count to 0. Any other read keeps it. A limit
-signal never counts, because it reuses a cached snapshot. At 2 the account gets `needs-login`.
+in the entry field `rejectedReads`. An ok read sets the count to 0. A limit signal never counts,
+because it reuses a cached snapshot. At 2 the account gets `needs-login`. The access token lives 8
+hours and only a CLI launch on the folder renews it, so an idle account reads 401 while its login
+is good. The usage poll marks a 401 or 403 as `token-expired` when the access token `expiresAt`
+passed and the refresh token is not known to be expired (`claude-usage.ts`). A `token-expired` read
+sets the count to 0 and keeps the account `unknown`, so the first launch on it renews the token. A
+429 or a network error keeps the count.
 
 **Account decisions.** `account-decisions.ts` raises the account decisions on the default board
 `LOCAL` with the orchestrator id `dispatch-accounts`. No orchestrator wakes for them. Each has the
