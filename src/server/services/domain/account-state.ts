@@ -125,6 +125,44 @@ export function deriveAccountState(
 }
 
 /**
+ * Tell whether a snapshot shows a new usage period for an account held as limited.
+ *
+ * @remarks A not ok read keeps the last good windows and `fetchedAt`, so only a `fetchedAt` newer than
+ * the stored one counts as fresh. The windows must all be below the threshold, and either a period
+ * started after the stored read or no reset still equals `limitedUntil`.
+ */
+export function showsNewPeriod(
+  usage: ClaudeUsageSnapshot,
+  prior: { fetchedAt?: string | null; limitedUntil: string | null },
+  thresholdPercent: number,
+): boolean {
+  if (
+    usage.status === "stale" ||
+    usage.fetchedAt === null ||
+    usage.windows.length === 0
+  ) {
+    return false;
+  }
+  const priorFetched =
+    prior.fetchedAt == null ? null : Date.parse(prior.fetchedAt);
+  if (priorFetched !== null && !(Date.parse(usage.fetchedAt) > priorFetched)) {
+    return false;
+  }
+  if (usage.windows.some((w) => w.percent >= thresholdPercent)) return false;
+  const limitedUntil =
+    prior.limitedUntil === null ? NaN : Date.parse(prior.limitedUntil);
+  const startedAfterRead =
+    priorFetched !== null &&
+    usage.windows.some(
+      (w) => w.periodStart !== null && Date.parse(w.periodStart) > priorFetched,
+    );
+  const resetMoved = !usage.windows.some(
+    (w) => w.resetsAt !== null && Date.parse(w.resetsAt) === limitedUntil,
+  );
+  return startedAfterRead || resetMoved;
+}
+
+/**
  * Read a stored chain state as of `now`, so a `limited` state whose `limitedUntil` passed is `unknown`.
  */
 export function expireLimit(

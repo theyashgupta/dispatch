@@ -1535,6 +1535,7 @@ export interface ChainAccountEntry {
   state: ChainAccountState;
   buckets: ChainBucket[];
   limitedUntil: string | null;
+  fetchedAt?: string | null;
 }
 
 export interface ChainExhaustedRecord {

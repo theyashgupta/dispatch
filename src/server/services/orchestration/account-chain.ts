@@ -22,6 +22,7 @@ import {
   isStaleSurface,
   isTokenReadFailed,
   parseSurfaceResetAt,
+  showsNewPeriod,
 } from "../domain/account-state.js";
 import { shouldWarnLoginExpiry } from "../domain/login-expiry.js";
 import {
@@ -248,8 +249,8 @@ export async function limitMoveCandidates(): Promise<BucketedCandidate[]> {
  * Derive and store one account's chain state from a usage snapshot and an optional limit signal.
  *
  * @remarks A read that is not ok, or is ok with no windows, keeps a limited account limited until its `limitedUntil` passes,
- * while a fresh ok read that derives another state replaces it. The return timer outlives that
- * clear, so only the timer returns the work.
+ * unless its snapshot shows a new period. A fresh ok read that derives another state replaces the
+ * limit. The return timer outlives that clear, so only the timer returns the work.
  */
 async function ingest(
   id: string,
@@ -259,10 +260,11 @@ async function ingest(
   const now = deps.now();
   const loggedIn =
     !limit && isTokenReadFailed(usage) ? await deps.loggedIn(id) : null;
+  const { thresholdPercent } = getClaudeAccountsSettings();
   const derived = deriveAccountState(
     usage,
     { loggedIn, ...(limit ? { limit } : {}) },
-    getClaudeAccountsSettings().thresholdPercent,
+    thresholdPercent,
     new Date(now),
   );
   const prior = chain.accounts[id];
@@ -272,12 +274,14 @@ async function ingest(
     derived.state !== "limited" &&
     derived.state !== "login-expired" &&
     prior.limitedUntil !== null &&
-    Date.parse(prior.limitedUntil) > now;
+    Date.parse(prior.limitedUntil) > now &&
+    !showsNewPeriod(usage, prior, thresholdPercent);
   const entry: ChainAccountEntry = {
     ...(held
       ? { state: "limited", limitedUntil: prior.limitedUntil }
       : derived),
     buckets: usageBuckets(usage),
+    fetchedAt: usage.fetchedAt,
   };
   chain.accounts[id] = entry;
   if (prior?.state === "limited" && entry.state !== "limited") {

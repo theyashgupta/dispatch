@@ -7,6 +7,7 @@ import { SWITCH_NOW_REASON } from "../../../shared/account-chain.js";
 import type {
   ClaudeAccountsSettings,
   ClaudeUsageSnapshot,
+  ClaudeUsageWindow,
 } from "../../../shared/types.js";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import type { ChainEvent } from "./account-chain-records.js";
@@ -1078,10 +1079,11 @@ void test("an ok read below the threshold before limitedUntil clears the limit, 
 void test("a rate-limited read before limitedUntil keeps the account limited, so a failover skips it", async () => {
   await begin();
   const s = await sessionCard("hd-held");
-  await handleUsageRead("default", usage(100, iso(BASE + 60 * MIN)));
+  const lastGood = usage(100, iso(BASE + 60 * MIN));
+  await handleUsageRead("default", lastGood);
   assert.equal(getActiveAccountId(), ACCOUNT_A);
   await advance(5 * MIN);
-  await handleUsageRead("default", failedRead("rate-limited"));
+  await handleUsageRead("default", { ...lastGood, status: "rate-limited" });
   const saved = await readChainState();
   assert.equal(saved.accounts.default?.state, "limited");
   assert.equal(saved.accounts.default?.limitedUntil, iso(BASE + 60 * MIN));
@@ -1556,4 +1558,111 @@ void test("login expiry: a past expiry sends one login-expiring event and none a
   stop = await startAccountChain(fakeDeps);
   await handleUsageRead(ACCOUNT_A, expired);
   assert.equal(expiring().length, 1);
+});
+
+const TICKET_CLOCK = Date.parse("2026-10-20T10:10:00.000Z");
+const TICKET_LIMITED_UNTIL = "2026-10-22T07:00:00.000Z";
+const TICKET_WEEKLY_RESET = "2026-10-27T07:00:00.000Z";
+const TICKET_OLD_FETCH = "2026-10-19T10:00:00.000Z";
+const WEEK = 7 * 24 * 60 * MIN;
+
+/** A usage window of `kind` at `percent` whose period began `spanMs` before `resetsAt`. */
+function periodWindow(
+  kind: string,
+  label: string,
+  percent: number,
+  resetsAt: string,
+  spanMs: number,
+): ClaudeUsageWindow {
+  return {
+    kind,
+    label,
+    percent,
+    resetsAt,
+    isActive: kind === "session",
+    periodStart: iso(Date.parse(resetsAt) - spanMs),
+    periodEnd: resetsAt,
+  };
+}
+
+/** The windows of the 2026-10-20 ticket snapshot, where the weekly buckets just started a new period. */
+function newPeriodWindows(): ClaudeUsageWindow[] {
+  return [
+    periodWindow(
+      "session",
+      "Session",
+      4,
+      iso(TICKET_CLOCK + 3 * 60 * MIN),
+      5 * 60 * MIN,
+    ),
+    periodWindow("weekly_all", "Weekly", 1, TICKET_WEEKLY_RESET, WEEK),
+    periodWindow("weekly_scoped", "Weekly Fable", 2, TICKET_WEEKLY_RESET, WEEK),
+  ];
+}
+
+/** The windows the account showed when it hit the weekly limit. */
+function oldPeriodWindows(): ClaudeUsageWindow[] {
+  return [
+    periodWindow("weekly_all", "Weekly", 100, TICKET_LIMITED_UNTIL, WEEK),
+  ];
+}
+
+/** Start the controller with `default` stored as limited by a weekly bucket read at `TICKET_OLD_FETCH`. */
+async function beginWithStoredWeeklyLimit(): Promise<void> {
+  await begin();
+  const state = emptyChainState();
+  state.accounts.default = {
+    state: "limited",
+    limitedUntil: TICKET_LIMITED_UNTIL,
+    buckets: [
+      { kind: "weekly_all", percent: 100, resetsAt: TICKET_LIMITED_UNTIL },
+    ],
+    fetchedAt: TICKET_OLD_FETCH,
+  };
+  await writeChainState(state);
+  clock = TICKET_CLOCK;
+  stop();
+  stop = await startAccountChain(fakeDeps);
+}
+
+void test("an ok read that shows a new period releases a limited account in one read", async () => {
+  await beginWithStoredWeeklyLimit();
+  await handleUsageRead("default", {
+    status: "ok",
+    fetchedAt: iso(clock),
+    windows: newPeriodWindows(),
+  });
+  const saved = await readChainState();
+  assert.equal(saved.accounts.default?.state, "available");
+  assert.equal(saved.accounts.default?.limitedUntil, null);
+  assert.equal(saved.accounts.default?.fetchedAt, iso(clock));
+  assert.equal(getActiveAccountId(), "default");
+  assert.deepEqual(events, []);
+  assert.ok(chainTimers().some((t) => t.key === "return:default"));
+});
+
+void test("a rate-limited read with a newer fetchedAt and new period windows releases a limited account", async () => {
+  await beginWithStoredWeeklyLimit();
+  await handleUsageRead("default", {
+    status: "rate-limited",
+    fetchedAt: iso(clock - MIN),
+    windows: newPeriodWindows(),
+  });
+  const saved = await readChainState();
+  assert.equal(saved.accounts.default?.state, "available");
+  assert.equal(saved.accounts.default?.limitedUntil, null);
+  assert.equal(getActiveAccountId(), "default");
+});
+
+void test("a rate-limited read that repeats the old windows and fetchedAt keeps the account limited", async () => {
+  await beginWithStoredWeeklyLimit();
+  await handleUsageRead("default", {
+    status: "rate-limited",
+    fetchedAt: TICKET_OLD_FETCH,
+    windows: oldPeriodWindows(),
+  });
+  const saved = await readChainState();
+  assert.equal(saved.accounts.default?.state, "limited");
+  assert.equal(saved.accounts.default?.limitedUntil, TICKET_LIMITED_UNTIL);
+  assert.equal(saved.accounts.default?.fetchedAt, TICKET_OLD_FETCH);
 });

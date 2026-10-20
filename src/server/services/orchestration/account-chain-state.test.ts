@@ -64,6 +64,35 @@ void test("chain state round trips every field", async () => {
   assert.equal(fs.statSync(chain.CHAIN_STATE_PATH).mode & 0o777, 0o600);
 });
 
+void test("an entry keeps its fetchedAt through a write and a read, and an entry without it still reads", async () => {
+  const state: ChainStateFile = {
+    ...chain.emptyChainState(),
+    accounts: {
+      default: {
+        state: "available",
+        buckets: [],
+        limitedUntil: null,
+        fetchedAt: "2026-10-01T00:00:00.000Z",
+      },
+      [ID]: {
+        state: "unknown",
+        buckets: [],
+        limitedUntil: null,
+        fetchedAt: null,
+      },
+    },
+  };
+  await chain.writeChainState(state);
+  assert.deepEqual(await chain.readChainState(), state);
+
+  const old = { state: "limited", buckets: [], limitedUntil: null };
+  fs.writeFileSync(
+    chain.CHAIN_STATE_PATH,
+    JSON.stringify({ accounts: { default: old } }),
+  );
+  assert.deepEqual((await chain.readChainState()).accounts, { default: old });
+});
+
 void test("corrupt or wrong-shaped chain state reads as empty and does not throw", async () => {
   for (const body of ["{not json", "[]", "null", '{"accounts":[]}', ""]) {
     fs.writeFileSync(chain.CHAIN_STATE_PATH, body);

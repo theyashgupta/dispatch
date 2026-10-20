@@ -11,6 +11,7 @@ import {
   expireLimit,
   isStaleSurface,
   parseSurfaceResetAt,
+  showsNewPeriod,
 } from "./account-state.js";
 
 const NOW = new Date("2026-10-06T12:00:00.000Z");
@@ -435,4 +436,88 @@ void test("a surface past its reset is stale only after a newer read below the t
   assert.equal(isStaleSurface(pane("10:40am"), after, 100, now), false);
   assert.equal(isStaleSurface(pane("3am"), after, 100, now), false);
   assert.equal(isStaleSurface("no limit here", after, 100, now), false);
+});
+
+const PRIOR_FETCHED = "2026-10-06T10:00:00.000Z";
+const PRIOR_LIMITED_UNTIL = "2026-10-08T07:00:00.000Z";
+const PRIOR = { fetchedAt: PRIOR_FETCHED, limitedUntil: PRIOR_LIMITED_UNTIL };
+
+/** A weekly window at `percent` that started at `periodStart`. */
+function weekly(
+  percent: number,
+  resetsAt: string | null,
+  periodStart: string | null,
+): ClaudeUsageWindow {
+  return { ...win("weekly_all", percent, resetsAt), periodStart };
+}
+
+void test("showsNewPeriod is true when a period started after the stored read", () => {
+  const snapshot = usage([
+    weekly(1, PRIOR_LIMITED_UNTIL, "2026-10-06T11:00:00.000Z"),
+  ]);
+  assert.equal(showsNewPeriod(snapshot, PRIOR, 100), true);
+});
+
+void test("showsNewPeriod is true when no reset equals limitedUntil any more", () => {
+  const snapshot = usage([weekly(1, "2026-10-13T07:00:00.000Z", null)]);
+  assert.equal(showsNewPeriod(snapshot, PRIOR, 100), true);
+});
+
+void test("showsNewPeriod is false when a reset still equals limitedUntil and no period started", () => {
+  const snapshot = usage([
+    weekly(1, PRIOR_LIMITED_UNTIL, "2026-10-01T07:00:00.000Z"),
+  ]);
+  assert.equal(showsNewPeriod(snapshot, PRIOR, 100), false);
+});
+
+void test("showsNewPeriod compares reset times by value, not by string", () => {
+  const snapshot = usage([weekly(1, "2026-10-08T07:00:00Z", null)]);
+  assert.equal(showsNewPeriod(snapshot, PRIOR, 100), false);
+});
+
+void test("showsNewPeriod is false when one window is at the threshold", () => {
+  const snapshot = usage([
+    weekly(1, "2026-10-13T07:00:00.000Z", null),
+    win("session", 100, "2026-10-06T15:00:00.000Z"),
+  ]);
+  assert.equal(showsNewPeriod(snapshot, PRIOR, 100), false);
+});
+
+void test("showsNewPeriod is false for a stale snapshot", () => {
+  const snapshot = usage(
+    [weekly(1, "2026-10-13T07:00:00.000Z", null)],
+    "stale",
+  );
+  assert.equal(showsNewPeriod(snapshot, PRIOR, 100), false);
+});
+
+void test("showsNewPeriod is false with no windows or no fetchedAt", () => {
+  assert.equal(showsNewPeriod(usage([]), PRIOR, 100), false);
+  const noFetch = usage([weekly(1, "2026-10-13T07:00:00.000Z", null)]);
+  assert.equal(
+    showsNewPeriod({ ...noFetch, fetchedAt: null }, PRIOR, 100),
+    false,
+  );
+});
+
+void test("showsNewPeriod is false when fetchedAt is not newer than the stored one", () => {
+  const snapshot = {
+    ...usage([weekly(1, "2026-10-13T07:00:00.000Z", null)]),
+    fetchedAt: PRIOR_FETCHED,
+  };
+  assert.equal(showsNewPeriod(snapshot, PRIOR, 100), false);
+});
+
+void test("showsNewPeriod without a stored fetchedAt relies on the reset alone", () => {
+  const unknownPrior = { limitedUntil: PRIOR_LIMITED_UNTIL };
+  const same = usage([
+    weekly(1, PRIOR_LIMITED_UNTIL, "2026-10-06T11:00:00.000Z"),
+  ]);
+  const moved = usage([weekly(1, "2026-10-13T07:00:00.000Z", null)]);
+  assert.equal(showsNewPeriod(same, unknownPrior, 100), false);
+  assert.equal(showsNewPeriod(moved, unknownPrior, 100), true);
+  assert.equal(
+    showsNewPeriod(moved, { ...unknownPrior, fetchedAt: null }, 100),
+    true,
+  );
 });
