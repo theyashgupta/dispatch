@@ -22,12 +22,7 @@ import type {
 } from "../../../../shared/types.js";
 
 export type BranchState =
-  | "planned"
-  | "running"
-  | "needs_input"
-  | "usage_limit"
-  | "done"
-  | "attention";
+  "planned" | "running" | "needs_input" | "usage_limit" | "done" | "attention";
 
 export type BranchTone = SessionTone;
 

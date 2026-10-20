@@ -180,11 +180,7 @@ export function CentreContainer() {
       onNodeKeyDown={nodeKeyDown}
       reason={stale ? <StaleReason id={REASON_ID} padded={false} /> : null}
       branches={
-        ready ? (
-          <BranchList bands={graph.bands} tile={tile} />
-        ) : (
-          notReady
-        )
+        ready ? <BranchList bands={graph.bands} tile={tile} /> : notReady
       }
       page={page}
       onPageChange={setPage}
