@@ -5,18 +5,15 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { NavIcon } from "@/modules/shell/components/NavIcon";
-import {
-  BOTTOM_BAR_SLOTS,
-  currentSlotId,
-} from "@/modules/shell/domain/bottom-bar";
-import { useBottomBarHeight } from "@/modules/shell/hooks/use-bottom-bar-height";
+import { BOTTOM_BAR_SLOTS } from "@/modules/shell/domain/bottom-bar";
+import { usePublishedHeight } from "@/modules/shell/hooks/use-chrome-top";
 
 interface BottomBarProps {
   current: Page;
   onNavigate: (page: Page) => void;
   onOpenCreateTicket: () => void;
   hidden: boolean;
-  needsCount: number;
+  needsYouCount: number;
 }
 
 export function BottomBar({
@@ -24,11 +21,10 @@ export function BottomBar({
   onNavigate,
   onOpenCreateTicket,
   hidden,
-  needsCount,
+  needsYouCount,
 }: BottomBarProps) {
   const [el, setEl] = useState<HTMLElement | null>(null);
-  useBottomBarHeight(el);
-  const activeId = currentSlotId(current);
+  usePublishedHeight(el, document.documentElement, "--bottom-bar-height");
   return (
     <nav
       ref={setEl}
@@ -41,16 +37,16 @@ export function BottomBar({
     >
       {BOTTOM_BAR_SLOTS.map((slot) => {
         const { page } = slot;
-        const active = slot.id === activeId;
-        const badged = page === "orchestrator" && needsCount > 0;
+        const active = slot.page === current;
+        const badged = page === "orchestrator" && needsYouCount > 0;
         return (
           <Button
-            key={slot.id}
+            key={slot.label}
             type="button"
             variant="ghost"
             aria-current={active ? "page" : undefined}
             aria-label={
-              badged ? `Orchestrator, ${needsCount} need you` : undefined
+              badged ? `Orchestrator, ${needsYouCount} need you` : undefined
             }
             className={cn(
               "h-full flex-col gap-1 rounded-none px-1 text-xs font-medium text-muted-foreground",
@@ -68,7 +64,7 @@ export function BottomBar({
               )}
               {badged ? (
                 <Badge tone="accent" className="absolute -top-2 left-3">
-                  {needsCount}
+                  {needsYouCount}
                 </Badge>
               ) : null}
             </span>

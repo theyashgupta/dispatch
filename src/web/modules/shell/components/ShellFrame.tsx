@@ -3,14 +3,14 @@ import type { Page, Route } from "../../../../shared/route.js";
 import { useSidebar } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 import { AppSidebar } from "@/modules/shell/components/AppSidebar";
-import type { SidebarBoardsData } from "./SidebarBoards";
 import { BottomBar } from "@/modules/shell/components/BottomBar";
 import { PageHeader } from "@/modules/shell/components/PageHeader";
 import { TopBar } from "@/modules/shell/components/TopBar";
+import type { SidebarBoardsData } from "./SidebarBoards";
 import type { NavCounts, NavItem } from "../../../../shared/nav-items.js";
 import type { SyncSnapshot } from "@/modules/shell/domain/sync-status";
 import { useBarVisible } from "@/modules/shell/hooks/use-bar-visible";
-import { useChromeTop } from "@/modules/shell/hooks/use-chrome-top";
+import { usePublishedHeight } from "@/modules/shell/hooks/use-chrome-top";
 import { useMenuFocusReturn } from "@/modules/shell/hooks/use-menu-focus-return";
 
 interface ShellFrameProps {
@@ -63,9 +63,9 @@ export function ShellFrame({
   const { isMobile, openMobile, setOpenMobile, state } = useSidebar();
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const [chrome, setChrome] = useState<HTMLDivElement | null>(null);
-  useChromeTop(chrome, root);
+  usePublishedHeight(chrome, root, "--chrome-top");
   const [column, setColumn] = useState<HTMLDivElement | null>(null);
-  const barHidden = !useBarVisible(column, route.page);
+  const barHidden = !useBarVisible(isMobile ? column : null, route.page);
   const phoneSheetOpen = isMobile && openMobile;
   const skipFocusReturn = useMenuFocusReturn(phoneSheetOpen);
 
@@ -142,7 +142,7 @@ export function ShellFrame({
             onNavigate={onNavigate}
             onOpenCreateTicket={onOpenCreateTicket}
             hidden={barHidden}
-            needsCount={needsYouCount}
+            needsYouCount={needsYouCount}
           />
         ) : null}
       </div>

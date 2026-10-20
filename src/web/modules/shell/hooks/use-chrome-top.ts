@@ -1,25 +1,24 @@
 import { useEffect } from "react";
 
 /**
- * Publish the height of the chrome stack (top bar, banner, page header) as `--chrome-top` on the shell root.
+ * Publish an element's measured height as a CSS variable on a target element.
  *
- * @remarks The docked detail panel anchors below the stack through this variable. The height is
- * measured because the banner adds a variable number of rows. The variable stays unset until the
- * first measurement, so the panel falls back to `--page-header-height`.
+ * @remarks The chrome stack publishes `--chrome-top` on the shell root for the docked detail panel. The bottom bar publishes `--bottom-bar-height` on the document root because toasts and sheets portal to the body.
  */
-export function useChromeTop(
-  chrome: HTMLElement | null,
-  root: HTMLElement | null,
+export function usePublishedHeight(
+  el: HTMLElement | null,
+  target: HTMLElement | null,
+  name: string,
 ): void {
   useEffect(() => {
-    if (chrome == null || root == null) return;
+    if (el == null || target == null) return;
     const observer = new ResizeObserver(() =>
-      root.style.setProperty("--chrome-top", `${chrome.offsetHeight}px`),
+      target.style.setProperty(name, `${el.offsetHeight}px`),
     );
-    observer.observe(chrome);
+    observer.observe(el);
     return () => {
       observer.disconnect();
-      root.style.removeProperty("--chrome-top");
+      target.style.removeProperty(name);
     };
-  }, [chrome, root]);
+  }, [el, target, name]);
 }
