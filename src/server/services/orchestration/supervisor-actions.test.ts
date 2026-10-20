@@ -595,11 +595,13 @@ void test(
       memory: initialPlanMemory(),
     });
     assert.deepEqual(actions, [{ kind: "limit_move" }]);
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60_000);
+    const resetDay = `${tomorrow.toLocaleString("en-US", { month: "short" })} ${tomorrow.getDate()}`;
     await runActions(
       loop.card(),
       loop.session(),
       actions,
-      "transcript: You've hit your weekly limit · resets Oct 20 at 8:30am (Asia/Calcutta)",
+      `transcript: You've hit your weekly limit · resets ${resetDay} at 8:30am (Asia/Calcutta)`,
     );
     const wait = loop.actions().find((e) => e.data.action === "limit_wait");
     assert.equal(wait?.data.reason, "no_headroom");

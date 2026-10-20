@@ -26,7 +26,6 @@ function branch(
     planSize: null,
     memberCount: null,
     stateSince: null,
-    shippedAt: null,
     slot: 0,
   };
 }
@@ -39,7 +38,6 @@ function graphOf(branches: CentreBranch[]): CentreGraph {
       { key: "running", label: "Running", branches, count: branches.length },
     ],
     edges: [],
-    hiddenShipped: 0,
   };
 }
 

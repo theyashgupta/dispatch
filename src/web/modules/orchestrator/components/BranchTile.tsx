@@ -3,7 +3,6 @@ import {
   CircleCheck,
   CircleDashed,
   Gauge,
-  GitMerge,
   MessageCircleQuestionMark,
   Play,
   TriangleAlert,
@@ -31,7 +30,6 @@ const GLYPHS = {
   needs_input: MessageCircleQuestionMark,
   usage_limit: Gauge,
   done: CircleCheck,
-  shipped: GitMerge,
   attention: TriangleAlert,
 } satisfies Record<BranchState, unknown>;
 

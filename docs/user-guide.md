@@ -297,9 +297,9 @@ At 1024 px and wider, the sections show in this order:
 1. The status line.
 2. **Progress per group**, full width.
 3. **Left on this board**, full width.
-4. Two columns. The main column holds **Tickets by column** and then **PRs and merge order**. The rail holds **Next step**, **Needs your call**, **Changed since** and **Cost and usage**.
+4. Two columns. The main column holds **Tickets by column**. The rail holds **Next step**, **Needs your call**, **Changed since** and **Cost and usage**.
 
-Below 1024 px, the sections show in this order: the status line, **Needs your call**, **Progress per group**, **Left on this board**, **Tickets by column**, **PRs and merge order**, **Next step**, **Changed since** and **Cost and usage**. Each section shows once in the page. The section headings are small uppercase labels. A screen reader still reads the names "Attention queue", "Progress per group", "Left on this board", "Tickets by column", "PRs and merge order", "Next step", "Activity log" and "Cost and usage".
+Below 1024 px, the sections show in this order: the status line, **Needs your call**, **Progress per group**, **Left on this board**, **Tickets by column**, **Next step**, **Changed since** and **Cost and usage**. Each section shows once in the page. The section headings are small uppercase labels. A screen reader still reads the names "Attention queue", "Progress per group", "Left on this board", "Tickets by column", "Next step", "Activity log" and "Cost and usage".
 
 - **Progress per group.** The first line of the section is the memory line, for example "Memory: 812 MB free, swap 2048 of 8192 MB". It adds ", <n> paused" when loops are paused. It updates every 15 seconds. It shows "(stale)" after 60 seconds without a reading, and it is hidden when the computer is not a Mac. Each loop is a milestone track with one node for each unit. With no units it shows "No loop progress". The session badges and the last gate text stay on the track header. A node has one of these states:
   - Done. The node has a check glyph and the state line "Done HH:MM" or "Done".
@@ -318,7 +318,6 @@ Below 1024 px, the sections show in this order: the status line, **Needs your ca
   - Amber is for needs input and a usage limit.
   - Green is for a passed gate, agent done and shipped.
   - Grey is for the other rows.
-- **PRs and merge order.** One block for each group in ship order. See the section "Ship flow". With no PR it shows "No PRs yet."
 - **Cost and usage.** The cost of each group against its budget, and the usage meters of the Claude account, as compact rows. With no cost it shows "No cost yet." See the section "Budgets and usage limits".
 
 **Changed since** shows one row for each recorded event, newest first. The orchestrator rows are tool calls and raised decisions. The supervisor rows are actions, session state changes, loop gates, PR changes and a wake of the machine. Your rows are the decisions that you answer and the goals that you submit. A policy save, a board change and a press of **Start orchestrator** write no row of their own. The filters **Actor** (**All**, **Orchestrator**, **Supervisor**, **You**) and **Group** limit the rows. The log shows 20 rows. Choose **Show more** for 20 more. With no match it shows "No activity matches." With no event it shows "No activity on this board yet."
@@ -363,17 +362,16 @@ The node is the card at the top left of the canvas. It shows these items:
 - "Context <n>%" and "$<cost> today". Each shows only when Dispatch has the value.
 - The count line "<n> branches, <m> need you". One branch reads "1 branch, 0 need you".
 
-The count <n> includes the older shipped branches that the page hides. The count <m> is the size of the band **Needs you**.
+The count <n> is the number of branches in the bands. A shipped branch is not counted. The count <m> is the size of the band **Needs you**.
 
 ### The bands and the tiles
 
-The branches stand in five bands, in this order: **Needs you**, **Running**, **Planned**, **Done** and **Shipped**. Each band heading shows its count. A band with no branch shows only the heading. A branch belongs to the orchestrator that owns its card. A hidden card and a group member are not branches.
+The branches stand in four bands, in this order: **Needs you**, **Running**, **Planned** and **Done**. Each band heading shows its count. A band with no branch shows only the heading. A branch belongs to the orchestrator that owns its card. A hidden card, a group member and a shipped card are not branches. Shipped work shows in the activity feed and in the board column Done.
 
 - **Needs you** holds a branch at Needs input, Usage limit, Budget reached or Resume failed. It also holds a branch in a stuck session state.
 - **Running** holds a branch with a session that works.
 - **Planned** holds a branch with no session. It comes from the plan, also when its card does not exist yet.
 - **Done** holds a branch at Agent done.
-- **Shipped** holds a shipped branch.
 
 The stuck session states are **No progress**, **Permission prompt**, **API error**, **Session lost** and **Claude exited**.
 
@@ -391,7 +389,6 @@ The detail line reads as follows:
 - Planned: "Plan order <n>, size <size>".
 - Needs input: "Needs your answer". Usage limit: "Stopped at the usage limit". Budget reached: "Budget reached".
 - Done: "Done <time>, awaiting ship".
-- Shipped: "Shipped <time>, PR <number>".
 
 A time reads "HH:MM" on the current day. On another day it reads "<day> <month> HH:MM". The clock has 24 hours.
 
@@ -415,7 +412,6 @@ How the actions work:
 - A failed action shows an alert, for example "Reply failed: <message>." The alert has the button **Try again**.
 - A result and an alert hide when the branch changes state. A reply draft stays when you change a tab.
 - **Open terminal** goes to the board page.
-- The page hides a branch that shipped more than 24 hours ago. Choose **Show <n> older shipped** under the bands to show it. The link then reads **Hide older shipped**.
 
 ### Orchestrator controls
 
@@ -783,7 +779,7 @@ A flow starts only when all of these are true:
 - No other flow runs on the board.
 - The branches are unit branches or the specs branch of the loop. The flow refuses `main`, `master`, `HEAD` and the base branch.
 
-For each branch, the flow goes through these states. The dashboard section **PRs and merge order** shows them.
+For each branch, the flow goes through these states.
 
 | State            | Label                  |
 | ---------------- | ---------------------- |
