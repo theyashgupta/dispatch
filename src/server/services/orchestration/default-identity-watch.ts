@@ -7,6 +7,7 @@ import { boardRepository as store } from "../../store/board-repository.js";
 import { noteHomeIdentity } from "./account-chain.js";
 import { cacheHomeIdentity } from "./claude-account-ops.js";
 import {
+  getManagedDefaultId,
   readDefaultIdentity,
   writeDefaultIdentity,
   type DefaultIdentity,
@@ -46,16 +47,19 @@ async function runCheck(): Promise<void> {
     orgId: read.orgId || (stored?.orgId ?? ""),
   };
   if (verdict !== "same") await writeDefaultIdentity(identity);
-  void noteHomeIdentity(identity);
+  const managed = getManagedDefaultId() !== undefined;
+  void noteHomeIdentity(managed ? undefined : identity);
   if (verdict === "same" || stored === undefined) return;
-  for (const { card, session } of store.sessionsWithTmux(ALL_BOARDS)) {
-    if (
-      (session.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID) !==
-      DEFAULT_CLAUDE_ACCOUNT_ID
-    ) {
-      continue;
+  if (!managed) {
+    for (const { card, session } of store.sessionsWithTmux(ALL_BOARDS)) {
+      if (
+        (session.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID) !==
+        DEFAULT_CLAUDE_ACCOUNT_ID
+      ) {
+        continue;
+      }
+      await store.markAccountStale(card.id, session.id);
     }
-    await store.markAccountStale(card.id, session.id);
   }
   await store.recordAccountEvent(
     "account_login_changed",
