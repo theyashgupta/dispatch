@@ -56,7 +56,18 @@ export function hasSessionFlow(
   );
 }
 
-const ACTIVE_BOX_WIDTH = 128;
+/** Whether the card's active session has a live terminal to show. */
+export function terminalReady(
+  card: Pick<Card, "terminalError" | "ttydPort" | "activeSessionId">,
+): boolean {
+  return (
+    card.terminalError == null &&
+    card.ttydPort != null &&
+    card.activeSessionId != null
+  );
+}
+
+const ACTIVE_BOX_WIDTH = 136;
 const IDLE_BOX_WIDTH = 72;
 const BOX_GAP = 16;
 const BOX_Y = 2;

@@ -1,6 +1,7 @@
 import { RotateCw } from "lucide-react";
 import type { Card as CardModel } from "../../../../shared/types.js";
 import { Button } from "@/components/ui/button";
+import { terminalReady } from "@/modules/detail/domain/session-flow";
 import { PanelAlert, PanelMonoNotice } from "./PanelNotice";
 
 interface TerminalRegionProps {
@@ -40,7 +41,7 @@ export function TerminalRegion({ card, onReconnect }: TerminalRegionProps) {
               Reconnect
             </Button>
           </div>
-        ) : c.ttydPort != null && c.activeSessionId != null ? (
+        ) : terminalReady(c) ? (
           <iframe
             src={`/sessions/${c.activeSessionId}/terminal/`}
             title={`Live terminal for ${c.identifier}`}

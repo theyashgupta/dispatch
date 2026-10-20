@@ -86,7 +86,10 @@ import { UnknownProbeRow } from "@/modules/detail/components/UnknownProbeRow";
 import { reviewHeader as buildReviewHeader } from "@/modules/detail/domain/review-header";
 import { heldPrItems } from "../../../../shared/pr-rows.js";
 import { panelEscapeAction } from "@/modules/detail/domain/panel-escape";
-import { hasSessionFlow } from "@/modules/detail/domain/session-flow";
+import {
+  hasSessionFlow,
+  terminalReady,
+} from "@/modules/detail/domain/session-flow";
 import { useFocusReturn } from "@/modules/detail/hooks/use-focus-return";
 import { usePanelHistory } from "@/modules/detail/hooks/use-panel-history";
 import { usePanelResize } from "@/modules/detail/hooks/use-panel-resize";
@@ -416,38 +419,38 @@ export function DetailPanelContainer() {
   const hasSwitcher = c != null && (c.sessionSummaries?.length ?? 0) >= 2;
   const showRunClaude =
     hasLiveSession &&
+    !hydrating &&
+    pinFetchError == null &&
     c != null &&
-    c.terminalError == null &&
-    c.ttydPort != null &&
-    c.activeSessionId != null;
-  const hasSessionControls = hasSwitcher || showStartAnother || showRunClaude;
-  const sessionControls = hasSessionControls ? (
-    <>
-      {hasSwitcher && (
-        <SessionSwitcher
-          card={c}
-          onSwitch={(cardId, sessionId) => {
-            switchSession({ cardId, sessionId }).catch(console.error);
-          }}
-        />
-      )}
-      {showStartAnother && (
-        <StartAnotherSessionButton
-          card={c}
-          onStartRequest={onStartRequest}
-          narrowPanel={narrowPanel}
-        />
-      )}
-      {showRunClaude && (
-        <RunClaudeButton
-          card={c}
-          onRunClaude={(id) => {
-            void runClaude(id).catch(console.error);
-          }}
-        />
-      )}
-    </>
-  ) : null;
+    terminalReady(c);
+  const sessionControls =
+    hasSwitcher || showStartAnother || showRunClaude ? (
+      <>
+        {hasSwitcher && (
+          <SessionSwitcher
+            card={c}
+            onSwitch={(cardId, sessionId) => {
+              switchSession({ cardId, sessionId }).catch(console.error);
+            }}
+          />
+        )}
+        {showStartAnother && (
+          <StartAnotherSessionButton
+            card={c}
+            onStartRequest={onStartRequest}
+            narrowPanel={narrowPanel}
+          />
+        )}
+        {showRunClaude && (
+          <RunClaudeButton
+            card={c}
+            onRunClaude={(id) => {
+              void runClaude(id).catch(console.error);
+            }}
+          />
+        )}
+      </>
+    ) : null;
 
   const referenceColumn = (
     <>

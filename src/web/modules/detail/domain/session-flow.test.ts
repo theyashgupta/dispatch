@@ -4,7 +4,19 @@ import {
   flowStageLayout,
   hasSessionFlow,
   sessionFlowStage,
+  terminalReady,
 } from "./session-flow.js";
+
+void test("the terminal is ready only with a port, an active session and no error", () => {
+  const ready = { ttydPort: 7681, activeSessionId: "s-1" };
+  assert.equal(terminalReady(ready), true);
+  assert.equal(
+    terminalReady({ ...ready, terminalError: { variant: "died" } }),
+    false,
+  );
+  assert.equal(terminalReady({ activeSessionId: "s-1" }), false);
+  assert.equal(terminalReady({ ttydPort: 7681 }), false);
+});
 
 type Fields = Parameters<typeof sessionFlowStage>[0];
 
@@ -125,10 +137,10 @@ void test("the flow layout widens only the active box and keeps a fixed total", 
   for (const active of [0, 1, 2, 3]) {
     const { rects, width, height } = flowStageLayout(active);
     assert.equal(rects.length, 4);
-    assert.equal(width, 392);
+    assert.equal(width, 400);
     assert.equal(height, 32);
     rects.forEach((rect, i) => {
-      assert.equal(rect.w, i === active ? 128 : 72);
+      assert.equal(rect.w, i === active ? 136 : 72);
       assert.equal(rect.y, 2);
       assert.equal(rect.h, 28);
       if (i > 0) assert.equal(rect.x - (rects[i - 1].x + rects[i - 1].w), 16);
