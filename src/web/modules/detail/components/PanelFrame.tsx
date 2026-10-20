@@ -49,14 +49,14 @@ export function PanelFrame({
         inert={!docked && !open}
         data-docked={docked ? "true" : undefined}
         className={cn(
-          "fixed right-0 z-11 flex max-w-screen flex-col bg-(--surface-column)",
+          "fixed right-0 z-11 flex flex-col bg-(--surface-column)",
           docked
-            ? "top-[var(--chrome-top,var(--page-header-height))] left-[calc(var(--nav-current,0px)_+_var(--orca-nav-width))] h-[calc(100dvh_-_var(--chrome-top,var(--page-header-height)))] w-[calc(100%_-_var(--nav-current,0px)_-_var(--orca-nav-width))] translate-none transition-none"
+            ? "top-[var(--chrome-top,var(--page-header-height))] left-[calc(var(--nav-current,0px)_+_var(--orca-nav-width))] h-[calc(100dvh_-_var(--chrome-top,var(--page-header-height)))] w-[calc(100%_-_var(--nav-current,0px)_-_var(--orca-nav-width))] max-w-screen translate-none transition-none"
             : "top-0 left-auto h-dvh transition-[translate]",
           !docked &&
             (fullscreen
-              ? "w-screen"
-              : "w-[var(--panel-live-width,var(--panel-width))] border-l border-border"),
+              ? "w-screen max-w-screen"
+              : "w-[var(--panel-live-width,var(--panel-width))] max-w-[calc(100vw_-_var(--nav-current,0px))] border-l border-border"),
           !docked &&
             (open
               ? "translate-x-0 duration-(--motion-panel-open) ease-(--easing-enter)"
