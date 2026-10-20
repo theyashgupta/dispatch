@@ -1,4 +1,4 @@
-import type { BoardPolicy } from "../../../shared/types.js";
+import type { BoardPolicy, BudgetWarning } from "../../../shared/types.js";
 
 export type PolicyCheck = { ok: true } | { ok: false; reason: string };
 
@@ -45,4 +45,29 @@ export function checkShipRights(
   return policy.shipRights === "none"
     ? { ok: false, reason: "ship rights are none" }
     : { ok: true };
+}
+
+/**
+ * Decide whether the budget warning mark of a group card is set, cleared or kept.
+ *
+ * @remarks A mark clears when the budget goes away, or when the budget or percent changed and the cost is below the new threshold. A plain cost drop keeps the mark, because the running cost is in memory and can drop after a server restart.
+ */
+export function budgetWarningStep({
+  budget,
+  percent,
+  cost,
+  mark,
+}: {
+  budget: number | null;
+  percent: number;
+  cost: number;
+  mark: BudgetWarning | undefined;
+}): "set" | "clear" | "keep" {
+  if (budget === null) return mark ? "clear" : "keep";
+  const threshold = (budget * percent) / 100;
+  if (mark) {
+    const changed = mark.budget !== budget || mark.percent !== percent;
+    return changed && cost < threshold ? "clear" : "keep";
+  }
+  return cost >= threshold ? "set" : "keep";
 }

@@ -7,6 +7,7 @@ import type {
   ArchivedGroup,
   Board,
   BoardPolicy,
+  BudgetWarning,
   OrchestratorRecord,
   BoardKey,
   BoardPatch,
@@ -397,6 +398,7 @@ export interface BoardRepository {
     queue: { startQueued: boolean; dependsOn?: string[] },
   ): Promise<void>;
   setBlockedBy(id: string, ids: string[]): Promise<void>;
+  setBudgetWarning(id: string, warning: BudgetWarning | null): Promise<void>;
   setOrchestratorFields(
     id: string,
     fields: Pick<

@@ -6149,7 +6149,12 @@ action that finds nothing to do, such as an `Escape` already sent, writes no row
   and the board is under `concurrencyCap`, and sets `needs_input` with `budget` at the next gate
   change after the cost of a group reaches `budgetPerGroup`. The cost of a session is a running
   total: when its status line meter drops (a claude relaunch starts it at 0), the pass adds the
-  last value. The total lives in server memory.
+  last value. The total lives in server memory. Each pass also compares the group cost with
+  `budgetWarnPercent` of the effective budget. At or above it, a card with no mark gets
+  `budgetWarning` and one `supervisor_action` row with `action: "budget_warning"`. The mark clears
+  when the budget is removed, or when the budget or percent changes and the cost is below the new
+  threshold. The attention queue shows one `budget_warning` item per mark, hidden in Done and under
+  a `budget` stop.
 - Group state events (`group-state-events.ts`, `domain/group-state.ts`): `recordGroupState` appends
   one `group_state` row (`{ state, reason }`) for a group card only, never for the orchestrator card
   or a ticket card, and skips a state equal to the last `group_state` row of that card, unless that card's session went back to `working` after it. The writers

@@ -207,6 +207,13 @@ export interface Item {
   autoResolved?: boolean;
 }
 
+export interface BudgetWarning {
+  at: string;
+  cost: number;
+  budget: number;
+  percent: number;
+}
+
 export interface Card {
   /** Internal card id (can equal issueId in Phase 1). */
   id: string;
@@ -365,6 +372,7 @@ export interface Card {
   transcriptPath?: string;
   dependsOn?: string[];
   blockedBy?: string[];
+  budgetWarning?: BudgetWarning;
   startQueued?: boolean;
   createdByOrchestrator?: string;
   ownerOrchestrator?: string;
