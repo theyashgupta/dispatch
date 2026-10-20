@@ -21,6 +21,7 @@ const CHAIN_STATES = new Set([
   "limited",
   "login-expired",
   "needs-login",
+  "shadowed-by-home",
   "unknown",
 ]);
 

@@ -1528,6 +1528,7 @@ export type ChainAccountState =
   | "limited"
   | "login-expired"
   | "needs-login"
+  | "shadowed-by-home"
   | "unknown";
 
 export interface ChainBucket {

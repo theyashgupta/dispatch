@@ -26,8 +26,13 @@ const env = isolateEnv();
 const fake = installFakeTmux(env);
 
 const { store } = await import("../../store/board.store.js");
-const { upsertAccount, accountDir, getActiveAccountId, setActiveAccount } =
-  await import("./claude-accounts.js");
+const {
+  upsertAccount,
+  accountDir,
+  getActiveAccountId,
+  setActiveAccount,
+  writeDefaultIdentity,
+} = await import("./claude-accounts.js");
 const { emptyChainState, readChainState, writeChainState } =
   await import("./account-chain-state.js");
 const {
@@ -35,6 +40,7 @@ const {
   forgetChainAccount,
   handleLimitSignal,
   handleUsageRead,
+  noteHomeIdentity,
   requestFailover,
   startAccountChain,
   updateChainSettings,
@@ -188,6 +194,7 @@ let stop: () => void = () => undefined;
 async function begin(
   settings: Partial<ClaudeAccountsSettings> = {},
   deps: Partial<typeof fakeDeps> = {},
+  homeIdentity = { email: "", orgId: "" },
 ) {
   stop();
   await whenChainIdle();
@@ -205,6 +212,7 @@ async function begin(
   readMode = "fresh";
   clock = BASE;
   await writeChainState(emptyChainState());
+  await writeDefaultIdentity(homeIdentity);
   await setActiveAccount("default");
   updateClaudeAccountsSettings({
     autoMove: true,
@@ -1842,4 +1850,126 @@ void test("removing a needs-login account closes its decision and drops the caus
   await forgetChainAccount(ACCOUNT_A);
   assert.equal(closed.length, 1);
   assert.deepEqual((await readChainState()).decisions, {});
+});
+
+const IDENTITY_A = {
+  email: `${ACCOUNT_A.slice(0, 4)}@example.com`,
+  orgId: "org",
+};
+const IDENTITY_B = {
+  email: `${ACCOUNT_B.slice(0, 4)}@example.com`,
+  orgId: "org",
+};
+
+void test("an account with the home login reads shadowed-by-home at start, with no usage read", async () => {
+  await begin({}, {}, IDENTITY_A);
+  const saved = await readChainState();
+  assert.equal(saved.accounts[ACCOUNT_A]?.state, "shadowed-by-home");
+  assert.equal(saved.accounts[ACCOUNT_A]?.limitedUntil, null);
+  assert.equal(saved.accounts[ACCOUNT_B], undefined);
+  assert.deepEqual(readLog, []);
+});
+
+void test("rejected reads on a shadowed account raise no login decision", async () => {
+  await begin({}, {}, IDENTITY_A);
+  for (let i = 0; i < 3; i++) {
+    await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  }
+  const saved = await readChainState();
+  assert.equal(saved.accounts[ACCOUNT_A]?.state, "shadowed-by-home");
+  assert.equal(saved.accounts[ACCOUNT_A]?.rejectedReads, undefined);
+  assert.deepEqual(raised, []);
+  assert.deepEqual(saved.decisions, {});
+});
+
+void test("a full read on a shadowed account stays shadowed-by-home and arms no return timer", async () => {
+  await begin({}, {}, IDENTITY_A);
+  await handleUsageRead(ACCOUNT_A, usage(100, iso(BASE + 60 * MIN)));
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "shadowed-by-home",
+  );
+  assert.deepEqual(
+    chainTimers().filter((t) => t.key === `return:${ACCOUNT_A}`),
+    [],
+  );
+});
+
+void test("the home login arriving after a needs-login account closes its open decision", async () => {
+  await begin({}, {}, { email: "other@example.com", orgId: "org" });
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  const decisionId = (await readChainState()).decisions[
+    `needs-login:${ACCOUNT_A}`
+  ] as string;
+  assert.equal(store.getDecisionItem(decisionId)?.state, "open");
+  await noteHomeIdentity(IDENTITY_A);
+  const saved = await readChainState();
+  assert.equal(saved.accounts[ACCOUNT_A]?.state, "shadowed-by-home");
+  assert.deepEqual(saved.decisions, {});
+  assert.deepEqual(closed, [
+    {
+      decisionId,
+      optionId: "later",
+      note: "The account returned to the chain.",
+    },
+  ]);
+  assert.notEqual(store.getDecisionItem(decisionId)?.state, "open");
+});
+
+void test("a failover never selects a shadowed account", async () => {
+  await begin({}, {}, IDENTITY_A);
+  const s = await sessionCard("shadow-failover");
+  await handleUsageRead("default", usage(100, iso(BASE + 60 * MIN)));
+  assert.equal(getActiveAccountId(), ACCOUNT_B);
+  assert.equal(sessionOf(s)?.claudeAccountId, ACCOUNT_B);
+  assert.deepEqual(await requestFailover("switch-now"), {
+    ok: false,
+    error: "no-eligible-account",
+  });
+  assert.equal(getActiveAccountId(), ACCOUNT_B);
+});
+
+void test("a boot return never goes back to a shadowed account", async () => {
+  await begin({}, {}, IDENTITY_A);
+  await handleUsageRead("default", usage(100, iso(BASE + 60 * MIN)));
+  assert.equal(getActiveAccountId(), ACCOUNT_B);
+  await advance(30 * MIN);
+  assert.notEqual(getActiveAccountId(), ACCOUNT_A);
+  assert.equal(readLog.includes(ACCOUNT_A), false);
+});
+
+void test("another home login turns a shadowed account to unknown, and the next ok read derives available", async () => {
+  await begin({}, {}, IDENTITY_A);
+  await noteHomeIdentity({ email: "other@example.com", orgId: "org" });
+  assert.equal((await readChainState()).accounts[ACCOUNT_A]?.state, "unknown");
+  await handleUsageRead(ACCOUNT_A, usage(10));
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "available",
+  );
+  await noteHomeIdentity(IDENTITY_A);
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "shadowed-by-home",
+  );
+});
+
+void test("the home login of the other account shadows it instead", async () => {
+  await begin({}, {}, IDENTITY_A);
+  await noteHomeIdentity(IDENTITY_B);
+  const saved = await readChainState();
+  assert.equal(saved.accounts[ACCOUNT_A]?.state, "unknown");
+  assert.equal(saved.accounts[ACCOUNT_B]?.state, "shadowed-by-home");
+});
+
+void test("removing a shadowed account lets a new account with the same login be shadowed again", async () => {
+  await begin({}, {}, IDENTITY_A);
+  await forgetChainAccount(ACCOUNT_A);
+  assert.equal((await readChainState()).accounts[ACCOUNT_A], undefined);
+  await handleUsageRead(ACCOUNT_A, usage(10));
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "available",
+  );
 });

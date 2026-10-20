@@ -19,6 +19,7 @@ import {
 } from "../domain/account-selection.js";
 import {
   deriveAccountState,
+  isShadowOfHome,
   isStaleSurface,
   isTokenReadFailed,
   NEEDS_LOGIN_READS,
@@ -48,6 +49,7 @@ import {
   readDefaultIdentity,
   readRegistry,
   setActiveAccount,
+  type DefaultIdentity,
 } from "./claude-accounts.js";
 import { startLogin } from "./claude-login.js";
 import {
@@ -127,6 +129,8 @@ let chain: ChainStateFile = emptyChainState();
 let running = false;
 let listening = false;
 let lastOffer: string | null = null;
+let home: DefaultIdentity | undefined;
+const shadowed = new Set<string>();
 let queue: Promise<unknown> = Promise.resolve();
 const timers = new Map<
   string,
@@ -293,12 +297,70 @@ async function syncLoginDecision(
 }
 
 /**
+ * Recompute which registry accounts hold the home login and move their chain entries to match.
+ *
+ * @remarks Call it inside the queue. A newly shadowed account gets `shadowed-by-home`, loses its
+ * return timer and closes an open login decision; an account that stopped matching goes back to
+ * `unknown`, so the next read derives its state.
+ */
+async function refreshShadows(): Promise<void> {
+  const next = new Set(
+    (await readRegistry())
+      .filter((record) => isShadowOfHome(record, home))
+      .map((record) => record.id),
+  );
+  let changed = false;
+  for (const id of next) {
+    if (shadowed.has(id)) continue;
+    shadowed.add(id);
+    changed = true;
+    const prior = chain.accounts[id];
+    chain.accounts[id] = {
+      state: "shadowed-by-home",
+      limitedUntil: null,
+      buckets: prior?.buckets ?? [],
+      ...(prior?.fetchedAt !== undefined ? { fetchedAt: prior.fetchedAt } : {}),
+    };
+    cancel(`return:${id}`);
+    await syncLoginDecision(id, "shadowed-by-home");
+  }
+  for (const id of [...shadowed]) {
+    if (next.has(id)) continue;
+    shadowed.delete(id);
+    changed = true;
+    const prior = chain.accounts[id];
+    if (prior === undefined) continue;
+    chain.accounts[id] = {
+      state: "unknown",
+      limitedUntil: null,
+      buckets: prior.buckets,
+      ...(prior.fetchedAt !== undefined ? { fetchedAt: prior.fetchedAt } : {}),
+    };
+  }
+  if (changed) await persist();
+}
+
+/**
+ * Take the home login in and shadow each registry account that holds the same login.
+ *
+ * @remarks Before the chain starts it only stores the identity, since the boot reads it itself. A
+ * failure is logged by the queue and never reaches the caller, so the identity watch keeps going.
+ */
+export function noteHomeIdentity(identity: DefaultIdentity): Promise<void> {
+  return enqueue(async () => {
+    home = identity;
+    if (running) await refreshShadows();
+  }).catch(() => undefined);
+}
+
+/**
  * Derive and store one account's chain state from a usage snapshot and an optional limit signal.
  *
  * @remarks Two consecutive `token-rejected` reads give `needs-login`, and a limit signal never counts
  * as a read because it reuses a cached snapshot. A not ok or empty read keeps a limited account held
  * until `limitedUntil` unless it shows a new period. The return timer outlives a clear, so only the
- * timer returns the work.
+ * timer returns the work. An account that holds the home login stays `shadowed-by-home` over every
+ * other state.
  */
 async function ingest(
   id: string,
@@ -306,8 +368,11 @@ async function ingest(
   limit?: { resetAt: string | null },
 ): Promise<ChainAccountEntry> {
   const now = deps.now();
+  const isShadow = shadowed.has(id);
   const loggedIn =
-    !limit && isTokenReadFailed(usage) ? await deps.loggedIn(id) : null;
+    !limit && !isShadow && isTokenReadFailed(usage)
+      ? await deps.loggedIn(id)
+      : null;
   const { thresholdPercent } = getClaudeAccountsSettings();
   const derived = deriveAccountState(
     usage,
@@ -316,9 +381,11 @@ async function ingest(
     new Date(now),
   );
   const prior = chain.accounts[id];
-  const rejectedReads = limit
-    ? (prior?.rejectedReads ?? 0)
-    : nextRejectedReads(prior?.rejectedReads, usage);
+  const rejectedReads = isShadow
+    ? 0
+    : limit
+      ? (prior?.rejectedReads ?? 0)
+      : nextRejectedReads(prior?.rejectedReads, usage);
   const needsLogin = rejectedReads >= NEEDS_LOGIN_READS;
   const held =
     !needsLogin &&
@@ -330,11 +397,13 @@ async function ingest(
     Date.parse(prior.limitedUntil) > now &&
     !showsNewPeriod(usage, prior, thresholdPercent);
   const entry: ChainAccountEntry = {
-    ...(needsLogin
-      ? { state: "needs-login", limitedUntil: null }
-      : held
-        ? { state: "limited", limitedUntil: prior.limitedUntil }
-        : derived),
+    ...(isShadow
+      ? { state: "shadowed-by-home", limitedUntil: null }
+      : needsLogin
+        ? { state: "needs-login", limitedUntil: null }
+        : held
+          ? { state: "limited", limitedUntil: prior.limitedUntil }
+          : derived),
     buckets: usageBuckets(usage),
     fetchedAt: usage.fetchedAt,
     ...(rejectedReads > 0 ? { rejectedReads } : {}),
@@ -579,9 +648,11 @@ async function freshRead(
  * Re-read a limited account at its reset and return to it when it outranks the one in use.
  *
  * @remarks Only a fresh ok read counts. Any other read changes nothing, and it or a result of
- * `unknown` or `login-expired` checks again 15 minutes later.
+ * `unknown` or `login-expired` checks again 15 minutes later. An account that holds the home login
+ * is never read or returned to.
  */
 async function checkReturn(id: string): Promise<void> {
+  if (shadowed.has(id)) return;
   const usage = await freshRead(id, deps.now());
   if (usage === null) {
     scheduleReturn(id, deps.now() + RECHECK_MS);
@@ -673,6 +744,7 @@ export async function updateChainSettings(
 export function forgetChainAccount(id: string): Promise<void> {
   return enqueue(async () => {
     cancel(`return:${id}`);
+    shadowed.delete(id);
     const hadNotice = id in chain.loginExpiryNotified;
     const cause = `${NEEDS_LOGIN_CAUSE}${id}`;
     const decisionId = chain.decisions[cause];
@@ -729,6 +801,9 @@ export async function startAccountChain(
   deps = { ...realDeps, ...overrides };
   chain = await readChainState();
   lastOffer = null;
+  home = await readDefaultIdentity().catch(() => undefined);
+  shadowed.clear();
+  await enqueue(refreshShadows).catch(() => undefined);
   if (!listening) {
     listening = true;
     onUsageRefreshed((id, usage) => {

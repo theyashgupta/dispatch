@@ -4,6 +4,7 @@ import {
   type ClaudeIdentity,
 } from "../../adapters/claude-cli.js";
 import { boardRepository as store } from "../../store/board-repository.js";
+import { noteHomeIdentity } from "./account-chain.js";
 import { cacheHomeIdentity } from "./claude-account-ops.js";
 import {
   readDefaultIdentity,
@@ -39,12 +40,14 @@ async function runCheck(): Promise<void> {
   const read = await readClaudeIdentity();
   const stored = await readDefaultIdentity();
   const verdict = compareIdentity(stored, read);
-  if (verdict === "same" || verdict === "ignore") return;
-  await writeDefaultIdentity({
+  if (verdict === "ignore") return;
+  const identity = {
     email: read.email,
     orgId: read.orgId || (stored?.orgId ?? ""),
-  });
-  if (stored === undefined) return;
+  };
+  if (verdict !== "same") await writeDefaultIdentity(identity);
+  await noteHomeIdentity(identity);
+  if (verdict === "same" || stored === undefined) return;
   for (const { card, session } of store.sessionsWithTmux(ALL_BOARDS)) {
     if (
       (session.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID) !==

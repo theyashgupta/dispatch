@@ -9,6 +9,7 @@ import { selectAccount } from "./account-selection.js";
 import {
   deriveAccountState,
   expireLimit,
+  isShadowOfHome,
   isStaleSurface,
   NEEDS_LOGIN_READS,
   nextRejectedReads,
@@ -546,4 +547,39 @@ void test("nextRejectedReads keeps the count on a 429, an error or an unavailabl
   }
   assert.equal(nextRejectedReads(1, usage([])), 0);
   assert.equal(nextRejectedReads(5, usage([win("session", 10, null)])), 0);
+});
+
+void test("isShadowOfHome matches the home email with an equal or missing organisation id", () => {
+  const home = { email: "a@example.com", orgId: "org" };
+  assert.equal(
+    isShadowOfHome({ email: "a@example.com", orgId: "org" }, home),
+    true,
+  );
+  assert.equal(
+    isShadowOfHome({ email: "a@example.com", orgId: "" }, home),
+    true,
+  );
+  assert.equal(
+    isShadowOfHome(
+      { email: "a@example.com", orgId: "org" },
+      { email: "a@example.com", orgId: "" },
+    ),
+    true,
+  );
+  assert.equal(
+    isShadowOfHome({ email: "a@example.com", orgId: "other" }, home),
+    false,
+  );
+  assert.equal(
+    isShadowOfHome({ email: "b@example.com", orgId: "org" }, home),
+    false,
+  );
+  assert.equal(
+    isShadowOfHome({ email: "a@example.com", orgId: "org" }, undefined),
+    false,
+  );
+  assert.equal(
+    isShadowOfHome({ email: "", orgId: "org" }, { email: "", orgId: "org" }),
+    false,
+  );
 });

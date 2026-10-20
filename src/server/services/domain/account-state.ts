@@ -30,6 +30,23 @@ export function isTokenReadFailed(usage: ClaudeUsageSnapshot): boolean {
 }
 
 /**
+ * Tell whether a registry account holds the same login as the home `~/.claude` login.
+ *
+ * @remarks The emails must match. A missing organisation id on either side compares the email
+ * alone, since the CLI sometimes omits the field.
+ */
+export function isShadowOfHome(
+  record: { email: string; orgId: string },
+  home: { email: string; orgId: string } | undefined,
+): boolean {
+  if (home === undefined || home.email === "") return false;
+  if (record.email !== home.email) return false;
+  return (
+    record.orgId === home.orgId || record.orgId === "" || home.orgId === ""
+  );
+}
+
+/**
  * Count consecutive reads whose token the server rejected.
  *
  * @remarks A rejected read adds one and an ok read resets the count. Any other read, such as a 429
