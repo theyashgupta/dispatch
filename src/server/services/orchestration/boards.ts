@@ -478,7 +478,7 @@ export function getBoard(key: BoardKey): Board {
 /**
  * Store a board policy and answer the board as the API shows it, or the typed 404 `unknown-board`.
  *
- * @remarks An omitted `groupPlaybook`, `wakeMinutes`, `crossSessionInbound`, `memoryFloorMb` or
+ * @remarks An omitted `groupPlaybook`, `wakeMinutes`, `crossSessionInbound`, `memoryFloorMb`,
  * `swapCeilingMb` or `budgetWarnPercent` keeps the stored value, and an explicit null clears the
  * playbook or the inbound value.
  */

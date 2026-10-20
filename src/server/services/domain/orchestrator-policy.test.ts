@@ -53,7 +53,7 @@ void test("checkShipRights refuses none and allows open_prs and merge", () => {
   assert.deepEqual(checkShipRights({ shipRights: "merge" }), { ok: true });
 });
 
-void test("budgetWarningStep sets at the threshold, keeps a mark on a cost drop and clears by the re-arm rule", () => {
+void test("budgetWarningStep sets at the threshold, keeps a mark on a cost drop, refreshes a changed setting the cost still passes and clears by the re-arm rule", () => {
   const mark = {
     at: "2026-10-20T00:00:00.000Z",
     cost: 8.5,
@@ -78,7 +78,8 @@ void test("budgetWarningStep sets at the threshold, keeps a mark on a cost drop 
   assert.equal(step(null, 80, 9.5, true), "clear");
   assert.equal(step(null, 80, 9.5, false), "keep");
   assert.equal(step(20, 80, 9.5, true), "clear");
-  assert.equal(step(20, 80, 17, true), "keep");
+  assert.equal(step(20, 80, 17, true), "refresh");
+  assert.equal(step(10, 70, 9, true), "refresh");
   assert.equal(step(10, 80, 5, true), "keep");
   assert.equal(step(10, 90, 8.5, true), "clear");
   assert.equal(step(0.5, 1, 0.01, false), "set");

@@ -168,6 +168,13 @@ async function warnNearBudget(cards: Card[], now: number): Promise<void> {
     });
     if (step === "clear") {
       await store.setBudgetWarning(card.id, null);
+    } else if (step === "refresh" && card.budgetWarning && budget !== null) {
+      await store.setBudgetWarning(card.id, {
+        ...card.budgetWarning,
+        cost,
+        budget,
+        percent,
+      });
     } else if (step === "set" && budget !== null) {
       const ts = new Date(now).toISOString();
       await store.setBudgetWarning(card.id, { at: ts, cost, budget, percent });
@@ -179,6 +186,18 @@ async function warnNearBudget(cards: Card[], now: number): Promise<void> {
         data: { action: "budget_warning", cost, budget, percent },
         ts,
       });
+    }
+  }
+}
+
+/** Clear the budget warning mark of every group card on a board whose supervisor is off. */
+async function clearUnsupervisedWarnings(): Promise<void> {
+  for (const board of store.listBoards()) {
+    if (board.policy.supervisor === "on") continue;
+    for (const card of store.listCards(board.key)) {
+      if (card.source === "group" && card.budgetWarning) {
+        await store.setBudgetWarning(card.id, null);
+      }
     }
   }
 }
@@ -238,6 +257,7 @@ export async function runSupervisorPass(
   await startHeldGroups(cards, deps);
   await stopOverBudget(cards, memory);
   await warnNearBudget(cards, now);
+  await clearUnsupervisedWarnings();
 }
 
 /** Start the 60 s supervisor pass and return its stop function, which also ends the keep awake child. */
