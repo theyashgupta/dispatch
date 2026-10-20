@@ -126,7 +126,6 @@ function graph(patch: Partial<CentreGraphInput> = {}) {
     selectedId: null,
     decisions: [],
     now: NOW,
-    showOlderShipped: false,
     timeZone: "UTC",
     ...patch,
   });
@@ -140,7 +139,7 @@ const shipDone = {
   branches: [],
 } as unknown as ShipFlow;
 
-test("no orchestrator gives no centre, no branches and five empty bands", () => {
+test("no orchestrator gives no centre, no branches and four empty bands", () => {
   const result = graph({
     cards: [group("GRP-1")],
     records: [],
@@ -149,7 +148,6 @@ test("no orchestrator gives no centre, no branches and five empty bands", () => 
   assert.equal(result.centre, null);
   assert.deepEqual(result.branches, []);
   assert.deepEqual(result.edges, []);
-  assert.equal(result.hiddenShipped, 0);
   assert.deepEqual(
     result.bands.map((b) => [b.key, b.label, b.count, b.branches.length]),
     [
@@ -157,7 +155,6 @@ test("no orchestrator gives no centre, no branches and five empty bands", () => 
       ["running", "Running", 0, 0],
       ["planned", "Planned", 0, 0],
       ["done", "Done", 0, 0],
-      ["shipped", "Shipped", 0, 0],
     ],
   );
 });
@@ -413,7 +410,6 @@ test("a plan entry with no match becomes a planned branch with no card", () => {
       planSize: "large",
       memberCount: null,
       stateSince: null,
-      shippedAt: null,
       slot: 0,
     },
   ]);
@@ -456,30 +452,6 @@ interface StatusRow {
 }
 
 const statusRows: StatusRow[] = [
-  {
-    name: "column done",
-    card: live("CEN-1", { column: "done" }),
-    expected: {
-      state: "shipped",
-      label: "Shipped",
-      tone: "muted",
-      band: "shipped",
-      actions: ["open"],
-      detail: "Shipped 10:00",
-    },
-  },
-  {
-    name: "ship flow done",
-    card: live("CEN-1", { shipFlow: shipDone }),
-    expected: {
-      state: "shipped",
-      label: "Shipped",
-      tone: "muted",
-      band: "shipped",
-      actions: ["open"],
-      detail: "Shipped 10:00",
-    },
-  },
   {
     name: "column agent done",
     card: live("CEN-1", { column: "agent_done" }),
@@ -848,9 +820,7 @@ test("a running loop with a phase and no units shows the phase only", () => {
   assert.equal(result.branches[0].detail, "Phase 2");
 });
 
-test("done and shipped details name the time, the date when it is another day, and the PR", () => {
-  const prs = (...list: [number, "open" | "merged" | "closed"][]) =>
-    list.map(([number, state]) => ({ number, state })) as Card["prs"];
+test("done details name the time, and the date when it is another day", () => {
   const rows: [string, Partial<Card>, string][] = [
     [
       "done with the session time",
@@ -861,29 +831,6 @@ test("done and shipped details name the time, the date when it is another day, a
       "done on another day",
       { column: "agent_done", columnSince: "2026-10-07T09:30:00.000Z" },
       "Done 7 Oct 09:30, awaiting ship",
-    ],
-    ["shipped with no PR", { column: "done" }, "Shipped 10:00"],
-    [
-      "shipped with the ship flow PR",
-      {
-        column: "done",
-        prs: prs([3, "open"]),
-        shipFlow: {
-          ...shipDone,
-          branches: [{ pr: null }, { pr: 42 }],
-        } as unknown as ShipFlow,
-      },
-      "Shipped 10:00, PR 42",
-    ],
-    [
-      "shipped with the merged PR first",
-      { column: "done", prs: prs([3, "open"], [4, "merged"]) },
-      "Shipped 10:00, PR 4",
-    ],
-    [
-      "shipped with the first PR when none merged",
-      { column: "done", prs: prs([5, "open"], [6, "closed"]) },
-      "Shipped 10:00, PR 5",
     ],
   ];
   for (const [name, patch, expected] of rows) {
@@ -999,13 +946,8 @@ test("a branch that changes state keeps its slot", () => {
     live("CEN-9", { state: "working" }),
     live("CEN-12", { state: "needs_input" }),
   ]);
-  const shipped = slots([
-    live("CEN-9", { column: "done" }),
-    live("CEN-12", { state: "needs_input" }),
-  ]);
   assert.deepEqual(before, { "CEN-9": 0, "CEN-12": 1 });
   assert.deepEqual(after, before);
-  assert.deepEqual(shipped, before);
 });
 
 test("a new branch with no plan order takes the next slot", () => {
@@ -1026,73 +968,25 @@ test("a new branch with no plan order takes the next slot", () => {
   );
 });
 
-test("a shipped branch older than 24 hours is hidden, one at 23 hours is shown", () => {
+test("a shipped card gets no branch, no edge and no count", () => {
   const result = graph({
     cards: [
-      live("CEN-1", { column: "done", columnSince: iso(23) }),
-      live("CEN-2", { column: "done", columnSince: iso(25) }),
+      live("CEN-1", { column: "done", columnSince: iso(1) }),
+      live("CEN-2", { shipFlow: shipDone }),
+      live("CEN-3", { state: "needs_input" }),
     ],
-    records: [main],
+    decisions: [plan("p", iso(1), [entry("CEN-1", 1)])],
   });
-  assert.deepEqual(ids(result.branches), ["CEN-1"]);
-  assert.equal(result.hiddenShipped, 1);
-  assert.deepEqual(ids(result.bands[4].branches), ["CEN-1"]);
-  assert.equal(result.bands[4].count, 1);
-  assert.equal(result.centre?.branchCount, 2);
+  assert.deepEqual(ids(result.branches), ["CEN-3"]);
   assert.deepEqual(
     result.edges.map((e) => e.to),
-    ["CEN-1"],
+    ["CEN-3"],
   );
+  assert.equal(result.centre?.branchCount, 1);
+  assert.equal(result.centre?.needYouCount, 1);
 });
 
-test("a shipped branch at exactly 24 hours is still shown", () => {
-  const result = graph({
-    cards: [live("CEN-1", { column: "done", columnSince: iso(24) })],
-  });
-  assert.deepEqual(ids(result.branches), ["CEN-1"]);
-  assert.equal(result.hiddenShipped, 0);
-});
-
-test("showing older shipped branches keeps them and reports none hidden", () => {
-  const result = graph({
-    cards: [live("CEN-2", { column: "done", columnSince: iso(25) })],
-    showOlderShipped: true,
-  });
-  assert.deepEqual(ids(result.branches), ["CEN-2"]);
-  assert.equal(result.hiddenShipped, 0);
-});
-
-test("a hidden shipped branch still holds its slot", () => {
-  const result = graph({
-    cards: [
-      live("CEN-1", { column: "done", columnSince: iso(30) }),
-      live("CEN-2"),
-    ],
-  });
-  assert.deepEqual(
-    result.branches.map((b) => [b.id, b.slot]),
-    [["CEN-2", 1]],
-  );
-});
-
-test("the shipped time is the ship flow finish, else the column time, else the update time", () => {
-  const rows: [string, Partial<Card>, string][] = [
-    [
-      "ship flow",
-      { shipFlow: { ...shipDone, finishedAt: iso(2) }, columnSince: iso(3) },
-      iso(2),
-    ],
-    ["column time", { column: "done", columnSince: iso(3) }, iso(3)],
-    ["update time", { column: "done" }, "2026-10-08T10:00:00.000Z"],
-  ];
-  for (const [name, patch, expected] of rows) {
-    const [branch] = graph({ cards: [live("CEN-1", patch)] }).branches;
-    assert.equal(branch.shippedAt, expected, name);
-  }
-  assert.equal(graph({ cards: [live("CEN-1")] }).branches[0].shippedAt, null);
-});
-
-test("the five bands list their visible branches in slot order", () => {
+test("the four bands list their branches in slot order", () => {
   const result = graph({
     cards: [
       live("CEN-1", { state: "needs_input" }),
@@ -1111,12 +1005,11 @@ test("the five bands list their visible branches in slot order", () => {
       ["running", "Running", 1, ["CEN-2"]],
       ["planned", "Planned", 2, ["plan:9", "CEN-6"]],
       ["done", "Done", 1, ["CEN-4"]],
-      ["shipped", "Shipped", 1, ["CEN-5"]],
     ],
   );
 });
 
-test("each visible branch has one edge from the centre, dashed only when planned", () => {
+test("each branch has one edge from the centre, dashed only when planned", () => {
   const result = graph({
     cards: [live("CEN-1", { state: "needs_input" }), live("CEN-2")],
     decisions: [plan("p", iso(1), [entry("Extra", 9)])],
@@ -1214,7 +1107,7 @@ test("the centre node carries the record fields, the session meters and the coun
     tone: "neutral",
     contextPercent: 35,
     cost: 2.25,
-    branchCount: 4,
+    branchCount: 3,
     needYouCount: 2,
     scope: "Board",
   });

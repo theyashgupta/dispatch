@@ -193,7 +193,6 @@ const graphOf = (reads: CentreReads) =>
     selectedId: null,
     decisions: reads.decisions,
     now: Date.now(),
-    showOlderShipped: false,
   });
 
 const timelineOf = (reads: CentreReads) =>

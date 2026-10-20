@@ -96,7 +96,7 @@ A loop is a session that works through a plan phase by phase. The supervisor is 
 - When the account reaches a usage limit, the supervisor waits for the reset or stops, as the policy tells it.
 - Dispatch refuses a new loop when the free memory of the Mac is below the floor in the policy.
 
-The dashboard shows the progress of each loop, the items that need you, the pull requests in merge order, and the cost against the budget. When a loop reaches **Agent Done**, the orchestrator starts the ship flow. The flow checks each branch, pushes it, opens its pull request and merges it in order. The policy **Ship rights** sets how far the flow goes:
+The dashboard shows the progress of each loop, the items that need you, and the cost against the budget. When a loop reaches **Agent Done**, the orchestrator starts the ship flow. The flow checks each branch, pushes it, opens its pull request and merges it in order. The policy **Ship rights** sets how far the flow goes:
 
 - **None, I ship**: you ship the branches.
 - **Open PRs**: the flow opens the pull requests and you merge them.
