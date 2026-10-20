@@ -224,7 +224,7 @@ export function PanelReference({
 
 export function PanelPreviews({ children }: { children: ReactNode }) {
   return (
-    <div className="flex flex-col pr-(--space-lg) pl-(--space-xl)">
+    <div className="flex flex-col gap-(--space-xs) pr-(--space-lg) pl-(--space-xl)">
       {children}
     </div>
   );
