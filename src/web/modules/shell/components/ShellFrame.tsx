@@ -4,6 +4,7 @@ import { useSidebar } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 import { AppSidebar } from "@/modules/shell/components/AppSidebar";
 import type { SidebarBoardsData } from "./SidebarBoards";
+import { BottomBar } from "@/modules/shell/components/BottomBar";
 import { PageHeader } from "@/modules/shell/components/PageHeader";
 import { TopBar } from "@/modules/shell/components/TopBar";
 import type { NavCounts, NavItem } from "../../../../shared/nav-items.js";
@@ -129,6 +130,13 @@ export function ShellFrame({
           </PageHeader>
         </div>
         {content}
+        {isMobile ? (
+          <BottomBar
+            current={route.page}
+            onNavigate={onNavigate}
+            onOpenCreateTicket={onOpenCreateTicket}
+          />
+        ) : null}
       </div>
       <div className="contents" inert={phoneSheetOpen}>
         {detail}

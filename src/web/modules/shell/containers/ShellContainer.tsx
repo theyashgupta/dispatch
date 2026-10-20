@@ -547,7 +547,12 @@ export function ShellContainer({
           theme={theme}
           position="bottom-center"
           offset="var(--space-xl)"
-          mobileOffset="var(--space-xl)"
+          mobileOffset={{
+            top: "var(--space-xl)",
+            right: "var(--space-xl)",
+            left: "var(--space-xl)",
+            bottom: "calc(var(--space-xl) + var(--bottom-bar-height, 0px))",
+          }}
           toastOptions={{
             closeButtonAriaLabel: "Dismiss",
             classNames: {
