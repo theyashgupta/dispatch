@@ -46,6 +46,9 @@ const { moveOrQueue, runPendingMove, sweepPendingMoves } =
   await import("./session-account-apply.js");
 const { liveTurnState, recordTurnEvent } = await import("./session-turn.js");
 const { refreshUsage } = await import("./claude-usage.js");
+const { closeAccountDecision, raiseLoginDecision } =
+  await import("./account-decisions.js");
+const { answerDecisionItem } = await import("./decision-items.js");
 const {
   setHooksRuntime,
   setOrchestrationConfig,
@@ -116,6 +119,10 @@ function surfaceAt(ms: number): string {
   return `Usage limit reached · continuing automatically at ${at.getHours() % 12 || 12}:${minutes}${half} · esc to cancel`;
 }
 
+const logins: (string | undefined)[] = [];
+const raised: string[] = [];
+const closed: { decisionId: string; optionId: string; note: string }[] = [];
+
 const fakeDeps = {
   now: () => clock,
   setTimer: (run: () => void, ms: number) => {
@@ -140,6 +147,20 @@ const fakeDeps = {
   loggedIn: () => Promise.resolve(true),
   emit: (event: ChainEvent) => {
     events.push(event);
+  },
+  startLogin: (accountId?: string) => {
+    logins.push(accountId);
+    return Promise.resolve({ ok: true });
+  },
+  raiseLoginDecision: (accountId: string) => {
+    raised.push(accountId);
+    return Promise.resolve(
+      raiseLoginDecision(accountId, `${accountId}@x.test`),
+    );
+  },
+  closeDecision: (decisionId: string, optionId: string, note: string) => {
+    closed.push({ decisionId, optionId, note });
+    closeAccountDecision(decisionId, optionId, note);
   },
   scanMs: 0,
 };
@@ -177,6 +198,9 @@ async function begin(
   due = [];
   events.length = 0;
   readLog.length = 0;
+  logins.length = 0;
+  raised.length = 0;
+  closed.length = 0;
   reads.clear();
   readMode = "fresh";
   clock = BASE;
@@ -1665,4 +1689,157 @@ void test("a rate-limited read that repeats the old windows and fetchedAt keeps 
   assert.equal(saved.accounts.default?.state, "limited");
   assert.equal(saved.accounts.default?.limitedUntil, TICKET_LIMITED_UNTIL);
   assert.equal(saved.accounts.default?.fetchedAt, TICKET_OLD_FETCH);
+});
+
+const rejectedRead = (prior: ClaudeUsageSnapshot): ClaudeUsageSnapshot => ({
+  status: "stale",
+  error: "token-rejected",
+  windows: prior.windows,
+  fetchedAt: prior.fetchedAt,
+});
+
+void test("one token-rejected read keeps the account out of needs-login and raises nothing", async () => {
+  await begin();
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  const saved = (await readChainState()).accounts[ACCOUNT_A];
+  assert.notEqual(saved?.state, "needs-login");
+  assert.equal(saved?.rejectedReads, 1);
+  assert.deepEqual(raised, []);
+});
+
+void test("two token-rejected reads make needs-login and raise one decision, and later reads raise nothing", async () => {
+  await begin();
+  for (let i = 0; i < 4; i++) {
+    await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  }
+  const saved = await readChainState();
+  assert.equal(saved.accounts[ACCOUNT_A]?.state, "needs-login");
+  assert.equal(saved.accounts[ACCOUNT_A]?.limitedUntil, null);
+  assert.equal(saved.accounts[ACCOUNT_A]?.rejectedReads, 4);
+  assert.deepEqual(raised, [ACCOUNT_A]);
+  const decisionId = saved.decisions[`needs-login:${ACCOUNT_A}`];
+  assert.equal(store.getDecisionItem(decisionId ?? "")?.state, "open");
+  assert.deepEqual(
+    chainTimers().filter((t) => t.key === `return:${ACCOUNT_A}`),
+    [],
+  );
+});
+
+void test("a restart then another rejected read raises nothing", async () => {
+  await begin();
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  stop();
+  await whenChainIdle();
+  stop = await startAccountChain({ ...fakeDeps });
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  assert.deepEqual(raised, [ACCOUNT_A]);
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "needs-login",
+  );
+});
+
+void test("a login-expired folder with two rejected reads becomes needs-login", async () => {
+  await begin({}, { loggedIn: () => Promise.resolve(false) });
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "login-expired",
+  );
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "needs-login",
+  );
+  assert.deepEqual(raised, [ACCOUNT_A]);
+});
+
+void test("a 429 between two rejected reads keeps the count", async () => {
+  await begin();
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await handleUsageRead(ACCOUNT_A, failedRead("rate-limited"));
+  assert.equal((await readChainState()).accounts[ACCOUNT_A]?.rejectedReads, 1);
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "needs-login",
+  );
+});
+
+void test("a limit signal does not count as a rejected read", async () => {
+  await begin();
+  await sessionCard("nl-limit");
+  await handleUsageRead("default", rejectedRead(usage(10)));
+  reads.set("default", rejectedRead(usage(10)));
+  const [{ cardId, sessionId }] = made.slice(-1);
+  await handleLimitSignal(cardId, sessionId, null);
+  assert.equal((await readChainState()).accounts.default?.rejectedReads, 1);
+  assert.deepEqual(raised, []);
+});
+
+void test("an ok read after needs-login clears the state and closes the decision once with later", async () => {
+  await begin();
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  const decisionId = (await readChainState()).decisions[
+    `needs-login:${ACCOUNT_A}`
+  ] as string;
+  await handleUsageRead(ACCOUNT_A, usage(10));
+  const saved = await readChainState();
+  assert.equal(saved.accounts[ACCOUNT_A]?.state, "available");
+  assert.equal(saved.accounts[ACCOUNT_A]?.rejectedReads ?? 0, 0);
+  assert.deepEqual(saved.decisions, {});
+  assert.deepEqual(closed, [
+    {
+      decisionId,
+      optionId: "later",
+      note: "The account returned to the chain.",
+    },
+  ]);
+  assert.deepEqual(store.getDecisionItem(decisionId)?.answer, {
+    optionId: "later",
+    note: "The account returned to the chain.",
+  });
+  await handleUsageRead(ACCOUNT_A, usage(10));
+  assert.equal(closed.length, 1);
+  assert.deepEqual(logins, []);
+});
+
+void test("a failover never selects a needs-login account", async () => {
+  await begin();
+  const s = await sessionCard("nl-failover");
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await handleUsageRead("default", usage(100, iso(BASE + 60 * MIN)));
+  assert.equal(getActiveAccountId(), ACCOUNT_B);
+  assert.equal(sessionOf(s)?.claudeAccountId, ACCOUNT_B);
+});
+
+void test("answering the login decision with login starts the login of that account, and later starts nothing", async () => {
+  await begin();
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await handleUsageRead(ACCOUNT_B, rejectedRead(usage(10)));
+  await handleUsageRead(ACCOUNT_B, rejectedRead(usage(10)));
+  const { decisions } = await readChainState();
+  answerDecisionItem(decisions[`needs-login:${ACCOUNT_B}`] as string, {
+    optionId: "later",
+    note: null,
+  });
+  assert.deepEqual(logins, []);
+  answerDecisionItem(decisions[`needs-login:${ACCOUNT_A}`] as string, {
+    optionId: "login",
+    note: null,
+  });
+  assert.deepEqual(logins, [ACCOUNT_A]);
+});
+
+void test("removing a needs-login account closes its decision and drops the cause", async () => {
+  await begin();
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await forgetChainAccount(ACCOUNT_A);
+  assert.equal(closed.length, 1);
+  assert.deepEqual((await readChainState()).decisions, {});
 });

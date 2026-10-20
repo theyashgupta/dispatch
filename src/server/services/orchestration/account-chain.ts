@@ -21,6 +21,8 @@ import {
   deriveAccountState,
   isStaleSurface,
   isTokenReadFailed,
+  NEEDS_LOGIN_READS,
+  nextRejectedReads,
   parseSurfaceResetAt,
   showsNewPeriod,
 } from "../domain/account-state.js";
@@ -36,17 +38,25 @@ import {
 } from "./account-chain-state.js";
 import { recordChainEvent, type ChainEvent } from "./account-chain-records.js";
 import {
+  closeAccountDecision,
+  raiseLoginDecision as raiseAccountLoginDecision,
+} from "./account-decisions.js";
+import {
   accountDir,
   getActiveAccountId,
   readChainOrder,
+  readDefaultIdentity,
+  readRegistry,
   setActiveAccount,
 } from "./claude-accounts.js";
+import { startLogin } from "./claude-login.js";
 import {
   getUsage,
   onUsageRefreshed,
   refreshUsage,
   usageBuckets,
 } from "./claude-usage.js";
+import { onDecisionAnswered } from "./decision-items.js";
 import {
   applyAutomaticMove,
   clearAutomaticPendingMoves,
@@ -60,6 +70,7 @@ const MAX_TIMER_MS = 24 * 24 * 60 * 60 * 1000;
 const SURFACE_CAP_MS = 5 * 60 * 60 * 1000;
 const SCAN_MS = 30_000;
 const EXHAUSTED_TIMER = "exhausted";
+const NEEDS_LOGIN_CAUSE = "needs-login:";
 
 export interface ChainDeps {
   now: () => number;
@@ -72,6 +83,9 @@ export interface ChainDeps {
   cachedUsage: (id: string) => ClaudeUsageSnapshot;
   loggedIn: (id: string) => Promise<boolean>;
   emit: (event: ChainEvent) => void;
+  startLogin: (accountId?: string) => Promise<{ ok: boolean; error?: string }>;
+  raiseLoginDecision: (accountId: string) => Promise<string>;
+  closeDecision: (decisionId: string, optionId: string, note: string) => void;
   scanMs: number;
 }
 
@@ -96,6 +110,15 @@ const realDeps: ChainDeps = {
       console.warn(`[account-chain] ${(err as Error).message}`);
     });
   },
+  startLogin,
+  raiseLoginDecision: async (id) => {
+    const email =
+      id === DEFAULT_CLAUDE_ACCOUNT_ID
+        ? (await readDefaultIdentity())?.email
+        : (await readRegistry()).find((a) => a.id === id)?.email;
+    return raiseAccountLoginDecision(id, email ?? id);
+  },
+  closeDecision: closeAccountDecision,
   scanMs: SCAN_MS,
 };
 
@@ -246,11 +269,36 @@ export async function limitMoveCandidates(): Promise<BucketedCandidate[]> {
 }
 
 /**
+ * Raise the login decision of an account that needs a login, or close it once the account recovered.
+ *
+ * @remarks The decision id is stored per cause, so a restart or a later rejected read never raises a
+ * second one. A failure keeps the stored id as it was, so the next read tries again.
+ */
+async function syncLoginDecision(
+  id: string,
+  state: ChainAccountEntry["state"],
+): Promise<void> {
+  const cause = `${NEEDS_LOGIN_CAUSE}${id}`;
+  const stored = chain.decisions[cause];
+  try {
+    if (state === "needs-login" && stored === undefined) {
+      chain.decisions[cause] = await deps.raiseLoginDecision(id);
+    } else if (state !== "needs-login" && stored !== undefined) {
+      deps.closeDecision(stored, "later", "The account returned to the chain.");
+      delete chain.decisions[cause];
+    }
+  } catch (err) {
+    console.warn(`[account-chain] ${(err as Error).message}`);
+  }
+}
+
+/**
  * Derive and store one account's chain state from a usage snapshot and an optional limit signal.
  *
- * @remarks A read that is not ok, or is ok with no windows, keeps a limited account limited until its `limitedUntil` passes,
- * unless its snapshot shows a new period. A fresh ok read that derives another state replaces the
- * limit. The return timer outlives that clear, so only the timer returns the work.
+ * @remarks Two consecutive `token-rejected` reads give `needs-login`, and a limit signal never counts
+ * as a read because it reuses a cached snapshot. A not ok or empty read keeps a limited account held
+ * until `limitedUntil` unless it shows a new period. The return timer outlives a clear, so only the
+ * timer returns the work.
  */
 async function ingest(
   id: string,
@@ -268,7 +316,12 @@ async function ingest(
     new Date(now),
   );
   const prior = chain.accounts[id];
+  const rejectedReads = limit
+    ? (prior?.rejectedReads ?? 0)
+    : nextRejectedReads(prior?.rejectedReads, usage);
+  const needsLogin = rejectedReads >= NEEDS_LOGIN_READS;
   const held =
+    !needsLogin &&
     (usage.status !== "ok" || usage.windows.length === 0) &&
     prior?.state === "limited" &&
     derived.state !== "limited" &&
@@ -277,11 +330,14 @@ async function ingest(
     Date.parse(prior.limitedUntil) > now &&
     !showsNewPeriod(usage, prior, thresholdPercent);
   const entry: ChainAccountEntry = {
-    ...(held
-      ? { state: "limited", limitedUntil: prior.limitedUntil }
-      : derived),
+    ...(needsLogin
+      ? { state: "needs-login", limitedUntil: null }
+      : held
+        ? { state: "limited", limitedUntil: prior.limitedUntil }
+        : derived),
     buckets: usageBuckets(usage),
     fetchedAt: usage.fetchedAt,
+    ...(rejectedReads > 0 ? { rejectedReads } : {}),
   };
   chain.accounts[id] = entry;
   if (prior?.state === "limited" && entry.state !== "limited") {
@@ -290,6 +346,7 @@ async function ingest(
   if (entry.state === "limited") {
     scheduleReturn(id, recheckAt(entry.limitedUntil));
   }
+  await syncLoginDecision(id, entry.state);
   await persist();
   return entry;
 }
@@ -617,7 +674,13 @@ export function forgetChainAccount(id: string): Promise<void> {
   return enqueue(async () => {
     cancel(`return:${id}`);
     const hadNotice = id in chain.loginExpiryNotified;
-    if (chain.accounts[id] === undefined && !hadNotice) return;
+    const cause = `${NEEDS_LOGIN_CAUSE}${id}`;
+    const decisionId = chain.decisions[cause];
+    if (chain.accounts[id] === undefined && !hadNotice && !decisionId) return;
+    if (decisionId !== undefined) {
+      deps.closeDecision(decisionId, "later", "The account was removed.");
+      delete chain.decisions[cause];
+    }
     delete chain.accounts[id];
     delete chain.loginExpiryNotified[id];
     await persist();
@@ -670,6 +733,26 @@ export async function startAccountChain(
     listening = true;
     onUsageRefreshed((id, usage) => {
       if (running) void handleUsageRead(id, usage).catch(() => undefined);
+    });
+    onDecisionAnswered((item) => {
+      if (!running || item.answer?.optionId !== "login") return;
+      const cause = Object.keys(chain.decisions).find(
+        (key) => chain.decisions[key] === item.id,
+      );
+      if (!cause?.startsWith(NEEDS_LOGIN_CAUSE)) return;
+      const accountId = cause.slice(NEEDS_LOGIN_CAUSE.length);
+      void deps
+        .startLogin(accountId)
+        .then((result) => {
+          if (!result.ok) {
+            console.warn(
+              `[account-chain] login for ${accountId} did not start: ${result.error}`,
+            );
+          }
+        })
+        .catch((err: unknown) => {
+          console.warn(`[account-chain] ${(err as Error).message}`);
+        });
     });
     onLimitSignal((cardId, sessionId, pane) => {
       if (running) {
