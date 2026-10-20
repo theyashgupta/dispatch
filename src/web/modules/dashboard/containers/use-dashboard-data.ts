@@ -44,6 +44,7 @@ export function useDashboardData() {
     accounts,
     orchestrators,
     boardName: board?.name ?? null,
+    budgetWarnPercent: board?.policy.budgetWarnPercent,
     now,
     connection,
   };

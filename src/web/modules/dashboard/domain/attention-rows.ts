@@ -9,7 +9,7 @@ import {
   type ClaudeAccountSummary,
   type SupervisorState,
 } from "../../../../shared/types.js";
-import { dollars } from "./cost-rows.js";
+import { spentOfBudget } from "../../../../shared/cost-text.js";
 import { accountFor, clock } from "./usage-meters.js";
 
 export type AttentionBadge =
@@ -62,21 +62,25 @@ function resetTime(card: Card | undefined, ctx: AttentionContext) {
   return iso == null ? null : clock(iso, ctx.timeZone, false);
 }
 
+function groupOf(item: AttentionItem, ctx: AttentionContext) {
+  return ctx.groups.find((g) => g.cardId === item.cardId);
+}
+
 function budgetText(item: AttentionItem, ctx: AttentionContext): string {
-  const group = ctx.groups.find((g) => g.cardId === item.cardId);
+  const group = groupOf(item, ctx);
   return group === undefined || group.budget === null
     ? "Budget reached."
-    : `Budget reached: ${dollars(group.cost)} of ${dollars(group.budget)}.`;
+    : `Budget reached: ${spentOfBudget(group.cost, group.budget)}.`;
 }
 
 function warningText(item: AttentionItem, ctx: AttentionContext): string {
   const { warning } = item;
   if (warning === undefined) return "Budget warning.";
-  const group = ctx.groups.find((g) => g.cardId === item.cardId);
-  const live = group?.budget == null ? null : group;
+  const group = groupOf(item, ctx);
+  const live = group === undefined || group.budget === null ? null : group;
   const cost = live?.cost ?? warning.cost;
   const budget = live?.budget ?? warning.budget;
-  return `Budget warning: ${dollars(cost)} of ${dollars(budget)}, warning at ${warning.percent}%.`;
+  return `Budget warning: ${spentOfBudget(cost, budget)}, warning at ${warning.percent}%.`;
 }
 
 function gateText(item: AttentionItem): string {

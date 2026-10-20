@@ -1,4 +1,4 @@
-import { costText } from "../../../../shared/cost-text.js";
+import { spentOfBudget } from "../../../../shared/cost-text.js";
 
 /** Build the cost line of a group card from the orchestration summary, or null for any other card. */
 export function groupCostLine(
@@ -9,5 +9,5 @@ export function groupCostLine(
   const group = groups.find((g) => g.cardId === card.id);
   return group === undefined
     ? null
-    : `Cost ${costText(group.cost, group.budget)}`;
+    : `Cost ${spentOfBudget(group.cost, group.budget)}`;
 }
