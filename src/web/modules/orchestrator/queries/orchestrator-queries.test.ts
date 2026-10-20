@@ -325,6 +325,20 @@ test("Save policy puts the sixteen fields and no credits value, then updates the
   assert.equal(list?.boards[0]?.policy.concurrencyCap, 4);
 });
 
+test("Save policy refreshes the orchestration summary of the board", async () => {
+  const client = newClient();
+  client.setQueryData(["orchestration", LOCAL, "summary"], { groups: [] });
+  stubFetch({ status: 200, body: { board: { key: LOCAL, policy } } });
+  await new MutationObserver(
+    client,
+    savePolicyMutationOptions(client, LOCAL),
+  ).mutate(policy);
+  assert.equal(
+    client.getQueryState(["orchestration", LOCAL, "summary"])?.isInvalidated,
+    true,
+  );
+});
+
 test("a refused policy save leaves the board list as it was", async () => {
   const client = newClient();
   client.setQueryData(boardListKeys.list, {
