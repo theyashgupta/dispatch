@@ -422,6 +422,13 @@ void test("accountStateLine: login expired by state or by a past loginExpiresAt,
   );
 });
 
+void test("accountStateLine: needs login reads as a login line, like login expired", () => {
+  assert.deepEqual(
+    accountStateLine(account({ state: "needs-login" }), T0 + HOUR),
+    { text: "Login expired, sign in again", tone: "down" },
+  );
+});
+
 void test("accountStateLine: limited names the reset time, or just Limited without one", () => {
   const now = T0 + HOUR;
   const soon = accountStateLine(

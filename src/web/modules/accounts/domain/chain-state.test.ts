@@ -19,6 +19,10 @@ test("each chain state has a label and a tone", () => {
     label: "Login expired",
     tone: "danger",
   });
+  assert.deepEqual(chainStateBadge("needs-login"), {
+    label: "Needs login",
+    tone: "danger",
+  });
   assert.deepEqual(chainStateBadge("unknown"), {
     label: "Unknown",
     tone: "neutral",

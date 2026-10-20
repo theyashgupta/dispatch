@@ -14,6 +14,8 @@ export type DerivedAccountState = Pick<
   "state" | "limitedUntil"
 >;
 
+export const NEEDS_LOGIN_READS = 2;
+
 const NEAR_LIMIT_PERCENT = 80;
 const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -25,6 +27,20 @@ const SURFACE_TIME =
  */
 export function isTokenReadFailed(usage: ClaudeUsageSnapshot): boolean {
   return usage.status === "stale" || usage.status === "unavailable";
+}
+
+/**
+ * Count consecutive reads whose token the server rejected.
+ *
+ * @remarks A rejected read adds one and an ok read resets the count. Any other read, such as a 429
+ * or a network error, says nothing about the token, so it keeps the count.
+ */
+export function nextRejectedReads(
+  prior: number | undefined,
+  usage: ClaudeUsageSnapshot,
+): number {
+  if (usage.error === "token-rejected") return (prior ?? 0) + 1;
+  return usage.status === "ok" ? 0 : (prior ?? 0);
 }
 
 /**

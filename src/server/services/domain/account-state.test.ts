@@ -10,6 +10,8 @@ import {
   deriveAccountState,
   expireLimit,
   isStaleSurface,
+  NEEDS_LOGIN_READS,
+  nextRejectedReads,
   parseSurfaceResetAt,
   showsNewPeriod,
 } from "./account-state.js";
@@ -520,4 +522,28 @@ void test("showsNewPeriod without a stored fetchedAt relies on the reset alone",
     showsNewPeriod(moved, { ...unknownPrior, fetchedAt: null }, 100),
     true,
   );
+});
+
+void test("nextRejectedReads counts consecutive token-rejected reads and needs two of them", () => {
+  const rejected: ClaudeUsageSnapshot = {
+    ...usage([], "stale"),
+    error: "token-rejected",
+  };
+  const first = nextRejectedReads(undefined, rejected);
+  assert.equal(first, 1);
+  assert.equal(nextRejectedReads(first, rejected), 2);
+  assert.equal(NEEDS_LOGIN_READS, 2);
+});
+
+void test("nextRejectedReads keeps the count on a 429, an error or an unavailable read, and an ok read resets it", () => {
+  for (const status of ["rate-limited", "error", "unavailable"] as const) {
+    const snapshot: ClaudeUsageSnapshot = {
+      ...usage([], status),
+      error: status,
+    };
+    assert.equal(nextRejectedReads(1, snapshot), 1, status);
+    assert.equal(nextRejectedReads(undefined, snapshot), 0, status);
+  }
+  assert.equal(nextRejectedReads(1, usage([])), 0);
+  assert.equal(nextRejectedReads(5, usage([win("session", 10, null)])), 0);
 });

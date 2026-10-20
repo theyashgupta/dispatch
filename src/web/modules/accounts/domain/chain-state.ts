@@ -11,6 +11,7 @@ const STATES: Record<
   "near-limit": { label: "Near limit", tone: "warning" },
   limited: { label: "Limited", tone: "danger" },
   "login-expired": { label: "Login expired", tone: "danger" },
+  "needs-login": { label: "Needs login", tone: "danger" },
   unknown: { label: "Unknown", tone: "neutral" },
 };
 

@@ -298,3 +298,37 @@ void test("pickHeadroomAccount picks the lowest weekly percent and keeps chain o
 void test("pickHeadroomAccount returns null for an empty chain", () => {
   assert.equal(pickHeadroomAccount([], "from", 100, 10), null);
 });
+
+void test("selectAccount never picks needs-login, and earliestReset ignores it", () => {
+  const stuck: ChainCandidate = {
+    id: "stuck",
+    state: "needs-login",
+    limitedUntil: null,
+  };
+  assert.deepEqual(selectAccount([stuck], NOW), {
+    exhausted: true,
+    earliestReset: null,
+  });
+  assert.deepEqual(
+    selectAccount(
+      [
+        stuck,
+        { id: "b", state: "limited", limitedUntil: untilAt("future", 1) },
+      ],
+      NOW,
+    ),
+    { exhausted: true, earliestReset: untilAt("future", 1) },
+  );
+  assert.deepEqual(
+    selectAccount(
+      [stuck, { id: "c", state: "available", limitedUntil: null }],
+      NOW,
+    ),
+    { exhausted: false, id: "c" },
+  );
+});
+
+void test("pickHeadroomAccount refuses a needs-login account", () => {
+  const chain = [entry("t", "needs-login", [weekly(5)])];
+  assert.equal(pickHeadroomAccount(chain, "from", 100, 10), null);
+});

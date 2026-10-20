@@ -20,6 +20,7 @@ const CHAIN_STATES = new Set([
   "near-limit",
   "limited",
   "login-expired",
+  "needs-login",
   "unknown",
 ]);
 
@@ -33,6 +34,7 @@ export function emptyChainState(): ChainStateFile {
     exhausted: null,
     moves: [],
     loginExpiryNotified: {},
+    decisions: {},
   };
 }
 
@@ -103,6 +105,7 @@ export async function readChainState(): Promise<ChainStateFile> {
       ? (parsed.moves as ChainMove[]).slice(-MAX_CHAIN_MOVES)
       : [],
     loginExpiryNotified: validNotified(parsed.loginExpiryNotified),
+    decisions: validNotified(parsed.decisions),
   };
 }
 
