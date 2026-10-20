@@ -2781,6 +2781,16 @@ detached pane has a tiny default size, the claude TUI paints into that cramped g
 readiness detection and `DISPATCH_STATUS` marker parsing become unreliable. It is load-bearing, not
 cosmetic.
 
+**A client does not change the window size (`LOCAL-162`).** The tmux default `window-size latest`
+sizes the window to the last client that attached, and the window keeps that size after the client
+detaches. A narrow phone client can then leave the pane at 44 columns. At that width Claude Code
+truncates its status row, `parseStatusLine` does not match, and `contextPercent` stops changing.
+`newSession` and `ensureTerminal` run `set-option -t <name> window-size manual`, so the window stays
+at 200x50 and a smaller ttyd client shows a clipped view of it. `reconnectTerminal` and the
+supervisor pane sample run `widenNarrowWindow`: when `#{window_width}` is below 120, it runs
+`resize-window -x 200 -y 50` once and logs a warning. `resize-window` also sets `window-size
+manual`, so the next probe finds 200 columns.
+
 **The leading `set -g history-limit` rides in the SAME invocation, and the order is load-bearing
 (`TERM-05`).** tmux allocates a pane's history buffer at pane creation, so raising the limit after
 `new-session` would not help the pane just created; and `set -g` needs a live server, which tmux's

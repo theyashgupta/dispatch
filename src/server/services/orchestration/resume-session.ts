@@ -6,7 +6,11 @@ import {
 } from "../../../shared/types.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { boardRepository as store } from "../../store/board-repository.js";
-import { hasSession, killSession } from "../../adapters/tmux.js";
+import {
+  hasSession,
+  killSession,
+  widenNarrowWindow,
+} from "../../adapters/tmux.js";
 import { resolveLaunchAccount } from "./claude-accounts.js";
 import { launchClaude, RESUME_MISSING, StartStepError } from "./steps.js";
 import {
@@ -42,6 +46,7 @@ export async function reconnectTerminal(cardId: string): Promise<void> {
   const card = store.getCard(cardId);
   if (!card?.tmuxSession || !card.activeSessionId) return;
   if (await hasSession(`=${card.tmuxSession}`)) {
+    await widenNarrowWindow(card.tmuxSession);
     await ensureTerminal(cardId, card.activeSessionId, card.tmuxSession);
     return;
   }
