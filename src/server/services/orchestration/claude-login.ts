@@ -11,6 +11,8 @@ import {
 } from "../../adapters/claude-login.js";
 import {
   accountDir,
+  adoptManagedDefault,
+  getManagedDefaultId,
   isExternalAccountDir,
   materializeConfigDir,
   readChainOrder,
@@ -32,12 +34,14 @@ type LoginFailure =
   | "no-identity"
   | "duplicate"
   | "home-login"
+  | "not-home-identity"
   | "save-failed"
   | "cancelled";
 
 interface ActiveLogin {
   accountId: string;
   isNew: boolean;
+  managed: boolean;
   process: LoginProcess;
   timer: NodeJS.Timeout;
   finished: boolean;
@@ -112,6 +116,13 @@ function sameIdentity(
   return a.email === b.email && a.orgId === b.orgId;
 }
 
+function matchesHome(
+  a: { email: string; orgId: string },
+  b: { email: string; orgId: string },
+): boolean {
+  return a.email === b.email && (!a.orgId || !b.orgId || a.orgId === b.orgId);
+}
+
 async function settle(
   login: ActiveLogin,
   code: number | null,
@@ -134,13 +145,28 @@ async function settle(
     return;
   }
 
+  const existing = await readRegistry();
   const home = await readClaudeIdentity();
-  if (home.loggedIn && sameIdentity(home, identity)) {
+  if (login.managed) {
+    const reference = home.loggedIn
+      ? home
+      : existing.find((a) => a.id === login.accountId);
+    if (!reference || !matchesHome(identity, reference)) {
+      await logoutClaudeConfigDir(dir);
+      await fail(
+        login,
+        "not-home-identity",
+        reference
+          ? `Sign in with the same Claude account as your terminal login (${reference.email}).`
+          : "Sign in with the same Claude account as your terminal login.",
+      );
+      return;
+    }
+  } else if (home.loggedIn && sameIdentity(home, identity)) {
     await logoutClaudeConfigDir(dir);
     await fail(login, "home-login", "This is already your home login");
     return;
   }
-  const existing = await readRegistry();
   const duplicate = existing.find(
     (a) => a.id !== login.accountId && sameIdentity(a, identity),
   );
@@ -172,7 +198,7 @@ async function settle(
     createdAt: prior?.createdAt ?? now,
     lastLoginAt: now,
   };
-  await upsertAccount(record);
+  await (login.managed ? adoptManagedDefault(record) : upsertAccount(record));
   await refreshUsage(record.id, "login").catch(() => undefined);
   const usage = getUsage(record.id);
   view = {
@@ -183,6 +209,7 @@ async function settle(
       orgName: record.orgName,
       subscriptionType: record.subscriptionType,
       isDefault: false,
+      ...(login.managed ? { managedDefault: true } : {}),
       lastLoginAt: record.lastLoginAt,
       usage,
       position: (await readChainOrder()).indexOf(record.id),
@@ -231,8 +258,15 @@ async function finish(
  */
 export async function startLogin(
   accountId?: string,
-): Promise<{ ok: true } | { ok: false; error: "in-flight" | "not-found" }> {
+  opts: { managedDefault?: boolean } = {},
+): Promise<
+  | { ok: true }
+  | { ok: false; error: "in-flight" | "not-found" | "managed-exists" }
+> {
   if (inFlight()) return { ok: false, error: "in-flight" };
+  if (opts.managedDefault === true && getManagedDefaultId() !== undefined) {
+    return { ok: false, error: "managed-exists" };
+  }
   if (accountId !== undefined && isExternalAccountDir(accountId)) {
     return { ok: false, error: "not-found" };
   }
@@ -269,6 +303,9 @@ export async function startLogin(
   const login: ActiveLogin = {
     accountId: id,
     isNew,
+    managed:
+      opts.managedDefault === true ||
+      (accountId !== undefined && accountId === getManagedDefaultId()),
     finished: false,
     codeRejected: false,
     timedOut: false,

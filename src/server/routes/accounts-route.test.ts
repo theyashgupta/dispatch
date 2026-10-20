@@ -232,6 +232,62 @@ void test("login: a good code lands in done and the account is listed; a duplica
   assert.equal(malformed.status, 400);
 });
 
+void test("login: managedDefault validates, moves the home login under the offer flag and refuses a second one", async () => {
+  const before = await call("GET", "/accounts");
+  assert.equal(before.body.managedDefaultOffer, true);
+
+  const both = await call("POST", "/accounts/login", {
+    accountId: ID_A,
+    managedDefault: true,
+  });
+  assert.equal(both.status, 400);
+  assert.equal(both.body.error, "invalid-id");
+  const falsy = await call("POST", "/accounts/login", {
+    managedDefault: false,
+  });
+  assert.equal(falsy.status, 400);
+  assert.equal(falsy.body.error, "invalid-id");
+
+  const started = await call("POST", "/accounts/login", {
+    managedDefault: true,
+  });
+  assert.equal(started.status, 202);
+  await waitForState("awaiting-code");
+  await call("POST", "/accounts/login/code", { code: "home" });
+  const done = await waitForState("done");
+  const id = (done.account as { id: string; managedDefault?: boolean }).id;
+  assert.equal(
+    (done.account as { managedDefault?: boolean }).managedDefault,
+    true,
+  );
+
+  const after = await call("GET", "/accounts");
+  assert.equal(after.body.managedDefaultOffer, false);
+
+  const again = await call("POST", "/accounts/login", {
+    managedDefault: true,
+  });
+  assert.equal(again.status, 409);
+  assert.equal(again.body.error, "managed-exists");
+
+  await call("DELETE", "/accounts/login");
+  const removed = await call("DELETE", `/accounts/${id}`);
+  assert.equal(removed.status, 200);
+  const restored = await call("GET", "/accounts");
+  assert.equal(restored.body.managedDefaultOffer, true);
+
+  const loggedOut = path.join(env.root, "logged-out-identity.json");
+  fs.writeFileSync(loggedOut, '{"loggedIn":false,"authMethod":"none"}');
+  process.env.FAKE_CLAUDE_IDENTITY_FILE = loggedOut;
+  const ops = await import("../services/orchestration/claude-account-ops.js");
+  const { readClaudeIdentity } = await import("../adapters/claude-cli.js");
+  ops.cacheHomeIdentity(await readClaudeIdentity());
+  const offline = await call("GET", "/accounts");
+  assert.equal(offline.body.managedDefaultOffer, false);
+  delete process.env.FAKE_CLAUDE_IDENTITY_FILE;
+  ops.cacheHomeIdentity(await readClaudeIdentity());
+});
+
 void test("login: cancel kills a hung login and removes a fresh dir", async () => {
   await call("POST", "/accounts/login", {});
   const awaiting = await waitForState("awaiting-code");

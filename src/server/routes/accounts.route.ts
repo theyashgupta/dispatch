@@ -6,12 +6,14 @@ import {
 } from "../../shared/types.js";
 import {
   getActiveAccountId,
+  getManagedDefaultId,
   readRegistry,
   setActiveAccount,
   setChainOrder,
 } from "../services/orchestration/claude-accounts.js";
 import {
   listAccountSessions,
+  homeIdentity,
   listAccountSummaries,
   readChainView,
   removeAccountAndLogout,
@@ -63,6 +65,8 @@ accountsRouter.get("/accounts", async (_req, res) => {
     accounts: await listAccountSummaries(),
     sessions: await listAccountSessions(),
     chain: await readChainView(),
+    managedDefaultOffer:
+      getManagedDefaultId() === undefined && (await homeIdentity()).loggedIn,
   }));
   res.status(200).json(body);
 });
@@ -121,12 +125,12 @@ accountsRouter.get("/accounts/login", (_req, res) => {
 });
 
 accountsRouter.post("/accounts/login", async (req, res) => {
-  const { accountId } = parseOrThrow(loginBodySchema, req.body);
+  const { accountId, managedDefault } = parseOrThrow(loginBodySchema, req.body);
   const result = await orFail("login-start-failed", () =>
-    startLogin(accountId),
+    startLogin(accountId, { managedDefault }),
   );
   if (!result.ok) {
-    throw new HttpError(result.error === "in-flight" ? 409 : 404, result.error);
+    throw new HttpError(result.error === "not-found" ? 404 : 409, result.error);
   }
   res.status(202).json(getLoginView());
 });

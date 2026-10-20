@@ -591,3 +591,32 @@ void test("a managedDefaultId without a record is ignored, and a registry withou
   );
   await accounts.setActiveAccount(DEFAULT_CLAUDE_ACCOUNT_ID);
 });
+
+void test("adoptManagedDefault takes Default's position and moves a default pointer, but leaves an explicit pointer", async () => {
+  managedRegistry({ managedDefaultId: undefined });
+  await accounts.loadManagedDefault();
+  await accounts.setActiveAccount(DEFAULT_CLAUDE_ACCOUNT_ID);
+  await accounts.adoptManagedDefault(record(ID_C, "c@example.com"));
+  const adopted = registryOnDisk();
+  assert.equal(adopted.managedDefaultId, ID_C);
+  assert.equal(
+    adopted.accounts.find((a) => a.id === ID_C)?.position,
+    adopted.defaultPosition,
+  );
+  assert.equal(readConfig().activeClaudeAccountId, ID_C);
+  assert.deepEqual(await accounts.readChainOrder(), [ID_A, ID_C, ID_B]);
+
+  await accounts.setActiveAccount(ID_A);
+  await accounts.adoptManagedDefault({
+    ...record(ID_C, "c@example.com"),
+    lastLoginAt: "2026-10-01T00:00:00.000Z",
+  });
+  assert.equal(readConfig().activeClaudeAccountId, ID_A);
+  assert.equal(registryOnDisk().managedDefaultId, ID_C);
+  assert.equal(
+    registryOnDisk().accounts.find((a) => a.id === ID_C)?.position,
+    adopted.defaultPosition,
+  );
+  await accounts.removeAccount(ID_C);
+  await accounts.setActiveAccount(DEFAULT_CLAUDE_ACCOUNT_ID);
+});

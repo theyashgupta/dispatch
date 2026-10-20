@@ -554,6 +554,47 @@ export function upsertAccount(record: ClaudeAccountRecord): Promise<void> {
 }
 
 /**
+ * Make a record the managed default in one registry write, and move a stored `default` pointer to it.
+ *
+ * @remarks The record takes the position Default held, unless it is already the managed record. The
+ * pointer moves inside the same serialized block, so no reader sees a managed id without it.
+ */
+export function adoptManagedDefault(
+  record: ClaudeAccountRecord,
+): Promise<void> {
+  accountDir(record.id);
+  return serialized(async () => {
+    const {
+      accounts: current,
+      defaultPosition,
+      defaultIdentity,
+      managedDefaultId: managed,
+    } = await readRegistryFile();
+    const previous = current.find((a) => a.id === record.id);
+    const accounts = current.filter((a) => a.id !== record.id);
+    accounts.push({
+      ...record,
+      position:
+        previous && managed === record.id
+          ? (previous.position ?? defaultPosition)
+          : defaultPosition,
+    });
+    await writeRegistryFile({
+      accounts,
+      defaultPosition,
+      ...(defaultIdentity ? { defaultIdentity } : {}),
+      managedDefaultId: record.id,
+    });
+    if (
+      (getOrchestrationConfig()?.activeClaudeAccountId ??
+        DEFAULT_CLAUDE_ACCOUNT_ID) === DEFAULT_CLAUDE_ACCOUNT_ID
+    ) {
+      updateActiveClaudeAccountId(record.id);
+    }
+  });
+}
+
+/**
  * Store a new chain order, Default included, and return it.
  *
  * @remarks The list is checked against the registry inside the registry lock, so an account added
