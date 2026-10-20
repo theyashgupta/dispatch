@@ -74,6 +74,7 @@ import {
 import { PanelMutedNotice } from "@/modules/detail/components/PanelNotice";
 import { PanelHeader } from "@/modules/detail/components/PanelHeader";
 import { PanelResizeHandle } from "@/modules/detail/components/PanelResizeHandle";
+import { RunClaudeButton } from "@/modules/detail/components/RunClaudeButton";
 import { PreviewRow } from "@/modules/detail/components/PreviewRow";
 import { ReferenceBlocks } from "@/modules/detail/components/ReferenceBlocks";
 import { SessionFlowRow } from "@/modules/detail/components/SessionFlowRow";
@@ -385,6 +386,69 @@ export function DetailPanelContainer() {
     setFullscreen(false);
   }
 
+  const accountGroup =
+    sessionAccount != null ? (
+      <PanelAccountRow
+        name={sessionAccount.name}
+        stale={sessionAccount.stale}
+        continueAction={sessionAccount.continueAction}
+        pendingNote={sessionAccount.pendingNote}
+        pending={
+          accountMove.pending?.key === accountKey
+            ? accountMove.pending.kind
+            : null
+        }
+        busy={accountMove.pending !== null}
+        note={accountKey == null ? undefined : accountMove.notes[accountKey]}
+        onRestart={() =>
+          moveSessionAccount("restart", sessionAccount.accountId, "Restarted")
+        }
+        onContinue={() => {
+          if (accountsData == null) return;
+          moveSessionAccount(
+            "continue",
+            accountsData.activeId,
+            `Moved to ${accountName(accountsData.accounts, accountsData.activeId)}`,
+          );
+        }}
+      />
+    ) : undefined;
+  const hasSwitcher = c != null && (c.sessionSummaries?.length ?? 0) >= 2;
+  const showRunClaude =
+    hasLiveSession &&
+    c != null &&
+    c.terminalError == null &&
+    c.ttydPort != null &&
+    c.activeSessionId != null;
+  const hasSessionControls = hasSwitcher || showStartAnother || showRunClaude;
+  const sessionControls = hasSessionControls ? (
+    <>
+      {hasSwitcher && (
+        <SessionSwitcher
+          card={c}
+          onSwitch={(cardId, sessionId) => {
+            switchSession({ cardId, sessionId }).catch(console.error);
+          }}
+        />
+      )}
+      {showStartAnother && (
+        <StartAnotherSessionButton
+          card={c}
+          onStartRequest={onStartRequest}
+          narrowPanel={narrowPanel}
+        />
+      )}
+      {showRunClaude && (
+        <RunClaudeButton
+          card={c}
+          onRunClaude={(id) => {
+            void runClaude(id).catch(console.error);
+          }}
+        />
+      )}
+    </>
+  ) : null;
+
   const referenceColumn = (
     <>
       <ReferenceBlocks
@@ -475,62 +539,16 @@ export function DetailPanelContainer() {
                 (unpause.isPending && unpause.variables?.id === c.id))
             }
             onAskRequest={onAskRequest}
+            account={accountGroup}
             resumeLine={resumeLine}
             reviewHeader={reviewHeader}
           />
 
-          {sessionAccount != null && (
-            <PanelAccountRow
-              name={sessionAccount.name}
-              stale={sessionAccount.stale}
-              continueAction={sessionAccount.continueAction}
-              pendingNote={sessionAccount.pendingNote}
-              pending={
-                accountMove.pending?.key === accountKey
-                  ? accountMove.pending.kind
-                  : null
-              }
-              busy={accountMove.pending !== null}
-              note={
-                accountKey == null ? undefined : accountMove.notes[accountKey]
-              }
-              onRestart={() =>
-                moveSessionAccount(
-                  "restart",
-                  sessionAccount.accountId,
-                  "Restarted",
-                )
-              }
-              onContinue={() => {
-                if (accountsData == null) return;
-                moveSessionAccount(
-                  "continue",
-                  accountsData.activeId,
-                  `Moved to ${accountName(accountsData.accounts, accountsData.activeId)}`,
-                );
-              }}
-            />
+          {c != null && hasSessionFlow(c) ? (
+            <SessionFlowRow card={c}>{sessionControls}</SessionFlowRow>
+          ) : (
+            sessionControls != null && <PanelRow>{sessionControls}</PanelRow>
           )}
-          {((c?.sessionSummaries?.length ?? 0) >= 2 || showStartAnother) && (
-            <PanelRow>
-              {c != null && (c.sessionSummaries?.length ?? 0) >= 2 && (
-                <SessionSwitcher
-                  card={c}
-                  onSwitch={(cardId, sessionId) => {
-                    switchSession({ cardId, sessionId }).catch(console.error);
-                  }}
-                />
-              )}
-              {showStartAnother && c != null && (
-                <StartAnotherSessionButton
-                  card={c}
-                  onStartRequest={onStartRequest}
-                  narrowPanel={narrowPanel}
-                />
-              )}
-            </PanelRow>
-          )}
-          {c != null && hasSessionFlow(c) && <SessionFlowRow card={c} />}
 
           <PanelBody>
             {hydrating ? (
@@ -581,9 +599,6 @@ export function DetailPanelContainer() {
                     card={c}
                     onReconnect={(id) => {
                       ensureTerminal(id).catch(console.error);
-                    }}
-                    onRunClaude={(id) => {
-                      void runClaude(id).catch(console.error);
                     }}
                   />
                 )}

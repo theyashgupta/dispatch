@@ -1,6 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { hasSessionFlow, sessionFlowStage } from "./session-flow.js";
+import {
+  flowStageLayout,
+  hasSessionFlow,
+  sessionFlowStage,
+} from "./session-flow.js";
 
 type Fields = Parameters<typeof sessionFlowStage>[0];
 
@@ -115,4 +119,21 @@ void test("a start error wins over provisioning, which wins over a lost session"
     ),
     { stage: "agent", state: "working" },
   );
+});
+
+void test("the flow layout widens only the active box and keeps a fixed total", () => {
+  for (const active of [0, 1, 2, 3]) {
+    const { rects, width, height } = flowStageLayout(active);
+    assert.equal(rects.length, 4);
+    assert.equal(width, 392);
+    assert.equal(height, 32);
+    rects.forEach((rect, i) => {
+      assert.equal(rect.w, i === active ? 128 : 72);
+      assert.equal(rect.y, 2);
+      assert.equal(rect.h, 28);
+      if (i > 0) assert.equal(rect.x - (rects[i - 1].x + rects[i - 1].w), 16);
+    });
+    const last = rects[3];
+    assert.equal(last.x + last.w, width);
+  }
 });

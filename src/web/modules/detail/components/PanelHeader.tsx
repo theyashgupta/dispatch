@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import {
   ArrowDown,
   ArrowLeft,
@@ -58,6 +59,7 @@ interface PanelHeaderProps {
   onResumePausedRequest?: (id: string) => void;
   pausePending?: boolean;
   onAskRequest?: (card: CardModel) => void;
+  account?: ReactNode;
   resumeLine?: ResumeLine;
   reviewHeader?: ReviewHeader | null;
 }
@@ -87,6 +89,7 @@ export function PanelHeader({
   onResumePausedRequest,
   pausePending = false,
   onAskRequest,
+  account,
   resumeLine,
   reviewHeader,
 }: PanelHeaderProps) {
@@ -101,7 +104,7 @@ export function PanelHeader({
   const syncLabel = c?.syncing === true ? "Syncing…" : "Sync Linear";
   return (
     <div className="flex flex-wrap items-center justify-between gap-(--space-lg) border-b border-border py-(--space-sm) pr-(--space-lg) pl-(--space-xl)">
-      <div className="flex min-w-0 items-baseline gap-(--space-sm)">
+      <div className="flex min-w-0 flex-1 basis-48 items-baseline gap-(--space-sm)">
         <span className="flex-none font-mono text-xs leading-(--line-label) font-semibold text-muted-foreground">
           {c?.identifier}
         </span>
@@ -116,6 +119,7 @@ export function PanelHeader({
       </div>
 
       <div className="flex flex-[0_1_auto] flex-wrap items-center justify-end gap-(--space-sm)">
+        {account}
         {resumeLine && <ResumeTargetLine {...resumeLine} />}
         {hasLiveSession && (
           <Button

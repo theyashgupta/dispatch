@@ -116,7 +116,7 @@ export function PanelAccountRow({
   return (
     <div
       data-testid="session-account"
-      className="flex flex-wrap items-center gap-(--space-xs) border-b border-border py-(--space-xs) pr-(--space-lg) pl-(--space-xl) font-sans text-sm text-muted-foreground"
+      className="flex min-w-0 flex-wrap items-center gap-(--space-xs) font-sans text-sm text-muted-foreground"
     >
       <span className="text-sm font-semibold text-muted-foreground">
         Account
@@ -224,7 +224,7 @@ export function PanelReference({
 
 export function PanelPreviews({ children }: { children: ReactNode }) {
   return (
-    <div className="reading-surface flex flex-col gap-(--space-sm) border-b border-border">
+    <div className="flex flex-col pr-(--space-lg) pl-(--space-xl)">
       {children}
     </div>
   );
