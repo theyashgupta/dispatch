@@ -21,6 +21,7 @@ import {
   boardSwitchTarget,
   staleCountsLabel,
 } from "../../../../shared/board-select.js";
+import { buildAttentionQueue } from "../../../../shared/attention-queue.js";
 import { createdBoardText } from "../../../../shared/board-create.js";
 import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import { inboxFeed, isListedError } from "../../../../shared/feed-items.js";
@@ -86,6 +87,7 @@ import { useUndoToast } from "@/modules/shell/hooks/use-undo-toast";
 import { useViewportNav } from "@/modules/shell/hooks/use-viewport-nav";
 import { CommandPaletteContainer } from "@/modules/shell/containers/CommandPaletteContainer";
 import { UpdateBannerContainer } from "@/modules/shell/containers/UpdateBannerContainer";
+import { useOpenDecisionsQuery } from "@/queries/attention-actions-queries";
 import { useCreateBoardMutation } from "@/queries/board-create-queries";
 import {
   useBoardCountsQuery,
@@ -186,6 +188,7 @@ export function ShellContainer({
   const selectedCardId = useAppStore(appStore, (s) => s.selectedCardId);
   const pinned = useAppStore(appStore, (s) => s.pinned);
   const { data: events = NO_EVENTS } = useActivityFeedQuery(boardKey);
+  const decisions = useOpenDecisionsQuery(boardKey);
   const list = useBoardListQuery();
   const boardList = list.data;
   const listFailed =
@@ -386,6 +389,15 @@ export function ShellContainer({
     return <BootScreen connection={connection} />;
   }
 
+  const needsYouCount =
+    decisions.data === undefined
+      ? 0
+      : buildAttentionQueue({
+          boardKey,
+          cards: board.cards,
+          decisions: decisions.data,
+          now: new Date(nowMs()),
+        }).length;
   const meetingItems = items.filter((item) => item.source === "meeting");
   const inboxCount = inboxWaitingCount(board.cards, inboxItems);
   const sessionRows = flattenSessions(board.cards, nowMs());
@@ -512,6 +524,7 @@ export function ShellContainer({
           <PageErrorBoundary key={route.page}>{content}</PageErrorBoundary>
         }
         detail={detail}
+        needsYouCount={needsYouCount}
       >
         <ActivityDrawer
           open={activityOpen}

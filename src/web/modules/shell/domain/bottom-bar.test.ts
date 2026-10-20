@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { BOTTOM_BAR_SLOTS, currentSlotId } from "./bottom-bar.js";
+import { BOTTOM_BAR_SLOTS, currentSlotId, nextBarState } from "./bottom-bar.js";
 
 test("the slots read Today, Inbox, New ticket, Board, Orchestrator in order", () => {
   assert.deepEqual(
@@ -19,4 +19,44 @@ test("each slot page maps to its own slot id", () => {
 test("a page with no slot maps to null", () => {
   assert.equal(currentSlotId("sessions"), null);
   assert.equal(currentSlotId("dashboard"), null);
+});
+
+test("near the top the bar shows", () => {
+  assert.deepEqual(nextBarState({ visible: false, anchor: 300 }, 40, false), {
+    visible: true,
+    anchor: 40,
+  });
+});
+
+test("a move under the threshold keeps the same state object", () => {
+  const state = { visible: true, anchor: 200 };
+  assert.equal(nextBarState(state, 205, false), state);
+});
+
+test("scrolling down hides the bar", () => {
+  assert.deepEqual(nextBarState({ visible: true, anchor: 200 }, 260, false), {
+    visible: false,
+    anchor: 260,
+  });
+});
+
+test("scrolling up shows the bar", () => {
+  assert.deepEqual(nextBarState({ visible: false, anchor: 400 }, 300, false), {
+    visible: true,
+    anchor: 300,
+  });
+});
+
+test("an upward clamp at the bottom edge keeps a hidden bar hidden", () => {
+  assert.deepEqual(nextBarState({ visible: false, anchor: 900 }, 836, true), {
+    visible: false,
+    anchor: 836,
+  });
+});
+
+test("scrolling up at the bottom edge keeps a visible bar visible", () => {
+  assert.deepEqual(nextBarState({ visible: true, anchor: 900 }, 836, true), {
+    visible: true,
+    anchor: 836,
+  });
 });

@@ -9,6 +9,7 @@ import { PageHeader } from "@/modules/shell/components/PageHeader";
 import { TopBar } from "@/modules/shell/components/TopBar";
 import type { NavCounts, NavItem } from "../../../../shared/nav-items.js";
 import type { SyncSnapshot } from "@/modules/shell/domain/sync-status";
+import { useBarVisible } from "@/modules/shell/hooks/use-bar-visible";
 import { useChromeTop } from "@/modules/shell/hooks/use-chrome-top";
 import { useMenuFocusReturn } from "@/modules/shell/hooks/use-menu-focus-return";
 
@@ -33,6 +34,7 @@ interface ShellFrameProps {
   detail: ReactNode;
   children?: ReactNode;
   onMobileOpenChange?: (open: boolean) => void;
+  needsYouCount: number;
 }
 
 export function ShellFrame({
@@ -56,11 +58,14 @@ export function ShellFrame({
   onMobileOpenChange,
   onOpenCreateTicket,
   onOpenActivity,
+  needsYouCount,
 }: ShellFrameProps) {
   const { isMobile, openMobile, setOpenMobile, state } = useSidebar();
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const [chrome, setChrome] = useState<HTMLDivElement | null>(null);
   useChromeTop(chrome, root);
+  const [column, setColumn] = useState<HTMLDivElement | null>(null);
+  const barHidden = !useBarVisible(column, route.page);
   const phoneSheetOpen = isMobile && openMobile;
   const skipFocusReturn = useMenuFocusReturn(phoneSheetOpen);
 
@@ -119,6 +124,7 @@ export function ShellFrame({
         }}
       />
       <div
+        ref={setColumn}
         className="flex min-w-0 flex-1 flex-col overflow-hidden"
         inert={phoneSheetOpen}
       >
@@ -135,6 +141,8 @@ export function ShellFrame({
             current={route.page}
             onNavigate={onNavigate}
             onOpenCreateTicket={onOpenCreateTicket}
+            hidden={barHidden}
+            needsCount={needsYouCount}
           />
         ) : null}
       </div>
