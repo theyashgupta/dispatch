@@ -599,7 +599,13 @@ void test(
       loop.card(),
       loop.session(),
       actions,
-      "transcript: You've hit your weekly limit · resets Oct 20 at 8:30am (Asia/Calcutta)",
+      `transcript: You've hit your weekly limit · resets ${new Date(
+        Date.now() + 3 * 24 * 60 * 60 * 1000,
+      ).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        timeZone: "Asia/Calcutta",
+      })} at 8:30am (Asia/Calcutta)`,
     );
     const wait = loop.actions().find((e) => e.data.action === "limit_wait");
     assert.equal(wait?.data.reason, "no_headroom");
