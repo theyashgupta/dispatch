@@ -150,7 +150,10 @@ export function DetailPanelContainer() {
   const editors = board?.editors;
   const accounts = accountsData?.accounts;
   const cardIdentifiers = identifiersOf(cards ?? []);
-  const summary = useOrchestrationSummaryQuery(card?.boardKey ?? boardKey);
+  const summary = useOrchestrationSummaryQuery(
+    card?.boardKey ?? boardKey,
+    card?.source === "group",
+  );
   const onClose = appStore.closePanel;
   const onRetryPinFetch = appStore.retryPinFetch;
   const onStartRequest = (req: string | StartRequest) =>

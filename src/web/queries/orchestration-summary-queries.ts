@@ -11,6 +11,6 @@ export function orchestrationSummaryQueryOptions(board: BoardKey) {
 }
 
 /** Read the orchestration summary of a board, with the cost total of each group. */
-export function useOrchestrationSummaryQuery(board: BoardKey) {
-  return useQuery(orchestrationSummaryQueryOptions(board));
+export function useOrchestrationSummaryQuery(board: BoardKey, enabled = true) {
+  return useQuery({ ...orchestrationSummaryQueryOptions(board), enabled });
 }

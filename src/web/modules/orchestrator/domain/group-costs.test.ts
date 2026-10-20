@@ -35,7 +35,9 @@ function graphOf(branches: CentreBranch[]): CentreGraph {
   return {
     centre: null,
     branches,
-    bands: [{ key: "running", label: "Running", branches, count: 2 }],
+    bands: [
+      { key: "running", label: "Running", branches, count: branches.length },
+    ],
     edges: [],
     hiddenShipped: 0,
   };
@@ -57,6 +59,15 @@ test("a branch not in the groups keeps its session cost and has no budget", () =
   assert.equal(out.branches[0], own);
   assert.equal(out.branches[0]?.cost, 2.5);
   assert.equal(out.branches[0]?.budget, undefined);
+});
+
+test("a branch with no session cost of a group with no cost stays unchanged", () => {
+  const notStarted = branch("n", "g1", null);
+  const out = withGroupCosts(graphOf([notStarted]), [
+    { cardId: "g1", cost: 0, budget: 20 },
+  ]);
+  assert.equal(out.branches[0], notStarted);
+  assert.equal(out.bands[0]?.branches[0], notStarted);
 });
 
 test("a planned branch with no card is unchanged", () => {

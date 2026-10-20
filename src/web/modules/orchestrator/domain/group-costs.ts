@@ -10,9 +10,9 @@ export function withGroupCosts(
   const apply = (branch: CentreBranch): CentreBranch => {
     const group =
       branch.cardId === null ? undefined : byCard.get(branch.cardId);
-    return group === undefined
-      ? branch
-      : { ...branch, cost: group.cost, budget: group.budget };
+    if (group === undefined) return branch;
+    if (branch.cost === null && group.cost === 0) return branch;
+    return { ...branch, cost: group.cost, budget: group.budget };
   };
   return {
     ...graph,

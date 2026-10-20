@@ -21,6 +21,23 @@ test("the key is the orchestration board prefix plus summary", () => {
   ]);
 });
 
+test("the keys of two boards share no prefix", () => {
+  assert.notDeepEqual(
+    orchestrationSummaryQueryOptions(BOARD).queryKey.slice(0, 2),
+    orchestrationSummaryQueryOptions("OTHR" as BoardKey).queryKey.slice(0, 2),
+  );
+});
+
+test("a failure status rejects the query", async () => {
+  globalThis.fetch = () => Promise.resolve(new Response("{}", { status: 500 }));
+  await assert.rejects(
+    new QueryClient().fetchQuery({
+      ...orchestrationSummaryQueryOptions(BOARD),
+      retry: false,
+    }),
+  );
+});
+
 test("the options fetch GET /api/boards/:key/orchestration", async () => {
   const summary = { concurrencyCap: 2, runningLoops: 1, groups: [] };
   globalThis.fetch = (url: string | URL | Request) => {
