@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { NavIcon } from "@/modules/shell/components/NavIcon";
 import { BOTTOM_BAR_SLOTS } from "@/modules/shell/domain/bottom-bar";
-import { usePublishedHeight } from "@/modules/shell/hooks/use-chrome-top";
+import { usePublishedHeight } from "@/modules/shell/hooks/use-published-height";
 
 interface BottomBarProps {
   current: Page;

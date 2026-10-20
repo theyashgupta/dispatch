@@ -10,7 +10,7 @@ import type { SidebarBoardsData } from "./SidebarBoards";
 import type { NavCounts, NavItem } from "../../../../shared/nav-items.js";
 import type { SyncSnapshot } from "@/modules/shell/domain/sync-status";
 import { useBarVisible } from "@/modules/shell/hooks/use-bar-visible";
-import { usePublishedHeight } from "@/modules/shell/hooks/use-chrome-top";
+import { usePublishedHeight } from "@/modules/shell/hooks/use-published-height";
 import { useMenuFocusReturn } from "@/modules/shell/hooks/use-menu-focus-return";
 
 interface ShellFrameProps {
