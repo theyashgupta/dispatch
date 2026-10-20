@@ -6513,6 +6513,9 @@ route `/boards/$key/orchestrator/{-$id}` shows it. The entry button is in the pa
 Its label is "Add orchestrator" on a board with no record. Its label is "Orchestrator" on a board with a
 record. It reads only the `Board` that the board list holds.
 
+The tile of a group branch and the detail panel header of a group card show the group cost total from
+`GET /api/boards/:key/orchestration`. The text is "$X of $Y" when the group has a budget. Otherwise it is "$X".
+
 The toolbar of the centre shows one control for the selected record. It is Start on a board with no
 record. It is also Start on a stopped record, unless the session state is `lost` or `shell_prompt`. It is
 Stop on a running record. It is Resume when the session state is `lost` or `shell_prompt`, also on a

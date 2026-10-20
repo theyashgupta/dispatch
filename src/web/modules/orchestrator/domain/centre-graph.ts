@@ -57,6 +57,7 @@ export interface CentreBranch {
   stateSince: string | null;
   shippedAt: string | null;
   slot: number;
+  budget?: number | null;
 }
 
 export interface CentreNode {

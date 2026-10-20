@@ -7,9 +7,10 @@ import {
 } from "react";
 import { NARROW_QUERY } from "../../../../shared/media-queries.js";
 import { pinFromBoard } from "../../../../shared/pinned-card.js";
-import type { Card } from "../../../../shared/types.js";
+import type { Card, OrchestrationSummary } from "../../../../shared/types.js";
 import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
 import { readClock, subscribeClock } from "@/components/ui/hooks/wake-clock";
+import { useOrchestrationSummaryQuery } from "@/queries/orchestration-summary-queries";
 import { BranchList } from "@/modules/orchestrator/components/BranchList";
 import type { TileBehaviour } from "@/modules/orchestrator/components/BranchTile";
 import { CentreCanvas } from "@/modules/orchestrator/components/CentreCanvas";
@@ -27,6 +28,7 @@ import {
   regionState,
 } from "@/modules/orchestrator/domain/centre-page-state";
 import { STALE_REASON } from "@/modules/orchestrator/domain/centre-model";
+import { withGroupCosts } from "@/modules/orchestrator/domain/group-costs";
 import { useCentrePane } from "@/modules/orchestrator/hooks/use-centre-pane";
 import { useEdgePaths } from "@/modules/orchestrator/hooks/use-edge-paths";
 import { useTileFocus } from "@/modules/orchestrator/hooks/use-tile-focus";
@@ -38,6 +40,7 @@ import { useCentreSelection } from "./use-centre-selection";
 import { useOrchestratorDecisions } from "./use-orchestrator-decisions";
 
 const NO_CARDS: Card[] = [];
+const NO_GROUPS: OrchestrationSummary["groups"] = [];
 const REASON_ID = "centre-actions-off";
 
 export function CentreContainer() {
@@ -60,17 +63,29 @@ export function CentreContainer() {
   const actions = useBranchActions(boardKey, cards);
   const start = useCentreControl(boardKey, null, stale);
 
+  const summary = useOrchestrationSummaryQuery(boardKey);
   const graph = useMemo(
     () =>
-      centreGraph({
-        cards,
-        records,
-        selectedId: record?.id ?? null,
-        decisions: decisions.decisions,
-        now,
-        showOlderShipped,
-      }),
-    [cards, records, record, decisions.decisions, now, showOlderShipped],
+      withGroupCosts(
+        centreGraph({
+          cards,
+          records,
+          selectedId: record?.id ?? null,
+          decisions: decisions.decisions,
+          now,
+          showOlderShipped,
+        }),
+        summary.data?.groups ?? NO_GROUPS,
+      ),
+    [
+      cards,
+      records,
+      record,
+      decisions.decisions,
+      now,
+      showOlderShipped,
+      summary.data,
+    ],
   );
   const order = useMemo(() => focusOrder(graph), [graph]);
   const { register, onKeyDown } = useTileFocus(order);

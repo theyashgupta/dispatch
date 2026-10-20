@@ -3,10 +3,8 @@ import { afterEach, test } from "node:test";
 import { QueryClient } from "@tanstack/react-query";
 import type { BoardKey } from "../../../../shared/types.js";
 import { openDecisionsQueryOptions } from "@/queries/attention-actions-queries";
-import {
-  orchestrationEventsQueryOptions,
-  orchestrationSummaryQueryOptions,
-} from "./orchestration-queries.js";
+import { orchestrationSummaryQueryOptions } from "@/queries/orchestration-summary-queries";
+import { orchestrationEventsQueryOptions } from "./orchestration-queries.js";
 
 const BOARD = "LOCAL" as BoardKey;
 const realFetch = globalThis.fetch;

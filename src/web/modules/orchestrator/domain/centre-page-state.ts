@@ -1,6 +1,7 @@
 import { actionFailedText } from "../../../../shared/decision-view.js";
 import type { OrchestratorConversation } from "../../../../shared/types.js";
 import { mainOrchestrator } from "../../../../shared/orchestrator-owner.js";
+import { costText as costWithBudget } from "../../../../shared/cost-text.js";
 import type { CentreBranch } from "./centre-graph.js";
 import {
   stripPeriod,
@@ -62,7 +63,8 @@ export function playbookText(name: string): string {
  * @remarks A branch that runs but has no reading yet shows no meter, so a tile never claims "Not started" for a live session.
  */
 export function tileMeters(
-  branch: Pick<CentreBranch, "state" | "contextPercent" | "cost">,
+  branch: Pick<CentreBranch, "state" | "contextPercent" | "cost"> &
+    Partial<Pick<CentreBranch, "budget">>,
 ): string[] {
   if (
     branch.state === "planned" &&
@@ -75,7 +77,9 @@ export function tileMeters(
     ...(branch.contextPercent === null
       ? []
       : [contextText(branch.contextPercent)]),
-    ...(branch.cost === null ? [] : [dollars(branch.cost)]),
+    ...(branch.cost === null
+      ? []
+      : [costWithBudget(branch.cost, branch.budget ?? null)]),
   ];
 }
 
