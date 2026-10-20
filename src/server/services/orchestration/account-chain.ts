@@ -49,6 +49,7 @@ import {
   accountDir,
   getActiveAccountId,
   readChainOrder,
+  getManagedDefaultId,
   readDefaultIdentity,
   readRegistry,
   setActiveAccount,
@@ -356,9 +357,12 @@ function entryWithState(
 async function refreshShadows(): Promise<void> {
   const active = getActiveAccountId();
   const registry = await readRegistry();
+  const homeLogin = getManagedDefaultId() === undefined ? home : undefined;
   const next = new Set(
     registry
-      .filter((record) => record.id !== active && isShadowOfHome(record, home))
+      .filter(
+        (record) => record.id !== active && isShadowOfHome(record, homeLogin),
+      )
       .map((record) => record.id),
   );
   let changed = false;

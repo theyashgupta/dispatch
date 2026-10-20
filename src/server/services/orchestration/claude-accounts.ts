@@ -319,6 +319,35 @@ interface RegistryFile {
   accounts: ClaudeAccountRecord[];
   defaultIdentity?: DefaultIdentity;
   defaultPosition: number;
+  managedDefaultId?: string;
+}
+
+let managedDefaultId: string | undefined;
+
+/**
+ * Refresh the cached managed default from a registry file, keeping it only while its record exists.
+ */
+function cacheManagedDefault(file: RegistryFile): void {
+  managedDefaultId = file.accounts.some((a) => a.id === file.managedDefaultId)
+    ? file.managedDefaultId
+    : undefined;
+}
+
+/**
+ * The account id that stands in for Default, `undefined` when Default is the home login.
+ *
+ * @remarks Synchronous and cached; every registry read and write refreshes it, and
+ * `loadManagedDefault` fills it at boot.
+ */
+export function getManagedDefaultId(): string | undefined {
+  return managedDefaultId;
+}
+
+/**
+ * Fill the managed default cache from the registry file.
+ */
+export async function loadManagedDefault(): Promise<void> {
+  await readRegistryFile();
 }
 
 function hasPosition(
@@ -353,6 +382,7 @@ async function readRegistryFile(): Promise<RegistryFile> {
     raw = await fsp.readFile(CLAUDE_ACCOUNTS_REGISTRY_PATH, "utf8");
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+      managedDefaultId = undefined;
       return { accounts: [], defaultPosition: 0 };
     }
     throw err;
@@ -362,6 +392,7 @@ async function readRegistryFile(): Promise<RegistryFile> {
     accounts?: unknown;
     defaultPosition?: unknown;
     defaultIdentity?: Partial<DefaultIdentity> | null;
+    managedDefaultId?: unknown;
   } | null;
   const accounts = parsed?.accounts;
   if (!Array.isArray(accounts) || !accounts.every(isAccountRecord)) {
@@ -381,6 +412,10 @@ async function readRegistryFile(): Promise<RegistryFile> {
   ) {
     file.defaultIdentity = { email: identity.email, orgId: identity.orgId };
   }
+  if (isAccountId(parsed?.managedDefaultId)) {
+    file.managedDefaultId = parsed.managedDefaultId;
+  }
+  cacheManagedDefault(file);
   return file;
 }
 
@@ -411,12 +446,15 @@ export async function isLaunchableAccount(id: string): Promise<boolean> {
 /**
  * Read the chain order: every account id, Default included, from the lowest position up.
  *
- * @remarks Default sorts before an added account at the same position.
+ * @remarks Default sorts before an added account at the same position. Once Default is managed,
+ * `default` is left out and the managed account keeps its own position.
  */
 export async function readChainOrder(): Promise<string[]> {
   const { accounts, defaultPosition } = await readRegistryFile();
   return [
-    { id: DEFAULT_CLAUDE_ACCOUNT_ID, position: defaultPosition },
+    ...(managedDefaultId === undefined
+      ? [{ id: DEFAULT_CLAUDE_ACCOUNT_ID, position: defaultPosition }]
+      : []),
     ...accounts,
   ]
     .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
@@ -441,14 +479,17 @@ async function writeRegistryFile(file: RegistryFile): Promise<void> {
     { mode: 0o600 },
   );
   fs.chmodSync(CLAUDE_ACCOUNTS_REGISTRY_PATH, 0o600);
+  cacheManagedDefault(file);
 }
 
 async function writeRegistry(accounts: ClaudeAccountRecord[]): Promise<void> {
-  const { defaultIdentity, defaultPosition } = await readRegistryFile();
+  const { defaultIdentity, defaultPosition, managedDefaultId } =
+    await readRegistryFile();
   await writeRegistryFile({
     accounts,
     defaultPosition,
     ...(defaultIdentity ? { defaultIdentity } : {}),
+    ...(managedDefaultId ? { managedDefaultId } : {}),
   });
 }
 
@@ -460,11 +501,34 @@ async function writeRegistry(accounts: ClaudeAccountRecord[]): Promise<void> {
  */
 export function writeDefaultIdentity(identity: DefaultIdentity): Promise<void> {
   return serialized(async () => {
-    const { accounts, defaultPosition } = await readRegistryFile();
+    const { accounts, defaultPosition, managedDefaultId } =
+      await readRegistryFile();
     await writeRegistryFile({
       accounts,
       defaultPosition,
       defaultIdentity: { email: identity.email, orgId: identity.orgId },
+      ...(managedDefaultId ? { managedDefaultId } : {}),
+    });
+  });
+}
+
+/**
+ * Store which account stands in for Default, or clear it with `undefined`.
+ *
+ * @remarks The record must already be in the registry, otherwise nothing is stored. Serialized
+ * behind the module mutation chain.
+ */
+export function setManagedDefault(id: string | undefined): Promise<void> {
+  return serialized(async () => {
+    const { accounts, defaultPosition, defaultIdentity } =
+      await readRegistryFile();
+    await writeRegistryFile({
+      accounts,
+      defaultPosition,
+      ...(defaultIdentity ? { defaultIdentity } : {}),
+      ...(id !== undefined && accounts.some((a) => a.id === id)
+        ? { managedDefaultId: id }
+        : {}),
     });
   });
 }
@@ -501,15 +565,23 @@ export function setChainOrder(
   { ok: true; order: string[] } | { ok: false; error: "invalid-order" }
 > {
   return serialized(async () => {
-    const { accounts, defaultIdentity } = await readRegistryFile();
-    const current = [DEFAULT_CLAUDE_ACCOUNT_ID, ...accounts.map((a) => a.id)];
+    const { accounts, defaultIdentity, defaultPosition, managedDefaultId } =
+      await readRegistryFile();
+    const managed = managedDefaultId !== undefined;
+    const current = [
+      ...(managed ? [] : [DEFAULT_CLAUDE_ACCOUNT_ID]),
+      ...accounts.map((a) => a.id),
+    ];
     if (!isValidChainOrder(current, order)) {
       return { ok: false, error: "invalid-order" };
     }
     await writeRegistryFile({
       accounts: accounts.map((a) => ({ ...a, position: order.indexOf(a.id) })),
-      defaultPosition: order.indexOf(DEFAULT_CLAUDE_ACCOUNT_ID),
+      defaultPosition: managed
+        ? defaultPosition
+        : order.indexOf(DEFAULT_CLAUDE_ACCOUNT_ID),
       ...(defaultIdentity ? { defaultIdentity } : {}),
+      ...(managedDefaultId ? { managedDefaultId } : {}),
     });
     return { ok: true, order: await readChainOrder() };
   });
@@ -524,12 +596,17 @@ export function removeAccount(
 ): Promise<{ ok: true } | { ok: false; error: "not-found" }> {
   accountDir(id);
   return serialized(async () => {
-    const accounts = await readRegistry();
-    if (!accounts.some((a) => a.id === id)) {
+    const file = await readRegistryFile();
+    if (!file.accounts.some((a) => a.id === id)) {
       return { ok: false, error: "not-found" };
     }
     await removeConfigDir(id);
-    await writeRegistry(accounts.filter((a) => a.id !== id));
+    const { managedDefaultId: managed, ...rest } = file;
+    await writeRegistryFile({
+      ...rest,
+      accounts: file.accounts.filter((a) => a.id !== id),
+      ...(managed && managed !== id ? { managedDefaultId: managed } : {}),
+    });
     if (getActiveAccountId() === id) {
       updateActiveClaudeAccountId(DEFAULT_CLAUDE_ACCOUNT_ID);
     }
@@ -538,13 +615,18 @@ export function removeAccount(
 }
 
 /**
- * Prove an account pointer can be launched on: `default` always can; an added id must be in the
+ * Prove an account pointer can be launched on: `default` resolves to the managed default when one
+ * exists and otherwise always can; an added id must be in the
  * registry and its config dir must exist on disk, which is then re-linked. Throws a value-free
  * error naming the account's email so the saga reports it on the card.
  * @see docs/ARCHITECTURE.md#claude-accounts
  */
 export function resolveLaunchAccount(id: string): Promise<LaunchAccount> {
-  if (id === DEFAULT_CLAUDE_ACCOUNT_ID) return Promise.resolve({ id });
+  if (id === DEFAULT_CLAUDE_ACCOUNT_ID) {
+    return managedDefaultId === undefined
+      ? Promise.resolve({ id })
+      : resolveLaunchAccount(managedDefaultId);
+  }
   if (!ACCOUNT_ID_RE.test(id)) {
     return Promise.reject(
       new Error(`Claude account ${id} is not a valid account id`),
@@ -570,11 +652,16 @@ export function resolveLaunchAccount(id: string): Promise<LaunchAccount> {
 
 /**
  * The id new sessions launch on, `default` when the config carries none.
+ *
+ * @remarks A stored `default` reads as the managed default once one exists.
  */
 export function getActiveAccountId(): string {
-  return (
-    getOrchestrationConfig()?.activeClaudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID
-  );
+  const stored =
+    getOrchestrationConfig()?.activeClaudeAccountId ??
+    DEFAULT_CLAUDE_ACCOUNT_ID;
+  return stored === DEFAULT_CLAUDE_ACCOUNT_ID && managedDefaultId !== undefined
+    ? managedDefaultId
+    : stored;
 }
 
 /**
@@ -593,7 +680,9 @@ export function setActiveAccount(
         return { ok: false, error: "not-found" };
       }
     }
-    updateActiveClaudeAccountId(id);
+    updateActiveClaudeAccountId(
+      id === DEFAULT_CLAUDE_ACCOUNT_ID ? (managedDefaultId ?? id) : id,
+    );
     return { ok: true };
   });
 }
@@ -606,6 +695,7 @@ export async function listAccounts(
   homeIdentity: ClaudeIdentity,
 ): Promise<AccountSummaryWithoutUsage[]> {
   const accounts = await readRegistry();
+  const managed = managedDefaultId;
   const base: AccountSummaryWithoutUsage = {
     id: DEFAULT_CLAUDE_ACCOUNT_ID,
     email: homeIdentity.loggedIn ? homeIdentity.email : "Not signed in",
@@ -622,6 +712,7 @@ export async function listAccounts(
       subscriptionType: a.subscriptionType,
       isDefault: false,
       lastLoginAt: a.lastLoginAt,
+      ...(a.id === managed ? { managedDefault: true } : {}),
     }));
-  return [base, ...added];
+  return managed === undefined ? [base, ...added] : added;
 }

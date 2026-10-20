@@ -1454,6 +1454,7 @@ export interface ClaudeAccountSummary {
   orgName: string;
   subscriptionType: string;
   isDefault: boolean;
+  managedDefault?: boolean;
   lastLoginAt?: string;
   usage: ClaudeUsageSnapshot;
   position: number;

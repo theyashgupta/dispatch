@@ -23,6 +23,7 @@ import {
   terminalProxyUpgrade,
 } from "../adapters/terminal-proxy.js";
 import { probePreflight } from "../services/infra/preflight.js";
+import { loadManagedDefault } from "../services/orchestration/claude-accounts.js";
 import {
   onDefaultUsageRefreshed,
   startUsagePollLoop,
@@ -515,6 +516,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   });
   startArtifactDetectionLoop(port);
   if (config.updateCheck !== false) startUpdateCheckLoop(config);
+  await loadManagedDefault().catch(() => undefined);
   onDefaultUsageRefreshed(() => void checkDefaultIdentity());
   startDefaultIdentityWatch();
   await startAccountChain();

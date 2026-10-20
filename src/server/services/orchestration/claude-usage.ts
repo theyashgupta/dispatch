@@ -28,6 +28,7 @@ import {
   accountDir,
   getActiveAccountId,
   keychainServiceName,
+  getManagedDefaultId,
   readRegistry,
 } from "./claude-accounts.js";
 
@@ -317,7 +318,8 @@ export async function refreshUsageManually(
 }
 
 async function pollableIds(): Promise<string[]> {
-  let ids: string[] = [DEFAULT_CLAUDE_ACCOUNT_ID];
+  let ids: string[] =
+    getManagedDefaultId() === undefined ? [DEFAULT_CLAUDE_ACCOUNT_ID] : [];
   try {
     ids = ids.concat((await readRegistry()).map((a) => a.id));
   } catch {}

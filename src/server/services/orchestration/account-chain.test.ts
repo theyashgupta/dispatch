@@ -32,6 +32,7 @@ const {
   getActiveAccountId,
   removeAccount,
   setActiveAccount,
+  setManagedDefault,
   writeDefaultIdentity,
 } = await import("./claude-accounts.js");
 const { emptyChainState, readChainState, writeChainState } =
@@ -2031,6 +2032,21 @@ void test("the home login of the other account shadows it instead", async () => 
   const saved = await readChainState();
   assert.equal(saved.accounts[ACCOUNT_A]?.state, "unknown");
   assert.equal(saved.accounts[ACCOUNT_B]?.state, "shadowed-by-home");
+});
+
+void test("no account is shadowed once a managed default exists", async () => {
+  await setManagedDefault(ACCOUNT_B);
+  try {
+    await begin({}, {}, IDENTITY_A);
+    await noteHomeIdentity(IDENTITY_A);
+    assert.notEqual(
+      (await readChainState()).accounts[ACCOUNT_A]?.state,
+      "shadowed-by-home",
+    );
+  } finally {
+    await setManagedDefault(undefined);
+    await setActiveAccount("default");
+  }
 });
 
 void test("the account in use is never shadowed, even when it holds the home login", async () => {
