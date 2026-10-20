@@ -32,7 +32,7 @@ export function SyncStatus({ sync, collapsed }: SyncStatusProps) {
     <div
       role="status"
       aria-live="polite"
-      title={collapsed ? status.text : undefined}
+      title={status.text}
       className={cn(
         "flex h-8 min-w-0 items-center overflow-hidden px-2 text-sm font-medium whitespace-nowrap",
         collapsed && "justify-center",
