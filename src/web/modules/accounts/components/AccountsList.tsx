@@ -9,6 +9,7 @@ interface AccountsListProps {
   now: number;
   loaded: boolean;
   failed: boolean;
+  removeError: string | null;
   addDisabled: boolean;
   onAdd: () => void;
   onSwitch: (account: ClaudeAccountSummary) => void;
@@ -24,6 +25,7 @@ export function AccountsList({
   now,
   loaded,
   failed,
+  removeError,
   addDisabled,
   onAdd,
   onSwitch,
@@ -56,6 +58,7 @@ export function AccountsList({
         <span className="text-xs text-muted-foreground">Loading…</span>
       )}
       {failed && <ErrorAlert>Couldn't load Claude accounts.</ErrorAlert>}
+      {removeError && <ErrorAlert>{removeError}</ErrorAlert>}
 
       {loaded && defaultOnly && (
         <p

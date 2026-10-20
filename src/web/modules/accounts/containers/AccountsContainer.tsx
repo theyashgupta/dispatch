@@ -1,5 +1,5 @@
-import { useParams } from "@tanstack/react-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate, useParams } from "@tanstack/react-router";
+import { useCallback, useEffect, useState } from "react";
 import type { ClaudeAccountSummary } from "../../../../shared/types.js";
 import { AccountsList } from "@/modules/accounts/components/AccountsList";
 import { AccountsStack } from "@/modules/accounts/components/AccountsStack";
@@ -20,7 +20,8 @@ export function AccountsContainer() {
   const accounts = useAccountsQuery();
   const { refetch } = accounts;
   const { id: routeId } = useParams({ from: "/accounts/{-$id}" });
-  const handledRouteId = useRef<string | null>(null);
+  const navigate = useNavigate();
+  const [openedRouteId, setOpenedRouteId] = useState<string | undefined>();
   const [addTarget, setAddTarget] = useState<{
     account?: ClaudeAccountSummary;
   } | null>(null);
@@ -31,21 +32,31 @@ export function AccountsContainer() {
     null,
   );
   const reload = useCallback(() => void refetch(), [refetch]);
+  const [removeError, setRemoveError] = useState<string | null>(null);
   const removeDuplicate = useRemoveAccountMutation();
   const removeDuplicateOnce = useSingleFlight(removeDuplicate.mutate);
   const routeAccount = accounts.data?.accounts.find(
     (a) => a.id === routeId && !a.isDefault,
   );
 
-  useEffect(() => {
+  if (routeId !== openedRouteId && (routeId === undefined || routeAccount)) {
+    setOpenedRouteId(routeId);
     if (
-      routeAccount === undefined ||
-      handledRouteId.current === routeAccount.id
-    )
-      return;
-    handledRouteId.current = routeAccount.id;
-    setAddTarget({ account: routeAccount });
-  }, [routeAccount]);
+      routeAccount?.state === "needs-login" ||
+      routeAccount?.state === "login-expired"
+    ) {
+      setAddTarget({ account: routeAccount });
+    }
+  }
+
+  useEffect(() => {
+    if (routeAccount === undefined) return;
+    void navigate({
+      to: "/accounts/{-$id}",
+      params: { id: undefined },
+      replace: true,
+    });
+  }, [routeAccount, navigate]);
 
   return (
     <AccountsStack>
@@ -55,6 +66,7 @@ export function AccountsContainer() {
         now={now}
         loaded={!accounts.isPending}
         failed={accounts.isError}
+        removeError={removeError}
         addDisabled={addTarget?.account !== undefined}
         reloginDisabled={addTarget !== null}
         onAdd={() => setAddTarget({})}
@@ -62,7 +74,12 @@ export function AccountsContainer() {
         onRelogin={(account) => setAddTarget({ account })}
         onRemove={setRemoveTarget}
         onRemoveDuplicate={(account) =>
-          removeDuplicateOnce(account.id, { onSettled: reload })
+          removeDuplicateOnce(account.id, {
+            onSuccess: (result) =>
+              setRemoveError(result.ok ? null : result.error),
+            onError: () => setRemoveError("Couldn't remove the account."),
+            onSettled: reload,
+          })
         }
       />
 
@@ -90,6 +107,7 @@ export function AccountsContainer() {
       )}
       {addTarget && (
         <AddAccountContainer
+          key={addTarget.account?.id ?? "new"}
           accountId={addTarget.account?.id}
           accountEmail={addTarget.account?.email}
           onClose={() => {
