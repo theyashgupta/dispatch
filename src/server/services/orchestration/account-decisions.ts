@@ -28,6 +28,32 @@ export function raiseLoginDecision(accountId: string, email: string): string {
 }
 
 /**
+ * Raise the decision that tells the user every account is at its limit and return its id.
+ */
+export function raiseExhaustedDecision(earliestResetAt: string | null): string {
+  const item = createDecisionItem(
+    {
+      boardKey: DEFAULT_BOARD_KEY,
+      orchestratorId: ACCOUNT_DECISIONS_ORCHESTRATOR,
+    },
+    {
+      cardId: null,
+      kind: "other",
+      question:
+        earliestResetAt === null
+          ? "Every Claude account is at its limit. No reset time is known. Open /#/accounts and add an account to continue sooner."
+          : `Every Claude account is at its limit. Work resumes at ${earliestResetAt} when the first account resets. Open /#/accounts and add an account to continue sooner.`,
+      options: [
+        { id: "wait", label: "Wait for the reset" },
+        { id: "add", label: "Add an account" },
+      ],
+      recommendedOptionId: "wait",
+    },
+  );
+  return item.id;
+}
+
+/**
  * Answer an account decision, leaving it alone when it is already answered or gone.
  *
  * @remarks The user can answer a decision between the chain's check and its close, so a conflict

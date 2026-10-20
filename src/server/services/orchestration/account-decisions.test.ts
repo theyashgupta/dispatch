@@ -8,6 +8,7 @@ const { store } = await import("../../store/board.store.js");
 const {
   ACCOUNT_DECISIONS_ORCHESTRATOR,
   closeAccountDecision,
+  raiseExhaustedDecision,
   raiseLoginDecision,
 } = await import("./account-decisions.js");
 const { answerDecisionItem } = await import("./decision-items.js");
@@ -62,4 +63,32 @@ void test("closeAccountDecision on an answered or unknown item does not throw an
     note: null,
   });
   closeAccountDecision("no-such-decision", "later", "gone");
+});
+
+void test("raiseExhaustedDecision names the reset time and offers wait and add", () => {
+  const decisionId = raiseExhaustedDecision("2026-10-20T14:00:00.000Z");
+  const item = store.getDecisionItem(decisionId);
+  assert.ok(item);
+  assert.equal(item.state, "open");
+  assert.equal(item.boardKey, DEFAULT_BOARD_KEY);
+  assert.equal(item.boardKey, "LOCAL");
+  assert.equal(item.orchestratorId, "dispatch-accounts");
+  assert.equal(item.cardId, null);
+  assert.equal(
+    item.question,
+    "Every Claude account is at its limit. Work resumes at 2026-10-20T14:00:00.000Z when the first account resets. Open /#/accounts and add an account to continue sooner.",
+  );
+  assert.deepEqual(item.options, [
+    { id: "wait", label: "Wait for the reset" },
+    { id: "add", label: "Add an account" },
+  ]);
+  assert.equal(item.recommendedOptionId, "wait");
+});
+
+void test("raiseExhaustedDecision without a reset time says none is known", () => {
+  const item = store.getDecisionItem(raiseExhaustedDecision(null));
+  assert.equal(
+    item?.question,
+    "Every Claude account is at its limit. No reset time is known. Open /#/accounts and add an account to continue sooner.",
+  );
 });

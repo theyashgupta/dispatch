@@ -40,6 +40,7 @@ import {
 import { recordChainEvent, type ChainEvent } from "./account-chain-records.js";
 import {
   closeAccountDecision,
+  raiseExhaustedDecision,
   raiseLoginDecision as raiseAccountLoginDecision,
 } from "./account-decisions.js";
 import {
@@ -73,6 +74,7 @@ const SURFACE_CAP_MS = 5 * 60 * 60 * 1000;
 const SCAN_MS = 30_000;
 const EXHAUSTED_TIMER = "exhausted";
 const NEEDS_LOGIN_CAUSE = "needs-login:";
+const EXHAUSTED_CAUSE = "exhausted";
 
 export interface ChainDeps {
   now: () => number;
@@ -87,6 +89,9 @@ export interface ChainDeps {
   emit: (event: ChainEvent) => void;
   startLogin: (accountId?: string) => Promise<{ ok: boolean; error?: string }>;
   raiseLoginDecision: (accountId: string) => Promise<string>;
+  raiseExhaustedDecision: (
+    earliestResetAt: string | null,
+  ) => string | Promise<string>;
   closeDecision: (decisionId: string, optionId: string, note: string) => void;
   scanMs: number;
 }
@@ -120,6 +125,7 @@ const realDeps: ChainDeps = {
         : (await readRegistry()).find((a) => a.id === id)?.email;
     return raiseAccountLoginDecision(id, email ?? id);
   },
+  raiseExhaustedDecision,
   closeDecision: closeAccountDecision,
   scanMs: SCAN_MS,
 };
@@ -455,13 +461,36 @@ async function moveOrOffer(
   } else offer(kind, from, to, reason);
 }
 
+/**
+ * Close the exhausted decision once an account is usable again.
+ *
+ * @remarks The caller persists, so the dropped id is saved with the cleared exhausted record.
+ */
+function closeExhaustedDecision(): void {
+  const stored = chain.decisions[EXHAUSTED_CAUSE];
+  if (stored === undefined) return;
+  try {
+    deps.closeDecision(stored, "wait", "An account is usable again.");
+  } catch (err) {
+    console.warn(`[account-chain] ${(err as Error).message}`);
+  }
+  delete chain.decisions[EXHAUSTED_CAUSE];
+}
+
 async function clearExhausted(): Promise<void> {
   cancel(EXHAUSTED_TIMER);
   if (chain.exhausted === null) return;
   chain.exhausted = null;
+  closeExhaustedDecision();
   await persist();
 }
 
+/**
+ * Record the exhausted chain and raise the one board decision for it.
+ *
+ * @remarks The decision is raised when none is stored, which also covers a chain file written
+ * before the decision existed. A failure keeps the id absent, so the next check tries again.
+ */
 async function markExhausted(
   from: string,
   earliestResetAt: string | null,
@@ -471,6 +500,14 @@ async function markExhausted(
     since: chain.exhausted?.since ?? nowIso(),
     earliestResetAt,
   };
+  if (chain.decisions[EXHAUSTED_CAUSE] === undefined) {
+    try {
+      chain.decisions[EXHAUSTED_CAUSE] =
+        await deps.raiseExhaustedDecision(earliestResetAt);
+    } catch (err) {
+      console.warn(`[account-chain] ${(err as Error).message}`);
+    }
+  }
   scheduleExhausted(recheckAt(earliestResetAt));
   await persist();
   if (first) deps.emit({ kind: "exhausted", from, earliestResetAt });
@@ -492,6 +529,7 @@ async function moveTo(
   lastOffer = null;
   cancel(EXHAUSTED_TIMER);
   chain.exhausted = null;
+  closeExhaustedDecision();
   let moves: AccountApplyResult | null = null;
   try {
     await persist();
@@ -810,11 +848,16 @@ export async function startAccountChain(
       if (running) void handleUsageRead(id, usage).catch(() => undefined);
     });
     onDecisionAnswered((item) => {
-      if (!running || item.answer?.optionId !== "login") return;
+      if (!running) return;
       const cause = Object.keys(chain.decisions).find(
         (key) => chain.decisions[key] === item.id,
       );
-      if (!cause?.startsWith(NEEDS_LOGIN_CAUSE)) return;
+      if (
+        !cause?.startsWith(NEEDS_LOGIN_CAUSE) ||
+        item.answer?.optionId !== "login"
+      ) {
+        return;
+      }
       const accountId = cause.slice(NEEDS_LOGIN_CAUSE.length);
       void deps
         .startLogin(accountId)

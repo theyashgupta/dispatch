@@ -52,7 +52,7 @@ const { moveOrQueue, runPendingMove, sweepPendingMoves } =
   await import("./session-account-apply.js");
 const { liveTurnState, recordTurnEvent } = await import("./session-turn.js");
 const { refreshUsage } = await import("./claude-usage.js");
-const { closeAccountDecision, raiseLoginDecision } =
+const { closeAccountDecision, raiseExhaustedDecision, raiseLoginDecision } =
   await import("./account-decisions.js");
 const { answerDecisionItem } = await import("./decision-items.js");
 const {
@@ -127,6 +127,7 @@ function surfaceAt(ms: number): string {
 
 const logins: (string | undefined)[] = [];
 const raised: string[] = [];
+const raisedExhausted: (string | null)[] = [];
 const closed: { decisionId: string; optionId: string; note: string }[] = [];
 
 const fakeDeps = {
@@ -163,6 +164,10 @@ const fakeDeps = {
     return Promise.resolve(
       raiseLoginDecision(accountId, `${accountId}@x.test`),
     );
+  },
+  raiseExhaustedDecision: (earliestResetAt: string | null) => {
+    raisedExhausted.push(earliestResetAt);
+    return raiseExhaustedDecision(earliestResetAt);
   },
   closeDecision: (decisionId: string, optionId: string, note: string) => {
     closed.push({ decisionId, optionId, note });
@@ -207,6 +212,7 @@ async function begin(
   readLog.length = 0;
   logins.length = 0;
   raised.length = 0;
+  raisedExhausted.length = 0;
   closed.length = 0;
   reads.clear();
   readMode = "fresh";
@@ -1972,4 +1978,112 @@ void test("removing a shadowed account lets a new account with the same login be
     (await readChainState()).accounts[ACCOUNT_A]?.state,
     "available",
   );
+});
+
+/** Read every account at its limit, the earliest reset at `BASE + 30 min`, and hold those reads. */
+function holdAllLimited(): void {
+  reads.set(ACCOUNT_A, usage(100, iso(BASE + 30 * MIN)));
+  reads.set(ACCOUNT_B, usage(100, iso(BASE + 90 * MIN)));
+  reads.set("default", usage(100, iso(BASE + 120 * MIN)));
+}
+
+/** Start the controller with every account limited and the chain exhausted. */
+async function beginExhausted(): Promise<string> {
+  await begin();
+  await sessionCard("ex-held");
+  holdAllLimited();
+  for (const id of [ACCOUNT_A, ACCOUNT_B, "default"]) {
+    await handleUsageRead(id, reads.get(id) as ClaudeUsageSnapshot);
+  }
+  return (await readChainState()).decisions.exhausted as string;
+}
+
+void test("an exhausted chain raises one decision with the earliest reset", async () => {
+  const decisionId = await beginExhausted();
+  assert.deepEqual(raisedExhausted, [iso(BASE + 30 * MIN)]);
+  const item = store.getDecisionItem(decisionId);
+  assert.equal(item?.state, "open");
+  assert.ok(item?.question.includes(iso(BASE + 30 * MIN)));
+  assert.equal(events.filter((e) => e.kind === "exhausted").length, 1);
+});
+
+void test("a second exhausted check while every account is still limited raises nothing", async () => {
+  await beginExhausted();
+  reads.set(ACCOUNT_A, usage(100, iso(BASE + 90 * MIN)));
+  const reading = readLog.length;
+  await advance(33 * MIN);
+  assert.ok(readLog.length > reading);
+  assert.notEqual((await readChainState()).exhausted, null);
+  assert.equal(raisedExhausted.length, 1);
+  assert.deepEqual(closed, []);
+});
+
+void test("the exhausted check that finds an account usable closes the decision with wait", async () => {
+  const decisionId = await beginExhausted();
+  reads.set(ACCOUNT_A, usage(5));
+  await advance(32 * MIN);
+  const saved = await readChainState();
+  assert.equal(saved.exhausted, null);
+  assert.equal(saved.decisions.exhausted, undefined);
+  assert.deepEqual(closed, [
+    { decisionId, optionId: "wait", note: "An account is usable again." },
+  ]);
+  assert.equal(store.getDecisionItem(decisionId)?.answer?.optionId, "wait");
+});
+
+void test("a switch now that clears the exhausted record closes the decision", async () => {
+  await begin();
+  const decisionId = raiseExhaustedDecision(null);
+  const state = emptyChainState();
+  state.exhausted = { since: iso(BASE), earliestResetAt: null };
+  state.decisions.exhausted = decisionId;
+  await writeChainState(state);
+  stop();
+  stop = await startAccountChain(fakeDeps);
+  assert.equal((await requestFailover("switch-now")).ok, true);
+  assert.deepEqual(closed, [
+    { decisionId, optionId: "wait", note: "An account is usable again." },
+  ]);
+  const saved = await readChainState();
+  assert.equal(saved.exhausted, null);
+  assert.equal(saved.decisions.exhausted, undefined);
+});
+
+void test("a restart of the controller with the stored decision raises none at the next exhausted check", async () => {
+  await beginExhausted();
+  reads.set(ACCOUNT_A, usage(100, iso(BASE + 90 * MIN)));
+  stop();
+  await whenChainIdle();
+  stop = await startAccountChain(fakeDeps);
+  await advance(33 * MIN);
+  assert.notEqual((await readChainState()).exhausted, null);
+  assert.equal(raisedExhausted.length, 1);
+});
+
+void test("a chain file exhausted before the upgrade raises one decision at the next exhausted check", async () => {
+  await begin();
+  const state = emptyChainState();
+  state.exhausted = {
+    since: iso(BASE),
+    earliestResetAt: iso(BASE + 30 * MIN),
+  };
+  await writeChainState(state);
+  holdAllLimited();
+  reads.set(ACCOUNT_A, usage(100, iso(BASE + 90 * MIN)));
+  stop();
+  stop = await startAccountChain(fakeDeps);
+  assert.deepEqual(raisedExhausted, []);
+  await advance(33 * MIN);
+  assert.deepEqual(raisedExhausted, [iso(BASE + 90 * MIN)]);
+  assert.equal(typeof (await readChainState()).decisions.exhausted, "string");
+  assert.equal(events.filter((e) => e.kind === "exhausted").length, 0);
+});
+
+void test("answering the exhausted decision starts no login, since the user adds the account on the accounts page", async () => {
+  const decisionId = await beginExhausted();
+  answerDecisionItem(decisionId, { optionId: "wait", note: null });
+  await beginExhausted();
+  const second = (await readChainState()).decisions.exhausted as string;
+  answerDecisionItem(second, { optionId: "add", note: null });
+  assert.deepEqual(logins, []);
 });
