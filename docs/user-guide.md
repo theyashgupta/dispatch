@@ -127,6 +127,7 @@ Only you can change the policy. The orchestrator reads it. No tool can change it
 | **At a usage limit**                                      | **Wait for the reset**, **Stop and ask me**                                                      | **Wait for the reset**      |
 | **Ship rights**                                           | **None, I ship**, **Open PRs**, **Open and merge PRs**                                           | **None, I ship**            |
 | **Budget per group (USD)**                                | An amount above 0 and at most 100000, or empty for **No limit**                                  | Empty (**No limit**)        |
+| **Budget warning (%)**                                    | A whole number from 1 to 99                                                                      | 80                          |
 | **Supervisor**                                            | **On**, **Off**                                                                                  | **On** (**Off** on `LOCAL`) |
 
 Notes on the fields:

@@ -80,6 +80,7 @@ export function defaultBoardPolicy(key: BoardKey): BoardPolicy {
     usageLimit: "wait",
     shipRights: "none",
     budgetPerGroup: null,
+    budgetWarnPercent: 80,
     supervisor: key === DEFAULT_BOARD_KEY ? "off" : "on",
     groupPlaybook: null,
     wakeMinutes: 15,

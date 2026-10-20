@@ -6211,7 +6211,8 @@ user route; no orchestrator route or tool changes a policy. The `groupPlaybook` 
 or null) is one of these fields. A save that omits `groupPlaybook` keeps the stored value, and a save
 with null clears it. `wakeMinutes` (whole number, 0 to 1440, else 400 `invalid-wakeMinutes`) is optional
 the same way, and so are `memoryFloorMb` (0 to 65536, default 1024, else 400 `invalid-memoryFloorMb`)
-and `swapCeilingMb` (256 to 65536, default 8192, else 400 `invalid-swapCeilingMb`). The store reads each stored policy as the defaults of `defaultBoardPolicy` with
+and `swapCeilingMb` (256 to 65536, default 8192, else 400 `invalid-swapCeilingMb`). `budgetWarnPercent`
+(whole number, 1 to 99, default 80, else 400 `invalid-budgetWarnPercent`) is optional the same way. The store reads each stored policy as the defaults of `defaultBoardPolicy` with
 the stored values over them, so a board saved before a new field gets its default. A stored policy
 that is JSON `null` or an array reads as the defaults alone.
 

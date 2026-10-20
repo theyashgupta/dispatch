@@ -181,6 +181,7 @@ test("every refusal code a user route can return has plain text", () => {
     "invalid-memoryFloorMb",
     "invalid-swapCeilingMb",
     "invalid-budgetPerGroup",
+    "invalid-budgetWarnPercent",
     "invalid-policy",
     "unknown-field",
     "invalid-body",

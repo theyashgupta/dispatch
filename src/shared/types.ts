@@ -1840,6 +1840,7 @@ export interface BoardPolicy {
   usageLimit: "wait" | "stop";
   shipRights: "none" | "open_prs" | "merge";
   budgetPerGroup: number | null;
+  budgetWarnPercent: number;
   supervisor: "on" | "off";
   groupPlaybook: string | null;
   wakeMinutes: number;
