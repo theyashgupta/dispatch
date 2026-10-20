@@ -9,6 +9,8 @@ import { AddAccountContainer } from "./AddAccountContainer";
 import { RemoveAccountContainer } from "./RemoveAccountContainer";
 import { RunningSessionsContainer } from "./RunningSessionsContainer";
 import { useNow } from "@/modules/accounts/hooks/use-now";
+import { useRemoveAccountMutation } from "@/modules/accounts/queries/accounts-queries";
+import { useSingleFlight } from "@/queries/single-flight";
 import { useAccountsQuery } from "@/queries/accounts-queries";
 
 const EXPIRY_TICK_MS = 60_000;
@@ -29,6 +31,8 @@ export function AccountsContainer() {
     null,
   );
   const reload = useCallback(() => void refetch(), [refetch]);
+  const removeDuplicate = useRemoveAccountMutation();
+  const removeDuplicateOnce = useSingleFlight(removeDuplicate.mutate);
   const routeAccount = accounts.data?.accounts.find(
     (a) => a.id === routeId && !a.isDefault,
   );
@@ -57,6 +61,9 @@ export function AccountsContainer() {
         onSwitch={setSwitchTarget}
         onRelogin={(account) => setAddTarget({ account })}
         onRemove={setRemoveTarget}
+        onRemoveDuplicate={(account) =>
+          removeDuplicateOnce(account.id, { onSettled: reload })
+        }
       />
 
       {accounts.data && (

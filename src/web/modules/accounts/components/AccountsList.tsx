@@ -14,6 +14,7 @@ interface AccountsListProps {
   onSwitch: (account: ClaudeAccountSummary) => void;
   onRelogin: (account: ClaudeAccountSummary) => void;
   onRemove: (account: ClaudeAccountSummary) => void;
+  onRemoveDuplicate: (account: ClaudeAccountSummary) => void;
   reloginDisabled: boolean;
 }
 
@@ -28,6 +29,7 @@ export function AccountsList({
   onSwitch,
   onRelogin,
   onRemove,
+  onRemoveDuplicate,
   reloginDisabled,
 }: AccountsListProps) {
   const defaultOnly = accounts.every((account) => account.isDefault);
@@ -78,6 +80,7 @@ export function AccountsList({
               onSwitch={() => onSwitch(account)}
               onRelogin={() => onRelogin(account)}
               onRemove={() => onRemove(account)}
+              onRemoveDuplicate={() => onRemoveDuplicate(account)}
             />
           ))}
         </div>

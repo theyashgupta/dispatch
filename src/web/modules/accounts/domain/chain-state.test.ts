@@ -23,6 +23,10 @@ test("each chain state has a label and a tone", () => {
     label: "Needs login",
     tone: "danger",
   });
+  assert.deepEqual(chainStateBadge("shadowed-by-home"), {
+    label: "Same login as Default",
+    tone: "warning",
+  });
   assert.deepEqual(chainStateBadge("unknown"), {
     label: "Unknown",
     tone: "neutral",

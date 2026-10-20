@@ -12,6 +12,7 @@ const STATES: Record<
   limited: { label: "Limited", tone: "danger" },
   "login-expired": { label: "Login expired", tone: "danger" },
   "needs-login": { label: "Needs login", tone: "danger" },
+  "shadowed-by-home": { label: "Same login as Default", tone: "warning" },
   unknown: { label: "Unknown", tone: "neutral" },
 };
 
