@@ -72,20 +72,49 @@ void test("markNeedsInput writes the state and reason, moves the card once and a
   assert.equal(session().stateReason, "usage_stop");
 });
 
-void test("moveToNeedsInput keeps a finished card in Agent done with its DONE marker", async () => {
-  const { card, session } = await startedCard("done-keep");
+const ENGINE = {
+  active: false,
+  iteration: null,
+  sessionId: null,
+  handoffPending: false,
+  startedAt: null,
+};
+
+async function doneCard(title: string, closed: boolean | null) {
+  const made = await startedCard(title);
+  await store.setLoopProgress(made.card().id, {
+    ...LOOP_PROGRESS,
+    engine: closed === null ? null : { ...ENGINE, closed },
+  });
   await store.applyMarker(
-    card().id,
-    session().id,
+    made.card().id,
+    made.session().id,
     "agent_done",
     undefined,
     "DONE built",
     "status_agent_done",
   );
+  return made;
+}
+
+void test("moveToNeedsInput keeps a finished card with a closed loop engine in Agent done with its DONE marker", async () => {
+  const { card, session } = await doneCard("done-keep", true);
   assert.equal(card().column, "agent_done");
   await moveToNeedsInput(card(), session(), "idle");
   assert.equal(card().column, "agent_done");
   assert.equal(card().lastMarker, "DONE built");
+});
+
+void test("moveToNeedsInput moves an Agent done card with a DONE marker and an open loop engine", async () => {
+  const { card, session } = await doneCard("done-open", false);
+  await moveToNeedsInput(card(), session(), "idle");
+  assert.equal(card().column, "needs_input");
+});
+
+void test("moveToNeedsInput moves an Agent done card with a DONE marker and no loop engine", async () => {
+  const { card, session } = await doneCard("done-no-engine", null);
+  await moveToNeedsInput(card(), session(), "idle");
+  assert.equal(card().column, "needs_input");
 });
 
 void test("moveToNeedsInput still moves an Agent done card whose marker is not a DONE key", async () => {
