@@ -28,6 +28,7 @@ export interface PolicyFormValues {
   usageLimit: BoardPolicy["usageLimit"];
   shipRights: BoardPolicy["shipRights"];
   budgetPerGroup: string;
+  budgetWarnPercent: string;
   supervisor: BoardPolicy["supervisor"];
   groupPlaybook: string | null;
   crossSessionInbound: CrossSessionInbound | null;
@@ -44,7 +45,8 @@ export type PolicyFormErrors = Partial<
     | "wakeMinutes"
     | "memoryFloorMb"
     | "swapCeilingMb"
-    | "budgetPerGroup",
+    | "budgetPerGroup"
+    | "budgetWarnPercent",
     string
   >
 >;
@@ -84,6 +86,7 @@ export const POLICY_ERRORS = {
   swapCeilingMb: "Enter a whole number from 256 to 65536.",
   budgetPerGroup: "Enter an amount above 0, or leave it empty for no limit.",
   budgetPerGroupMax: "Enter an amount of 100000 or less.",
+  budgetWarnPercent: "Enter a whole number from 1 to 99.",
 } as const;
 
 export const MAX_BUDGET_PER_GROUP = 100_000;
@@ -159,6 +162,7 @@ export function policyFormValues(policy: BoardPolicy): PolicyFormValues {
     shipRights: policy.shipRights,
     budgetPerGroup:
       policy.budgetPerGroup === null ? "" : String(policy.budgetPerGroup),
+    budgetWarnPercent: String(policy.budgetWarnPercent),
     supervisor: policy.supervisor,
     groupPlaybook: policy.groupPlaybook,
     crossSessionInbound: policy.crossSessionInbound,
@@ -236,6 +240,9 @@ export function validatePolicyForm(values: PolicyFormValues): PolicyFormErrors {
   } else if (budget !== null && budget > MAX_BUDGET_PER_GROUP) {
     errors.budgetPerGroup = POLICY_ERRORS.budgetPerGroupMax;
   }
+  if (!inRange(values.budgetWarnPercent, 1, 99)) {
+    errors.budgetWarnPercent = POLICY_ERRORS.budgetWarnPercent;
+  }
   return errors;
 }
 
@@ -245,6 +252,9 @@ export function serverFieldErrors(code: string | undefined): PolicyFormErrors {
   }
   if (code === "invalid-swapCeilingMb") {
     return { swapCeilingMb: POLICY_ERRORS.swapCeilingMb };
+  }
+  if (code === "invalid-budgetWarnPercent") {
+    return { budgetWarnPercent: POLICY_ERRORS.budgetWarnPercent };
   }
   return {};
 }
@@ -260,7 +270,7 @@ export function isPolicyDirty(
 }
 
 /**
- * Build the body of the policy save: the fifteen policy fields and nothing else.
+ * Build the body of the policy save: the sixteen policy fields and nothing else.
  *
  * @remarks
  * `usageLimit` is `wait` or `stop`, so the body never holds a usage credits value.
@@ -276,6 +286,7 @@ export function policyPayload(values: PolicyFormValues): PolicyPayload {
     usageLimit: values.usageLimit,
     shipRights: values.shipRights,
     budgetPerGroup: budgetAmount(values.budgetPerGroup),
+    budgetWarnPercent: Number(values.budgetWarnPercent),
     supervisor: values.supervisor,
     groupPlaybook: values.groupPlaybook,
     crossSessionInbound: values.crossSessionInbound,

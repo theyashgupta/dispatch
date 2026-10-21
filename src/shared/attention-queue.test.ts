@@ -584,3 +584,56 @@ test("auto-answered ticket_proposal and plan items stay out of the queue and the
   assert.equal(views.length, 1);
   assert.equal(views[0]?.id, "d-ruling");
 });
+
+test("a budget warning mark yields one budget_warning item with the numbers and the mark time", () => {
+  const at = minutesAgo(30);
+  const cards = [
+    card("GROUP-1", {
+      budgetWarning: { at, cost: 8.5, budget: 10, percent: 80 },
+    }),
+  ];
+  const first = build(cards);
+  const second = build(cards);
+  assert.equal(first.length, 1);
+  assert.deepEqual(
+    second.map((i) => i.id),
+    ["budget_warning:id-GROUP-1"],
+  );
+  assert.equal(first[0]?.kind, "budget_warning");
+  assert.equal(first[0]?.waitingSince, at);
+  assert.equal(first[0]?.waitMinutes, 30);
+  assert.equal(first[0]?.reply, false);
+  assert.deepEqual(first[0]?.warning, { cost: 8.5, budget: 10, percent: 80 });
+});
+
+test("a budget warning mark on a done card yields no item", () => {
+  const queue = build([
+    card("GROUP-1", {
+      column: "done",
+      budgetWarning: {
+        at: minutesAgo(30),
+        cost: 8.5,
+        budget: 10,
+        percent: 80,
+      },
+    }),
+  ]);
+  assert.deepEqual(queue, []);
+});
+
+test("a budget stop shows the budget_stop item and no budget_warning item", () => {
+  const queue = build([
+    withSession("GROUP-1", "needs_input", minutesAgo(5), "budget", {
+      budgetWarning: {
+        at: minutesAgo(30),
+        cost: 12,
+        budget: 10,
+        percent: 80,
+      },
+    }),
+  ]);
+  assert.deepEqual(
+    queue.map((i) => i.kind),
+    ["budget_stop"],
+  );
+});

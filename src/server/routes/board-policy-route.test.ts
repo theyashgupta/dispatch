@@ -57,6 +57,7 @@ const VALID: BoardPolicy = {
   usageLimit: "stop",
   shipRights: "open_prs",
   budgetPerGroup: 25.5,
+  budgetWarnPercent: 80,
   supervisor: "off",
   groupPlaybook: null,
   wakeMinutes: 15,
@@ -367,4 +368,48 @@ test("an out-of-range memory floor or swap ceiling answers 400 and the policy do
       "invalid-swapCeilingMb",
     );
   }
+});
+
+test("a fresh board has the budget warning 80 percent", async () => {
+  const fresh = parseBoardKey("BWRN") as BoardKey;
+  await store.createBoard({
+    key: fresh,
+    name: "Budget warning",
+    workspaceRoot: null,
+    repositories: [],
+    linearTeamKeys: [],
+  });
+  assert.equal(store.getBoard(fresh)?.policy.budgetWarnPercent, 80);
+});
+
+test("a budgetWarnPercent of 70 answers 200 and the board reads 70", async () => {
+  const got = await put("/boards/PLC/policy", {
+    ...VALID,
+    budgetWarnPercent: 70,
+  });
+  assert.equal(got.status, 200, got.text);
+  assert.equal(got.body.board.policy.budgetWarnPercent, 70);
+  assert.equal(stored()?.budgetWarnPercent, 70);
+});
+
+test("an omitted budgetWarnPercent keeps the stored value", async () => {
+  await put("/boards/PLC/policy", { ...VALID, budgetWarnPercent: 70 });
+  const kept = await put("/boards/PLC/policy", {
+    ...VALID,
+    budgetWarnPercent: undefined,
+  });
+  assert.equal(kept.status, 200, kept.text);
+  assert.equal(stored()?.budgetWarnPercent, 70);
+});
+
+test("a budgetWarnPercent of 0, 100 or 80.5 answers 400 and the policy does not change", async () => {
+  await put("/boards/PLC/policy", { ...VALID, budgetWarnPercent: 80 });
+  for (const budgetWarnPercent of [0, 100, 80.5]) {
+    await expectRefusal(
+      { ...VALID, budgetWarnPercent },
+      400,
+      "invalid-budgetWarnPercent",
+    );
+  }
+  assert.equal(stored()?.budgetWarnPercent, 80);
 });

@@ -60,6 +60,7 @@ const SUPERVISOR_ACTIONS: Record<string, (g: string) => string> = {
   handoff_cancel: (g) => `cancelled the handoff of ${g}`,
   close_loop: (g) => `closed the loop of ${g}`,
   budget_release: (g) => `released the budget stop of ${g}`,
+  budget_warning: (g) => `warned that ${g} is near its budget`,
   needs_input: (g) => `moved ${g} to Needs input`,
   start_group: (g) => `started ${g}`,
   start_group_failed: (g) => `could not start ${g}`,
@@ -85,6 +86,7 @@ const GROUP_STATE_TONES: Record<string, ActivityTone> = {
 const ACTION_TONES: Record<string, ActivityTone> = {
   start_group_failed: "danger",
   needs_input: "warn",
+  budget_warning: "warn",
 };
 
 function toneFrom(
