@@ -1,4 +1,10 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Browser,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 
 const port = Number(process.env.DISPATCH_VISUAL_PORT);
 const orchestrated = `http://127.0.0.1:${port + 3}`;
@@ -138,4 +144,82 @@ test("the bottom bar hides on scroll down and returns on scroll up, and reduced 
   await expect(bar).toHaveCSS("height", `${BAR_HEIGHT}px`);
   await expect(bar).toHaveCSS("transition-duration", "0s");
   expect(await barHeightVar(page)).toBe(`${BAR_HEIGHT}px`);
+});
+
+const FIELD_SELECTOR =
+  'input, textarea, select, [contenteditable]:not([contenteditable="false"])';
+
+const renderedFields = (page: Page) =>
+  page.evaluate((selector) => {
+    const label = (el: Element) => {
+      const tag = el.tagName.toLowerCase();
+      const detail =
+        el.getAttribute("type") ??
+        el.getAttribute("name") ??
+        el.getAttribute("placeholder") ??
+        el.getAttribute("aria-label") ??
+        "";
+      return detail ? `${tag}[${detail}]` : tag;
+    };
+    return [...document.querySelectorAll(selector)]
+      .filter((el) => {
+        const rect = el.getBoundingClientRect();
+        return el.checkVisibility() && rect.width > 0 && rect.height > 0;
+      })
+      .map((el) => ({
+        label: label(el),
+        size: parseFloat(getComputedStyle(el).fontSize),
+      }));
+  }, FIELD_SELECTOR);
+
+const measureFieldSizes = async (browser: Browser, hasTouch: boolean) => {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 900 },
+    hasTouch,
+    reducedMotion: "reduce",
+  });
+  try {
+    const page = await context.newPage();
+    await guardWrites(page);
+    await page.goto(`${orchestrated}/#/boards/ORC`);
+    await expect(page.locator('nav[aria-label="Primary"]')).toBeVisible();
+    const coarse = await page.evaluate(
+      () => matchMedia("(pointer: coarse)").matches,
+    );
+    await page.getByRole("button", { name: "New ticket" }).click();
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible();
+    await expect(
+      dialog.locator(`input:visible, textarea:visible`).first(),
+    ).toBeVisible();
+    const dialogFields = await renderedFields(page);
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
+    await page.keyboard.press("b");
+    await expect(
+      page.getByRole("combobox", { name: "Search commands and tickets" }),
+    ).toBeVisible();
+    const fields = [...dialogFields, ...(await renderedFields(page))];
+    return { coarse, fields };
+  } finally {
+    await context.close();
+  }
+};
+
+test("editable fields use at least 16 px text on touch devices and the rule stays off on a fine pointer", async ({
+  browser,
+}) => {
+  const touch = await measureFieldSizes(browser, true);
+  expect(touch.coarse).toBe(true);
+  expect(touch.fields.length).toBeGreaterThan(0);
+  const small = touch.fields.filter((field) => field.size < 16);
+  expect(
+    small,
+    `touch fields under 16 px: ${small.map((f) => `${f.label}=${f.size}`).join(", ")}`,
+  ).toEqual([]);
+
+  const fine = await measureFieldSizes(browser, false);
+  expect(fine.coarse).toBe(false);
+  expect(fine.fields.length).toBeGreaterThan(0);
+  expect(Math.min(...fine.fields.map((field) => field.size))).toBeLessThan(16);
 });
