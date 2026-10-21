@@ -5660,7 +5660,7 @@ question; none of them read prose for truth.
   its content is not a pid, or when it is older than the last boot. On each poll, a waiting gate
   reads the state of each holder with `ps`. A holder in state `T` (stopped, for example by a
   suspend or after a sleep of the Mac) for more than `DISPATCH_CHECK_STOPPED_SECONDS` (default 300)
-  is also dead. `ps` does not give the stop time, so the gate counts the stopped time from its first
+  is also dead, and so is a holder in state `Z` (a zombie). `ps` does not give the stop time, so the gate counts the stopped time from its first
   poll that saw the stop. A holder that runs again resets the count. When the gate frees a slot
   whose holder is gone or stopped, it writes one line, for example
   `with-check-slot: released check-slot-0, holder pid 57153 state T stopped 301s, held 57600s`.
