@@ -5777,8 +5777,18 @@ question; none of them read prose for truth.
   A slot is the file `~/.dispatch/locks/check-slot-<n>`, which holds the pid of the gate process.
   The gate creates it with a hard link, so it cannot replace a slot that exists. A caller that finds
   no free slot prints the holder pids, then waits. A slot is dead when its pid is not alive, when
-  its content is not a pid, or when it is older than the last boot. A dead slot is removed only
-  while the caller holds the `.reclaim` guard directory with its own token. This prevents the removal
+  its content is not a pid, or when it is older than the last boot. On each poll, a waiting gate
+  reads the state of each holder with `ps`. A holder in state `T` (stopped, for example by a
+  suspend or after a sleep of the Mac) for more than `DISPATCH_CHECK_STOPPED_SECONDS` (default 300)
+  is also dead, and so is a holder in state `Z` (a zombie). `ps` does not give the stop time, so the gate counts the stopped time from its first
+  poll that saw the stop. A holder that runs again resets the count. When the gate frees a slot
+  whose holder is gone or stopped, it writes one line, for example
+  `with-check-slot: released check-slot-0, holder pid 57153 state T stopped 301s, held 57600s`.
+  `held` is the age of the slot file. The gate does not send a signal to a stopped holder. If the
+  holder continues later, its command runs without a slot, and at exit it does not remove the slot
+  of the new holder, because the slot does not hold its pid. A dead slot is removed only
+  while the caller holds the `.reclaim` guard directory with its own token, and only when a second
+  check under the guard finds the same holder pid still dead. This prevents the removal
   of a live slot, except in one race: 3 or more gates that act on a guard older than 60 seconds. The gate sets `DISPATCH_CHECK_SLOT_HELD=1` for its command, so the steps of
   `npm run check` run in the slot of the chain and do not take a second slot. The command runs in
   its own process group, and the gate sends SIGINT, SIGTERM and SIGHUP to the full group. After 5400
