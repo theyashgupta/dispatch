@@ -175,20 +175,19 @@ void test(
         load1: 2,
       }),
     );
-    const sandboxes = [
-      await startSandbox({ name: NAME, memorySampleFile: SAMPLE_FILE }),
-    ];
-    let workspace: string | undefined;
+    const sb = await startSandbox({
+      name: NAME,
+      memorySampleFile: SAMPLE_FILE,
+    });
     try {
-      await runScenario(sandboxes[0]);
+      await runScenario(sb);
     } finally {
-      workspace = (
-        await cardOf(sandboxes[0], BOARD, CARD).catch(() => undefined)
-      )?.workspacePath;
+      const workspace = (await cardOf(sb, BOARD, CARD).catch(() => undefined))
+        ?.workspacePath;
       if (workspace && fs.existsSync(`${workspace}-gone`)) {
         fs.renameSync(`${workspace}-gone`, workspace);
       }
-      for (const sb of sandboxes) await sb.stop();
+      await sb.stop();
       delete process.env.FAKE_CLAUDE_ARGV_FILE;
     }
   },
