@@ -156,8 +156,8 @@ function checkFailureReason(
     .slice(-CHECK_TAIL_LINES);
   const room = REASON_MAX_CHARS - header.length - 1;
   while (lines.length > 1 && lines.join("\n").length > room) lines.shift();
-  if (lines.length === 1 && lines[0]!.length > room) {
-    lines[0] = lines[0]!.slice(-room);
+  if (lines.length === 1 && lines[0].length > room) {
+    lines[0] = lines[0].slice(-room);
   }
   return lines.length === 0 ? header : `${header}\n${lines.join("\n")}`;
 }
