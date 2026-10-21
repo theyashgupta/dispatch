@@ -436,7 +436,7 @@ async function frozenSession(title: string) {
   );
   const session = sessionOf(ids.cardId);
   assert.equal(session?.state, "frozen");
-  return { ids, since: Date.parse(session!.stateSince!) };
+  return { ids, since: Date.parse(session.stateSince!) };
 }
 
 void test("a session frozen for 15 minutes is relaunched once and later samples add nothing", async () => {
@@ -502,7 +502,7 @@ void test("a second freeze in the same phase gives needs_input with resume_faile
     const second = sessionOf(ids.cardId);
     assert.equal(second?.state, "frozen");
     const due = Math.max(
-      Date.parse(second!.stateSince!) + 15 * 60_000,
+      Date.parse(second.stateSince!) + 15 * 60_000,
       healthy + 180_000,
     );
     await supervisePane(frozen, due);
