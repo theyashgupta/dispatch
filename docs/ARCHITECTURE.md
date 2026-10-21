@@ -1997,7 +1997,8 @@ missing, and a continued claude there resumes the newest conversation of a diffe
 rule applies to the Resume route, Reconnect, the orchestrator `resume_session` tool and the boot
 resume sweep, because all of them go through `resumeSession`. On the boot sweep the supervisor also
 moves the card to Needs input. A reattach to a live tmux session does not launch claude, so it does
-not check the folder.
+not check the folder. The supervisor relaunch into a live shell-prompt pane has its own check
+(LOCAL-166, see Session Supervisor).
 
 In Review's opposite in-edge/out-edge asymmetry versus Agent Done, and the full trigger-by-trigger
 spec, are homed in [Column Transition Specification](#column-transition-specification) (`BOARD-06`).
@@ -6164,6 +6165,8 @@ Scenario 13 (tests/e2e/scenario-13-feature-scope.e2e.ts) proves that a feature o
 
 Scenario 14 (tests/e2e/scenario-14-missing-workspace.e2e.ts) proves that the boot resume sweep refuses a lost session whose workspace folder is missing (LOCAL-163). The test starts one card with the fake `claude`, sets `supervisor: on`, stops the server, stops the sandbox tmux server and renames the workspace folder of the card. It then boots the server again on the same data folder. The card must show `Resume failed: workspace-missing: <path>`, stay lost, be in Needs input with `resume_failed`, and have exactly one `resume_failed` event. The fake `claude` must record no new launch, and the sandbox tmux server must have no session.
 
+Scenario 16 (tests/e2e/scenario-16-live-missing-workspace.e2e.ts) proves that the supervisor does not relaunch claude in a live shell whose workspace folder is missing (LOCAL-166). The test starts one card with the fake `claude`, renames the workspace folder of the card inside the sandbox, stops the fake `claude` with `C-c` so that the pane is at the shell prompt, and sets `supervisor: on`. The card must be in Needs input with `resume_failed` and the status reason `resume: Resume failed: workspace-missing: <path>`. The card must not be lost, the tmux session must stay live, and the fake `claude` must record no new launch.
+
 The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
 ## Orchestration Initiative
@@ -6271,6 +6274,14 @@ action that finds nothing to do, such as an `Escape` already sent, writes no row
   takes the foreground, within 60 s. A failed relaunch, a lost session that stays gone, or claude
   that does not start sets `resume_failed`; an unconfirmed resume prompt is recorded as
   unconfirmed.
+- Missing workspace folder before a relaunch (LOCAL-166): before `runClaude` types the launch line
+  into a shell-prompt pane, the supervisor checks that the session root (the session
+  `workspacePath`, else the card `workspacePath`) is a folder. If the folder is missing, the
+  supervisor launches nothing. It sets the session to `needs_input` with `resume_failed`, moves the
+  card to Needs input and records the LOCAL-163 copy as the status reason:
+  `resume: Resume failed: workspace-missing: <path>`. The tmux session stays live, because a
+  detach would leave a tmux session that no card tracks. The card detail shows the copy in an alert
+  above the terminal.
 - Handoff (`supervisor-handoff.ts`): at `handoffPercent` the session gets the handoff request
   once per crossing, and once more at `handoffHardPercent`; the hard request tells the loop to
   hand off now. At `handoff_ready` the supervisor waits until the pane is ready and not busy (a
