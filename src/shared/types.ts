@@ -2118,6 +2118,7 @@ export type SupervisorState =
   | "usage_limit_wait"
   | "api_error"
   | "stale"
+  | "frozen"
   | "lost"
   | "shell_prompt"
   | "paused";

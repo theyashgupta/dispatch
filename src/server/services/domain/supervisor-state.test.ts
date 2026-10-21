@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import {
   detectState,
   initialMemory,
+  inputBoxText,
   limitSurfaceOf,
   paneReady,
   type DetectInput,
@@ -27,6 +28,7 @@ function input(over: Partial<DetectInput>): DetectInput {
     atShellPrompt: false,
     paused: null,
     pane: "",
+    contextPercent: null,
     engineSessionId: "3f0c2a7e-5d1b-4c3e-9a2f-1b2c3d4e5f60",
     completion: "running",
     engineOpen: true,
@@ -100,6 +102,8 @@ const FIXTURE_STATES: [
   ["limit-cancelled.txt", 3, {}, "idle"],
   ["api-error.txt", 1, {}, "api_error"],
   ["api-error-2.txt", 1, {}, "api_error"],
+  ["frozen-compacted.txt", 2, { contextPercent: 0 }, "frozen"],
+  ["frozen-compacted-2.txt", 2, { contextPercent: 0 }, "frozen"],
   ["shell-prompt.txt", 1, { atShellPrompt: true }, "shell_prompt"],
   ["idle.txt", 1, { tmuxAlive: false }, "lost"],
 ];
@@ -110,10 +114,93 @@ for (const [file, count, over, state] of FIXTURE_STATES) {
   });
 }
 
-void test("every one of the 12 states comes from a recorded pane", () => {
+void test("every one of the 13 states comes from a recorded pane", () => {
   const seen = new Set(FIXTURE_STATES.map(([, , , s]) => s));
   seen.add(last(feed(pane("working.txt"), 16, {}, () => 100)));
-  assert.equal(seen.size, 12);
+  assert.equal(seen.size, 13);
+});
+
+const FROZEN_FIXTURES = ["frozen-compacted.txt", "frozen-compacted-2.txt"];
+const FROZEN_OVER = { contextPercent: 0 };
+
+void test("a compacted idle pane with queued input at 0 percent context is frozen on the second sample 60 s later", () => {
+  for (const file of FROZEN_FIXTURES) {
+    const ds = feed(pane(file), 2, FROZEN_OVER, () => 100);
+    assert.notEqual(ds[0].state, "frozen", file);
+    assert.equal(ds[1].state, "frozen", file);
+    assert.match(ds[1].evidence, /Compacted while idle/, file);
+  }
+});
+
+void test("one frozen looking sample is not frozen", () => {
+  for (const file of FROZEN_FIXTURES)
+    assert.notEqual(feed(pane(file), 1, FROZEN_OVER)[0].state, "frozen", file);
+});
+
+void test("a compacted idle pane with context above 0 percent is never frozen", () => {
+  for (const file of FROZEN_FIXTURES) {
+    const states = feed(pane(file), 4, { contextPercent: 5 }).map(
+      (d) => d.state,
+    );
+    assert.ok(!states.includes("frozen"), file);
+  }
+});
+
+void test("a compacted idle pane with an empty input line is idle, not frozen", () => {
+  const text = pane("frozen-compacted-2.txt").replace(
+    "❯ Dispatch wake: Agent done for LOCAL-159",
+    "❯ ",
+  );
+  const states = feed(text, 3, FROZEN_OVER).map((d) => d.state);
+  assert.deepEqual(states, ["working", "working", "idle"]);
+});
+
+void test("queued input at 0 percent context without a compaction line is not frozen", () => {
+  for (const file of FROZEN_FIXTURES) {
+    const text = pane(file).replace("✻ Compacted while idle", "✻ Crunched 4s");
+    assert.notEqual(text, pane(file));
+    const states = feed(text, 4, FROZEN_OVER).map((d) => d.state);
+    assert.ok(!states.includes("frozen"), file);
+  }
+});
+
+void test("a growing transcript on a frozen looking pane is working and keeps frozenSince null", () => {
+  const ds = feed(
+    pane("frozen-compacted.txt"),
+    4,
+    FROZEN_OVER,
+    (i) => 100 + i * 10,
+  );
+  assert.ok(ds.every((d) => d.state === "working"));
+  assert.ok(ds.slice(1).every((d) => d.memory.frozenSince === null));
+});
+
+void test("transcript growth after frozen resets to working and clears frozenSince", () => {
+  const ds = feed(pane("frozen-compacted.txt"), 3, FROZEN_OVER, (i) =>
+    i < 2 ? 100 : 200,
+  );
+  assert.equal(ds[1].state, "frozen");
+  assert.equal(ds[2].state, "working");
+  assert.equal(ds[2].memory.frozenSince, null);
+});
+
+void test("a paused card on a frozen pane is paused", () => {
+  const paused: DetectInput["paused"] = {
+    at: "2026-10-21T00:00:00.000Z",
+    by: "user",
+    sessionId: "session-1",
+    pids: [101],
+  };
+  const ds = feed(pane("frozen-compacted.txt"), 2, { ...FROZEN_OVER, paused });
+  assert.equal(last(ds), "paused");
+});
+
+void test("inputBoxText joins the queued box text and is empty for an idle prompt", () => {
+  assert.equal(
+    inputBoxText(pane("frozen-compacted.txt")),
+    "Dispatch wake: decision answered for LOCAL-161 Dispatch wake: decision answered for LOCAL-161 Orchestrator: the wake lines above are already satisfied Orchestrator: no action is needed until the next event",
+  );
+  assert.equal(inputBoxText(pane("idle.txt")), "");
 });
 
 void test("the shortly notice is the usage limit wait evidence", () => {

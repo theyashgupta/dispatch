@@ -25,6 +25,7 @@ export const ORCHESTRATOR_STATE_MAX_BYTES = 65536;
 export const INTAKE_GOAL_MAX = 2000;
 export const INTAKE_REQUIREMENTS_MAX_BYTES = 65536;
 export const STALE_MINUTES = 15;
+export const FROZEN_RELAUNCH_MINUTES = 15;
 export const RELEASE_BUMPS = ["patch", "minor", "major"] as const;
 export const RELEASE_FEATURE_MAX = 200;
 export const RELEASE_FEATURES_MAX = 20;

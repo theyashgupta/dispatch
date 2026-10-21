@@ -153,6 +153,14 @@ void test("a second API error in the same phase gives up, and a sleep cut shares
   ]);
 });
 
+void test("a frozen detection releases a supervisor_gave_up or usage_stop hold but keeps a budget or resume_failed hold", () => {
+  const frozen = { state: "frozen" } as const;
+  for (const reason of ["supervisor_gave_up", "usage_stop"] as const)
+    assert.equal(holdsNeedsInput("needs_input", reason, frozen), false, reason);
+  for (const reason of ["budget", "resume_failed"] as const)
+    assert.equal(holdsNeedsInput("needs_input", reason, frozen), true, reason);
+});
+
 void test("a supervisor set needs_input holds until a busy sign, a permission prompt or a lost pane", () => {
   const held = (state: SupervisorState, busy?: true) =>
     holdsNeedsInput("needs_input", "supervisor_gave_up", {

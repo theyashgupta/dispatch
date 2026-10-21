@@ -49,8 +49,8 @@ export function initialPlanMemory(): PlanMemory {
 /**
  * Keep a stored `needs_input` that the supervisor set with a reason until the session shows life.
  *
- * @remarks Only a real busy sign, a permission prompt (a new tool request), a lost session or a
- * shell prompt releases the hold. A `budget` stop holds until a lost session or a shell prompt, and
+ * @remarks Only a real busy sign, a permission prompt (a new tool request), a lost session, a
+ * shell prompt or a `frozen` session releases the hold. A `budget` stop holds until a lost session or a shell prompt, and
  * a `resume_failed` hold until a real busy sign or a confirmed idle prompt, so a failed resume is
  * not planned on every sample. A confirmed idle needs claude up and quiet for three samples, which
  * a shell prompt or a dead pane never shows, so it marks a resume that worked after the hold. A
@@ -80,6 +80,7 @@ export function holdsNeedsInput(
     case "lost":
     case "shell_prompt":
     case "permission_prompt":
+    case "frozen":
       return false;
     case "working":
       return detected.busy !== true;

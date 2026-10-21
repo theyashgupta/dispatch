@@ -20,6 +20,7 @@ export interface DetectMemory {
   transcriptSize: number | null;
   lastGrowthAt: number | null;
   restored: boolean;
+  frozenSince: number | null;
 }
 
 export interface DetectInput {
@@ -28,6 +29,7 @@ export interface DetectInput {
   atShellPrompt: boolean;
   paused: Card["paused"];
   pane: string;
+  contextPercent: number | null;
   engineSessionId: string | null;
   completion: LoopProgress["completion"] | null;
   engineOpen: boolean;
@@ -52,6 +54,7 @@ interface Dialog {
 
 const IDLE_SAMPLE_MS = 60_000;
 const IDLE_SAMPLES = 3;
+const FROZEN_CONFIRM_MS = IDLE_SAMPLE_MS;
 const STALE_MS = STALE_MINUTES * 60_000;
 const EVIDENCE_MAX = 160;
 
@@ -71,6 +74,7 @@ const PEER_DENY = /^\s*❯\s*Deny\b/;
 const ESC_TO_CANCEL = /Esc to cancel/i;
 const RULE_LINE = /^\s*─{3,}/;
 const MODE_ROW = /^[!#&]/;
+const COMPACTED_IDLE = /compacted while idle/i;
 const NEEDS_INPUT_MARKER = /^\s*(?:⏺\s*)?DISPATCH_STATUS:\s*NEEDS_INPUT\b/;
 const HANDOFF_LINE = /^\s*(⏺\s*)?HANDOFF_READY\s+[\w.-]+\s*$/;
 const COMPLETE_PROMISE = /<promise>(ROADMAP|RALPH) COMPLETE\b/;
@@ -216,6 +220,48 @@ export function paneReady(pane: string): boolean {
   );
 }
 
+/**
+ * Return the text queued in the input box, or an empty string when the box is empty.
+ *
+ * @remarks The box ends at the first blank row, status row or rule line under the input line.
+ */
+export function inputBoxText(pane: string): string {
+  const lines = pane.split("\n");
+  const inputAt = inputLineAt(lines);
+  if (inputAt < 0) return "";
+  const parts = [lines[inputAt].slice(lines[inputAt].indexOf("❯") + 1)];
+  for (const line of lines.slice(inputAt + 1)) {
+    if (
+      line.trim() === "" ||
+      line.includes("│") ||
+      /^\s*⏵/.test(line) ||
+      RULE_LINE.test(line)
+    )
+      break;
+    parts.push(line);
+  }
+  return parts.join(" ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Return the compaction line when the pane shows a session that compacted while idle and holds
+ * queued input at 0 percent context, or null.
+ *
+ * @remarks An idle compaction on a healthy session leaves an empty input box, so queued text is
+ * what tells a frozen session from a healthy one.
+ */
+function frozenSign(
+  lines: readonly string[],
+  inputAt: number,
+  contextPercent: number | null,
+  pane: string,
+): string | null {
+  if (inputAt < 0 || contextPercent !== 0) return null;
+  const compacted = lines.slice(0, inputAt).find((l) => COMPACTED_IDLE.test(l));
+  if (compacted === undefined || inputBoxText(pane) === "") return null;
+  return evidence("pane", compacted);
+}
+
 /** Whether a dialog is open under the last input line, or anywhere in a pane that has no input line. */
 export function paneDialog(pane: string): boolean {
   const lines = pane.split("\n");
@@ -279,6 +325,7 @@ export function initialMemory(
     transcriptSize: null,
     lastGrowthAt: null,
     restored: stored !== null,
+    frozenSince: null,
   };
 }
 
@@ -305,6 +352,7 @@ export function detectState(input: DetectInput): Detection {
         ? now
         : memory.lastGrowthAt,
     restored: false,
+    frozenSince: null,
   };
   const done = (
     state: SupervisorState,
@@ -331,6 +379,11 @@ export function detectState(input: DetectInput): Detection {
 
   const lines = input.pane.split("\n");
   const inputAt = inputLineAt(lines);
+  const frozenSignLine = grew
+    ? null
+    : frozenSign(lines, inputAt, input.contextPercent, input.pane);
+  base.frozenSince =
+    frozenSignLine === null ? null : (memory.frozenSince ?? now);
   const dialog = openDialog(inputAt >= 0 ? lines.slice(inputAt + 1) : lines);
   if (dialog && dialog.key === memory.dialogKey) {
     return done(
@@ -420,6 +473,14 @@ export function detectState(input: DetectInput): Detection {
       );
     }
     dialogMem = { dialogKey: key };
+  }
+
+  if (
+    frozenSignLine !== null &&
+    base.frozenSince !== null &&
+    now - base.frozenSince >= FROZEN_CONFIRM_MS
+  ) {
+    return done("frozen", frozenSignLine, {}, dialogMem);
   }
 
   if (busy) {

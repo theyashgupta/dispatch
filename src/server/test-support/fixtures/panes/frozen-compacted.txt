@@ -1,0 +1,14 @@
+⏺ Bash(git log -3 -q)
+  ⎿  4be1c07 feat(LOCAL-161): wire the decision answer into the card
+     9a3d2f8 test(LOCAL-161): cover the answered decision path
+⏺ The decision card is answered and the tests pass. I will wait for the next wake.
+✻ Compacted while idle
+
+❯ Dispatch wake: decision answered for LOCAL-161
+  Dispatch wake: decision answered for LOCAL-161
+  Orchestrator: the wake lines above are already satisfied
+  Orchestrator: no action is needed until the next event
+
+  Opus 5.5 · high  │  ░░░░░░░░░░    0%  0/1.0M
+  LOCAL-161  │  LOCAL-161  │  thinking  │  5h 40%  │  7d 61%  │  3h12m  │  $12.34
+  ⏵⏵ bypass permissions on
