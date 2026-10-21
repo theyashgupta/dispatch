@@ -546,8 +546,8 @@ const presenceOf = (raw: string): EnvPresence =>
  * Report whether each env-vault name is unset, empty or filled.
  *
  * @remarks It answers presence states only and never returns, logs or stores a value. The values
- * file wins, as the runner sources it over the inherited environment. Then the process
- * environment decides, so a test with no vault file can set fake values.
+ * file wins with its last line for a name, as the runner sources it over the inherited
+ * environment. Then the process environment decides, so a test with no vault file can set fake values.
  */
 export async function envVaultPresence<N extends string>(
   names: readonly N[],
@@ -557,13 +557,15 @@ export async function envVaultPresence<N extends string>(
     values: ENV_VAULT_VALUES_PATH,
   },
 ): Promise<Record<N, EnvPresence>> {
-  const valueLines = await readEnvLines(files.values);
+  const valueLines = (await readEnvLines(files.values)).map((line) =>
+    line.replace(/^export\s+/, ""),
+  );
   const schemaLines = (await readEnvLines(files.schema))
     .map((line) => line.trim())
     .filter((line) => !line.startsWith("#"));
   const out = {} as Record<N, EnvPresence>;
   for (const name of names) {
-    const valueLine = valueLines.find(isLineFor(name));
+    const valueLine = valueLines.filter(isLineFor(name)).at(-1);
     if (valueLine !== undefined) {
       out[name] = presenceOf(
         valueLine

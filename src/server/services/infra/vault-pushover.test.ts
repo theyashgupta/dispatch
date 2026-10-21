@@ -126,6 +126,24 @@ void test("a quoted value in the values file is filled", async () => {
   );
 });
 
+void test("the last values file line of a name decides, as the shell does", async () => {
+  const filledLast = await userOnly(
+    "PUSHOVER_USER_KEY=''\nPUSHOVER_USER_KEY='abc'\n",
+  );
+  assert.equal(filledLast.PUSHOVER_USER_KEY, "filled");
+  const emptyLast = await userOnly(
+    "PUSHOVER_USER_KEY='abc'\nPUSHOVER_USER_KEY=''\n",
+  );
+  assert.equal(emptyLast.PUSHOVER_USER_KEY, "empty");
+});
+
+void test("an export prefix on a values file line is read", async () => {
+  const empty = await userOnly("export PUSHOVER_USER_KEY=''\n");
+  assert.equal(empty.PUSHOVER_USER_KEY, "empty");
+  const filled = await userOnly("export PUSHOVER_USER_KEY='abc'\n");
+  assert.equal(filled.PUSHOVER_USER_KEY, "filled");
+});
+
 void test("a longer sibling name does not fill the name", async () => {
   const result = await userOnly("PUSHOVER_USER_KEY_OLD='x'\n");
   assert.equal(result.PUSHOVER_USER_KEY, "unset");
