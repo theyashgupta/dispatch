@@ -4961,12 +4961,19 @@ seven `--src-*` source colors and the "active sidebar row" accent job are ratifi
 **Two custom properties carry the shell's geometry to the detail panel.** `components/ShellFrame.tsx`
 sets `--nav-current` (the live sidebar width: `var(--nav-width)`, `var(--nav-width-collapsed)`, or `0px`
 when the sidebar becomes a phone sheet) with classes on its root element. The hook
-`hooks/use-chrome-top.ts` sets `--chrome-top` (the measured height of the top bar, banner and
-page header) on the same element with `style.setProperty`. The docked (Orca) `PanelFrame.tsx` reads
+`usePublishedHeight` in `hooks/use-published-height.ts` sets `--chrome-top` (the measured height of
+the top bar, banner and page header) on the same element with `style.setProperty`. The docked (Orca) `PanelFrame.tsx` reads
 both: `top: var(--chrome-top)`, `left: calc(var(--nav-current, 0px) + var(--orca-nav-width))` and
 `width: calc(100% - var(--nav-current, 0px) - var(--orca-nav-width))`, so collapsing the sidebar
 shifts the docked panel by style values alone and never remounts the terminal iframe. Measured at
 1280px with the sidebar expanded: left 520, top 52, width 760, right edge 1280.
+
+**The phone bottom bar publishes its height on the document root.** Below 768px,
+`components/BottomBar.tsx` sits in flow at the end of the content column, so page content never goes
+under it. The same hook sets `--bottom-bar-height` on `document.documentElement`: 64px when the bar
+shows, 0px when it hides on scroll down, and unset on desktop. The root is the target because toasts
+and sheets portal to the body. The toaster, `SelectionBar.tsx` and `SessionsBulkBar.tsx` add the
+variable to their bottom offset.
 
 **The active row carries its own tint.** `AppSidebar.tsx` renders each row as a shadcn
 `SidebarMenuButton`. The active row (`data-active="true"`) takes the tint

@@ -47,7 +47,9 @@ export function NavRow({
           <NavIcon page={page} brand={brand} />
         )}
         {collapsed ? null : (
-          <span className="min-w-0 flex-1 truncate">{label}</span>
+          <span className="min-w-0 flex-1 truncate" title={label}>
+            {label}
+          </span>
         )}
         {collapsed || count <= 0 ? null : (
           <Badge tone={neutral ? "neutral" : "accent"}>{count}</Badge>
