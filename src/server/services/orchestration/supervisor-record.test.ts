@@ -6,7 +6,7 @@ import type { Card, Session } from "../../../shared/types.js";
 
 const env = isolateEnv();
 const { store } = await import("../../store/board.store.js");
-const { continueText, markNeedsInput, record, rootOf } =
+const { continueText, markNeedsInput, moveToNeedsInput, record, rootOf } =
   await import("./supervisor-record.js");
 const { loopFilePath } = await import("../domain/loop-progress.js");
 const { LOOP_PROGRESS, SBX, setupSupervisedBoard } =
@@ -70,6 +70,38 @@ void test("markNeedsInput writes the state and reason, moves the card once and a
   assert.equal(card().lastMarker, marker);
   assert.equal(card().column, "needs_input");
   assert.equal(session().stateReason, "usage_stop");
+});
+
+void test("moveToNeedsInput keeps a finished card in Agent done with its DONE marker", async () => {
+  const { card, session } = await startedCard("done-keep");
+  await store.applyMarker(
+    card().id,
+    session().id,
+    "agent_done",
+    undefined,
+    "DONE built",
+    "status_agent_done",
+  );
+  assert.equal(card().column, "agent_done");
+  await moveToNeedsInput(card(), session(), "idle");
+  assert.equal(card().column, "agent_done");
+  assert.equal(card().lastMarker, "DONE built");
+});
+
+void test("moveToNeedsInput still moves an Agent done card whose marker is not a DONE key", async () => {
+  const { card, session } = await startedCard("done-narrow");
+  await store.applyMarker(
+    card().id,
+    session().id,
+    "agent_done",
+    undefined,
+    "supervisor:x",
+    "status_agent_done",
+  );
+  assert.equal(card().column, "agent_done");
+  await moveToNeedsInput(card(), session(), "idle");
+  assert.equal(card().column, "needs_input");
+  assert.match(String(card().lastMarker), /^supervisor:/);
 });
 
 void test("continueText names the loop progress and resume files for the restart duty", async () => {
