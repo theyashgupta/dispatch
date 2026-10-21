@@ -333,7 +333,9 @@ export function parseAttemptLines(text: string): AttemptLine[] {
   return lines;
 }
 
-function frontMatterFences(lines: string[]): (number | undefined)[] {
+function frontMatterFences(
+  lines: string[],
+): [number | undefined, number | undefined] {
   const fences: number[] = [];
   lines.forEach((line, index) => {
     if (line.trim() === "---" && fences.length < 2) fences.push(index);
@@ -385,7 +387,7 @@ function closedReasonOf(value: string | undefined): ClosedReason {
 }
 
 /**
- * Writes the reason a loop engine file was closed into its front matter.
+ * Returns the engine text with one `closed_reason` line in its front matter.
  *
  * @remarks Text without a front matter comes back unchanged.
  */
@@ -404,6 +406,26 @@ export function withClosedReason(
     ...kept,
     `closed_reason: ${reason}`,
     ...lines.slice(end),
+  ].join("\n");
+}
+
+/**
+ * Returns the text of a closed engine file that Dispatch writes when the plugin already removed the real one.
+ */
+export function closedEngineText(
+  slug: string,
+  sessionId: string | null,
+  reason: "promise" | "close_loop",
+): string {
+  return [
+    "---",
+    "active: false",
+    ...(sessionId === null ? [] : [`session_id: ${sessionId}`]),
+    `completion_promise: "RALPH COMPLETE ${slug}"`,
+    `closed_reason: ${reason}`,
+    "---",
+    "Closed by Dispatch after the loop engine file was removed.",
+    "",
   ].join("\n");
 }
 

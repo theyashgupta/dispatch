@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { LoopProgress } from "../../../shared/types.js";
+import { parsePrdEngine } from "./prd-progress.js";
 import {
   buildLoopProgress,
   buildPrdProgress,
+  closedEngineText,
   type PrdProgressInput,
   parseAttemptLines,
   parseEngineFile,
@@ -893,4 +895,23 @@ void test("an open engine file has no closedReason key", () => {
     "closedReason" in (parseEngineFile(text, false).engine ?? {}),
     false,
   );
+});
+
+void test("closedEngineText parses as a closed engine with the reason and the session id", () => {
+  const text = closedEngineText("local-172", "sess-1", "promise");
+  const { engine } = parseEngineFile(text, true);
+  assert.equal(engine?.active, false);
+  assert.equal(engine?.closed, true);
+  assert.equal(engine?.closedReason, "promise");
+  assert.equal(engine?.sessionId, "sess-1");
+  assert.equal(parsePrdEngine(text).slug, "local-172");
+});
+
+void test("closedEngineText leaves the session id null when none is given", () => {
+  const { engine } = parseEngineFile(
+    closedEngineText("local-172", null, "close_loop"),
+    true,
+  );
+  assert.equal(engine?.sessionId, null);
+  assert.equal(engine?.closedReason, "close_loop");
 });

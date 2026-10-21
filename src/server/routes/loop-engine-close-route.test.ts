@@ -387,8 +387,8 @@ void test("a failed rename is recorded, leaves the engine open, and is retried o
   assert.equal(fs.existsSync(`${engine}.done`), true);
 });
 
-/** Seed a LOCAL-159 shaped engine file whose prompt has no "Execute the PRD at" line. */
-function seedUnvouchedLoop(ws: string): string {
+/** Seeds an engine file whose prompt has no PRD path line, so no phase can vouch for completion. */
+function seedLoopWithoutPrdPath(ws: string): string {
   const engine = path.join(ws, ".claude", "ralph-loop.local.md");
   fs.mkdirSync(path.dirname(engine), { recursive: true });
   fs.writeFileSync(
@@ -398,12 +398,12 @@ function seedUnvouchedLoop(ws: string): string {
   return engine;
 }
 
-async function superviseUnvouchedLoop(
+async function superviseLoopWithoutPrdPath(
   card: Card,
   ws: string,
   transcript: string,
 ): Promise<string> {
-  const engine = seedUnvouchedLoop(ws);
+  const engine = seedLoopWithoutPrdPath(ws);
   await refreshLoopProgress(card.id);
   await store.setTranscriptPath(card.id, sessionOf(card).id, transcript);
   await sampleThrice(card);
@@ -414,7 +414,7 @@ void test("a single PRD loop with no PRD path in its prompt is closed on the pro
   await enableSupervisor();
   const ws = ownRoot("ws-unvouched");
   const card = await launchedTicket(ws);
-  const engine = await superviseUnvouchedLoop(
+  const engine = await superviseLoopWithoutPrdPath(
     card,
     ws,
     seedTranscript("sess-unvouched"),
@@ -437,7 +437,7 @@ void test("a single PRD loop with no PRD path keeps its engine open when the pro
   await enableSupervisor();
   const ws = ownRoot("ws-other-slug");
   const card = await launchedTicket(ws);
-  const engine = await superviseUnvouchedLoop(
+  const engine = await superviseLoopWithoutPrdPath(
     card,
     ws,
     seedTranscript(
@@ -450,4 +450,33 @@ void test("a single PRD loop with no PRD path keeps its engine open when the pro
   assert.equal(fs.existsSync(`${engine}.done`), false);
   assert.equal(store.getCard(card.id)?.loopProgress?.engine?.closed, false);
   assert.equal(closeLoopEvents(card).length, 0);
+});
+
+void test("a loop whose engine file the plugin already removed is closed on the promise", async () => {
+  await enableSupervisor();
+  const ws = ownRoot("ws-plugin-removed");
+  const card = await launchedTicket(ws);
+  const engine = seedLoopWithoutPrdPath(ws);
+  await refreshLoopProgress(card.id);
+  await store.setTranscriptPath(
+    card.id,
+    sessionOf(card).id,
+    seedTranscript("sess-plugin-removed"),
+  );
+  fs.unlinkSync(engine);
+  await sampleThrice(card);
+
+  const done = fs.readFileSync(`${engine}.done`, "utf8");
+  assert.match(done, /^closed_reason: promise$/m);
+  assert.match(done, /^active: false$/m);
+  const stored = store.getCard(card.id)?.loopProgress;
+  assert.equal(stored?.engine?.closed, true);
+  assert.equal(stored?.engine?.closedReason, "promise");
+  assert.equal(stored?.completion, "complete");
+  const events = closeLoopEvents(card);
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.data.result, "closed");
+  const reply = await shipOf(card);
+  assert.notEqual(reply.body.error, "engine-not-closed");
+  assert.notEqual(reply.body.error, "loop-not-finished");
 });
