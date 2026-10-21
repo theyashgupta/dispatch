@@ -5,7 +5,11 @@ import { isHiddenCard } from "../../../shared/hidden-card.js";
 import type { Card, Session } from "../../../shared/types.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import { capturePane, paneAtPrompt, sendKeys } from "../../adapters/tmux.js";
-import { ENGINE_FILE } from "../domain/loop-progress.js";
+import {
+  closedEngineText,
+  ENGINE_FILE,
+  withClosedReason,
+} from "../domain/loop-progress.js";
 import {
   declineKeys,
   type SupervisorAction,
@@ -79,19 +83,67 @@ async function answerPrompt(
   });
 }
 
+async function writeAtomic(file: string, text: string): Promise<void> {
+  const tmp = `${file}.tmp`;
+  await fsp.writeFile(tmp, text);
+  await fsp.rename(tmp, file);
+}
+
+async function closeEngineFile(
+  card: Card,
+  engine: string,
+  closedBy: "promise" | "close_loop",
+): Promise<{ result: string; reason: typeof closedBy | "manual" }> {
+  const done = `${engine}.done`;
+  try {
+    await fsp.rename(engine, done);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    const slug = card.loopProgress?.slug;
+    if (code === "ENOENT" && slug) {
+      if (
+        await fsp.access(done).then(
+          () => true,
+          () => false,
+        )
+      ) {
+        return { result: "closed", reason: closedBy };
+      }
+      try {
+        const sessionId = card.loopProgress?.engine?.sessionId ?? null;
+        await writeAtomic(done, closedEngineText(slug, sessionId, closedBy));
+        return { result: "closed", reason: closedBy };
+      } catch (writeErr) {
+        const writeCode = (writeErr as NodeJS.ErrnoException).code;
+        return { result: `failed: ${writeCode ?? "error"}`, reason: closedBy };
+      }
+    }
+    return { result: `failed: ${code ?? "error"}`, reason: closedBy };
+  }
+  try {
+    const text = await fsp.readFile(done, "utf8");
+    await writeAtomic(done, withClosedReason(text, closedBy));
+    return { result: "closed", reason: closedBy };
+  } catch {
+    return { result: "closed", reason: "manual" };
+  }
+}
+
 async function closeLoop(card: Card, session: Session): Promise<void> {
   const root = rootOf(card, session);
   const engine = path.join(root, ENGINE_FILE);
-  let result = "closed";
-  if (root === "") result = "failed: no session root";
-  else {
-    try {
-      await fsp.rename(engine, `${engine}.done`);
-    } catch (err) {
-      result = `failed: ${(err as NodeJS.ErrnoException).code ?? "error"}`;
-    }
-  }
-  record(card, session, { action: "close_loop", file: engine, result });
+  const closedBy =
+    card.loopProgress?.completion === "complete" ? "close_loop" : "promise";
+  const { result, reason } =
+    root === ""
+      ? { result: "failed: no session root", reason: closedBy }
+      : await closeEngineFile(card, engine, closedBy);
+  record(card, session, {
+    action: "close_loop",
+    file: engine,
+    result,
+    reason,
+  });
   await refreshLoopProgress(card.id);
 }
 

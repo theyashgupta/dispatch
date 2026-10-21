@@ -1,4 +1,7 @@
-import { NEEDS_INPUT_MARKER_KIND } from "../../../shared/marker-key.js";
+import {
+  DONE_MARKER_KIND,
+  NEEDS_INPUT_MARKER_KIND,
+} from "../../../shared/marker-key.js";
 
 const MARKER_RE =
   /^\s*(?:⏺\s*)?DISPATCH_STATUS:\s*(NEEDS_INPUT|DONE)\b(?:\s*[—–-]\s*(.*))?\s*$/;
@@ -22,7 +25,7 @@ const CHROME_BORDER_RE = /^\s*[╭┌]?─{3,}/;
 const PLACEHOLDER_PREFIX_RE = /^<one-line (reason|summary)>/;
 
 export interface Marker {
-  kind: typeof NEEDS_INPUT_MARKER_KIND | "DONE";
+  kind: typeof NEEDS_INPUT_MARKER_KIND | typeof DONE_MARKER_KIND;
   reason: string;
 }
 
