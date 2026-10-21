@@ -34,7 +34,7 @@ test("a live session refused with resume_failed shows the reason without the res
   );
 });
 
-test("a lost session, a card with no tmux session, another state, another reason or an empty reason shows no alert", () => {
+test("a lost session, a card with no tmux session, another state, another reason, an empty reason or an older reason shows no alert", () => {
   const variants: Partial<Card>[] = [
     { sessionLost: true },
     { tmuxSession: undefined },
@@ -42,6 +42,7 @@ test("a lost session, a card with no tmux session, another state, another reason
     { stateReason: "supervisor_gave_up" },
     { statusReason: undefined },
     { statusReason: "resume: " },
+    { statusReason: "Which branch should I use?" },
   ];
   for (const variant of variants) {
     assert.equal(liveResumeFailure(card({ ...refused, ...variant })), null);

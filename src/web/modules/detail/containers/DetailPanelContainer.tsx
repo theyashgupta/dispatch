@@ -614,7 +614,7 @@ export function DetailPanelContainer() {
                     data-testid="live-resume-failure"
                     className="mx-(--space-xl) mb-(--space-lg)"
                   >
-                    <PanelAlert icon>{liveFailure}</PanelAlert>
+                    <PanelAlert>{liveFailure}</PanelAlert>
                   </div>
                 )}
 
