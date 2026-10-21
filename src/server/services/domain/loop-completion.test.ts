@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { loopCompletionOf } from "./loop-completion.js";
+import type { LoopProgress, LoopUnit } from "../../../shared/types.js";
+import { loopCompletionOf, promiseCompletes } from "./loop-completion.js";
 
 const LOCAL_159 =
   "All 7 phases of unit A and unit B are green.\n<promise>RALPH COMPLETE local-159</promise>\nDISPATCH_STATUS: DONE - LOCAL-159 built, awaiting ship";
@@ -81,6 +82,91 @@ void test("loopCompletionOf matches a slug with dots only exactly", () => {
 void test("loopCompletionOf gives false for an empty slug", () => {
   assert.equal(
     loopCompletionOf("<promise>RALPH COMPLETE </promise>", "").promise,
+    false,
+  );
+});
+
+const PROMISE_TEXT = "<promise>RALPH COMPLETE local-159</promise>";
+
+function unitOf(phaseTotal: number | null): LoopUnit {
+  return {
+    number: 1,
+    ticket: null,
+    title: "Unit",
+    status: "in progress",
+    statusText: "",
+    branch: null,
+    commit: null,
+    prdPath: null,
+    phaseTotal,
+    phases: [],
+  };
+}
+
+function progressOf(overrides: Partial<LoopProgress> = {}): LoopProgress {
+  return {
+    slug: "local-159",
+    roadmapFile: "",
+    units: [unitOf(null)],
+    engine: null,
+    completion: "running",
+    summary: {
+      unitsDone: 0,
+      unitsTotal: 1,
+      currentUnit: null,
+      currentPhase: null,
+      lastGate: null,
+    },
+    warnings: [],
+    readAt: "2026-10-21T00:00:00.000Z",
+    ...overrides,
+  };
+}
+
+void test("promiseCompletes is true for an open engine, a PRD model with no phases and its own promise", () => {
+  assert.equal(promiseCompletes(progressOf(), true, PROMISE_TEXT), true);
+});
+
+void test("promiseCompletes is false when the engine is closed", () => {
+  assert.equal(promiseCompletes(progressOf(), false, PROMISE_TEXT), false);
+});
+
+void test("promiseCompletes is false for a group loop model", () => {
+  assert.equal(
+    promiseCompletes(
+      progressOf({ roadmapFile: "loop-ledger.md" }),
+      true,
+      PROMISE_TEXT,
+    ),
+    false,
+  );
+});
+
+void test("promiseCompletes is false when the unit has a phase total", () => {
+  assert.equal(
+    promiseCompletes(progressOf({ units: [unitOf(3)] }), true, PROMISE_TEXT),
+    false,
+  );
+});
+
+void test("promiseCompletes is false for the promise of another slug", () => {
+  assert.equal(
+    promiseCompletes(progressOf({ slug: "local-160" }), true, PROMISE_TEXT),
+    false,
+  );
+});
+
+void test("promiseCompletes is false without progress", () => {
+  assert.equal(promiseCompletes(undefined, true, PROMISE_TEXT), false);
+});
+
+void test("promiseCompletes is false when the PRD path is known and the phase total is null", () => {
+  assert.equal(
+    promiseCompletes(
+      progressOf({ prdFile: "docs/x/PRD.md" }),
+      true,
+      PROMISE_TEXT,
+    ),
     false,
   );
 });
