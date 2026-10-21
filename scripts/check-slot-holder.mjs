@@ -42,7 +42,7 @@ export function isAlive(pid) {
  * Read the `ps` state of a process, or null when the process is gone.
  *
  * @remarks
- * "?" on a failed `ps` start keeps an unknown state from freeing a slot.
+ * "?" when `ps` cannot start or fails for a pid that still exists, so an unknown state never frees a slot.
  */
 export function psState(pid) {
   if (!isAlive(pid)) return null;
@@ -50,7 +50,7 @@ export function psState(pid) {
     encoding: "utf8",
   });
   if (result.error) return "?";
-  if (result.status !== 0) return null;
+  if (result.status !== 0) return isAlive(pid) ? "?" : null;
   return result.stdout.trim();
 }
 
@@ -58,28 +58,33 @@ export function psState(pid) {
  * Check the holder of a slot file and answer free, stale, busy, gone, alive or stopped.
  *
  * @remarks
- * `ps` has no stop time, so the stopped seconds count from the first check that saw the pid stopped, and a pid that runs again resets its clock. The caller owns `stoppedSince` and passes the same map on every poll.
+ * `ps` has no stop time, so the stopped seconds count from the first check that saw the holder stopped. The caller keeps one map across polls, keyed by slot, and a holder that runs again, a new holder pid or a free slot resets the clock. A zombie counts as gone because it does no work.
  */
 export function checkHolder(
   slotPath,
   { stateOf = psState, now = Date.now(), stoppedSince },
 ) {
   const owner = readOwner(slotPath);
-  if (typeof owner !== "number") return { verdict: owner };
+  if (typeof owner !== "number") {
+    stoppedSince.delete(slotPath);
+    return { verdict: owner };
+  }
   const state = stateOf(owner);
-  if (state === null) {
-    stoppedSince.delete(owner);
+  if (state === null || state.startsWith("Z")) {
+    stoppedSince.delete(slotPath);
     return { verdict: "gone", pid: owner };
   }
   if (!state.startsWith("T")) {
-    stoppedSince.delete(owner);
+    stoppedSince.delete(slotPath);
     return { verdict: "alive", pid: owner };
   }
-  if (!stoppedSince.has(owner)) stoppedSince.set(owner, now);
+  const entry = stoppedSince.get(slotPath);
+  const since = entry?.pid === owner ? entry.since : now;
+  stoppedSince.set(slotPath, { pid: owner, since });
   return {
     verdict: "stopped",
     pid: owner,
-    stoppedSeconds: (now - stoppedSince.get(owner)) / 1000,
+    stoppedSeconds: (now - since) / 1000,
   };
 }
 

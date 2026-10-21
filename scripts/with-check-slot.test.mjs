@@ -210,6 +210,7 @@ test("keeps a slot held by a live process and gives up with 75", async () => {
 
 test("releases a slot whose holder is stopped past the threshold", async () => {
   const lockDir = scratchDir();
+  const marker = join(scratchDir(), "ran");
   const holder = spawn("sleep", ["30"], { stdio: "ignore" });
   try {
     const pid = holder.pid;
@@ -226,10 +227,11 @@ test("releases a slot whose holder is stopped past the threshold", async () => {
       },
       process.execPath,
       "-e",
-      "",
+      `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "")`,
     );
     const { code, stderr } = await done;
     assert.equal(code, 0);
+    assert.equal(existsSync(marker), true);
     assert.ok(Date.now() - started >= 1000);
     assert.match(
       stderr,

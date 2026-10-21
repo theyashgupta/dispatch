@@ -115,6 +115,50 @@ test("an unknown state and a trace stop count as alive", () => {
   }
 });
 
+test("a zombie holder is gone", () => {
+  const slot = slotWith(4242);
+  const check = checkHolder(slot, {
+    stateOf: tableOf({ 4242: "Z" }),
+    now: 0,
+    stoppedSince: new Map(),
+  });
+  assert.deepEqual(check, { verdict: "gone", pid: 4242 });
+  assert.equal(shouldRelease(check, 300), true);
+});
+
+test("a free slot between polls resets the stopped clock", () => {
+  const slot = slotWith(4242);
+  const stateOf = tableOf({ 4242: "T" });
+  const stoppedSince = new Map();
+  checkHolder(slot, { stateOf, now: 0, stoppedSince });
+  writeFileSync(slot, "abc");
+  assert.equal(
+    checkHolder(slot, { stateOf, now: 1000, stoppedSince }).verdict,
+    "stale",
+  );
+  writeFileSync(slot, "4242");
+  assert.deepEqual(checkHolder(slot, { stateOf, now: 400000, stoppedSince }), {
+    verdict: "stopped",
+    pid: 4242,
+    stoppedSeconds: 0,
+  });
+});
+
+test("a new holder pid in the same slot restarts the stopped clock", () => {
+  const slot = slotWith(4242);
+  const stoppedSince = new Map();
+  checkHolder(slot, { stateOf: tableOf({ 4242: "T" }), now: 0, stoppedSince });
+  writeFileSync(slot, "4343");
+  assert.deepEqual(
+    checkHolder(slot, {
+      stateOf: tableOf({ 4343: "T" }),
+      now: 400000,
+      stoppedSince,
+    }),
+    { verdict: "stopped", pid: 4343, stoppedSeconds: 0 },
+  );
+});
+
 test("a missing slot file is free and garbage content is stale", () => {
   const stoppedSince = new Map();
   assert.deepEqual(
@@ -130,7 +174,6 @@ test("psState sees a real process stop and exit", async () => {
   const child = spawn("sleep", ["30"], { stdio: "ignore" });
   const exited = new Promise((resolve) => child.on("exit", resolve));
   try {
-    await waitFor(() => child.pid);
     const running = psState(child.pid);
     assert.equal(typeof running, "string");
     assert.ok(!running.startsWith("T"), `state was ${running}`);
