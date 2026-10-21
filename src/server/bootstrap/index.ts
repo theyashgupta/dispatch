@@ -23,6 +23,7 @@ import {
   terminalProxyUpgrade,
 } from "../adapters/terminal-proxy.js";
 import { probePreflight } from "../services/infra/preflight.js";
+import { loadManagedDefault } from "../services/orchestration/claude-accounts.js";
 import {
   onDefaultUsageRefreshed,
   startUsagePollLoop,
@@ -395,6 +396,12 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   await seedPlaybooks();
 
   await store.load();
+  await loadManagedDefault().catch((err) =>
+    console.warn(
+      "[accounts] managed default not loaded",
+      err instanceof Error ? err.message : err,
+    ),
+  );
 
   store.setPollInterval(config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
   store.setCleanupDelayDays(

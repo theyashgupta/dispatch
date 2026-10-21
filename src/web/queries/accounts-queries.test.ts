@@ -42,13 +42,29 @@ test("accountsKeys has the documented shape", () => {
 test("accountsQueryOptions requests the account list", async () => {
   const options = accountsQueryOptions();
   assert.deepEqual(options.queryKey, ["accounts", "list"]);
-  reply(200, { activeId: "a", accounts: [], sessions: [] });
+  reply(200, {
+    activeId: "a",
+    accounts: [],
+    sessions: [],
+    managedDefaultOffer: false,
+  });
   assert.deepEqual(await newClient().fetchQuery(options), {
     activeId: "a",
     accounts: [],
     sessions: [],
+    managedDefaultOffer: false,
   });
   assert.equal(calls[0]?.url, "/api/accounts");
+});
+
+test("getAccounts passes the managed default offer through", async () => {
+  reply(200, {
+    activeId: "a",
+    accounts: [],
+    sessions: [],
+    managedDefaultOffer: true,
+  });
+  assert.equal((await getAccounts()).managedDefaultOffer, true);
 });
 
 test("getAccounts throws on a failure status", async () => {

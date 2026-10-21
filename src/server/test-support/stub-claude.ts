@@ -5,6 +5,7 @@ const STUB_CLAUDE = `#!/bin/sh
 [ "$1" = "-p" ] || { echo "2.1.212 (Claude Code)"; exit 0; }
 [ "$ASK_STUB_MODE" = ignoreterm ] && trap '' TERM
 [ -n "$ASK_STUB_PID" ] && echo $$ > "$ASK_STUB_PID"
+[ -n "$ASK_STUB_CONFIG_DIR" ] && echo "$CLAUDE_CONFIG_DIR" > "$ASK_STUB_CONFIG_DIR"
 [ -n "$ASK_STUB_ARGV" ] && printf '%s\n' "$@" > "$ASK_STUB_ARGV"
 if [ -n "$ASK_STUB_STDIN" ]; then cat > "$ASK_STUB_STDIN"; else cat > /dev/null; fi
 case "$ASK_STUB_MODE" in
@@ -19,7 +20,7 @@ exit 2
 
 /**
  * Write the Ask stub `claude` into a bin dir; it records its pid and stdin, then acts on
- * `ASK_STUB_MODE`.
+ * `ASK_STUB_MODE`; `ASK_STUB_CONFIG_DIR` names a file that gets the `CLAUDE_CONFIG_DIR` value.
  *
  * @remarks `exec sleep` keeps the recorded pid on the sleeping process, so a pid check after an
  * abort proves the child itself is gone, not only its shell; `ignoreterm` passes an ignored
@@ -36,10 +37,12 @@ DIR="$CONNECTOR_STUB_DIR"
 case "$1" in
   mcp)
     echo "mcp list" >> "$DIR/calls.log"
+    echo "$CLAUDE_CONFIG_DIR" >> "$DIR/config-dir.log"
     [ -f "$DIR/mcp-list.txt" ] && cat "$DIR/mcp-list.txt"
     exit 0 ;;
   -p)
     echo "call" >> "$DIR/calls.log"
+    echo "$CLAUDE_CONFIG_DIR" >> "$DIR/config-dir.log"
     for a in "$@"; do printf '%s\\n' "$a" >> "$DIR/argv.log"; done
     echo "@@" >> "$DIR/argv.log"
     cat >> "$DIR/stdin.log"
@@ -113,7 +116,8 @@ exit 0
  * else the text of `reply.json`. The `mode` file holds `reply`, `toolerror`, `denied`, `mixed` (the third
  * tool answers an error result), `profileonly`, `notools`, `nouse`, `sleep` or `fail`. The init event
  * lists the servers in `servers.json` when it exists, else the connected `claude.ai Slack` server.
- * `nonblocking.log` gets the `MCP_CONNECTION_NONBLOCKING` value of each call.
+ * `nonblocking.log` gets the `MCP_CONNECTION_NONBLOCKING` value of each call, and `config-dir.log` the
+ * `CLAUDE_CONFIG_DIR` value of each list read and call.
  * @public The Slack connector specs are the callers.
  */
 export function writeConnectorClaude(binDir: string): string {

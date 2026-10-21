@@ -456,19 +456,19 @@ Mount prefix: `/api`.
 
 Mount prefix: `/api`.
 
-| Method | Path                              | Auth | Purpose                                                                              |
-| ------ | --------------------------------- | ---- | ------------------------------------------------------------------------------------ |
-| GET    | `/api/accounts`                   | User | List the Claude accounts, the active id, the account sessions and the account chain. |
-| PUT    | `/api/accounts/active`            | User | Set the active account, and optionally apply it to running sessions.                 |
-| PUT    | `/api/accounts/chain/order`       | User | Set the order of the account chain.                                                  |
-| PUT    | `/api/accounts/chain/settings`    | User | Save the account chain settings.                                                     |
-| POST   | `/api/accounts/chain/switch-now`  | User | Fail over to the next account of the chain now.                                      |
-| GET    | `/api/accounts/login`             | User | Read the state of the account login.                                                 |
-| POST   | `/api/accounts/login`             | User | Start the login of an account.                                                       |
-| POST   | `/api/accounts/login/code`        | User | Submit the login code.                                                               |
-| DELETE | `/api/accounts/login`             | User | Cancel the login.                                                                    |
-| POST   | `/api/accounts/:id/usage/refresh` | User | Refresh the usage of an account.                                                     |
-| DELETE | `/api/accounts/:id`               | User | Remove an account and log it out.                                                    |
+| Method | Path                              | Auth | Purpose                                                                                                     |
+| ------ | --------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/accounts`                   | User | List the Claude accounts, the active id, the account sessions, the account chain and `managedDefaultOffer`. |
+| PUT    | `/api/accounts/active`            | User | Set the active account, and optionally apply it to running sessions.                                        |
+| PUT    | `/api/accounts/chain/order`       | User | Set the order of the account chain.                                                                         |
+| PUT    | `/api/accounts/chain/settings`    | User | Save the account chain settings.                                                                            |
+| POST   | `/api/accounts/chain/switch-now`  | User | Fail over to the next account of the chain now.                                                             |
+| GET    | `/api/accounts/login`             | User | Read the state of the account login.                                                                        |
+| POST   | `/api/accounts/login`             | User | Start the login of an account. The body can hold `managedDefault: true`.                                    |
+| POST   | `/api/accounts/login/code`        | User | Submit the login code.                                                                                      |
+| DELETE | `/api/accounts/login`             | User | Cancel the login.                                                                                           |
+| POST   | `/api/accounts/:id/usage/refresh` | User | Refresh the usage of an account.                                                                            |
+| DELETE | `/api/accounts/:id`               | User | Remove an account and log it out.                                                                           |
 
 ### `routes/items.route.ts`
 
@@ -2926,6 +2926,72 @@ subprocess adapters may import only themselves and `shared`.
 `<configDir>/.claude.json` for an added account and into the home file for Default, since Claude
 Code reads the trust map from the config dir it runs under.
 
+#### Managed Default
+
+**Record (2026-10-21, LOCAL-159).** The user can move Default from the home login to a Dispatch
+login. The Dispatch login is a registry account in its own config dir. It stands in for Default.
+Dispatch then tracks its usage and moves its sessions like those of any added account.
+
+**Registry field.** `accounts.json` has an optional `managedDefaultId`. It is the id of the registry
+account that stands in for Default. When the field is absent, Default is the home login
+(`~/.claude`). The server caches the value in memory, loads it at boot and updates it on every
+registry write.
+
+**The offer.** `GET /api/accounts` returns `managedDefaultOffer: true` while `managedDefaultId` is
+absent, the home login is signed in, and no registry account holds the home identity (remove that
+duplicate first). The Accounts page then shows the panel `Move the Default
+account to a Dispatch login` with a `Log in` button. The user cannot dismiss the panel. It goes away
+when the move is done.
+
+**The managed login.** `POST /api/accounts/login` with `{ "managedDefault": true }` starts the login.
+The route refuses the body with 400 `invalid-id` when it also holds `accountId`. It refuses with 409
+`managed-exists` when a managed default exists. The login makes a new config dir like the login of an
+added account. At the end, the signed in identity must match the reference identity: the same
+email, and the same organization when both identities carry one. The reference is the managed
+record for a re-login, else the home identity. Another identity fails with `not-home-identity`
+and the message `Sign in with the same Claude account as your terminal login (<email>).`. The
+server removes the new dir. The `home-login` refusal does not apply in this mode, to a re-login of
+the managed account, or to any login after the move. A re-login whose record was removed during
+the login ends as cancelled. On success, one registry write puts the record at the Default
+position and sets `managedDefaultId`. The active pointer moves to the managed id when it was
+`default`. No running session moves. The chain then forgets its `default` entry and closes an open
+`needs-login:default` decision.
+
+**The mapping.** After the move, these calls use the managed account for a session recorded on
+`default`:
+
+- `resolveLaunchAccount("default")` resolves the managed account. A start, a resume or a move of
+  a session recorded on `default` launches on the managed config dir. A shell that already runs
+  keeps its environment.
+- `getActiveAccountId()` returns the managed id for a stored `default`.
+- `canonicalAccountId()` maps a session recorded on `default` to the managed id where the chain,
+  the supervisor limit wait, the session list and a session move compare accounts. Such a session
+  runs on the same Claude identity, so the same limits apply.
+- The chain order lists the managed id at the Default position and no `default`.
+- The usage poll does not read the home login.
+- `GET /api/accounts` hides the home row. The managed row has `managedDefault: true`, and its meta
+  reads `Default (Dispatch login)`.
+
+**Removal.** The removal of the managed account clears `managedDefaultId` and retags every session
+recorded on it to `default`. Default is the home login again, and the offer shows again. A running
+shell keeps the removed dir in its environment until it relaunches, as for any removed account.
+
+**Identity watch.** After the move, a change of the terminal login records `account_login_changed`
+and marks no session stale. Before the move, the watch works as in Session Account Move. The home
+duplicate check `shadowed-by-home` is off after the move, because the home login is not a chain
+account. The login flow refuses a second record with the managed identity (`duplicate`).
+
+**Headless Claude calls.** `managedClaudeEnv()` returns `{ CLAUDE_CONFIG_DIR: <managed dir> }` when
+a managed default exists, else `{}`. These calls merge it into their env: the connector calls and
+`claude mcp list` (the Granola and Slack rounds), the playbook, group title, meeting draft, Linear
+sync and ticket generators, and Ask. They use the managed default, not the active account, because
+the claude.ai connectors belong to the terminal identity. When the managed dir is missing, the
+calls fall back to the home login.
+
+**Known limit.** Dispatch copies `.claude.json` once from the home login into the managed dir, at
+its first use. A user scope MCP server that the user adds to the terminal login later is not in the
+managed dir. The user must add it there too.
+
 ### Session Account Move
 
 **Record (2026-10-05, LOCAL-80).** This record replaces the earlier rule, under which an account
@@ -3005,7 +3071,9 @@ the user must turn them on.
 `defaultPosition`. The migration from version 1 puts Default first and the added accounts after it
 by creation time. The runtime state is in `chain-state.json` next to it
 (`account-chain-state.ts`): the state, buckets and `limitedUntil` of each account, `inUseSince`, the
-exhausted record, the last 50 moves and `loginExpiryNotified`. A corrupt file reads as empty and does
+exhausted record, the last 50 moves and `loginExpiryNotified`. An account entry also holds the
+`fetchedAt` of its last read and, when above 0, `rejectedReads`. The `decisions` map holds the id of
+each open account decision by cause (see Account decisions). A corrupt file reads as empty and does
 not stop the boot. The settings are in `config.json` under `claudeAccounts`: `autoMove` (default
 false), `thresholdPercent` (default 100, range 50 to 100), `minDwellMinutes` (default 15, range 0 to 240) and `hysteresisPercent` (default 10, range 0 to 50). The config reader clamps a stored value to
 its range.
@@ -3013,12 +3081,17 @@ its range.
 **States.** `account-state.ts#deriveAccountState` gives each account one state. The first
 rule that applies sets the state:
 
+- `shadowed-by-home`: the registry account holds the home login (see Home login duplicate). This
+  state wins over every other state. The entry has no `limitedUntil`. The check is off once Default is managed (see Managed Default).
+- `needs-login`: 2 consecutive reads were `token-rejected` (see Needs login). The state wins over
+  `limited`, `login-expired` and `unknown`. The entry has no `limitedUntil`.
 - `login-expired`: the token read failed (401, 403 or no token) and the folder is logged out.
 - `limited`: a bucket is at or above the threshold, or a limit signal arrived. `limitedUntil` is the
   latest reset of the full buckets, so a full 7 day bucket holds the account until the 7 day reset.
   A bucket whose reset passed is not full. A stored `limited` state stays until `limitedUntil` only
   while the reads are not good (rate limited, failed, stale or unavailable). A good read that gives
-  another state replaces it (LOCAL-152). `GET /accounts` and the orchestrator `list_accounts` show a
+  another state replaces it (LOCAL-152). A held `limited` state also ends when the snapshot shows a
+  new period (see Stability). `GET /accounts` and the orchestrator `list_accounts` show a
   stored `limited` state whose `limitedUntil` passed as `unknown` with no `limitedUntil`
   (`account-state.ts#expireLimit`).
 - `unknown`: no good read exists, a 401 or 403 read comes from a logged in folder, or a good read
@@ -3029,7 +3102,7 @@ rule that applies sets the state:
 **The selection rule.** `account-selection.ts#selectAccount` takes the chain in position order and
 selects the first account whose state is `available`, `near-limit` or `unknown` and whose
 `limitedUntil` is not in the future. When no account qualifies, the chain is exhausted and the
-result is the earliest `limitedUntil`. The selection never takes a `login-expired` account.
+result is the earliest `limitedUntil`. The selection never takes a `login-expired`, `needs-login` or `shadowed-by-home` account.
 
 **Hysteresis.** `account-selection.ts#filterByHysteresis` limits the candidates of a usage trigger.
 The binding bucket of an account is its bucket with the highest percent. A candidate passes only
@@ -3099,7 +3172,11 @@ failure does not stop the read. A read without a token sends no request and writ
 
 **Stability.** After a chain move, a usage trigger does not move the sessions again for
 `minDwellMinutes`. Triggers 2 and 3 are hard signals and override the dwell. A limited account stays
-limited until its `limitedUntil`, also when a read before that time is below the threshold. A manual switch through `PUT /accounts/active` ends a running dwell and does not start a new one.
+limited until its `limitedUntil`, also when a read before that time is below the threshold, with one
+exception. `account-state.ts#showsNewPeriod` releases the hold when all of these are true: the
+snapshot is not `stale` and has windows, its `fetchedAt` is later than the stored `fetchedAt` of the
+entry, and every window is below the threshold. One more condition must hold: a window `periodStart`
+is after the stored `fetchedAt`, or no window still resets at the stored `limitedUntil`. A manual switch through `PUT /accounts/active` ends a running dwell and does not start a new one.
 
 **Failover.** With `autoMove` true, the controller sets the pointer, records the move and starts a
 new dwell. Then `session-account-apply.ts#applyAutomaticMove` changes the pending moves. Each
@@ -3134,7 +3211,8 @@ it. When a supervised session stops on the usage limit message, the supervisor r
 (`account-chain.ts#limitMoveCandidates`) and picks the target with
 `account-selection.ts#pickHeadroomAccount`:
 
-- The target is not the account of the session, and its state is `available` or `near-limit`.
+- The target is not the account of the session, and its state is `available` or `near-limit`. A
+  `needs-login` or `shadowed-by-home` account is never a target.
 - Its weekly percent is the highest bucket of a `weekly` kind (`weekly_all`, `weekly_scoped`). An
   account with no weekly bucket is not a target.
 - The weekly percent is below `thresholdPercent` minus `hysteresisPercent` (90 with the defaults).
@@ -3162,6 +3240,44 @@ still shows a limit surface continues: on the automatic continue line the server
 then `Continue.`; on the options menu it selects the stop option, or the wait option when no stop
 option shows, and then sends `Continue.`. A session with no limit surface on the screen gets no
 key. No key path selects a credits option.
+
+**Home login duplicate.** `account-state.ts#isShadowOfHome` is true when the email of a registry
+account equals the email of the home identity and both organization ids are set and equal. The
+controller checks it at the start of the chain, against the registry `defaultIdentity`, and after
+each identity watch check that reads a logged in home (`account-chain.ts#noteHomeIdentity`). The
+account in use is never shadowed. A failed or logged out home read changes nothing, because the CLI
+reports every failure as logged out. A shadowed account gets
+`shadowed-by-home`, loses its return timer, gets no login decision and is never a return target. A
+registry account that stops matching goes back to `unknown`. The Accounts row shows the badge
+`Same login as Default` and the button `Remove duplicate`. The button removes the account and signs
+out only the config directory of that account.
+
+**Needs login.** `account-state.ts#nextRejectedReads` counts the consecutive `token-rejected` reads
+in the entry field `rejectedReads`. An ok read sets the count to 0. A limit signal never counts,
+because it reuses a cached snapshot. At 2 the account gets `needs-login`. The access token lives 8
+hours and only a CLI launch on the folder renews it, so an idle account reads 401 while its login
+is good. The usage poll marks a 401 or 403 as `token-expired` when the access token `expiresAt`
+passed and the refresh token is not known to be expired (`claude-usage.ts`). A `token-expired` read
+sets the count to 0 and keeps the account `unknown`, so the first launch on it renews the token. A
+429 or a network error keeps the count.
+
+**Account decisions.** `account-decisions.ts` raises the account decisions on the default board
+`LOCAL` with the orchestrator id `dispatch-accounts`. No orchestrator wakes for them. Each has the
+kind `other`. The controller raises one decision for each cause and stores its id in
+`chain-state.json` under `decisions` (`needs-login:<id>` and `exhausted`), so a restart or a later
+read raises no second one. A failed raise leaves the id absent, and the next read tries again.
+
+- The login decision asks the user to log in. Its options are `login` and `later`. The question links
+  to `/#/accounts/<id>`, which opens the login dialog of that account. The answer `login` starts the
+  login for that account. The listener `decision-items.ts#onDecisionAnswered`, registered in
+  `account-chain.ts`, runs it. The login flow repairs only registry accounts, so a `needs-login`
+  decision for `default` cannot start a login until the managed default (Unit B).
+- The exhausted decision names the earliest reset, or says "No reset time is known." Its options are
+  `wait` and `add`. The answer starts no login. The decision closes when the exhausted record clears
+  or a move runs.
+- When the cause ends, the server answers its own item with the passive option and a note
+  (`later` for a login decision, `wait` for the exhausted decision). An item that the user already
+  answered stays as answered. Removing an account closes its open login decision.
 
 **Login expiry.** The usage read also reads `claudeAiOauth.refreshTokenExpiresAt` (epoch ms) from
 the same credential text as the token (`claude-usage.ts#readCredential`). The value stays in memory.
@@ -5657,8 +5773,18 @@ question; none of them read prose for truth.
   A slot is the file `~/.dispatch/locks/check-slot-<n>`, which holds the pid of the gate process.
   The gate creates it with a hard link, so it cannot replace a slot that exists. A caller that finds
   no free slot prints the holder pids, then waits. A slot is dead when its pid is not alive, when
-  its content is not a pid, or when it is older than the last boot. A dead slot is removed only
-  while the caller holds the `.reclaim` guard directory with its own token. This prevents the removal
+  its content is not a pid, or when it is older than the last boot. On each poll, a waiting gate
+  reads the state of each holder with `ps`. A holder in state `T` (stopped, for example by a
+  suspend or after a sleep of the Mac) for more than `DISPATCH_CHECK_STOPPED_SECONDS` (default 300)
+  is also dead, and so is a holder in state `Z` (a zombie). `ps` does not give the stop time, so the gate counts the stopped time from its first
+  poll that saw the stop. A holder that runs again resets the count. When the gate frees a slot
+  whose holder is gone or stopped, it writes one line, for example
+  `with-check-slot: released check-slot-0, holder pid 57153 state T stopped 301s, held 57600s`.
+  `held` is the age of the slot file. The gate does not send a signal to a stopped holder. If the
+  holder continues later, its command runs without a slot, and at exit it does not remove the slot
+  of the new holder, because the slot does not hold its pid. A dead slot is removed only
+  while the caller holds the `.reclaim` guard directory with its own token, and only when a second
+  check under the guard finds the same holder pid still dead. This prevents the removal
   of a live slot, except in one race: 3 or more gates that act on a guard older than 60 seconds. The gate sets `DISPATCH_CHECK_SLOT_HELD=1` for its command, so the steps of
   `npm run check` run in the slot of the chain and do not take a second slot. The command runs in
   its own process group, and the gate sends SIGINT, SIGTERM and SIGHUP to the full group. After 5400

@@ -47,6 +47,19 @@ const AUTO_APPROVED_KINDS: readonly DecisionItem["kind"][] = [
   "plan",
 ];
 
+const answeredListeners: ((item: DecisionItem) => void)[] = [];
+
+/**
+ * Register a listener that runs after a decision item is answered through `answerDecisionItem`.
+ *
+ * @remarks A listener that throws is logged and never fails the answer.
+ */
+export function onDecisionAnswered(
+  listener: (item: DecisionItem) => void,
+): void {
+  answeredListeners.push(listener);
+}
+
 /**
  * Resolve the orchestrator that owns a decision.
  *
@@ -162,5 +175,12 @@ export function answerDecisionItem(
     },
     ts: new Date().toISOString(),
   });
+  for (const listener of answeredListeners) {
+    try {
+      listener(answered);
+    } catch (err) {
+      console.warn(`[decision-items] ${(err as Error).message}`);
+    }
+  }
   return answered;
 }
