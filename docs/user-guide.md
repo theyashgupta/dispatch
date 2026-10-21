@@ -540,6 +540,7 @@ Each item shows the group id, a badge, the wait time ("waiting 34 min", "waiting
 | Budget stop           | "Budget reached: $<cost> of $<budget>."                                                                                  | **Resume loop**, **Change budget**, **Open terminal**.                                        |
 | **Failed gate**       | "Phase <n> gate failed, attempt <k> of <limit>."                                                                         | **Open terminal**.                                                                            |
 | Failed resume         | "The session was lost and the resume failed: <reason>." or "Claude exited and the resume failed: <reason>."              | **Try resume again**, **Open terminal**.                                                      |
+| **Notifications**     | "Pushover <names> <is or are> empty. Loop phase notifications are not sent. Fill the value(s) in the env vault."         | None in Dispatch. Fill the value in the env vault.                                            |
 
 How each action works:
 
@@ -549,6 +550,8 @@ How each action works:
 - **Try resume again.** It starts the resume of the dead session again. This is the same resume that the supervisor tried.
 - **Open terminal.** It opens the detail panel of the group with its live terminal.
 - **Permission prompt.** The queue has no approve button and no deny button. Answer the prompt in the terminal. The supervisor itself declines only two prompts: a dangerous delete, and a held message from a peer session.
+
+The **Notifications** item shows when loop phase notifications are on and `PUSHOVER_USER_KEY` or `PUSHOVER_APP_TOKEN` is empty. Notifications are on when a Pushover name is set in the server environment or in the env vault. The item shows on every board. Dispatch checks the values again every 60 seconds. The item goes away at most 60 seconds after you fill both values. When no Pushover name is set, the item does not show. The start log has one line that names the empty variables. Dispatch never shows a value and never writes a value to the log.
 
 A board with the supervisor **Off** still lists a card at **Needs input**, with a reply field when the card has a session.
 
