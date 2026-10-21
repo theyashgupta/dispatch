@@ -6,14 +6,26 @@ const MOUSE_TAP_PX = 3;
 const TOUCH_TAP_PX = 8;
 
 /**
- * Clamp a panel width to at least 360 px and at most 90 percent of the viewport.
+ * Clamp a panel width to at least 360 px and at most `panelMaxWidth`.
  *
  * @remarks The maximum wins over the minimum, so a viewport under 400 px gets 90 percent of it.
  */
-export function clampPanelWidth(px: number, viewportWidth: number): number {
+export function clampPanelWidth(
+  px: number,
+  viewportWidth: number,
+  navWidth = 0,
+): number {
+  return Math.min(
+    panelMaxWidth(viewportWidth, navWidth),
+    Math.max(PANEL_MIN_WIDTH_PX, px),
+  );
+}
+
+/** The widest overlay panel: 90 percent of the viewport, and never over the sidebar. */
+export function panelMaxWidth(viewportWidth: number, navWidth = 0): number {
   return Math.min(
     viewportWidth * PANEL_MAX_WIDTH_RATIO,
-    Math.max(PANEL_MIN_WIDTH_PX, px),
+    viewportWidth - navWidth,
   );
 }
 
@@ -26,10 +38,11 @@ export function keyboardStepWidth(
   key: "ArrowLeft" | "ArrowRight",
   current: number,
   viewportWidth: number,
+  navWidth = 0,
 ): number {
   const step =
     key === "ArrowLeft" ? PANEL_KEYBOARD_STEP_PX : -PANEL_KEYBOARD_STEP_PX;
-  return clampPanelWidth(current + step, viewportWidth);
+  return clampPanelWidth(current + step, viewportWidth, navWidth);
 }
 
 /** Whether a drag that moved `delta` px is a tap: 3 px or less for a mouse, 8 px or less otherwise. */
