@@ -9,9 +9,10 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { constants, homedir, totalmem, uptime } from "node:os";
+import { constants, homedir, totalmem } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { isAlive, readOwner } from "./check-slot-holder.mjs";
 
 const [command, ...args] = process.argv.slice(2);
 const env = process.env;
@@ -42,41 +43,6 @@ function nonNegativeInt(value, fallback) {
   if (String(value ?? "").trim() === "") return fallback;
   const number = Number(value);
   return Number.isInteger(number) && number >= 0 ? number : fallback;
-}
-
-/**
- * Read the owner of a slot file as "free", "stale", "busy" or the owner pid.
- *
- * @remarks
- * A slot is "stale" when its content is not a positive integer, when it is a directory, or when it is older than the last boot, because a pid from before the boot can name an unrelated process. Any other read error returns "busy" so a slot is never removed on a failure that says nothing about its owner.
- */
-function readOwner(path) {
-  try {
-    const stat = statSync(path);
-    if (stat.isDirectory() || stat.mtimeMs < Date.now() - uptime() * 1000) {
-      return "stale";
-    }
-    const pid = Number(readFileSync(path, "utf8").trim());
-    return Number.isInteger(pid) && pid > 0 ? pid : "stale";
-  } catch (error) {
-    if (error.code === "ENOENT") return "free";
-    return error.code === "EISDIR" ? "stale" : "busy";
-  }
-}
-
-/**
- * Tell if a process with this pid exists.
- *
- * @remarks
- * EPERM means the process exists but belongs to another user, so it counts as alive.
- */
-function isAlive(pid) {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    return error.code === "EPERM";
-  }
 }
 
 /**
