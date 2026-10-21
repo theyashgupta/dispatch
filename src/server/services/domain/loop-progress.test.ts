@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { LoopProgress } from "../../../shared/types.js";
+import { parsePrdEngine } from "./prd-progress.js";
 import {
   buildLoopProgress,
   buildPrdProgress,
+  closedEngineText,
   type PrdProgressInput,
   parseAttemptLines,
   parseEngineFile,
@@ -13,6 +15,7 @@ import {
   parseStateLines,
   phaseDir,
   unitFilePaths,
+  withClosedReason,
 } from "./loop-progress.js";
 
 const READ_AT = "2026-10-06T12:00:00.000Z";
@@ -770,6 +773,42 @@ void test("a closed engine with no gate lines gives not started", () => {
   assert.equal(result.engine?.closed, true);
 });
 
+void test("a closed engine with no PRD file reads built and complete", () => {
+  const result = buildPrdProgress(
+    prdInput({
+      prdFile: null,
+      prdText: null,
+      engine: { text: ENGINE_ACTIVE, closed: true },
+    }),
+  );
+  assert.equal(result.units[0]?.status, "built, awaiting /ship");
+  assert.equal(result.completion, "complete");
+  assert.equal(result.summary.unitsDone, 1);
+  assert.equal(result.summary.unitsTotal, 1);
+});
+
+void test("an open engine with no PRD file reads running, not complete", () => {
+  const result = buildPrdProgress(
+    prdInput({
+      prdFile: null,
+      prdText: null,
+      engine: { text: ENGINE_ACTIVE, closed: false },
+    }),
+  );
+  assert.equal(result.completion, "running");
+});
+
+void test("a closed engine with phases read stays in progress while a phase is pending", () => {
+  const result = buildPrdProgress(
+    prdInput({
+      stateText: "phase 1 One GREEN 2026-10-11T04:00:00Z gate=pass\n",
+      engine: { text: ENGINE_ACTIVE, closed: true },
+    }),
+  );
+  assert.equal(result.units[0]?.status, "in progress");
+  assert.notEqual(result.completion, "complete");
+});
+
 void test("a PRD with no phase headings gives a warning and a null total", () => {
   const result = buildPrdProgress(prdInput({ prdText: "# Only a title\n" }));
   assert.equal(result.units[0]?.phaseTotal, null);
@@ -807,4 +846,72 @@ void test("the model has no roadmap file and carries the PRD file", () => {
   assert.equal(result.slug, "demo-feature");
   assert.equal(result.units[0]?.prdPath, PRD_FILE);
   assert.equal(result.readAt, PRD_READ_AT);
+});
+
+const FENCED = "---\nactive: true\niteration: 2\n---\nbody line\n";
+
+void test("withClosedReason inserts the reason before the second fence and keeps the body", () => {
+  assert.equal(
+    withClosedReason(FENCED, "promise"),
+    "---\nactive: true\niteration: 2\nclosed_reason: promise\n---\nbody line\n",
+  );
+});
+
+void test("withClosedReason replaces an existing closed_reason line", () => {
+  const text = "---\nactive: true\nclosed_reason: promise\n---\nbody\n";
+  assert.equal(
+    withClosedReason(text, "close_loop"),
+    "---\nactive: true\nclosed_reason: close_loop\n---\nbody\n",
+  );
+});
+
+void test("withClosedReason returns text without a front matter unchanged", () => {
+  assert.equal(withClosedReason("no fences\n", "promise"), "no fences\n");
+  assert.equal(
+    withClosedReason("---\nactive: true\n", "promise"),
+    "---\nactive: true\n",
+  );
+});
+
+void test("a closed engine file reports the closed_reason it holds", () => {
+  for (const reason of ["promise", "close_loop"]) {
+    const text = `---\nactive: true\nclosed_reason: ${reason}\n---\nbody`;
+    assert.equal(parseEngineFile(text, true).engine?.closedReason, reason);
+  }
+});
+
+void test("a closed engine file with no or an unknown closed_reason reports manual", () => {
+  assert.equal(parseEngineFile(FENCED, true).engine?.closedReason, "manual");
+  assert.equal(
+    parseEngineFile("---\nactive: true\nclosed_reason: other\n---\nbody", true)
+      .engine?.closedReason,
+    "manual",
+  );
+});
+
+void test("an open engine file has no closedReason key", () => {
+  const text = "---\nactive: true\nclosed_reason: promise\n---\nbody";
+  assert.equal(
+    "closedReason" in (parseEngineFile(text, false).engine ?? {}),
+    false,
+  );
+});
+
+void test("closedEngineText parses as a closed engine with the reason and the session id", () => {
+  const text = closedEngineText("local-172", "sess-1", "promise");
+  const { engine } = parseEngineFile(text, true);
+  assert.equal(engine?.active, false);
+  assert.equal(engine?.closed, true);
+  assert.equal(engine?.closedReason, "promise");
+  assert.equal(engine?.sessionId, "sess-1");
+  assert.equal(parsePrdEngine(text).slug, "local-172");
+});
+
+void test("closedEngineText leaves the session id null when none is given", () => {
+  const { engine } = parseEngineFile(
+    closedEngineText("local-172", null, "close_loop"),
+    true,
+  );
+  assert.equal(engine?.sessionId, null);
+  assert.equal(engine?.closedReason, "close_loop");
 });

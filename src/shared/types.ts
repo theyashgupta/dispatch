@@ -2020,6 +2020,7 @@ export interface LoopEngine {
   handoffPending: boolean;
   startedAt: string | null;
   closed: boolean;
+  closedReason?: "promise" | "close_loop" | "manual";
 }
 
 export interface LoopGate {
