@@ -32,12 +32,14 @@ function queue() {
 }
 
 test("filled values leave no item and no snapshot field", async () => {
+  await checkPushover(presence("empty", "empty"));
   await checkPushover(presence("filled", "filled"));
   assert.deepEqual(queue(), []);
   assert.equal("pushoverMissing" in store.snapshot(DEFAULT_BOARD_KEY), false);
 });
 
 test("empty values give one item naming both, with no network call", async (t) => {
+  store.setPushoverMissing([]);
   const fetchSpy = t.mock.method(globalThis, "fetch", () =>
     Promise.reject(new Error("no network")),
   );
@@ -54,6 +56,8 @@ test("empty values give one item naming both, with no network call", async (t) =
 });
 
 test("a second check with the same values keeps one item and its since", async () => {
+  store.setPushoverMissing([]);
+  await checkPushover(presence("empty", "empty"));
   const before = store.pushoverMissing()?.since;
   assert.ok(before);
   await checkPushover(presence("empty", "empty"));
@@ -62,16 +66,20 @@ test("a second check with the same values keeps one item and its since", async (
 });
 
 test("a check with filled values clears the item", async () => {
+  await checkPushover(presence("empty", "empty"));
+  assert.equal(queue().length, 1);
   await checkPushover(presence("filled", "filled"));
   assert.deepEqual(queue(), []);
 });
 
 test("notifications off gives no item", async () => {
+  await checkPushover(presence("empty", "empty"));
   await checkPushover(presence("unset", "unset"));
   assert.deepEqual(queue(), []);
 });
 
 test("the snapshot never holds a value and names only the empty name", async () => {
+  store.setPushoverMissing([]);
   const missing = path.join(env.root, "missing");
   const missingPaths = {
     schema: path.join(missing, "schema.keys"),
@@ -87,5 +95,4 @@ test("the snapshot never holds a value and names only the empty name", async () 
   const json = JSON.stringify(store.snapshot(DEFAULT_BOARD_KEY));
   assert.equal(json.includes("fake-user-168"), false);
   assert.deepEqual(store.pushoverMissing()?.names, ["PUSHOVER_APP_TOKEN"]);
-  await checkPushover(presence("unset", "unset"));
 });

@@ -253,7 +253,7 @@ test("a budget warning reads the numbers of the item when no group matches", () 
 });
 
 test("a pushover_missing item row shows the Notifications badge and its text with no action", () => {
-  const text = "Pushover PUSHOVER_USER_KEY is empty.";
+  const text = "Pushover PUSHOVER_USER_KEY is empty or not set.";
   const row = body("pushover_missing", {
     cardId: null,
     groupId: null,

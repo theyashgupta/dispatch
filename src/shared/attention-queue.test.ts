@@ -639,9 +639,9 @@ test("a budget stop shows the budget_stop item and no budget_warning item", () =
 });
 
 const ONE_NAME =
-  "Pushover PUSHOVER_USER_KEY is empty. Loop phase notifications are not sent. Fill the value in the env vault.";
+  "Pushover PUSHOVER_USER_KEY is empty or not set. Loop phase notifications are not sent. Fill the value in the env vault.";
 const TWO_NAMES =
-  "Pushover PUSHOVER_USER_KEY and PUSHOVER_APP_TOKEN are empty. Loop phase notifications are not sent. Fill the values in the env vault.";
+  "Pushover PUSHOVER_USER_KEY and PUSHOVER_APP_TOKEN are empty or not set. Loop phase notifications are not sent. Fill the values in the env vault.";
 
 function withGap(names: string[], cards: Card[] = [], since = minutesAgo(10)) {
   return buildAttentionQueue({

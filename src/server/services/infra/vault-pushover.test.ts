@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { isolateEnv } from "../../test-support/fixtures.js";
@@ -13,7 +12,7 @@ after(() => env.cleanup());
 const NAMES = ["PUSHOVER_USER_KEY", "PUSHOVER_APP_TOKEN"] as const;
 
 function files(schema: string | null, values: string | null) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "pushover-"));
+  const dir = fs.mkdtempSync(path.join(env.root, "pushover-"));
   const paths = {
     schema: path.join(dir, "schema.keys"),
     values: path.join(dir, "values.env"),
@@ -26,19 +25,57 @@ function files(schema: string | null, values: string | null) {
 const userOnly = (values: string) =>
   envVaultPresence(["PUSHOVER_USER_KEY"], {}, files(null, values));
 
-void test("a name defined in the environment is filled even when the values file is empty", async () => {
+void test("the values file wins over an empty environment value", async () => {
+  const result = await envVaultPresence(
+    ["PUSHOVER_USER_KEY"],
+    { PUSHOVER_USER_KEY: "" },
+    files(null, "PUSHOVER_USER_KEY='abc'\n"),
+  );
+  assert.equal(result.PUSHOVER_USER_KEY, "filled");
+});
+
+void test("an empty values file line wins over a filled environment value", async () => {
+  const result = await envVaultPresence(
+    ["PUSHOVER_USER_KEY"],
+    { PUSHOVER_USER_KEY: "fake-user-168" },
+    files(null, "PUSHOVER_USER_KEY=''\n"),
+  );
+  assert.equal(result.PUSHOVER_USER_KEY, "empty");
+});
+
+void test("the environment decides when the values file has no line", async () => {
   const result = await envVaultPresence(
     NAMES,
     {
       PUSHOVER_USER_KEY: "fake-user-168",
       PUSHOVER_APP_TOKEN: "fake-token-168",
     },
-    files(null, "PUSHOVER_USER_KEY=''\n"),
+    files(null, "OTHER_NAME='x'\n"),
   );
   assert.deepEqual(result, {
     PUSHOVER_USER_KEY: "filled",
     PUSHOVER_APP_TOKEN: "filled",
   });
+});
+
+void test("the environment wins over a schema-only declaration", async () => {
+  const result = await envVaultPresence(
+    ["PUSHOVER_USER_KEY"],
+    { PUSHOVER_USER_KEY: "fake-user-168" },
+    files("PUSHOVER_USER_KEY=  # purpose\n", null),
+  );
+  assert.equal(result.PUSHOVER_USER_KEY, "filled");
+});
+
+void test("a CRLF values file line reads the same as an LF line", async () => {
+  assert.equal(
+    (await userOnly("PUSHOVER_USER_KEY=''\r\n")).PUSHOVER_USER_KEY,
+    "empty",
+  );
+  assert.equal(
+    (await userOnly("PUSHOVER_USER_KEY='abc'\r\n")).PUSHOVER_USER_KEY,
+    "filled",
+  );
 });
 
 void test("an empty or blank environment value is empty", async () => {

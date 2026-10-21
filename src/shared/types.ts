@@ -904,7 +904,7 @@ export interface BoardSnapshot {
   doneCounts?: { awaiting: number; cleaned: number; total: number };
   items?: Item[];
   enabledSources?: string[];
-  pushoverMissing?: { names: string[]; since: string };
+  pushoverMissing?: PushoverGap;
 }
 
 /**
@@ -2242,3 +2242,8 @@ export interface SlackMcpStatus {
 }
 
 export type EnvPresence = "unset" | "empty" | "filled";
+
+export interface PushoverGap {
+  names: string[];
+  since: string;
+}

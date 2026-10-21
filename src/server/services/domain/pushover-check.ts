@@ -28,5 +28,5 @@ export function pushoverStartLine(
 ): string | null {
   if (missing.length === 0) return null;
   const verb = missing.length === 1 ? "is" : "are";
-  return `[notify] loop phase notifications are on, but ${missing.join(" and ")} ${verb} empty in the env vault, so no phase notification is sent`;
+  return `[notify] loop phase notifications are on, but ${missing.join(" and ")} ${verb} empty or not set, so no phase notification is sent`;
 }

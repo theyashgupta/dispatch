@@ -196,7 +196,7 @@ function pushoverItem(
     state: null,
     waitingSince: gap.since,
     waitMinutes: waitMinutesOf(gap.since, now),
-    text: `Pushover ${gap.names.join(" and ")} ${many ? "are" : "is"} empty. Loop phase notifications are not sent. Fill the ${many ? "values" : "value"} in the env vault.`,
+    text: `Pushover ${gap.names.join(" and ")} ${many ? "are" : "is"} empty or not set. Loop phase notifications are not sent. Fill the ${many ? "values" : "value"} in the env vault.`,
     reply: false,
   };
 }

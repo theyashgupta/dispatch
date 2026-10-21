@@ -55,6 +55,7 @@ import type {
   LoopProgress,
   ShipFlow,
   OrchestrationEvent,
+  PushoverGap,
   SettableItemState,
   StartError,
   TerminalError,
@@ -560,7 +561,7 @@ class BoardStore extends EventEmitter {
     cursor: false,
   };
   private enabledSourceIds: string[] = [];
-  private pushoverGap: { names: string[]; since: string } | null = null;
+  private pushoverGap: PushoverGap | null = null;
   /**
    * Registered workspace-folder paths, persisted in board.json and broadcast on every snapshot so
    * the start modal reads them live. Runtime state (unlike the boot-only pollIntervalMs/editors), so
@@ -1300,6 +1301,7 @@ class BoardStore extends EventEmitter {
           (c.groupId != null && !outOfWindow.has(c.groupId)),
       );
     }
+    const gap = this.pushoverMissing();
     return {
       ...snap,
       boardKey: board,
@@ -1318,14 +1320,7 @@ class BoardStore extends EventEmitter {
         return held !== undefined && held.column !== "done";
       }),
       enabledSources: this.enabledSourceIds,
-      ...(this.pushoverGap
-        ? {
-            pushoverMissing: {
-              ...this.pushoverGap,
-              names: [...this.pushoverGap.names],
-            },
-          }
-        : {}),
+      ...(gap ? { pushoverMissing: gap } : {}),
     };
   }
 
@@ -1458,7 +1453,7 @@ class BoardStore extends EventEmitter {
   }
 
   /** Read the empty Pushover names and the time the gap began, or null when none is empty. */
-  pushoverMissing(): { names: string[]; since: string } | null {
+  pushoverMissing(): PushoverGap | null {
     return this.pushoverGap === null
       ? null
       : { ...this.pushoverGap, names: [...this.pushoverGap.names] };

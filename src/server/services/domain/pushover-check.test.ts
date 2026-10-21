@@ -59,13 +59,13 @@ void test("an unset name counts as missing when the other name is declared", () 
 void test("the start line names one missing value", () => {
   assert.equal(
     pushoverStartLine(["PUSHOVER_USER_KEY"]),
-    "[notify] loop phase notifications are on, but PUSHOVER_USER_KEY is empty in the env vault, so no phase notification is sent",
+    "[notify] loop phase notifications are on, but PUSHOVER_USER_KEY is empty or not set, so no phase notification is sent",
   );
 });
 
 void test("the start line names two missing values", () => {
   assert.equal(
     pushoverStartLine(["PUSHOVER_USER_KEY", "PUSHOVER_APP_TOKEN"]),
-    "[notify] loop phase notifications are on, but PUSHOVER_USER_KEY and PUSHOVER_APP_TOKEN are empty in the env vault, so no phase notification is sent",
+    "[notify] loop phase notifications are on, but PUSHOVER_USER_KEY and PUSHOVER_APP_TOKEN are empty or not set, so no phase notification is sent",
   );
 });
