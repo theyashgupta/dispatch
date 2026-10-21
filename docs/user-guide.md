@@ -756,7 +756,7 @@ When an account shows **Same login as Default**, choose **Remove duplicate**. Th
 
 When every account is at its limit, Dispatch raises the decision "Every Claude account is at its limit". The text shows when the first account resets. Work resumes at that time. To continue sooner, choose **Add an account** and add an account on the **Accounts** page. Choose **Wait for the reset** to do nothing. The decision closes by itself when an account is usable again.
 
-When the home login is signed in and you did not move Default, the **Accounts** page shows the panel **Move the Default account to a Dispatch login**. You cannot dismiss the panel. It goes away when you finish the move.
+When the home login is signed in and you did not move Default, the **Accounts** page shows the panel **Move the Default account to a Dispatch login**. If an added account has the same login as Default, remove that duplicate first; the panel then shows. You cannot dismiss the panel. It goes away when you finish the move.
 
 After the move, Dispatch can track the usage of **Default** and can move its sessions, as it does for any other account. To do the move:
 

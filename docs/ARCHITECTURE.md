@@ -2917,20 +2917,24 @@ account that stands in for Default. When the field is absent, Default is the hom
 registry write.
 
 **The offer.** `GET /api/accounts` returns `managedDefaultOffer: true` while `managedDefaultId` is
-absent and the home login is signed in. The Accounts page then shows the panel `Move the Default
+absent, the home login is signed in, and no registry account holds the home identity (remove that
+duplicate first). The Accounts page then shows the panel `Move the Default
 account to a Dispatch login` with a `Log in` button. The user cannot dismiss the panel. It goes away
 when the move is done.
 
 **The managed login.** `POST /api/accounts/login` with `{ "managedDefault": true }` starts the login.
 The route refuses the body with 400 `invalid-id` when it also holds `accountId`. It refuses with 409
 `managed-exists` when a managed default exists. The login makes a new config dir like the login of an
-added account. At the end, the signed in identity must be the home identity: the same email, and the
-same organization when both identities carry one. Another identity fails with `not-home-identity`
+added account. At the end, the signed in identity must match the reference identity: the same
+email, and the same organization when both identities carry one. The reference is the managed
+record for a re-login, else the home identity. Another identity fails with `not-home-identity`
 and the message `Sign in with the same Claude account as your terminal login (<email>).`. The
-server removes the new dir. The `home-login` refusal does not apply in this mode. It does not apply
-to a re-login of the managed account. On success, one registry write puts the record at the Default
+server removes the new dir. The `home-login` refusal does not apply in this mode, to a re-login of
+the managed account, or to any login after the move. A re-login whose record was removed during
+the login ends as cancelled. On success, one registry write puts the record at the Default
 position and sets `managedDefaultId`. The active pointer moves to the managed id when it was
-`default`. No running session moves.
+`default`. No running session moves. The chain then forgets its `default` entry and closes an open
+`needs-login:default` decision.
 
 **The mapping.** After the move, these calls use the managed account for a session recorded on
 `default`:
@@ -2939,13 +2943,17 @@ position and sets `managedDefaultId`. The active pointer moves to the managed id
   a session recorded on `default` launches on the managed config dir. A shell that already runs
   keeps its environment.
 - `getActiveAccountId()` returns the managed id for a stored `default`.
+- `canonicalAccountId()` maps a session recorded on `default` to the managed id where the chain,
+  the supervisor limit wait, the session list and a session move compare accounts. Such a session
+  runs on the same Claude identity, so the same limits apply.
 - The chain order lists the managed id at the Default position and no `default`.
 - The usage poll does not read the home login.
 - `GET /api/accounts` hides the home row. The managed row has `managedDefault: true`, and its meta
   reads `Default (Dispatch login)`.
 
-**Removal.** The removal of the managed account clears `managedDefaultId`. Default is the home
-login again, and the offer shows again.
+**Removal.** The removal of the managed account clears `managedDefaultId` and retags every session
+recorded on it to `default`. Default is the home login again, and the offer shows again. A running
+shell keeps the removed dir in its environment until it relaunches, as for any removed account.
 
 **Identity watch.** After the move, a change of the terminal login records `account_login_changed`
 and marks no session stale. Before the move, the watch works as in Session Account Move. The home
@@ -2956,8 +2964,8 @@ account. The login flow refuses a second record with the managed identity (`dupl
 a managed default exists, else `{}`. These calls merge it into their env: the connector calls and
 `claude mcp list` (the Granola and Slack rounds), the playbook, group title, meeting draft, Linear
 sync and ticket generators, and Ask. They use the managed default, not the active account, because
-the claude.ai connectors belong to the terminal identity. A broken managed account (the record or
-the dir is missing) falls back to the home login.
+the claude.ai connectors belong to the terminal identity. When the managed dir is missing, the
+calls fall back to the home login.
 
 **Known limit.** Dispatch copies `.claude.json` once from the home login into the managed dir, at
 its first use. A user scope MCP server that the user adds to the terminal login later is not in the
