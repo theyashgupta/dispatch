@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
+import { randomUUID } from "node:crypto";
+import type { Card } from "../../../shared/types.js";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { fakeBoardRepository } from "../../test-support/fake-board-repository.js";
 
@@ -14,8 +16,36 @@ const login = await import("./claude-login.js");
 configHolder.setOrchestrationConfig({ linearApiKey: "", port: 4700 });
 
 const events: { type: string; reason: string; cardId: string | null }[] = [];
+const cardSessions: { id: string; claudeAccountId?: string }[] = [];
+const sessionWrites: string[] = [];
+
+/**
+ * Record an account write against the seeded sessions and apply it to their state.
+ */
+function sessionWriter(
+  name: string,
+  apply?: (sessionId: string, accountId: string) => void,
+): (...args: unknown[]) => Promise<void> {
+  return (...args: unknown[]): Promise<void> => {
+    sessionWrites.push(`${name}:${args.map(String).join(",")}`);
+    apply?.(args[1] as string, args[2] as string);
+    return Promise.resolve();
+  };
+}
+
 setBoardRepository(
   fakeBoardRepository({
+    getCard: () =>
+      ({ id: "card-1", sessions: cardSessions }) as unknown as Card,
+    setSessionAccount: sessionWriter("setSessionAccount", (sid, acct) => {
+      const s = cardSessions.find((x) => x.id === sid);
+      if (s) s.claudeAccountId = acct;
+    }),
+    markAccountStale: sessionWriter("markAccountStale"),
+    setPendingAccount: sessionWriter("setPendingAccount"),
+    setAccountPinned: sessionWriter("setAccountPinned"),
+    clearPendingAccountsFor: sessionWriter("clearPendingAccountsFor"),
+    clearPendingAccountsExcept: sessionWriter("clearPendingAccountsExcept"),
     recordAccountEvent: (type, reason, cardId = null) => {
       events.push({ type, reason, cardId });
       return Promise.resolve();
@@ -327,6 +357,52 @@ void test("removing the account during a managed re-login cancels it instead of 
   ]);
   assert.equal(accounts.getManagedDefaultId(), undefined);
   assert.equal((await registryEmails()).includes("home@example.com"), false);
+});
+
+void test("a managed login or an adopted managed default leaves every running session on its recorded account", async () => {
+  const addedId = randomUUID();
+  await accounts.upsertAccount({
+    id: addedId,
+    email: "added@example.com",
+    orgId: "org-added",
+    orgName: "Added Org",
+    subscriptionType: "pro",
+    createdAt: "2026-09-02T00:00:00.000Z",
+    lastLoginAt: "2026-09-02T00:00:00.000Z",
+  });
+  cardSessions.splice(
+    0,
+    cardSessions.length,
+    { id: "session-default" },
+    { id: "session-added", claudeAccountId: addedId },
+  );
+  sessionWrites.length = 0;
+  const loginId = await runWithCode("home", "done", { managedDefault: true });
+  await login.cancelLogin();
+  try {
+    assert.equal(accounts.getManagedDefaultId(), loginId);
+    assert.deepEqual(await accounts.removeAccount(loginId), { ok: true });
+
+    await accounts.adoptManagedDefault({
+      id: loginId,
+      email: "home@example.com",
+      orgId: "org-home",
+      orgName: "Home Org",
+      subscriptionType: "max",
+      createdAt: "2026-09-02T00:00:00.000Z",
+      lastLoginAt: "2026-09-02T00:00:00.000Z",
+    });
+    assert.equal(accounts.getManagedDefaultId(), loginId);
+
+    assert.deepEqual(
+      cardSessions.map((s) => s.claudeAccountId),
+      [undefined, addedId],
+    );
+    assert.deepEqual(sessionWrites, []);
+  } finally {
+    await accounts.removeAccount(loginId);
+    await accounts.removeAccount(addedId);
+  }
 });
 
 void test.after(() => env.cleanup());
