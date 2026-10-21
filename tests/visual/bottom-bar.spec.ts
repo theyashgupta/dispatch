@@ -89,3 +89,53 @@ test("toasts and floating bars clear the bottom bar through its height variable"
   await page.setViewportSize({ width: 1440, height: 900 });
   await expect.poll(() => barHeightVar(page)).toBe("");
 });
+
+const scrollTo = async (page: Page, locator: Locator, top: number) => {
+  await locator.evaluate((el, value) => {
+    el.scrollTop = value;
+  }, top);
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      ),
+  );
+};
+
+test("the bottom bar hides on scroll down and returns on scroll up, and reduced motion keeps it shown", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 600 });
+  await page.emulateMedia({ reducedMotion: "no-preference" });
+  await guardWrites(page);
+  const bar = page.locator('nav[aria-label="Primary"]');
+  const column = page.locator(".scroll-stable-y.dot-grid");
+
+  await page.goto(`${orchestrated}/#/boards/ORC/dashboard`);
+  await expect(bar).toBeVisible();
+  await expect(bar).toHaveCSS("height", `${BAR_HEIGHT}px`);
+  expect(
+    await column.evaluate((el) => el.scrollHeight - el.clientHeight),
+  ).toBeGreaterThan(500);
+
+  await scrollTo(page, column, 20);
+  await scrollTo(page, column, 300);
+  await expect(bar).toHaveJSProperty("inert", true);
+  await expect(bar).toHaveCSS("height", "0px");
+  await expect.poll(() => barHeightVar(page)).toBe("0px");
+
+  await scrollTo(page, column, 200);
+  await expect(bar).toHaveJSProperty("inert", false);
+  await expect(bar).toHaveCSS("height", `${BAR_HEIGHT}px`);
+  await expect.poll(() => barHeightVar(page)).toBe(`${BAR_HEIGHT}px`);
+
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await expect(bar).toHaveCSS("height", `${BAR_HEIGHT}px`);
+  await scrollTo(page, column, 20);
+  await scrollTo(page, column, 600);
+  await page.waitForTimeout(300);
+  await expect(bar).toHaveJSProperty("inert", false);
+  await expect(bar).toHaveCSS("height", `${BAR_HEIGHT}px`);
+  await expect(bar).toHaveCSS("transition-duration", "0s");
+  expect(await barHeightVar(page)).toBe(`${BAR_HEIGHT}px`);
+});
