@@ -2001,7 +2001,8 @@ missing, and a continued claude there resumes the newest conversation of a diffe
 rule applies to the Resume route, Reconnect, the orchestrator `resume_session` tool and the boot
 resume sweep, because all of them go through `resumeSession`. On the boot sweep the supervisor also
 moves the card to Needs input. A reattach to a live tmux session does not launch claude, so it does
-not check the folder.
+not check the folder. The supervisor relaunch into a live shell-prompt pane has its own check
+(LOCAL-166, see Session Supervisor).
 
 In Review's opposite in-edge/out-edge asymmetry versus Agent Done, and the full trigger-by-trigger
 spec, are homed in [Column Transition Specification](#column-transition-specification) (`BOARD-06`).
@@ -6172,7 +6173,9 @@ Scenario 16 (tests/e2e/scenario-16-ship-retry.e2e.ts) proves that a ship retry r
 
 Scenario 17 (tests/e2e/scenario-17-promise-close.e2e.ts) proves that the supervisor closes the engine of a single PRD loop that has no phases from the promise alone (LOCAL-172). The engine file has the LOCAL-159 shape: the prompt has no "Execute the PRD at" line, and the test seeds no PRD file and no state file. The test checks that `get_card_progress` shows the open engine and that `start_ship` answers 409 `engine-not-closed`. The test then writes a session transcript whose last assistant message ends with `<promise>RALPH COMPLETE local-159</promise>` and the `DISPATCH_STATUS: DONE` line, and posts the Stop hook. In 60 s the board holds one `close_loop` row with the result `closed` and the reason `promise`. The engine file is renamed to its `.done` copy, which holds `closed_reason: promise`. `get_card_progress` shows `engine.closedReason` `promise`, `completion` `complete`, 1 unit done of 1, and a `lastMarker` that starts with `DONE `. `start_ship` then answers 202. The test does not check a push, a PR or a merge. The test does not rename the engine file, and it types no key into any pane.
 
-Scenario 18 (tests/e2e/scenario-18-pushover-attention.e2e.ts) proves that an empty Pushover value gives one attention item and one start log line, and that filled values give neither (LOCAL-168). The test starts one server with `PUSHOVER_USER_KEY` and `PUSHOVER_APP_TOKEN` set to empty strings. The server log must have exactly one `[notify] loop phase notifications are on` line that names both variables. The board snapshot must carry `pushoverMissing` with both names in that order, and `GET /api/boards/counts` must show `attention` 1 for the default board. The test then starts a second server with fake non-empty values. That server log must have no `[notify]` line, the snapshot must have no `pushoverMissing`, and `attention` must be 0. The fake values must appear in neither log, snapshot nor counts.
+Scenario 18 (tests/e2e/scenario-18-live-missing-workspace.e2e.ts) proves that the supervisor does not relaunch claude in a live shell whose workspace folder is missing (LOCAL-166). The test starts one card with the fake `claude`, renames the workspace folder of the card inside the sandbox, stops the fake `claude` with `C-c` so that the pane is at the shell prompt, and sets `supervisor: on`. The card must be in Needs input with `resume_failed` and the status reason `resume: Resume failed: workspace-missing: <path>`. The card must not be lost, the tmux session must stay live, and the fake `claude` must record no new launch.
+
+Scenario 19 (tests/e2e/scenario-19-pushover-attention.e2e.ts) proves that an empty Pushover value gives one attention item and one start log line, and that filled values give neither (LOCAL-168). The test starts one server with `PUSHOVER_USER_KEY` and `PUSHOVER_APP_TOKEN` set to empty strings. The server log must have exactly one `[notify] loop phase notifications are on` line that names both variables. The board snapshot must carry `pushoverMissing` with both names in that order, and `GET /api/boards/counts` must show `attention` 1 for the default board. The test then starts a second server with fake non-empty values. That server log must have no `[notify]` line, the snapshot must have no `pushoverMissing`, and `attention` must be 0. The fake values must appear in neither log, snapshot nor counts.
 
 The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
@@ -6292,6 +6295,14 @@ action that finds nothing to do, such as an `Escape` already sent, writes no row
   takes the foreground, within 60 s. A failed relaunch, a lost session that stays gone, or claude
   that does not start sets `resume_failed`; an unconfirmed resume prompt is recorded as
   unconfirmed.
+- Missing workspace folder before a relaunch (LOCAL-166): before `runClaude` types the launch line
+  into a shell-prompt pane, the supervisor checks that the session root (the session
+  `workspacePath`, else the card `workspacePath`) is a folder. If the folder is missing, the
+  supervisor launches nothing. It sets the session to `needs_input` with `resume_failed`, moves the
+  card to Needs input and records the LOCAL-163 copy as the status reason:
+  `resume: Resume failed: workspace-missing: <path>`. The tmux session stays live, because a
+  detach would leave a tmux session that no card tracks. The card detail shows the copy in an alert
+  above the terminal.
 - Handoff (`supervisor-handoff.ts`): at `handoffPercent` the session gets the handoff request
   once per crossing, and once more at `handoffHardPercent`; the hard request tells the loop to
   hand off now. At `handoff_ready` the supervisor waits until the pane is ready and not busy (a
