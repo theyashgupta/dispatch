@@ -798,7 +798,7 @@ export function buildLoopProgress(input: LoopProgressInput): LoopProgress {
 /**
  * Builds the one-unit loop model of a single PRD from the already read texts of one session root.
  *
- * @remarks A missing state or attempts file adds no warning because a PRD that has not started has neither. The result has no roadmap, so `roadmapFile` is empty.
+ * @remarks A missing state or attempts file adds no warning because a PRD that has not started has neither. The result has no roadmap, so `roadmapFile` is empty. A closed engine with no phase headings reads built, because the loop files cannot vouch and the close was the loop's own finish.
  */
 export function buildPrdProgress(input: PrdProgressInput): LoopProgress {
   const ctx: ReadContext = {
@@ -833,7 +833,10 @@ export function buildPrdProgress(input: PrdProgressInput): LoopProgress {
   };
   const phases = phasesOf(headings, evidence);
   const running = engine !== null && engine.active && !engine.closed;
-  const built = phases.length > 0 && phases.every((p) => p.gate === "pass");
+  const built =
+    phases.length > 0
+      ? phases.every((p) => p.gate === "pass")
+      : engine?.closed === true;
   const status: LoopUnitStatus = built
     ? "built, awaiting /ship"
     : running || evidence.passes.length > 0 || evidence.attempts.length > 0

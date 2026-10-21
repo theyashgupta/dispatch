@@ -771,6 +771,42 @@ void test("a closed engine with no gate lines gives not started", () => {
   assert.equal(result.engine?.closed, true);
 });
 
+void test("a closed engine with no PRD file reads built and complete", () => {
+  const result = buildPrdProgress(
+    prdInput({
+      prdFile: null,
+      prdText: null,
+      engine: { text: ENGINE_ACTIVE, closed: true },
+    }),
+  );
+  assert.equal(result.units[0]?.status, "built, awaiting /ship");
+  assert.equal(result.completion, "complete");
+  assert.equal(result.summary.unitsDone, 1);
+  assert.equal(result.summary.unitsTotal, 1);
+});
+
+void test("an open engine with no PRD file reads running, not complete", () => {
+  const result = buildPrdProgress(
+    prdInput({
+      prdFile: null,
+      prdText: null,
+      engine: { text: ENGINE_ACTIVE, closed: false },
+    }),
+  );
+  assert.equal(result.completion, "running");
+});
+
+void test("a closed engine with phases read stays in progress while a phase is pending", () => {
+  const result = buildPrdProgress(
+    prdInput({
+      stateText: "phase 1 One GREEN 2026-10-11T04:00:00Z gate=pass\n",
+      engine: { text: ENGINE_ACTIVE, closed: true },
+    }),
+  );
+  assert.equal(result.units[0]?.status, "in progress");
+  assert.notEqual(result.completion, "complete");
+});
+
 void test("a PRD with no phase headings gives a warning and a null total", () => {
   const result = buildPrdProgress(prdInput({ prdText: "# Only a title\n" }));
   assert.equal(result.units[0]?.phaseTotal, null);
