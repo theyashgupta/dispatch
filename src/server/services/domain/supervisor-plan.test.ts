@@ -154,11 +154,18 @@ void test("a second API error in the same phase gives up, and a sleep cut shares
   ]);
 });
 
-void test("a frozen detection releases a supervisor_gave_up or usage_stop hold but keeps a budget or resume_failed hold", () => {
+void test("a frozen detection releases only a supervisor_gave_up hold", () => {
   const frozen = { state: "frozen" } as const;
-  for (const reason of ["supervisor_gave_up", "usage_stop"] as const)
-    assert.equal(holdsNeedsInput("needs_input", reason, frozen), false, reason);
-  for (const reason of ["budget", "resume_failed"] as const)
+  assert.equal(
+    holdsNeedsInput("needs_input", "supervisor_gave_up", frozen),
+    false,
+  );
+  for (const reason of [
+    "usage_stop",
+    "budget",
+    "stop_session",
+    "resume_failed",
+  ] as const)
     assert.equal(holdsNeedsInput("needs_input", reason, frozen), true, reason);
 });
 
@@ -334,7 +341,7 @@ void test("a frozen relaunch is planned once per unit and phase, then the sessio
   ]);
   const second = planFrozenRelaunch(LOOP, first.memory, since);
   assert.deepEqual(second.actions, [
-    { kind: "needs_input", reason: "supervisor_gave_up" },
+    { kind: "needs_input", reason: "resume_failed" },
   ]);
   const nextPhase = planFrozenRelaunch(
     { ...LOOP, unitPhase: "2/4" },

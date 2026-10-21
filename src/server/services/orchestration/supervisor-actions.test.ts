@@ -9,7 +9,7 @@ const env = isolateEnv();
 const { store } = await import("../../store/board.store.js");
 const { capturePane } = await import("../../adapters/tmux.js");
 const { resolveBinaryPath } = await import("../../adapters/resolve-binary.js");
-const { runActions } = await import("./supervisor-actions.js");
+const { runActions, actionTools } = await import("./supervisor-actions.js");
 const { loopFilePath } = await import("../domain/loop-progress.js");
 const { initialPlanMemory, planActions } =
   await import("../domain/supervisor-plan.js");
@@ -45,9 +45,14 @@ const loopCard = (
 
 function deps(overrides: Partial<ActionDeps> = {}): ActionDeps {
   return {
+    ...actionTools,
     resume: () => Promise.resolve(),
     relaunch: () => Promise.resolve("launched"),
     atShellPrompt: () => Promise.resolve(false),
+    shellRoot: () => Promise.resolve(true),
+    paneTerminal: () => Promise.resolve(null),
+    kill: () => undefined,
+    grace: { hangupMs: 50, killMs: 50, pollMs: 10 },
     claudeUpMs: 1_000,
     ...overrides,
   };
@@ -612,18 +617,22 @@ void test(
   },
 );
 
+const SINCE = "2026-10-21T10:00:00.000Z";
+const JOB = 5100;
+
 function frozenDeps(startsAtPrompt: boolean, exits: boolean) {
   const calls = {
-    stop: [] as string[],
+    kill: [] as [number, string][],
     relaunch: 0,
     sends: [] as { text: string; kind: string }[],
   };
   let atPrompt = startsAtPrompt;
   const overrides: Partial<ActionDeps> = {
-    stopClaude: (_target, signal) => {
-      calls.stop.push(signal);
+    paneTerminal: () =>
+      Promise.resolve({ pgid: 5000, tpgid: atPrompt ? 5000 : JOB }),
+    kill: (pid, signal) => {
+      calls.kill.push([pid, signal]);
       if (exits) atPrompt = true;
-      return Promise.resolve(true);
     },
     relaunch: () => {
       calls.relaunch++;
@@ -636,13 +645,15 @@ function frozenDeps(startsAtPrompt: boolean, exits: boolean) {
       return Promise.resolve("confirmed");
     },
     claudeUpMs: 200,
-    exitMs: 50,
   };
   return { calls, deps: deps(overrides) };
 }
 
+const frozenEvents = (loop: Awaited<ReturnType<typeof loopCard>>) =>
+  loop.actions().filter((e) => e.data.action === "relaunch_frozen");
+
 void test(
-  "a frozen claude gets SIGTERM, a relaunch with resume and one resume prompt",
+  "a frozen claude gets SIGHUP, a relaunch with resume and one resume prompt",
   { skip: !hasTmux },
   async () => {
     const loop = await loopCard("relaunch-frozen", {});
@@ -650,21 +661,18 @@ void test(
     await runActions(
       loop.card(),
       loop.session(),
-      [{ kind: "relaunch_frozen", frozenSince: "2026-10-21T10:00:00.000Z" }],
+      [{ kind: "relaunch_frozen", frozenSince: SINCE }],
       "pane: frozen",
       injected,
     );
-    assert.deepEqual(calls.stop, ["SIGTERM"]);
+    assert.deepEqual(calls.kill, [[-JOB, "SIGHUP"]]);
     assert.equal(calls.relaunch, 1);
     assert.equal(calls.sends.length, 1);
     assert.equal(calls.sends[0].kind, "resume");
     assert.ok(calls.sends[0].text.startsWith("The session was restarted."));
-    const relaunched = loop
-      .actions()
-      .filter((e) => e.data.action === "relaunch_frozen");
-    assert.equal(relaunched.length, 1);
-    assert.equal(relaunched[0].data.result, "stopped");
-    assert.equal(relaunched[0].data.frozenSince, "2026-10-21T10:00:00.000Z");
+    assert.equal(frozenEvents(loop).length, 1);
+    assert.equal(frozenEvents(loop)[0].data.result, "stopped");
+    assert.equal(frozenEvents(loop)[0].data.frozenSince, SINCE);
     assert.equal(
       loop.actions().filter((e) => e.data.action === "resume").length,
       1,
@@ -687,17 +695,17 @@ void test(
     await runActions(
       loop.card(),
       loop.session(),
-      [{ kind: "relaunch_frozen", frozenSince: "2026-10-21T10:00:00.000Z" }],
+      [{ kind: "relaunch_frozen", frozenSince: SINCE }],
       "pane: frozen",
       injected,
     );
-    assert.deepEqual(calls.stop, []);
+    assert.deepEqual(calls.kill, []);
     assert.equal(calls.relaunch, 1);
   },
 );
 
 void test(
-  "a claude that ignores SIGTERM and SIGKILL is not relaunched and gets resume_failed",
+  "a claude that ignores SIGHUP and SIGKILL is not relaunched and gets resume_failed",
   { skip: !hasTmux },
   async () => {
     const loop = await loopCard("relaunch-stuck", {});
@@ -705,17 +713,154 @@ void test(
     await runActions(
       loop.card(),
       loop.session(),
-      [{ kind: "relaunch_frozen", frozenSince: "2026-10-21T10:00:00.000Z" }],
+      [{ kind: "relaunch_frozen", frozenSince: SINCE }],
       "pane: frozen",
       injected,
     );
-    assert.deepEqual(calls.stop, ["SIGTERM", "SIGKILL"]);
+    assert.deepEqual(calls.kill, [
+      [-JOB, "SIGHUP"],
+      [-JOB, "SIGKILL"],
+    ]);
     assert.equal(calls.relaunch, 0);
-    const failed = loop
-      .actions()
-      .filter((e) => e.data.action === "relaunch_frozen");
-    assert.equal(failed.length, 1);
-    assert.equal(failed[0].data.result, "failed");
+    assert.equal(frozenEvents(loop).length, 1);
+    assert.equal(frozenEvents(loop)[0].data.result, "failed");
+    assert.equal(frozenEvents(loop)[0].data.reason, "claude did not exit");
     assert.equal(loop.session().stateReason, "resume_failed");
+    assert.equal(
+      store
+        .listEvents(SBX, loop.card().id, 50)
+        .filter((e) => e.type === "session_relaunch").length,
+      0,
+    );
+  },
+);
+
+void test(
+  "a relaunch that never reaches the prompt send writes no session_relaunch event",
+  { skip: !hasTmux },
+  async () => {
+    const loop = await loopCard("relaunch-busy", {});
+    const { calls, deps: injected } = frozenDeps(false, true);
+    await runActions(
+      loop.card(),
+      loop.session(),
+      [{ kind: "relaunch_frozen", frozenSince: SINCE }],
+      "pane: frozen",
+      { ...injected, relaunch: () => Promise.resolve("busy") },
+    );
+    assert.equal(calls.sends.length, 0);
+    assert.equal(frozenEvents(loop)[0].data.result, "stopped");
+    assert.equal(loop.session().stateReason, "resume_failed");
+    assert.equal(
+      store
+        .listEvents(SBX, loop.card().id, 50)
+        .filter((e) => e.type === "session_relaunch").length,
+      0,
+    );
+  },
+);
+
+void test(
+  "under memory pressure a frozen relaunch sends no signal and fails before any stop",
+  { skip: !hasTmux },
+  async () => {
+    const loop = await loopCard("relaunch-memory", {});
+    const { calls, deps: injected } = frozenDeps(false, true);
+    recordMemory(812, 1000);
+    try {
+      await runActions(
+        loop.card(),
+        loop.session(),
+        [{ kind: "relaunch_frozen", frozenSince: SINCE }],
+        "pane: frozen",
+        injected,
+      );
+    } finally {
+      recordMemory(2048, 1000);
+    }
+    assert.deepEqual(calls.kill, []);
+    assert.equal(calls.relaunch, 0);
+    assert.equal(frozenEvents(loop)[0].data.result, "failed");
+    assert.equal(
+      frozenEvents(loop)[0].data.reason,
+      "free memory 812 MB is below the 1024 MB floor",
+    );
+    assert.equal(loop.session().stateReason, "resume_failed");
+  },
+);
+
+void test(
+  "a frozen relaunch on a pane with no shell root sends no signal and fails",
+  { skip: !hasTmux },
+  async () => {
+    const loop = await loopCard("relaunch-no-root", {});
+    const { calls, deps: injected } = frozenDeps(false, true);
+    await runActions(
+      loop.card(),
+      loop.session(),
+      [{ kind: "relaunch_frozen", frozenSince: SINCE }],
+      "pane: frozen",
+      { ...injected, shellRoot: () => Promise.resolve(false) },
+    );
+    assert.deepEqual(calls.kill, []);
+    assert.equal(frozenEvents(loop)[0].data.result, "failed");
+    assert.equal(frozenEvents(loop)[0].data.reason, "no shell root");
+    assert.equal(loop.session().stateReason, "resume_failed");
+  },
+);
+
+void test(
+  "a frozen relaunch on a paused card records skipped and sends no signal",
+  { skip: !hasTmux },
+  async () => {
+    const loop = await loopCard("relaunch-paused", {});
+    const { calls, deps: injected } = frozenDeps(false, true);
+    const stale = loop.card();
+    await store.markCardPaused(stale.id, loop.session().id, {
+      at: "2026-10-21T00:00:00.000Z",
+      by: "user",
+      sessionId: loop.session().id,
+      pids: [101],
+    });
+    try {
+      await runActions(
+        stale,
+        loop.session(),
+        [{ kind: "relaunch_frozen", frozenSince: SINCE }],
+        "pane: frozen",
+        injected,
+      );
+    } finally {
+      await store.clearCardPaused(stale.id);
+    }
+    assert.deepEqual(calls.kill, []);
+    assert.equal(calls.relaunch, 0);
+    assert.equal(frozenEvents(loop).length, 1);
+    assert.equal(frozenEvents(loop)[0].data.result, "skipped");
+    assert.notEqual(loop.session().stateReason, "resume_failed");
+  },
+);
+
+void test(
+  "a frozen relaunch while a start is in flight records skipped and sends no signal",
+  { skip: !hasTmux },
+  async () => {
+    const loop = await loopCard("relaunch-starting", {});
+    const { calls, deps: injected } = frozenDeps(false, true);
+    store.beginStart(loop.card().id);
+    try {
+      await runActions(
+        loop.card(),
+        loop.session(),
+        [{ kind: "relaunch_frozen", frozenSince: SINCE }],
+        "pane: frozen",
+        injected,
+      );
+    } finally {
+      store.endStart(loop.card().id);
+    }
+    assert.deepEqual(calls.kill, []);
+    assert.equal(frozenEvents(loop)[0].data.result, "skipped");
+    assert.notEqual(loop.session().stateReason, "resume_failed");
   },
 );

@@ -1,6 +1,7 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { DEFAULT_BOARD_KEY, parseBoardKey } from "../../../shared/board-key.js";
 import type { BoardKey } from "../../../shared/types.js";
@@ -16,9 +17,14 @@ const {
   supervisePane,
   superviseLost,
 } = await import("./supervisor-registry.js");
-const { setActionDeps } = await import("./supervisor-actions.js");
+const { actionTools } = await import("./supervisor-actions.js");
+const { recordMemory } = await import("../../test-support/memory-fixtures.js");
 await store.load();
-after(() => env.cleanup());
+const realTools = { ...actionTools };
+after(() => {
+  Object.assign(actionTools, realTools);
+  env.cleanup();
+});
 
 const SBX = parseBoardKey("SBX")!;
 await store.createBoard({
@@ -371,28 +377,29 @@ void test("superviseLost records lost and runs the duty once for a whole-card lo
   }
 });
 
+const JOB = 5100;
+
 function frozenFixture() {
-  const calls = { stop: 0, relaunch: 0, resume: 0 };
+  const calls = { kill: 0, relaunch: 0 };
   let atPrompt = false;
-  const fake: ActionDeps = {
-    stopClaude: () => {
-      calls.stop++;
+  const fake: Partial<ActionDeps> = {
+    paneTerminal: () =>
+      Promise.resolve({ pgid: 5000, tpgid: atPrompt ? 5000 : JOB }),
+    kill: () => {
+      calls.kill++;
       atPrompt = true;
-      return Promise.resolve(true);
     },
     relaunch: () => {
       calls.relaunch++;
       atPrompt = false;
       return Promise.resolve("launched");
     },
-    resume: () => {
-      calls.resume++;
-      return Promise.resolve();
-    },
+    resume: () => Promise.resolve(),
     atShellPrompt: () => Promise.resolve(atPrompt),
+    shellRoot: () => Promise.resolve(true),
     send: () => Promise.resolve("confirmed"),
     claudeUpMs: 50,
-    exitMs: 50,
+    grace: { hangupMs: 50, killMs: 50, pollMs: 10 },
   };
   return { calls, fake };
 }
@@ -410,6 +417,17 @@ function relaunchEvents(cardId: string) {
 
 async function frozenSession(title: string) {
   const ids = await startedCard(SBX, title);
+  const file = path.join(env.root, "projects", title, "transcript.jsonl");
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, '{"type":"summary"}\n');
+  await store.setTranscriptPath(ids.cardId, ids.sessionId, file);
+  await store.setSessionMetersIfSession(ids.cardId, ids.tmuxSession, {
+    contextPercent: 0,
+    model: "Opus 5.5",
+    cost: null,
+    usage: { fiveHourPercent: null, sevenDayPercent: null },
+  });
+  recordMemory(2048, 1000);
   const base = Date.now();
   await supervisePane({ ...ids, pane: pane("frozen-compacted.txt") }, base);
   await supervisePane(
@@ -424,41 +442,92 @@ async function frozenSession(title: string) {
 void test("a session frozen for 15 minutes is relaunched once and later samples add nothing", async () => {
   delete process.env.DISPATCH_FROZEN_RELAUNCH_MS;
   const { calls, fake } = frozenFixture();
-  setActionDeps(fake);
+  Object.assign(actionTools, fake);
   try {
     const { ids, since } = await frozenSession("frozen-15");
     const frozen = { ...ids, pane: pane("frozen-compacted.txt") };
     await supervisePane(frozen, since + 15 * 60_000 - 1_000);
-    assert.equal(calls.stop, 0);
+    assert.equal(calls.kill, 0);
     assert.equal(relaunchEvents(ids.cardId).length, 0);
     await supervisePane(frozen, since + 15 * 60_000);
-    assert.equal(calls.stop, 1);
+    assert.equal(calls.kill, 1);
     assert.equal(calls.relaunch, 1);
     assert.equal(relaunchEvents(ids.cardId).length, 1);
     await supervisePane(frozen, since + 16 * 60_000);
     await supervisePane(frozen, since + 17 * 60_000);
-    assert.equal(calls.stop, 1);
+    assert.equal(calls.kill, 1);
     assert.equal(calls.relaunch, 1);
     assert.equal(relaunchEvents(ids.cardId).length, 1);
   } finally {
-    setActionDeps();
+    Object.assign(actionTools, realTools);
   }
 });
 
 void test("DISPATCH_FROZEN_RELAUNCH_MS moves the relaunch time", async () => {
   process.env.DISPATCH_FROZEN_RELAUNCH_MS = "120000";
   const { calls, fake } = frozenFixture();
-  setActionDeps(fake);
+  Object.assign(actionTools, fake);
   try {
     const { ids, since } = await frozenSession("frozen-env");
     const frozen = { ...ids, pane: pane("frozen-compacted.txt") };
     await supervisePane(frozen, since + 119_000);
-    assert.equal(calls.stop, 0);
+    assert.equal(calls.kill, 0);
     await supervisePane(frozen, since + 120_000);
-    assert.equal(calls.stop, 1);
+    assert.equal(calls.kill, 1);
     assert.equal(relaunchEvents(ids.cardId).length, 1);
   } finally {
     delete process.env.DISPATCH_FROZEN_RELAUNCH_MS;
-    setActionDeps();
+    Object.assign(actionTools, realTools);
   }
+});
+
+void test("a second freeze in the same phase gives needs_input with resume_failed and never flaps back to frozen", async () => {
+  delete process.env.DISPATCH_FROZEN_RELAUNCH_MS;
+  const { calls, fake } = frozenFixture();
+  Object.assign(actionTools, fake);
+  try {
+    const { ids, since } = await frozenSession("frozen-twice");
+    const frozen = { ...ids, pane: pane("frozen-compacted.txt") };
+    await supervisePane(frozen, since + 15 * 60_000);
+    assert.equal(calls.kill, 1);
+    assert.equal(calls.relaunch, 1);
+    const healthy = since + 16 * 60_000;
+    await supervisePane({ ...ids, pane: pane("working.txt") }, healthy);
+    assert.notEqual(sessionOf(ids.cardId)?.state, "frozen");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await supervisePane(frozen, healthy + 60_000);
+    await supervisePane(frozen, healthy + 120_000);
+    const second = sessionOf(ids.cardId);
+    assert.equal(second?.state, "frozen");
+    const due = Math.max(
+      Date.parse(second!.stateSince!) + 15 * 60_000,
+      healthy + 180_000,
+    );
+    await supervisePane(frozen, due);
+    assert.equal(sessionOf(ids.cardId)?.state, "needs_input");
+    assert.equal(sessionOf(ids.cardId)?.stateReason, "resume_failed");
+    await supervisePane(frozen, due + 60_000);
+    await supervisePane(frozen, due + 120_000);
+    assert.equal(sessionOf(ids.cardId)?.state, "needs_input");
+    assert.equal(sessionOf(ids.cardId)?.stateReason, "resume_failed");
+    assert.equal(calls.kill, 1);
+    assert.equal(calls.relaunch, 1);
+    assert.equal(relaunchEvents(ids.cardId).length, 1);
+  } finally {
+    Object.assign(actionTools, realTools);
+  }
+});
+
+void test("a server restart keeps a frozen session frozen with the same stateSince", async () => {
+  const { ids } = await frozenSession("frozen-restart");
+  const before = sessionOf(ids.cardId);
+  const events = stateEvents(SBX, ids.cardId).length;
+  dropWatcher(ids.tmuxSession);
+  const frozen = { ...ids, pane: pane("frozen-compacted.txt") };
+  await supervisePane(frozen, Date.now());
+  await supervisePane(frozen, Date.now() + 1_000);
+  const kept = sessionOf(ids.cardId);
+  assert.equal(kept?.state, "frozen");
+  assert.equal(kept?.stateSince, before?.stateSince);
+  assert.equal(stateEvents(SBX, ids.cardId).length, events);
 });

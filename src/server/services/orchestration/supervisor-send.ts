@@ -144,10 +144,14 @@ export async function sendLine(
     ? normalize(line)
     : normalize(line).slice(0, MATCH_CHARS);
   const head = compact(line).slice(0, ECHO_CHARS);
-  const held = async () =>
-    compact(inputBoxText(await capturePane(target).catch(() => ""))).includes(
-      head,
+  const held = async () => {
+    const capture = await capturePane(target).catch(() => "");
+    return (
+      paneReady(capture) &&
+      head !== "" &&
+      compact(inputBoxText(capture)).includes(head)
     );
+  };
   const matches = async () => {
     const file = await transcriptOf();
     const tail = file === null ? null : await readTranscriptTail(file);

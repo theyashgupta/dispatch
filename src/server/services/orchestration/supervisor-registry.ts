@@ -9,7 +9,6 @@ import {
   sessionEnvHas,
   widenNarrowWindow,
 } from "../../adapters/tmux.js";
-import { parseStatusLine } from "../../adapters/markers/status-line.js";
 import { readTranscriptTail } from "../../adapters/transcript.js";
 import {
   detectState,
@@ -320,7 +319,7 @@ export async function supervisePane(
       atShellPrompt: shellPrompt,
       paused: card.paused ?? null,
       pane: sample.pane,
-      contextPercent: parseStatusLine(sample.pane)?.contextPercent ?? null,
+      contextPercent: session.contextPercent ?? null,
       engineSessionId: engineSessionIdOf(card),
       completion: card.loopProgress?.completion ?? null,
       engineOpen,

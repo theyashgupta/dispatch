@@ -74,6 +74,11 @@ function last(ds: Detection[]): SupervisorState {
   return ds[ds.length - 1].state;
 }
 
+const FROZEN_OVER = {
+  contextPercent: 0,
+  transcript: { size: 100, lastAssistantText: null },
+};
+
 const FIXTURE_STATES: [
   string,
   number,
@@ -102,8 +107,8 @@ const FIXTURE_STATES: [
   ["limit-cancelled.txt", 3, {}, "idle"],
   ["api-error.txt", 1, {}, "api_error"],
   ["api-error-2.txt", 1, {}, "api_error"],
-  ["frozen-compacted.txt", 2, { contextPercent: 0 }, "frozen"],
-  ["frozen-compacted-2.txt", 2, { contextPercent: 0 }, "frozen"],
+  ["frozen-compacted.txt", 2, FROZEN_OVER, "frozen"],
+  ["frozen-compacted-2.txt", 2, FROZEN_OVER, "frozen"],
   ["shell-prompt.txt", 1, { atShellPrompt: true }, "shell_prompt"],
   ["idle.txt", 1, { tmuxAlive: false }, "lost"],
 ];
@@ -121,7 +126,6 @@ void test("every one of the 13 states comes from a recorded pane", () => {
 });
 
 const FROZEN_FIXTURES = ["frozen-compacted.txt", "frozen-compacted-2.txt"];
-const FROZEN_OVER = { contextPercent: 0 };
 
 void test("a compacted idle pane with queued input at 0 percent context is frozen on the second sample 60 s later", () => {
   for (const file of FROZEN_FIXTURES) {
@@ -193,6 +197,67 @@ void test("a paused card on a frozen pane is paused", () => {
   };
   const ds = feed(pane("frozen-compacted.txt"), 2, { ...FROZEN_OVER, paused });
   assert.equal(last(ds), "paused");
+});
+
+void test("a frozen looking pane with no transcript is never frozen", () => {
+  for (const file of FROZEN_FIXTURES) {
+    const states = feed(pane(file), 4, { contextPercent: 0 }).map(
+      (d) => d.state,
+    );
+    assert.ok(!states.includes("frozen"), file);
+  }
+});
+
+void test("a frozen looking pane with a running spinner line is working, not frozen", () => {
+  const text = pane("frozen-compacted.txt").replace(
+    "❯ Dispatch wake: decision answered for LOCAL-161",
+    "✻ Thinking… (esc to interrupt)\n\n❯ Dispatch wake: decision answered for LOCAL-161",
+  );
+  const ds = feed(text, 3, FROZEN_OVER);
+  assert.ok(ds.every((d) => d.state === "working"));
+  assert.ok(ds.every((d) => d.memory.frozenSince === null));
+});
+
+void test("a box text that changes on each sample is never frozen", () => {
+  let memory = initialMemory();
+  const states: SupervisorState[] = [];
+  for (let i = 0; i < 4; i++) {
+    const d = detectState(
+      input({
+        ...FROZEN_OVER,
+        now: i * MINUTE,
+        pane: pane("frozen-compacted.txt").replace(
+          "no action is needed",
+          `no action ${i} is needed`,
+        ),
+        memory,
+      }),
+    );
+    states.push(d.state);
+    memory = d.memory;
+  }
+  assert.ok(!states.includes("frozen"));
+});
+
+void test("a stored frozen state is kept on the first sample while the frozen pane is unchanged", () => {
+  const [first] = feed(pane("frozen-compacted.txt"), 1, {
+    ...FROZEN_OVER,
+    memory: initialMemory("frozen"),
+  });
+  assert.equal(first.state, "frozen");
+  assert.equal(first.memory.frozenSince, 0);
+});
+
+void test("a stored frozen state is released when the pane no longer shows the freeze", () => {
+  const text = pane("frozen-compacted-2.txt").replace(
+    "❯ Dispatch wake: Agent done for LOCAL-159",
+    "❯ ",
+  );
+  const [first] = feed(text, 1, {
+    ...FROZEN_OVER,
+    memory: initialMemory("frozen"),
+  });
+  assert.equal(first.state, "working");
 });
 
 void test("inputBoxText joins the queued box text and is empty for an idle prompt", () => {

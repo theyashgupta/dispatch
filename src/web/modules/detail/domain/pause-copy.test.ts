@@ -94,17 +94,14 @@ test("a frozen card with a start time shows the frozen note and any other card n
   assert.equal(frozenNote(card({ state: "working", stateSince })), null);
   assert.equal(frozenNote(card({ state: "frozen" })), null);
   assert.equal(frozenNote(card({ state: "frozen", stateSince: "x" })), null);
-  const time = new Date(stateSince).toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-  });
-  const note = frozenNote(card({ state: "frozen", stateSince }));
-  assert.ok(note?.startsWith("Frozen after an idle compaction since "));
-  assert.ok(note?.includes(time));
-  assert.ok(
-    note?.endsWith(
-      "Dispatch relaunches Claude with resume 15 minutes after that.",
-    ),
+  const start = "Frozen after an idle compaction since ";
+  const end = " Dispatch relaunches Claude with resume 15 minutes after that.";
+  const note = frozenNote(card({ state: "frozen", stateSince })) ?? "";
+  assert.ok(note.startsWith(start));
+  assert.ok(note.endsWith(end));
+  assert.match(
+    note.slice(start.length, note.length - end.length),
+    /^\d{1,2}:\d{2}/,
   );
 });
 

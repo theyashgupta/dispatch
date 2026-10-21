@@ -695,31 +695,6 @@ export async function paneAtPrompt(target: string): Promise<boolean> {
 }
 
 /**
- * Signal the foreground process group of a pane, and report whether a signal was sent.
- *
- * @remarks It never signals the pane's root shell group.
- */
-export async function signalForeground(
-  target: string,
-  signal: "SIGTERM" | "SIGKILL",
-): Promise<boolean> {
-  let terminal: Awaited<ReturnType<typeof paneTerminal>>;
-  try {
-    terminal = await paneTerminal(target);
-  } catch {
-    return false;
-  }
-  if (terminal === null) return false;
-  if (terminal.pgid === terminal.tpgid || terminal.tpgid <= 1) return false;
-  try {
-    process.kill(-terminal.tpgid, signal);
-  } catch {
-    return false;
-  }
-  return true;
-}
-
-/**
  * Whether the pane tty is in cooked (`icanon`) mode, or null when it cannot be read.
  *
  * @remarks The shell restores cooked mode when its job stops, and a REPL needs raw mode, so a
