@@ -320,15 +320,15 @@ Ship one squash PR for each unit. Implementation files and new test files never 
 The server runs the ship flow. For each branch the flow does these steps:
 
 1. Merge main into the branch. The flow never rebases.
-2. Run the check command.
-3. Open the PR.
+2. Run the check command. If the merged tip is the commit on which the check command last passed, skip the command. The diff scope check and the prose check still run.
+3. Open the PR. If the branch already has an open PR into main, adopt that PR.
 4. Wait for the checks.
 5. With merge rights, squash merge the PR. With `open_prs` rights, wait for the user to merge.
 6. After each merge, check the author identity. Check that the commit has no Co-Authored-By line.
 
 Call `get_ship_state` to follow the flow.
 
-When the flow stops, the server creates a decision item of kind `ship_failure`. Read the failed step and the reason in `get_ship_state`.
+When the flow stops, the server creates a decision item of kind `ship_failure`. Read the failed step and the reason in `get_ship_state`. The reason of a failed check command names the failing step, the exit code and the last 40 lines of the output.
 
 To fix a failed check, call `send_input` with the fix instruction to the group session. Then call `start_ship` again.
 

@@ -6168,7 +6168,11 @@ Scenario 13 (tests/e2e/scenario-13-feature-scope.e2e.ts) proves that a feature o
 
 Scenario 14 (tests/e2e/scenario-14-missing-workspace.e2e.ts) proves that the boot resume sweep refuses a lost session whose workspace folder is missing (LOCAL-163). The test starts one card with the fake `claude`, sets `supervisor: on`, stops the server, stops the sandbox tmux server and renames the workspace folder of the card. It then boots the server again on the same data folder. The card must show `Resume failed: workspace-missing: <path>`, stay lost, be in Needs input with `resume_failed`, and have exactly one `resume_failed` event. The fake `claude` must record no new launch, and the sandbox tmux server must have no session.
 
-Scenario 16 (tests/e2e/scenario-16-pushover-attention.e2e.ts) proves that an empty Pushover value gives one attention item and one start log line, and that filled values give neither (LOCAL-168). The test starts one server with `PUSHOVER_USER_KEY` and `PUSHOVER_APP_TOKEN` set to empty strings. The server log must have exactly one `[notify] loop phase notifications are on` line that names both variables. The board snapshot must carry `pushoverMissing` with both names in that order, and `GET /api/boards/counts` must show `attention` 1 for the default board. The test then starts a second server with fake non-empty values. That server log must have no `[notify]` line, the snapshot must have no `pushoverMissing`, and `attention` must be 0. The fake values must appear in neither log, snapshot nor counts.
+Scenario 16 (tests/e2e/scenario-16-ship-retry.e2e.ts) proves that a ship retry reports the failing step, skips a check that already passed and adopts the open PR of the branch (LOCAL-171). The board has the ship rights **merge**, and its repository check command is a script in the sandbox folder, outside the repository, that reads a mode file. The test starts two cards with the orchestrator `start_card` route, so both have a `launch`, and moves both to Agent done. Card A ships three times on the same branch. With the mode `fail`, the first `start_ship` stops at `checking`. The stored reason, the `ship_failure` decision item question and the `ship_stopped` group state hold `step test`, `exit code 3` and the last output line `not ok 1 - the real failure`. With the mode `pass` and failing PR checks, the second `start_ship` stops at `waiting_checks` with one PR, and the check script has run once. With passing PR checks, the third `start_ship` ends `done`: the branch shows `checkSkipped` true, the script does not run again, there is one `ship_check_skipped` group state, the fake `gh` log holds one `pr create`, and the bare origin `main` holds the work file. Card B has an open PR in the fake `gh` state before its first `start_ship`. That one ship ends `done` on the seeded PR with no `pr create` call for the branch. The test types no key into any pane.
+
+Scenario 17 (tests/e2e/scenario-17-promise-close.e2e.ts) proves that the supervisor closes the engine of a single PRD loop that has no phases from the promise alone (LOCAL-172). The engine file has the LOCAL-159 shape: the prompt has no "Execute the PRD at" line, and the test seeds no PRD file and no state file. The test checks that `get_card_progress` shows the open engine and that `start_ship` answers 409 `engine-not-closed`. The test then writes a session transcript whose last assistant message ends with `<promise>RALPH COMPLETE local-159</promise>` and the `DISPATCH_STATUS: DONE` line, and posts the Stop hook. In 60 s the board holds one `close_loop` row with the result `closed` and the reason `promise`. The engine file is renamed to its `.done` copy, which holds `closed_reason: promise`. `get_card_progress` shows `engine.closedReason` `promise`, `completion` `complete`, 1 unit done of 1, and a `lastMarker` that starts with `DONE `. `start_ship` then answers 202. The test does not check a push, a PR or a merge. The test does not rename the engine file, and it types no key into any pane.
+
+Scenario 18 (tests/e2e/scenario-18-pushover-attention.e2e.ts) proves that an empty Pushover value gives one attention item and one start log line, and that filled values give neither (LOCAL-168). The test starts one server with `PUSHOVER_USER_KEY` and `PUSHOVER_APP_TOKEN` set to empty strings. The server log must have exactly one `[notify] loop phase notifications are on` line that names both variables. The board snapshot must carry `pushoverMissing` with both names in that order, and `GET /api/boards/counts` must show `attention` 1 for the default board. The test then starts a second server with fake non-empty values. That server log must have no `[notify]` line, the snapshot must have no `pushoverMissing`, and `attention` must be 0. The fake values must appear in neither log, snapshot nor counts.
 
 The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
@@ -6206,6 +6210,12 @@ The reader reads at most 1 MiB per file (`<path>: larger than 1 MiB`). A missing
 adds a warning to `loopProgress.warnings`, and the rest of the model still fills. A root with no
 loop files gives no model, and the card keeps its last stored model. The reader never writes a
 loop file, and no reader error stops the server.
+
+**Closed engine.** The reader reads the `closed_reason` front matter line of a `.done` engine file
+into `engine.closedReason`. The values are `promise`, `close_loop` and `manual`. The value is
+`manual` when the line is missing or unknown, for example in a file that a person renamed by hand.
+A single PRD loop with a closed engine and no phase headings reads as built and complete. When the
+PRD shows phases, the phases decide.
 
 **Report call.** A loop can report a gate result, so that the board shows it at once. A session
 has the variables `DISPATCH_HOOK_PORT` and `DISPATCH_HOOK_TOKEN`. Run this command after each gate
@@ -6271,7 +6281,12 @@ action that finds nothing to do, such as an `Escape` already sent, writes no row
   restart has its own.
 - Prompts: the dangerous delete prompt and the held peer message are declined. Any other
   permission prompt gets no key.
-- Loop close: at `roadmap_complete` the engine file is renamed to its `.done` copy.
+- Loop close: at `roadmap_complete` the engine file is renamed to its `.done` copy. The supervisor
+  also closes a single PRD loop whose model has no phases when the last assistant text of the
+  transcript holds `<promise>RALPH COMPLETE <slug></promise>` for the slug of the loop. The
+  supervisor does not read the pane for this, because the loop prompt and the Stop hook message
+  also show the phrase. The close writes `closed_reason`: `close_loop` when the files read
+  complete, else `promise`. When the plugin already removed the engine file, the supervisor writes a closed `.done` file with the slug and the `closed_reason`. The DONE marker guard applies only when the loop engine is closed. A supervisor stop never replaces the DONE marker of an Agent done card whose loop engine is closed.
 - Lost session and shell prompt: a pane whose shell owns the foreground is relaunched with
   `runClaude`; any other case runs the resume saga. The resume prompt is typed only after claude
   takes the foreground, within 60 s. A failed relaunch, a lost session that stays gone, or claude
@@ -6321,7 +6336,7 @@ action that finds nothing to do, such as an `Escape` already sent, writes no row
   one `group_state` row (`{ state, reason }`) for a group card only, never for the orchestrator card
   or a ticket card, and skips a state equal to the last `group_state` row of that card, unless that card's session went back to `working` after it. The writers
   are the `status_agent_done` and `status_needs_input` activity subscription in `bootstrap/index.ts`
-  (`agent_done`, `needs_input`), the ship flow (`shipped`, `ship_stopped`), `recordStartFailure`
+  (`agent_done`, `needs_input`), the ship flow (`shipped`, `ship_stopped`, `ship_check_skipped`), `recordStartFailure`
   (`start_failed`) and the supervisor state change (`loop_error` for `api_error`, `stale`, `lost`
   and `shell_prompt`; `usage_limit` for `usage_limit_dialog` and `usage_limit_wait`).
 - Wake duty (`orchestrator-wake.ts`, `domain/orchestrator-wake.ts`): a running orchestrator gets a
@@ -6478,11 +6493,19 @@ group with no loop progress, D-10), with a local `refs/heads/<name>`, and never 
 `HEAD`, a full ref name or the repository base. A unit branch is the `Branch` cell of the progress table, else the name in backticks after `branch` in the roadmap unit Status line, and the name schema accepts every name that git accepts as a branch name (the `git check-ref-format` branch rules), up to 255 characters. The first step checks that the worktree is clean, then runs `git fetch origin`, a checkout with the no-guess option and
 a merge of `origin/main` with no edit, and records the merged commit as `checked`. The check
 runs on that commit, the push uses the refspec `<checked>:refs/heads/<name>`, and the merge
-passes gh's match head commit option with it; a resumed flow whose HEAD moved stops. Each gh
+passes gh's match head commit option with it; a resumed flow whose HEAD moved stops. Each branch
+stores `passed`, the commit on which its check last passed. A new flow copies `passed` from the
+previous flow of the same card, repository and branch name. When `checked` equals `passed`, the
+flow does not run the check command, sets `checkSkipped` to true and records one
+`ship_check_skipped` group state (loop cards only). The diff scope check and the prose check still
+run. Each gh
 call names the repository of the `origin` remote (`repo` on the flow; null unless the host is
 `github.com` or `ssh.github.com`, so an SSH host alias, another host or a local path gives none), and
-an open PR is reused only from the same repository, into `main`, at the checked commit. The
-admin merge retry runs only when every violation clause of the merge error (lines split on
+an open PR is reused only from the same repository and into `main`. The push step looks up that
+PR before the push, because the PR list can answer empty right after a push. After the push, the
+flow adopts the PR when its head equals the checked commit (up to 5 reads, then the flow stops).
+When `gh pr create` fails with `already exists` and a `/pull/<n>` URL, the flow adopts `<n>`. A
+closed PR is not adopted, and a new PR opens. The admin merge retry runs only when every violation clause of the merge error (lines split on
 sentence ends, commas and semicolons) matches the signature rule wording `must have verified
 signatures`.
 The flow never rebases and never edits code. Every git and gh call has a time limit (120 s, 300 s
@@ -6490,7 +6513,12 @@ for fetch and push, 30 min for the check command) and a 64 MiB output buffer, an
 with fixed color, prefix and path settings. The check command gets `DISPATCH_CHECK_WAIT_SECONDS=5400`.
 Its 30 min stop while the slot gate prints its waiting line and start again at the gate's
 `with-check-slot: acquired` line, and the call ends after 5400 s plus 30 min in all. The gate lines
-are never the reason of a failed check. The runner reads the board policy before each step
+are never the reason of a failed check. A failed check command stores the reason
+`check command failed at step <step> with exit code <code>:` followed by the last 40 non-empty
+lines of the combined stdout and stderr, capped at 4000 characters. The step is the script of the
+last npm header line `> pkg@ver script`, else the first word of the check command. A timeout
+stores `check command failed: timed out after 30 minutes in the check slot`. The decision item question and the `ship_stopped` group state carry the same
+reason. The runner reads the board policy before each step
 and poll: `none` stops the flow and `open_prs` stops the merges. The runner keeps its board key,
 and a card that is gone stops it with no write; unwind refuses a group whose flow runs with 409
 `ship-running`. A thrown runner is stored as stopped. A refused move to Done after the last merge
