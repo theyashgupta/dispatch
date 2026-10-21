@@ -77,6 +77,7 @@ interface SandboxOptions {
   memorySampleFile?: string;
   usageUrl?: string;
   seed?: (folders: { dir: string; home: string }) => void;
+  env?: Record<string, string>;
 }
 
 export interface OrchestrationEventRow {
@@ -400,6 +401,7 @@ export async function startSandbox(opts: SandboxOptions): Promise<Sandbox> {
     GIT_AUTHOR_EMAIL: SHIP_IDENTITY.email,
     GIT_COMMITTER_NAME: SHIP_IDENTITY.name,
     GIT_COMMITTER_EMAIL: SHIP_IDENTITY.email,
+    ...(opts.env ?? {}),
   });
   assertFakeClaude(env, claude);
 
