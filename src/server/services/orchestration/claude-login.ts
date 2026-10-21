@@ -138,12 +138,6 @@ async function settle(
   code: number | null,
   accessDenied: boolean,
 ): Promise<void> {
-  if (code !== 0) {
-    await fail(login, ...exitFailure(login, accessDenied));
-    return;
-  }
-
-  view = { state: "finishing", accountId: login.accountId };
   const dir = accountDir(login.accountId);
   const existing = await readRegistry();
   const prior = existing.find((a) => a.id === login.accountId);
@@ -153,6 +147,12 @@ async function settle(
     await recordFailure("cancelled");
     return;
   }
+  if (code !== 0) {
+    await fail(login, ...exitFailure(login, accessDenied));
+    return;
+  }
+
+  view = { state: "finishing", accountId: login.accountId };
   const identity = await readClaudeIdentity(dir);
   if (!identity.loggedIn || identity.email === "") {
     await fail(

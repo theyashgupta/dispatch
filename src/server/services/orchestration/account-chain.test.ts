@@ -2084,6 +2084,27 @@ void test("no account is shadowed once a managed default exists", async () => {
   }
 });
 
+void test("a usage read for default adds no default entry once a managed default exists", async () => {
+  const managed = "55555555-5555-4555-8555-555555555555";
+  await adoptManagedDefault({
+    id: managed,
+    email: "managed@example.com",
+    orgId: "org",
+    orgName: "Org",
+    subscriptionType: "max",
+    createdAt: "2026-10-03T00:00:00.000Z",
+    lastLoginAt: "2026-10-03T00:00:00.000Z",
+  });
+  try {
+    await begin({}, {}, IDENTITY_A);
+    await handleUsageRead("default", usage(50));
+    assert.equal((await readChainState()).accounts.default, undefined);
+  } finally {
+    await removeAccount(managed);
+    await setActiveAccount("default");
+  }
+});
+
 void test("the account in use is never shadowed, even when it holds the home login", async () => {
   await begin();
   await setActiveAccount(ACCOUNT_A);

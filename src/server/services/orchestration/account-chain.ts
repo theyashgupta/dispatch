@@ -613,12 +613,19 @@ async function onLimited(
 
 /**
  * Store one usage read and fail over when the account in use is at the threshold.
+ * With a managed default the home login is not a chain account, so a `default` read is ignored.
  */
 export function handleUsageRead(
   id: string,
   usage: ClaudeUsageSnapshot,
 ): Promise<void> {
   return enqueue(async () => {
+    if (
+      id === DEFAULT_CLAUDE_ACCOUNT_ID &&
+      getManagedDefaultId() !== undefined
+    ) {
+      return;
+    }
     const entry = await ingest(id, usage);
     const expiresAt = usage.loginExpiresAt;
     if (

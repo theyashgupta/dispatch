@@ -77,7 +77,7 @@ accountsRouter.put("/accounts/active", async (req, res) => {
     );
     if (!result.ok) return result;
     await noteManualSwitch();
-    void refreshUsageManually(id).catch(() => undefined);
+    void refreshUsageManually(getActiveAccountId()).catch(() => undefined);
     const applied = await orFail("accounts-apply-failed", () =>
       applyAccountChoice(applyToRunning, id),
     );

@@ -359,6 +359,20 @@ void test("removing the account during a managed re-login cancels it instead of 
   assert.equal((await registryEmails()).includes("home@example.com"), false);
 });
 
+void test("removing the account during a managed re-login ends cancelled even when the CLI then exits non-zero", async () => {
+  const id = await runWithCode("home", "done", { managedDefault: true });
+  await login.cancelLogin();
+  const before = events.length;
+  assert.deepEqual(await login.startLogin(id), { ok: true });
+  await waitFor("awaiting-code");
+  assert.deepEqual(await accounts.removeAccount(id), { ok: true });
+  assert.deepEqual(login.submitLoginCode("crash"), { ok: true });
+  await waitFor("idle");
+  assert.deepEqual(events.slice(before), [
+    { type: "account_login_failed", reason: "cancelled", cardId: null },
+  ]);
+});
+
 void test("a managed login or an adopted managed default leaves every running session on its recorded account", async () => {
   const addedId = randomUUID();
   await accounts.upsertAccount({
