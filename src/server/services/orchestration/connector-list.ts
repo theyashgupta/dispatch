@@ -1,5 +1,6 @@
 import { run } from "../../adapters/exec.js";
 import { DISPATCH_DIR } from "../infra/paths.js";
+import { managedClaudeEnv } from "./claude-accounts.js";
 
 export type ConnectorCheck =
   | { state: "connected"; server: string }
@@ -83,6 +84,7 @@ export async function readMcpList(
     timeout: LIST_TIMEOUT_MS,
     signal,
     killEscalationMs: KILL_GRACE_MS,
+    env: await managedClaudeEnv(),
   });
   return list.stdout;
 }

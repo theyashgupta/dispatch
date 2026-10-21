@@ -1,10 +1,27 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
-import {
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { after as afterAll, test } from "node:test";
+import { isolateEnv } from "../../test-support/fixtures.js";
+import { writeConnectorClaude } from "../../test-support/stub-claude.js";
+
+const env = isolateEnv();
+const stubDir = fs.mkdtempSync(path.join(os.tmpdir(), "connector-call-stub-"));
+process.env.CONNECTOR_STUB_DIR = stubDir;
+const {
   CONNECTOR_CALL_ENV,
   connectorCallArgs,
   connectorLoaded,
-} from "./connector-call.js";
+  runConnectorCall,
+} = await import("./connector-call.js");
+const accounts = await import("./claude-accounts.js");
+
+afterAll(() => {
+  delete process.env.CONNECTOR_STUB_DIR;
+  fs.rmSync(stubDir, { recursive: true, force: true });
+  env.cleanup();
+});
 
 const after = (args: string[], flag: string): string | undefined =>
   args[args.indexOf(flag) + 1];
@@ -123,4 +140,41 @@ test("CC10 a connected server with none of its tools listed is not loaded", () =
   const init =
     '{"type":"system","subtype":"init","tools":["mcp__claude_ai_Gmail__search"],"mcp_servers":[{"name":"claude.ai Slack","status":"connected"}]}';
   assert.equal(connectorLoaded(init, "claude.ai Slack"), false);
+});
+
+test("CC11 runConnectorCall runs on the home login without a managed default and on the managed dir with one", async () => {
+  const fake = writeConnectorClaude(env.binDir);
+  fs.writeFileSync(path.join(stubDir, "reply.json"), "{}");
+  const log = path.join(stubDir, "config-dir.log");
+  fs.rmSync(log, { force: true });
+  const call = () =>
+    runConnectorCall(fake, {
+      allowed: ["mcp__claude_ai_Slack"],
+      outputFormat: "text",
+      prompt: "hi",
+      timeoutMs: 10_000,
+    });
+  await call();
+  const id = "44444444-4444-4444-8444-444444444444";
+  const dir = accounts.accountDir(id);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  await accounts.upsertAccount({
+    id,
+    email: "managed@example.com",
+    orgId: "org-x",
+    orgName: "Org X",
+    subscriptionType: "pro",
+    createdAt: "2026-09-02T00:00:00.000Z",
+    lastLoginAt: "2026-09-02T00:00:00.000Z",
+  });
+  await accounts.setManagedDefault(id);
+  try {
+    await call();
+  } finally {
+    await accounts.setManagedDefault(undefined);
+  }
+  assert.equal(
+    fs.readFileSync(log, "utf8"),
+    `${process.env.CLAUDE_CONFIG_DIR ?? ""}\n${dir}\n`,
+  );
 });

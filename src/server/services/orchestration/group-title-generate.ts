@@ -2,6 +2,7 @@ import { run } from "../../adapters/exec.js";
 import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
 import { DISPATCH_DIR } from "../infra/paths.js";
 import { hasDispatchMarker } from "../infra/playbooks.js";
+import { managedClaudeEnv } from "./claude-accounts.js";
 
 const PHRASE_HEADER = "## Phrase";
 const PHRASE_CAP = 48;
@@ -160,6 +161,7 @@ export async function generateGroupTitlePhrase(
       maxBuffer: 10 * 1024 * 1024,
       signal,
       killEscalationMs: 5_000,
+      env: await managedClaudeEnv(),
     },
   );
 

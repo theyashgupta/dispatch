@@ -5,6 +5,7 @@ import type { AskRequest } from "../../../shared/types.js";
 import { DISPATCH_DIR } from "../infra/paths.js";
 import { buildAskContext } from "../domain/ask-context.js";
 import { buildAskPrompt } from "../domain/ask-prompt.js";
+import { managedClaudeEnv } from "./claude-accounts.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 
 const ASK_TIMEOUT_MS = 180_000;
@@ -55,6 +56,7 @@ export async function askClaude(
         timeout: timeoutMs,
         maxBuffer: 10 * 1024 * 1024,
         killEscalationMs: 5_000,
+        env: await managedClaudeEnv(),
         signal: runSignal,
         input: prompt,
       },

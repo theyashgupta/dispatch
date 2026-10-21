@@ -3,6 +3,7 @@ import path from "node:path";
 import { run } from "../../adapters/exec.js";
 import { resolveBinaryPath } from "../../adapters/resolve-binary.js";
 import { DISPATCH_DIR } from "../infra/paths.js";
+import { managedClaudeEnv } from "./claude-accounts.js";
 import { isWithinHome } from "./workspaces.js";
 
 const MAX_FILE_BYTES = 100 * 1024;
@@ -152,7 +153,12 @@ export async function generatePlaybookDraft(input: {
       "--strict-mcp-config",
       "--no-session-persistence",
     ],
-    { cwd: DISPATCH_DIR, timeout: 150_000, maxBuffer: 10 * 1024 * 1024 },
+    {
+      cwd: DISPATCH_DIR,
+      timeout: 150_000,
+      maxBuffer: 10 * 1024 * 1024,
+      env: await managedClaudeEnv(),
+    },
   );
 
   const draft = stdout.trim();

@@ -620,3 +620,21 @@ void test("adoptManagedDefault takes Default's position and moves a default poin
   await accounts.removeAccount(ID_C);
   await accounts.setActiveAccount(DEFAULT_CLAUDE_ACCOUNT_ID);
 });
+
+void test("managedClaudeEnv gives the managed dir only while a managed default with a dir exists", async () => {
+  seedRegistry([ID_A]);
+  await accounts.loadManagedDefault();
+  assert.deepEqual(await accounts.managedClaudeEnv(), {});
+
+  managedRegistry();
+  await accounts.loadManagedDefault();
+  assert.deepEqual(await accounts.managedClaudeEnv(), {
+    CLAUDE_CONFIG_DIR: accounts.accountDir(ID_B),
+  });
+
+  fs.rmSync(accounts.accountDir(ID_B), { recursive: true, force: true });
+  assert.deepEqual(await accounts.managedClaudeEnv(), {});
+
+  await accounts.setManagedDefault(undefined);
+  assert.deepEqual(await accounts.managedClaudeEnv(), {});
+});

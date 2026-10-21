@@ -11,6 +11,7 @@ const stubDir = fs.mkdtempSync(path.join(os.tmpdir(), "connector-stub-"));
 process.env.CONNECTOR_STUB_DIR = stubDir;
 const { mcpToolPrefix, parseMcpList, pickConnector, readMcpList } =
   await import("./connector-list.js");
+const accounts = await import("./claude-accounts.js");
 
 after(() => {
   delete process.env.CONNECTOR_STUB_DIR;
@@ -94,4 +95,37 @@ test("C7: readMcpList returns the fixture text and logs one list read and no mod
   assert.equal(text, `${MACHINE_LIST}\n${CLAUDE_AI_CONNECTED}\n`);
   const calls = fs.readFileSync(path.join(stubDir, "calls.log"), "utf8");
   assert.equal(calls, "mcp list\n");
+});
+
+async function useManagedDefault(id: string): Promise<string> {
+  const dir = accounts.accountDir(id);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  await accounts.upsertAccount({
+    id,
+    email: "managed@example.com",
+    orgId: "org-x",
+    orgName: "Org X",
+    subscriptionType: "pro",
+    createdAt: "2026-09-02T00:00:00.000Z",
+    lastLoginAt: "2026-09-02T00:00:00.000Z",
+  });
+  await accounts.setManagedDefault(id);
+  return dir;
+}
+
+test("C8: readMcpList runs on the home login without a managed default and on the managed dir with one", async () => {
+  const fake = writeConnectorClaude(env.binDir);
+  const log = path.join(stubDir, "config-dir.log");
+  fs.rmSync(log, { force: true });
+  await readMcpList(fake);
+  const dir = await useManagedDefault("44444444-4444-4444-8444-444444444444");
+  try {
+    await readMcpList(fake);
+  } finally {
+    await accounts.setManagedDefault(undefined);
+  }
+  assert.equal(
+    fs.readFileSync(log, "utf8"),
+    `${process.env.CLAUDE_CONFIG_DIR ?? ""}\n${dir}\n`,
+  );
 });

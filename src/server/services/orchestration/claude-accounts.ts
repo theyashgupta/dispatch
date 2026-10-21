@@ -692,6 +692,20 @@ export function resolveLaunchAccount(id: string): Promise<LaunchAccount> {
 }
 
 /**
+ * The env that points a headless `claude` call at the managed default login.
+ *
+ * @remarks Uses the managed default, not the active account, because the claude.ai connectors
+ * belong to the terminal identity. A broken managed account falls back to the home login.
+ */
+export async function managedClaudeEnv(): Promise<Record<string, string>> {
+  if (managedDefaultId === undefined) return {};
+  const launch = await resolveLaunchAccount(DEFAULT_CLAUDE_ACCOUNT_ID).catch(
+    () => undefined,
+  );
+  return launch?.configDir ? { CLAUDE_CONFIG_DIR: launch.configDir } : {};
+}
+
+/**
  * The id new sessions launch on, `default` when the config carries none.
  *
  * @remarks A stored `default` reads as the managed default once one exists.
