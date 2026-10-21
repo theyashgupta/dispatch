@@ -27,7 +27,12 @@ if (process.env.FAKE_CLAUDE_ARGV_FILE) {
 process.stdout._handle?.setBlocking?.(false);
 
 for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) {
-  process.on(signal, () => process.exit(0));
+  process.on(signal, () => {
+    try {
+      if (scenario.freezeFile) fs.unlinkSync(scenario.freezeFile);
+    } catch {}
+    process.exit(0);
+  });
 }
 
 const startedAt = Date.now();
@@ -542,6 +547,7 @@ function handleKey(key) {
     return;
   }
   if (key === "enter") {
+    if (scenario.freezeFile && fs.existsSync(scenario.freezeFile)) return;
     if (droppedEnters < (scenario.dropEnters ?? 0)) droppedEnters++;
     else submit();
   } else if (key === "ctrl:21") input = "";
@@ -635,7 +641,7 @@ function shellQuote(value: string): string {
  *
  * @remarks Lookup order is `<dir>/<DISPATCH_CARD_ID>.json`, `<dir>/default.json`, then the variable. Scenario keys: `byConfigDir`
  * merges a partial scenario by `CLAUDE_CONFIG_DIR` folder name, `limitStop` answers each prompt as a usage limit stop, and
- * `exitOnExit` ends the process on `/exit`. The fake is test-only and sets stdout non-blocking, since a blocking write stalls on a full pty.
+ * `exitOnExit` ends the process on `/exit`, and `freezeFile` holds every Enter while that file exists (a signal that ends the fake deletes it). The fake is test-only and sets stdout non-blocking, since a blocking write stalls on a full pty.
  */
 export function writeFakeClaudeTui(binDir: string): string {
   const script = path.join(binDir, "fake-claude-tui.mjs");
