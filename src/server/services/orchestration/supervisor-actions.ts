@@ -16,7 +16,7 @@ import {
 } from "../domain/supervisor-plan.js";
 import { refreshLoopProgress } from "./loop-progress-reader.js";
 import { memoryCheck } from "./memory-governor.js";
-import { resumeSession } from "./resume-session.js";
+import { isFolder, resumeSession } from "./resume-session.js";
 import { runClaude, type RunClaudeOutcome } from "./run-claude.js";
 import { sendConfirmed, waitFor } from "./supervisor-send.js";
 import {
@@ -152,7 +152,8 @@ async function closeLoop(card: Card, session: Session): Promise<void> {
  *
  * @remarks A pane whose shell owns the foreground is relaunched with `runClaude`, since the resume
  * saga reattaches a live tmux session without starting claude. The prompt is typed only after
- * claude takes the foreground, so it never reaches the login shell.
+ * claude takes the foreground, so it never reaches the login shell. A pane whose workspace folder is
+ * missing is not relaunched, because the launch would run claude outside the session workspace.
  */
 async function resume(
   card: Card,
@@ -182,6 +183,9 @@ async function resume(
     session.tmuxSession !== undefined &&
     (await deps.atShellPrompt(`=${session.tmuxSession}:`))
   ) {
+    const root = rootOf(card, session);
+    if (root !== "" && !(await isFolder(root)))
+      return failed(`Resume failed: workspace-missing: ${root}`);
     const memory = memoryCheck(card.boardKey ?? DEFAULT_BOARD_KEY);
     if (!memory.ok) return failed(memory.reason);
     const outcome = await deps.relaunch(card.id);
