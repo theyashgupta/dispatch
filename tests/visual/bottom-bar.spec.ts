@@ -72,10 +72,16 @@ test("toasts and floating bars clear the bottom bar through its height variable"
 
   const toaster = page.locator("[data-sonner-toaster]");
   await expect(toaster).toHaveCSS("bottom", `${spaceXl + BAR_HEIGHT}px`);
-  await expectAbove(page.locator("[data-sonner-toast]").first(), barBox.y);
+  await expectAbove(
+    page
+      .locator("[data-sonner-toast]")
+      .filter({ hasText: "Board ORC could not be loaded." }),
+    barBox.y,
+  );
 
   await page.unroute("**/api/board?*board=ORC*");
   await page.goto(`${orchestrated}/#/boards/ORC`);
+  await page.reload();
   await expect(bar).toBeVisible();
   await expect.poll(() => barHeightVar(page)).toBe(`${BAR_HEIGHT}px`);
   await page
@@ -120,9 +126,9 @@ test("the bottom bar hides on scroll down and returns on scroll up, and reduced 
   await page.goto(`${orchestrated}/#/boards/ORC/dashboard`);
   await expect(bar).toBeVisible();
   await expect(bar).toHaveCSS("height", `${BAR_HEIGHT}px`);
-  expect(
-    await column.evaluate((el) => el.scrollHeight - el.clientHeight),
-  ).toBeGreaterThan(500);
+  await expect
+    .poll(() => column.evaluate((el) => el.scrollHeight - el.clientHeight))
+    .toBeGreaterThan(500);
 
   await scrollTo(page, column, 20);
   await scrollTo(page, column, 300);
@@ -177,6 +183,7 @@ const measureFieldSizes = async (browser: Browser, hasTouch: boolean) => {
     viewport: { width: 390, height: 900 },
     hasTouch,
     reducedMotion: "reduce",
+    serviceWorkers: "block",
   });
   try {
     const page = await context.newPage();
