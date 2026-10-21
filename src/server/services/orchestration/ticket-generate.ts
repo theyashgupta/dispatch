@@ -150,7 +150,7 @@ export async function generateTicketDraft(
     maxBuffer: 10 * 1024 * 1024,
     signal,
     killEscalationMs: 5_000,
-    env: await managedClaudeEnv(),
+    env: managedClaudeEnv(),
   };
   if (images.length > 0) {
     const { stdout } = await run(

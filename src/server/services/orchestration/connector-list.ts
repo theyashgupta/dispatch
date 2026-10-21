@@ -84,7 +84,7 @@ export async function readMcpList(
     timeout: LIST_TIMEOUT_MS,
     signal,
     killEscalationMs: KILL_GRACE_MS,
-    env: await managedClaudeEnv(),
+    env: managedClaudeEnv(),
   });
   return list.stdout;
 }

@@ -102,7 +102,7 @@ export async function runConnectorCall(
     timeoutMs: number;
   },
 ): Promise<string> {
-  const managedEnv = await managedClaudeEnv();
+  const managedEnv = managedClaudeEnv();
   const { stdout } = await run(claude, connectorCallArgs(input), {
     cwd: DISPATCH_DIR,
     timeout: input.timeoutMs + KILL_GRACE_MS,

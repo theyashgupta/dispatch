@@ -43,7 +43,7 @@ export async function generateMeetingDrafts(
       maxBuffer: 10 * 1024 * 1024,
       signal,
       killEscalationMs: 5_000,
-      env: await managedClaudeEnv(),
+      env: managedClaudeEnv(),
       input: buildPastePrompt(input.meeting, input.notes, input.me),
     },
   );

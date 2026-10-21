@@ -652,9 +652,9 @@ export function resolveLaunchAccount(id: string): Promise<LaunchAccount> {
  * The env that points a headless `claude` call at the managed default login.
  *
  * @remarks Uses the managed default, not the active account, because the claude.ai connectors
- * belong to the terminal identity. A broken managed account falls back to the home login.
+ * belong to the terminal identity. A missing managed dir falls back to the home login.
  */
-export async function managedClaudeEnv(): Promise<Record<string, string>> {
+export function managedClaudeEnv(): Record<string, string> {
   if (managedDefaultId === undefined) return {};
   const dir = accountDir(managedDefaultId);
   return fs.existsSync(dir) ? { CLAUDE_CONFIG_DIR: dir } : {};

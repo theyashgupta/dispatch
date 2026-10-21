@@ -56,7 +56,7 @@ export async function askClaude(
         timeout: timeoutMs,
         maxBuffer: 10 * 1024 * 1024,
         killEscalationMs: 5_000,
-        env: await managedClaudeEnv(),
+        env: managedClaudeEnv(),
         signal: runSignal,
         input: prompt,
       },

@@ -327,7 +327,7 @@ export async function syncCardToLinear(card: {
       timeout: 240_000,
       maxBuffer: 10 * 1024 * 1024,
       killEscalationMs: 5_000,
-      env: await managedClaudeEnv(),
+      env: managedClaudeEnv(),
     },
   );
 

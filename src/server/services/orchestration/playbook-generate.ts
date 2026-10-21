@@ -157,7 +157,7 @@ export async function generatePlaybookDraft(input: {
       cwd: DISPATCH_DIR,
       timeout: 150_000,
       maxBuffer: 10 * 1024 * 1024,
-      env: await managedClaudeEnv(),
+      env: managedClaudeEnv(),
     },
   );
 
