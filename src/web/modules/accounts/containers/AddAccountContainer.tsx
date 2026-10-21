@@ -23,6 +23,7 @@ const FOREIGN_NOTICE =
 interface AddAccountContainerProps {
   accountId?: string;
   accountEmail?: string;
+  managedDefault?: boolean;
   onClose: () => void;
   onAdded: () => void;
 }
@@ -30,6 +31,7 @@ interface AddAccountContainerProps {
 export function AddAccountContainer({
   accountId,
   accountEmail,
+  managedDefault,
   onClose,
   onAdded,
 }: AddAccountContainerProps) {
@@ -62,7 +64,13 @@ export function AddAccountContainer({
 
   const begin = useCallback(
     () =>
-      startLogin(accountId)
+      startLogin(
+        accountId
+          ? { accountId }
+          : managedDefault
+            ? { managedDefault: true }
+            : {},
+      )
         .then(
           (result) => {
             if (result.ok) {
@@ -75,7 +83,7 @@ export function AddAccountContainer({
           () => setNotice(START_FAILED),
         )
         .finally(() => setAnswered(true)),
-    [startLogin, accountId],
+    [startLogin, accountId, managedDefault],
   );
 
   useEffect(() => {
@@ -122,7 +130,9 @@ export function AddAccountContainer({
       title={
         accountId
           ? `Re-login ${accountEmail ?? "account"}`
-          : "Add a Claude account"
+          : managedDefault
+            ? "Log in for the Default account"
+            : "Add a Claude account"
       }
       view={view}
       notice={notice}

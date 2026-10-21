@@ -68,13 +68,13 @@ export async function refreshAccountUsage(
 }
 
 /**
- * Start a Claude login for a new account, or for `accountId` to repair its token: POST /api/accounts/login.
+ * Start a Claude login for a new account, for `accountId` to repair its token, or for the managed Default: POST /api/accounts/login.
  *
  * @remarks
  * A 409 means one is already running.
  */
 export async function startLogin(
-  accountId?: string,
+  target: { accountId?: string; managedDefault?: boolean } = {},
 ): Promise<
   | { ok: true; accountId: string | null }
   | { ok: false; error: string; inFlight?: boolean }
@@ -82,14 +82,22 @@ export async function startLogin(
   const result = await http<ClaudeLoginView | null>("/api/accounts/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(accountId ? { accountId } : {}),
+    body: JSON.stringify(
+      target.accountId
+        ? { accountId: target.accountId }
+        : target.managedDefault
+          ? { managedDefault: true }
+          : {},
+    ),
   });
   if (result.ok) {
     const view = result.data;
     return {
       ok: true,
       accountId:
-        view && "accountId" in view ? view.accountId : (accountId ?? null),
+        view && "accountId" in view
+          ? view.accountId
+          : (target.accountId ?? null),
     };
   }
   if (result.status === 409) {

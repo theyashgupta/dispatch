@@ -47,8 +47,19 @@ test("accountsQueryOptions requests the account list", async () => {
     activeId: "a",
     accounts: [],
     sessions: [],
+    managedDefaultOffer: false,
   });
   assert.equal(calls[0]?.url, "/api/accounts");
+});
+
+test("getAccounts passes the managed default offer through", async () => {
+  reply(200, {
+    activeId: "a",
+    accounts: [],
+    sessions: [],
+    managedDefaultOffer: true,
+  });
+  assert.equal((await getAccounts()).managedDefaultOffer, true);
 });
 
 test("getAccounts throws on a failure status", async () => {

@@ -39,7 +39,11 @@ export function AccountRow({
   const expiry = loginExpiryView(account.usage.loginExpiresAt, now);
   const shadowed = account.state === "shadowed-by-home";
   const meta = [
-    account.isDefault ? "Default (your home login)" : account.orgName,
+    account.managedDefault
+      ? "Default (Dispatch login)"
+      : account.isDefault
+        ? "Default (your home login)"
+        : account.orgName,
     account.subscriptionType,
     account.lastLoginAt
       ? `signed in ${new Date(account.lastLoginAt).toLocaleString()}`

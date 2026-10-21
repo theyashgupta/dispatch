@@ -16,15 +16,20 @@ export async function getAccounts(): Promise<{
   accounts: ClaudeAccountSummary[];
   sessions: AccountSessionEntry[];
   chain: ChainView;
+  managedDefaultOffer: boolean;
 }> {
   const result = await http<{
     activeId: string;
     accounts: ClaudeAccountSummary[];
     sessions: AccountSessionEntry[];
     chain: ChainView;
+    managedDefaultOffer?: boolean;
   }>("/api/accounts");
   if (!result.ok) {
     throw httpError("getAccounts", result);
   }
-  return result.data;
+  return {
+    ...result.data,
+    managedDefaultOffer: result.data.managedDefaultOffer === true,
+  };
 }

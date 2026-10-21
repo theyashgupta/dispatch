@@ -24,6 +24,7 @@ export function AccountsContainer() {
   const [openedRouteId, setOpenedRouteId] = useState<string | undefined>();
   const [addTarget, setAddTarget] = useState<{
     account?: ClaudeAccountSummary;
+    managedDefault?: boolean;
   } | null>(null);
   const [removeTarget, setRemoveTarget] = useState<ClaudeAccountSummary | null>(
     null,
@@ -68,6 +69,8 @@ export function AccountsContainer() {
         failed={accounts.isError}
         removeError={removeError}
         addDisabled={addTarget?.account !== undefined}
+        managedDefaultOffer={accounts.data?.managedDefaultOffer ?? false}
+        onManagedLogin={() => setAddTarget({ managedDefault: true })}
         reloginDisabled={addTarget !== null}
         onAdd={() => setAddTarget({})}
         onSwitch={setSwitchTarget}
@@ -107,9 +110,13 @@ export function AccountsContainer() {
       )}
       {addTarget && (
         <AddAccountContainer
-          key={addTarget.account?.id ?? "new"}
+          key={
+            addTarget.account?.id ??
+            (addTarget.managedDefault ? "managed" : "new")
+          }
           accountId={addTarget.account?.id}
           accountEmail={addTarget.account?.email}
+          managedDefault={addTarget.managedDefault}
           onClose={() => {
             setAddTarget(null);
             reload();

@@ -2,6 +2,7 @@ import type { ClaudeAccountSummary } from "../../../../shared/types.js";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { Button } from "@/components/ui/button";
 import { AccountRow } from "./AccountRow";
+import { ManagedDefaultOffer } from "./ManagedDefaultOffer";
 
 interface AccountsListProps {
   accounts: ClaudeAccountSummary[];
@@ -11,7 +12,9 @@ interface AccountsListProps {
   failed: boolean;
   removeError: string | null;
   addDisabled: boolean;
+  managedDefaultOffer: boolean;
   onAdd: () => void;
+  onManagedLogin: () => void;
   onSwitch: (account: ClaudeAccountSummary) => void;
   onRelogin: (account: ClaudeAccountSummary) => void;
   onRemove: (account: ClaudeAccountSummary) => void;
@@ -27,7 +30,9 @@ export function AccountsList({
   failed,
   removeError,
   addDisabled,
+  managedDefaultOffer,
   onAdd,
+  onManagedLogin,
   onSwitch,
   onRelogin,
   onRemove,
@@ -53,6 +58,10 @@ export function AccountsList({
           Add account
         </Button>
       </div>
+
+      {managedDefaultOffer && (
+        <ManagedDefaultOffer disabled={addDisabled} onLogin={onManagedLogin} />
+      )}
 
       {!loaded && (
         <span className="text-xs text-muted-foreground">Loading…</span>
