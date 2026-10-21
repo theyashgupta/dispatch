@@ -194,6 +194,14 @@ test("startLogin reads a 409 as a login already in progress", async () => {
   });
 });
 
+test("startLogin reads a 409 managed-exists as a refusal, not a login in progress", async () => {
+  reply(409, { error: "managed-exists" });
+  assert.deepEqual(await startLogin({ managedDefault: true }), {
+    ok: false,
+    error: "The Default account already uses a Dispatch login.",
+  });
+});
+
 test("startLogin reads a 404 as an unregistered account", async () => {
   reply(404, {});
   assert.deepEqual(await startLogin({ accountId: "x" }), {

@@ -42,7 +42,12 @@ test("accountsKeys has the documented shape", () => {
 test("accountsQueryOptions requests the account list", async () => {
   const options = accountsQueryOptions();
   assert.deepEqual(options.queryKey, ["accounts", "list"]);
-  reply(200, { activeId: "a", accounts: [], sessions: [] });
+  reply(200, {
+    activeId: "a",
+    accounts: [],
+    sessions: [],
+    managedDefaultOffer: false,
+  });
   assert.deepEqual(await newClient().fetchQuery(options), {
     activeId: "a",
     accounts: [],

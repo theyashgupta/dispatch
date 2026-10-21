@@ -24,7 +24,7 @@ export function AccountsContainer() {
   const [openedRouteId, setOpenedRouteId] = useState<string | undefined>();
   const [addTarget, setAddTarget] = useState<{
     account?: ClaudeAccountSummary;
-    managedDefault?: boolean;
+    managedDefault?: true;
   } | null>(null);
   const [removeTarget, setRemoveTarget] = useState<ClaudeAccountSummary | null>(
     null,

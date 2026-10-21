@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Item, ItemContent } from "@/components/ui/item";
 import { UsageDot } from "./UsageDot";
+import { accountMeta } from "@/modules/accounts/domain/account-meta";
 import { chainStateBadge } from "@/modules/accounts/domain/chain-state";
 import {
   tightestWindow,
@@ -39,11 +40,7 @@ export function AccountRow({
   const expiry = loginExpiryView(account.usage.loginExpiresAt, now);
   const shadowed = account.state === "shadowed-by-home";
   const meta = [
-    account.managedDefault
-      ? "Default (Dispatch login)"
-      : account.isDefault
-        ? "Default (your home login)"
-        : account.orgName,
+    accountMeta(account),
     account.subscriptionType,
     account.lastLoginAt
       ? `signed in ${new Date(account.lastLoginAt).toLocaleString()}`

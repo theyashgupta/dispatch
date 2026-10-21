@@ -120,7 +120,7 @@ export function useRefreshAccountUsageMutation() {
 export function startLoginMutationOptions(queryClient: QueryClient) {
   return {
     mutationKey: accountsKeys.start,
-    mutationFn: (target?: { accountId?: string; managedDefault?: boolean }) =>
+    mutationFn: (target?: { accountId?: string; managedDefault?: true }) =>
       startLogin(target),
     onSuccess: (result: Awaited<ReturnType<typeof startLogin>>) => {
       if (result.ok) return invalidateLogin(queryClient);

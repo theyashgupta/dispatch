@@ -68,13 +68,13 @@ export async function refreshAccountUsage(
 }
 
 /**
- * Start a Claude login for a new account, for `accountId` to repair its token, or for the managed Default: POST /api/accounts/login.
+ * Start a Claude login for a new, repaired or managed Default account: POST /api/accounts/login.
  *
  * @remarks
- * A 409 means one is already running.
+ * A 409 means one is already running, unless its code is `managed-exists`.
  */
 export async function startLogin(
-  target: { accountId?: string; managedDefault?: boolean } = {},
+  target: { accountId?: string; managedDefault?: true } = {},
 ): Promise<
   | { ok: true; accountId: string | null }
   | { ok: false; error: string; inFlight?: boolean }
@@ -82,13 +82,7 @@ export async function startLogin(
   const result = await http<ClaudeLoginView | null>("/api/accounts/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(
-      target.accountId
-        ? { accountId: target.accountId }
-        : target.managedDefault
-          ? { managedDefault: true }
-          : {},
-    ),
+    body: JSON.stringify(target),
   });
   if (result.ok) {
     const view = result.data;
@@ -98,6 +92,12 @@ export async function startLogin(
         view && "accountId" in view
           ? view.accountId
           : (target.accountId ?? null),
+    };
+  }
+  if (result.status === 409 && result.error === "managed-exists") {
+    return {
+      ok: false,
+      error: "The Default account already uses a Dispatch login.",
     };
   }
   if (result.status === 409) {

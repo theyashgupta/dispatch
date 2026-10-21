@@ -20,10 +20,20 @@ const SUBMIT_FAILED = "Couldn't submit the code.";
 const FOREIGN_NOTICE =
   "Another Claude login is in progress in a different window. Finish or cancel it there first.";
 
+function dialogTitle(
+  accountId: string | undefined,
+  accountEmail: string | undefined,
+  managedDefault: true | undefined,
+): string {
+  if (accountId) return `Re-login ${accountEmail ?? "account"}`;
+  if (managedDefault) return "Log in for the Default account";
+  return "Add a Claude account";
+}
+
 interface AddAccountContainerProps {
   accountId?: string;
   accountEmail?: string;
-  managedDefault?: boolean;
+  managedDefault?: true;
   onClose: () => void;
   onAdded: () => void;
 }
@@ -64,13 +74,7 @@ export function AddAccountContainer({
 
   const begin = useCallback(
     () =>
-      startLogin(
-        accountId
-          ? { accountId }
-          : managedDefault
-            ? { managedDefault: true }
-            : {},
-      )
+      startLogin({ accountId, managedDefault })
         .then(
           (result) => {
             if (result.ok) {
@@ -127,13 +131,7 @@ export function AddAccountContainer({
 
   return (
     <AddAccountDialog
-      title={
-        accountId
-          ? `Re-login ${accountEmail ?? "account"}`
-          : managedDefault
-            ? "Log in for the Default account"
-            : "Add a Claude account"
-      }
+      title={dialogTitle(accountId, accountEmail, managedDefault)}
       view={view}
       notice={notice}
       foreign={foreign}
