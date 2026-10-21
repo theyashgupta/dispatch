@@ -236,6 +236,8 @@ const REFUSALS: Record<string, string> = {
     "the swap ceiling has to be a whole number from 256 to 65536",
   "invalid-budgetPerGroup":
     "the budget has to be an amount above 0 and at most 100000",
+  "invalid-budgetWarnPercent":
+    "the budget warning has to be a whole number from 1 to 99",
   "invalid-policy": "the policy has a field that is not valid",
   "unknown-field": "the request has a field that is not allowed",
   "invalid-body": "the request is not valid",

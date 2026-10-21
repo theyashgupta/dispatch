@@ -127,6 +127,7 @@ Only you can change the policy. The orchestrator reads it. No tool can change it
 | **At a usage limit**                                      | **Wait for the reset**, **Stop and ask me**                                                      | **Wait for the reset**      |
 | **Ship rights**                                           | **None, I ship**, **Open PRs**, **Open and merge PRs**                                           | **None, I ship**            |
 | **Budget per group (USD)**                                | An amount above 0 and at most 100000, or empty for **No limit**                                  | Empty (**No limit**)        |
+| **Budget warning (%)**                                    | A whole number from 1 to 99                                                                      | 80                          |
 | **Supervisor**                                            | **On**, **Off**                                                                                  | **On** (**Off** on `LOCAL`) |
 
 Notes on the fields:
@@ -700,7 +701,9 @@ The field **Budget per group (USD)** sets a cost limit for each group. The cost 
 - **Change budget** opens the **Policy** tab of the settings sheet on the command centre.
 - When you raise the budget above the cost, or remove it, the supervisor clears the budget reason within one minute. The item then becomes a normal **Needs input** item with a reply field.
 
-The section **Cost and usage** shows a bar for each group. The text reads "$12.40 of $20.00, 62%". At 80 percent or more it reads "$17.10 of $20.00, 86%, near budget" and shows a warning glyph. Above 100 percent it reads "$25.00 of $20.00, 125%, over budget". With no budget it reads "$12.40, no budget". When an orchestrator override sets the budget, the text ends with "budget set by <name>".
+When a group reaches the warning percent of its budget (80 by default), one "Budget warning" item shows in the attention queue. The sidebar count includes the item. The item goes away when you raise or remove the budget, when the group stops at its budget, or when the group is done.
+
+The section **Cost and usage** shows a bar for each group. The text reads "$12.40 of $20.00, 62%". At the budget warning percent of the board or more (default 80) it reads "$17.10 of $20.00, 86%, near budget" and shows a warning glyph. Above 100 percent it reads "$25.00 of $20.00, 125%, over budget". With no budget it reads "$12.40, no budget". When an orchestrator override sets the budget, the text ends with "budget set by <name>".
 
 The same section shows the usage meters of the Claude account that each live session uses: the current window and the current week. The text reads "Window 23%, resets 18:00" or "Week 85%, near limit, resets Mon 05:30". The meters come from the status line of the sessions. No control offers usage credits.
 

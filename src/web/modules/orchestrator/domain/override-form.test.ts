@@ -20,6 +20,7 @@ const board: BoardPolicy = {
   usageLimit: "wait",
   shipRights: "merge",
   budgetPerGroup: 20,
+  budgetWarnPercent: 80,
   supervisor: "on",
   groupPlaybook: null,
   crossSessionInbound: null,

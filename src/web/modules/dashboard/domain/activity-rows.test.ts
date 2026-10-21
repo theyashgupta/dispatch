@@ -96,6 +96,7 @@ test("supervisor actions use the map and unknown ones fall back", () => {
       event(6, "supervisor_action", "c14", { action: "budget_release" }),
       event(7, "supervisor_action", "c14", { action: "needs_input" }),
       event(8, "supervisor_action", "c14", { action: "mystery" }),
+      event(9, "supervisor_action", "c14", { action: "budget_warning" }),
     ]).reverse(),
     [
       "sent one continue prompt to GROUP-14",
@@ -106,6 +107,7 @@ test("supervisor actions use the map and unknown ones fall back", () => {
       "released the budget stop of GROUP-14",
       "moved GROUP-14 to Needs input",
       "mystery on GROUP-14",
+      "warned that GROUP-14 is near its budget",
     ],
   );
 });

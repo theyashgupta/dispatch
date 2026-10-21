@@ -224,3 +224,30 @@ test("waitingText uses minutes under 60, hours under 48, then days", () => {
   assert.equal(waitingText(48 * 60), "waiting 2 d");
   assert.equal(waitingText(576002), "waiting 400 d");
 });
+
+test("a budget warning has the label badge, the live numbers, the Change budget link and no action", () => {
+  const warning = { cost: 8, budget: 10, percent: 80 };
+  const live: AttentionContext = {
+    ...CTX,
+    groups: [{ cardId: "c1", cost: 8.5, budget: 10 }],
+  };
+  const row = only(attentionRows([item("budget_warning", { warning })], live));
+  assert.deepEqual(row?.badge, { kind: "label", label: "Budget warning" });
+  assert.equal(row?.body, "Budget warning: $8.50 of $10.00, warning at 80%.");
+  assert.equal(row?.action, null);
+  assert.equal(
+    row?.changeBudgetHref,
+    "#/boards/LOCAL/orchestrator?settings=policy",
+  );
+});
+
+test("a budget warning reads the numbers of the item when no group matches", () => {
+  const warning = { cost: 8, budget: 10, percent: 80 };
+  const row = only(
+    attentionRows([item("budget_warning", { warning })], {
+      ...CTX,
+      groups: [],
+    }),
+  );
+  assert.equal(row?.body, "Budget warning: $8.00 of $10.00, warning at 80%.");
+});

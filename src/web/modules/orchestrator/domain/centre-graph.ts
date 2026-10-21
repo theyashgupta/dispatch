@@ -50,6 +50,7 @@ export interface CentreBranch {
   memberCount: number | null;
   stateSince: string | null;
   slot: number;
+  budget?: number | null;
 }
 
 export interface CentreNode {

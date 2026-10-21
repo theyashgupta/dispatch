@@ -6,11 +6,11 @@ import { usageMeters } from "@/modules/dashboard/domain/usage-meters";
 import { retryFailed, useDashboardData } from "./use-dashboard-data";
 
 export function CostContainer() {
-  const { snapshot, summary, accounts } = useDashboardData();
+  const { snapshot, summary, accounts, budgetWarnPercent } = useDashboardData();
   const cards = snapshot.data?.cards;
   const rows = useMemo(
-    () => costRows(summary.data?.groups ?? []),
-    [summary.data],
+    () => costRows(summary.data?.groups ?? [], budgetWarnPercent ?? 80),
+    [summary.data, budgetWarnPercent],
   );
   const meters = useMemo(
     () => usageMeters(cards ?? [], accounts.data?.accounts ?? [], {}),
