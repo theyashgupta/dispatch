@@ -463,6 +463,8 @@ export async function startShip(
       "get-url",
       "origin",
     ]).catch(() => "");
+    const previous =
+      card.shipFlow?.repository === input.repository ? card.shipFlow : null;
     const flow: ShipFlow = {
       state: "running",
       rights,
@@ -479,6 +481,9 @@ export async function startShip(
         admin: false,
         tip: null,
         checked: null,
+        passed:
+          previous?.branches.find((p) => p.name === b.name)?.passed ?? null,
+        checkSkipped: false,
       })),
       failedStep: null,
       reason: null,
@@ -617,7 +622,8 @@ function isDispatchRepo(worktree: string): boolean {
  * Check that the diff holds only this branch, the prose rule and the repository check command.
  *
  * @remarks The branch's own files run from the previous branch's stored tip to this branch's tip
- * before the merge. Only the first branch, which has no previous tip, uses its merge base.
+ * before the merge. Only the first branch, which has no previous tip, uses its merge base. A retry
+ * on the commit that already passed skips only the check command.
  */
 async function check(r: Runner, branch: ShipBranch): Promise<void> {
   const tip = branch.tip ?? (await exec(r, "git", ["rev-parse", "HEAD"]));
@@ -649,8 +655,19 @@ async function check(r: Runner, branch: ShipBranch): Promise<void> {
     throw new ShipStop("the repository has no board entry");
   }
   const argv = r.checkCommand.split(/\s+/).filter((a) => a !== "");
-  if (argv.length === 0) return;
-  await runCheck(r.worktree, argv);
+  if (branch.passed != null && branch.passed === branch.checked) {
+    branch.checkSkipped = true;
+    await persist(r);
+    recordGroupState(
+      store.getCard(r.cardId),
+      "ship_check_skipped",
+      `check skipped: ${branch.checked} already passed it`,
+    );
+    return;
+  }
+  if (argv.length > 0) await runCheck(r.worktree, argv);
+  branch.passed = branch.checked;
+  await persist(r);
 }
 
 /**

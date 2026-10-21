@@ -1,6 +1,7 @@
 import test, { after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { isolateEnv, waitFor } from "../../test-support/fixtures.js";
 import { startedGroup } from "../../test-support/group-fixtures.js";
@@ -856,6 +857,106 @@ void test("failed PR checks stop the flow at waiting_checks", async () => {
   );
 });
 
+/**
+ * A check command outside every worktree that appends one line to a count file and exits 0.
+ *
+ * @remarks With `failFirst` it exits 1 when the count file was empty before the append.
+ */
+function countingCheck(failFirst = false): {
+  command: string;
+  runs: () => number;
+} {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ship-check-"));
+  roots.push(dir);
+  const script = path.join(dir, "check.js");
+  const count = path.join(dir, "count.txt");
+  fs.writeFileSync(
+    script,
+    [
+      `const fs = require("node:fs");`,
+      `const seen = fs.existsSync(${JSON.stringify(count)}) && fs.readFileSync(${JSON.stringify(count)}, "utf8") !== "";`,
+      `fs.appendFileSync(${JSON.stringify(count)}, "x\\n");`,
+      `process.exit(${failFirst ? "seen ? 0 : 1" : "0"});`,
+    ].join("\n"),
+  );
+  return {
+    command: `node ${script}`,
+    runs: () =>
+      fs.existsSync(count)
+        ? fs.readFileSync(count, "utf8").split("\n").filter(Boolean).length
+        : 0,
+  };
+}
+
+async function retryAfterFailedPrChecks(
+  stack: Stack,
+  between: () => Promise<void> = () => Promise.resolve(),
+): Promise<ShipFlow> {
+  await startShip(stack, ["unit-1"]);
+  const first = await finished(stack.card);
+  assert.equal(first.failedStep, "waiting_checks");
+  await between();
+  setGhScenario(stack.ghScenario, { checks: "pass" });
+  await startShip(stack, ["unit-1"]);
+  return finished(stack.card);
+}
+
+void test("a retry on the merged tip whose check passed skips the check command and records the skip", async () => {
+  const check = countingCheck();
+  const stack = await newStack({
+    checkCommand: check.command,
+    scenario: { checks: "fail" },
+  });
+  const flow = await retryAfterFailedPrChecks(stack);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.equal(check.runs(), 1);
+  assert.equal(flow.branches[0]?.checkSkipped, true);
+  assert.equal(flow.branches[0]?.passed, flow.branches[0]?.checked);
+  assert.deepEqual(groupStatesOf(stack.card.id), [
+    "ship_stopped",
+    "ship_check_skipped",
+    "shipped",
+  ]);
+});
+
+void test("a retry after a new commit on the branch runs the check again", async () => {
+  const check = countingCheck();
+  const stack = await newStack({
+    checkCommand: check.command,
+    scenario: { checks: "fail" },
+  });
+  const flow = await retryAfterFailedPrChecks(stack, async () => {
+    const inTree = (...args: string[]) => gitOutput(stack.worktree, ...args);
+    await inTree("checkout", "-q", "unit-1");
+    fs.writeFileSync(path.join(stack.worktree, "extra.txt"), "more\n");
+    await inTree("add", "-A");
+    await inTree("commit", "-qm", "more work");
+    await inTree("checkout", "-q", "group-work");
+  });
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.equal(check.runs(), 2);
+  assert.equal(flow.branches[0]?.checkSkipped, false);
+  assert.equal(
+    groupStatesOf(stack.card.id).includes("ship_check_skipped"),
+    false,
+  );
+});
+
+void test("a retry after a failed check runs the check again", async () => {
+  const check = countingCheck(true);
+  const stack = await newStack({ checkCommand: check.command });
+  await startShip(stack, ["unit-1"]);
+  const first = await finished(stack.card);
+  assert.equal(first.failedStep, "checking");
+  assert.equal(check.runs(), 1);
+  assert.equal(first.branches[0]?.passed, null);
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.equal(check.runs(), 2);
+  assert.equal(flow.branches[0]?.checkSkipped, false);
+});
+
 void test("a merge conflict with main stops at merging_main and aborts the merge", async () => {
   const stack = await newStack();
   await pushToMain(stack.bare, { "a.txt": "main side\n" }, "main edit");
@@ -967,6 +1068,8 @@ void test("resumeShipFlows finishes a stored running flow from its stored tips w
     admin: false,
     tip: null,
     checked: null,
+    passed: null,
+    checkSkipped: false,
     ...fields,
   });
   await store.setShipFlow(stack.card.id, {
@@ -1490,6 +1593,8 @@ void test("a resumed flow whose HEAD is not the checked commit stops before it p
         admin: false,
         tip: tip1,
         checked: tip1,
+        passed: null,
+        checkSkipped: false,
       },
     ],
     failedStep: null,
@@ -1570,6 +1675,8 @@ void test("a resumed flow on a card with no workspace path stops with a decision
         admin: false,
         tip: "a".repeat(40),
         checked: "a".repeat(40),
+        passed: null,
+        checkSkipped: false,
       },
     ],
     failedStep: null,
@@ -1802,6 +1909,8 @@ function storeRunning(
         admin: false,
         tip: null,
         checked: null,
+        passed: null,
+        checkSkipped: false,
         ...fields,
       },
     ],
