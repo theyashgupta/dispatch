@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync, statSync } from "node:fs";
 import { uptime } from "node:os";
+import { basename } from "node:path";
 
 /**
  * Read the owner of a slot file as "free", "stale", "busy" or the owner pid.
@@ -80,4 +81,30 @@ export function checkHolder(
     pid: owner,
     stoppedSeconds: (now - stoppedSince.get(owner)) / 1000,
   };
+}
+
+/**
+ * Tell if a slot must be released: its holder is gone, or stopped for more than the limit.
+ */
+export function shouldRelease(check, stoppedLimitSeconds) {
+  return (
+    check.verdict === "gone" ||
+    (check.verdict === "stopped" && check.stoppedSeconds > stoppedLimitSeconds)
+  );
+}
+
+/**
+ * Format the log line that names the released holder, its state and its age.
+ *
+ * @remarks
+ * Call it before the slot file is removed, because the held age is the slot file age.
+ */
+export function releaseLine(slotPath, check, now = Date.now()) {
+  const mtimeMs = statSync(slotPath, { throwIfNoEntry: false })?.mtimeMs;
+  const held = mtimeMs === undefined ? 0 : Math.round((now - mtimeMs) / 1000);
+  const state =
+    check.verdict === "stopped"
+      ? `T stopped ${Math.round(check.stoppedSeconds)}s`
+      : "gone";
+  return `with-check-slot: released ${basename(slotPath)}, holder pid ${check.pid} state ${state}, held ${held}s`;
 }

@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { after, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
-import { checkHolder, psState } from "./check-slot-holder.mjs";
+import {
+  checkHolder,
+  psState,
+  releaseLine,
+  shouldRelease,
+} from "./check-slot-holder.mjs";
 
 const dir = mkdtempSync(join(tmpdir(), "check-slot-holder-test-"));
 let slotCount = 0;
@@ -136,4 +141,60 @@ test("psState sees a real process stop and exit", async () => {
   }
   await exited;
   assert.equal(psState(child.pid), null);
+});
+
+test("a stopped holder is released only after the threshold", () => {
+  const slot = slotWith(4242);
+  const stateOf = tableOf({ 4242: "T" });
+  const stoppedSince = new Map();
+  const released = [0, 300000, 300500].map((now) =>
+    shouldRelease(checkHolder(slot, { stateOf, now, stoppedSince }), 300),
+  );
+  assert.deepEqual(released, [false, false, true]);
+});
+
+test("a live holder is never released", () => {
+  const slot = slotWith(4242);
+  const stateOf = tableOf({ 4242: "S" });
+  const stoppedSince = new Map();
+  for (const now of [0, 3600000]) {
+    assert.equal(
+      shouldRelease(checkHolder(slot, { stateOf, now, stoppedSince }), 300),
+      false,
+    );
+  }
+});
+
+test("a gone holder is released at once", () => {
+  const slot = slotWith(4242);
+  const check = checkHolder(slot, {
+    stateOf: tableOf({}),
+    now: 0,
+    stoppedSince: new Map(),
+  });
+  assert.equal(shouldRelease(check, 300), true);
+});
+
+test("free, stale and busy verdicts are never released", () => {
+  for (const verdict of ["free", "stale", "busy"]) {
+    assert.equal(shouldRelease({ verdict }, 0), false);
+  }
+});
+
+test("the release line names the holder pid, state and ages", () => {
+  const slot = slotWith(4242);
+  utimesSync(slot, 1000, 1000);
+  const name = basename(slot);
+  assert.equal(
+    releaseLine(
+      slot,
+      { verdict: "stopped", pid: 4242, stoppedSeconds: 300.4 },
+      1600000,
+    ),
+    `with-check-slot: released ${name}, holder pid 4242 state T stopped 300s, held 600s`,
+  );
+  assert.equal(
+    releaseLine(slot, { verdict: "gone", pid: 4242 }, 1600000),
+    `with-check-slot: released ${name}, holder pid 4242 state gone, held 600s`,
+  );
 });
