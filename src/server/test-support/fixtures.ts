@@ -26,6 +26,7 @@ case "$1 $2" in
     fi
     ;;
   "auth logout")
+    if [ -n "$FAKE_CLAUDE_LOGOUT_LOG" ]; then printf 'CLAUDE_CONFIG_DIR=%s\\n' "$CLAUDE_CONFIG_DIR" >> "$FAKE_CLAUDE_LOGOUT_LOG"; fi
     rm -f "$CLAUDE_CONFIG_DIR/.fake-login"
     echo "Logged out"
     ;;

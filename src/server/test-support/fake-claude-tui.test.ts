@@ -1196,6 +1196,29 @@ void test("auth status answers a logged out identity and exits instead of openin
   assert.deepEqual(JSON.parse(out.stdout), { loggedIn: false });
 });
 
+void test("auth status prints the fake login of the config dir and logout removes it", async () => {
+  const dir = fs.mkdtempSync(path.join(env.root, "auth-login-"));
+  const bin = writeFakeClaudeTui(dir);
+  const configDir = path.join(dir, "config");
+  fs.mkdirSync(configDir);
+  const identity = { loggedIn: true, email: "a@example.com", orgId: "org-a" };
+  fs.writeFileSync(
+    path.join(configDir, ".fake-login"),
+    JSON.stringify(identity),
+  );
+  const status = () =>
+    run(bin, ["auth", "status", "--json"], {
+      timeout: 5000,
+      env: { CLAUDE_CONFIG_DIR: configDir },
+    });
+  assert.deepEqual(JSON.parse((await status()).stdout), identity);
+  await run(bin, ["auth", "logout"], {
+    timeout: 5000,
+    env: { CLAUDE_CONFIG_DIR: configDir },
+  });
+  assert.deepEqual(JSON.parse((await status()).stdout), { loggedIn: false });
+});
+
 void test("mcp list answers no configured servers and exits instead of opening the TUI", async () => {
   const dir = fs.mkdtempSync(path.join(env.root, "mcp-"));
   const bin = writeFakeClaudeTui(dir);

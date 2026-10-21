@@ -255,7 +255,11 @@ export function accountStateLine(
 ): { text: string; tone: UsageTone | "muted" } | null {
   const { usage } = account;
   const loginAt = usage.loginExpiresAt ? Date.parse(usage.loginExpiresAt) : NaN;
-  if (account.state === "login-expired" || loginAt < now) {
+  if (
+    account.state === "login-expired" ||
+    account.state === "needs-login" ||
+    loginAt < now
+  ) {
     return { text: "Login expired, sign in again", tone: "down" };
   }
   if (account.state === "limited") {

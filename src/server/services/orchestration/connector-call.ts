@@ -1,5 +1,6 @@
 import { run } from "../../adapters/exec.js";
 import { DISPATCH_DIR } from "../infra/paths.js";
+import { managedClaudeEnv } from "./claude-accounts.js";
 import { mcpToolPrefix } from "./connector-list.js";
 
 const KILL_GRACE_MS = 5_000;
@@ -101,6 +102,7 @@ export async function runConnectorCall(
     timeoutMs: number;
   },
 ): Promise<string> {
+  const managedEnv = managedClaudeEnv();
   const { stdout } = await run(claude, connectorCallArgs(input), {
     cwd: DISPATCH_DIR,
     timeout: input.timeoutMs + KILL_GRACE_MS,
@@ -108,7 +110,7 @@ export async function runConnectorCall(
     signal: input.signal,
     killEscalationMs: KILL_GRACE_MS,
     input: input.prompt,
-    env: CONNECTOR_CALL_ENV,
+    env: { ...CONNECTOR_CALL_ENV, ...managedEnv },
   });
   return stdout;
 }

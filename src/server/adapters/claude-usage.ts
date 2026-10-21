@@ -20,19 +20,33 @@ export interface UsageFetchResult {
   body: unknown;
 }
 
+export interface ClaudeCredential {
+  token: string;
+  loginExpiresAt: string | null;
+  accessExpiresAt?: number;
+}
+
 /**
- * Parse a credential text into the OAuth access token and the login expiry as an ISO string.
+ * Tell whether a credential field is a positive epoch ms number a `Date` can hold.
+ */
+function validEpochMs(value: unknown): value is number {
+  return typeof value === "number" && value > 0 && value <= MAX_DATE_MS;
+}
+
+/**
+ * Parse a credential text into the OAuth access token, the login expiry as an ISO string and the
+ * access token expiry in epoch ms.
  *
  * @remarks The login expiry is the refresh token's `refreshTokenExpiresAt`; anything but a finite
- * positive number reads as unknown (`null`). The short-lived access token expiry is not used.
+ * positive number reads as unknown (`null`). `accessExpiresAt` is the access token's `expiresAt`,
+ * omitted when invalid, and it stays in memory only.
  */
-export function parseCredential(
-  raw: string,
-): { token: string; loginExpiresAt: string | null } | null {
+export function parseCredential(raw: string): ClaudeCredential | null {
   try {
     const parsed = JSON.parse(raw.trim()) as {
       claudeAiOauth?: {
         accessToken?: unknown;
+        expiresAt?: unknown;
         refreshTokenExpiresAt?: unknown;
       };
     };
@@ -40,11 +54,11 @@ export function parseCredential(
     const token = oauth?.accessToken;
     if (typeof token !== "string" || token.length === 0) return null;
     const ms = oauth?.refreshTokenExpiresAt;
-    const loginExpiresAt =
-      typeof ms === "number" && ms > 0 && ms <= MAX_DATE_MS
-        ? new Date(ms).toISOString()
-        : null;
-    return { token, loginExpiresAt };
+    const loginExpiresAt = validEpochMs(ms) ? new Date(ms).toISOString() : null;
+    const accessExpiresAt = oauth?.expiresAt;
+    return validEpochMs(accessExpiresAt)
+      ? { token, loginExpiresAt, accessExpiresAt }
+      : { token, loginExpiresAt };
   } catch {
     return null;
   }
@@ -61,7 +75,7 @@ export function parseCredential(
 export async function readCredential(
   keychainService: string,
   configDir: string,
-): Promise<{ token: string; loginExpiresAt: string | null } | null> {
+): Promise<ClaudeCredential | null> {
   if (process.platform === "darwin") {
     const attempts = [
       ["-s", keychainService, "-a", os.userInfo().username, "-w"],
