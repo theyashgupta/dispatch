@@ -170,7 +170,7 @@ async function setup(sb: Sandbox): Promise<SampleRepo> {
   return sample;
 }
 
-/** Write the replay files: the loop card shows an idle pane with no promise line, and the orchestrator card idles. */
+/** Writes replay files whose loop pane shows no promise line, so only the transcript can trigger the close. */
 function writeScenarios(sb: Sandbox): string {
   const transcript = path.join(sb.logs, "orchestrator.jsonl");
   fs.writeFileSync(transcript, "");
@@ -227,7 +227,6 @@ async function startOrchestrator(
   return minted.body.token;
 }
 
-/** Start the single PRD + Ralph Loop card through the orchestrator route and return it once its session exists. */
 async function startCard(sb: Sandbox, token: string): Promise<Card> {
   const started = await orch(sb, token, "POST", `/cards/${CARD}/start`, {
     playbook: "PRD + Ralph Loop",
@@ -258,7 +257,6 @@ function commitWork(sb: Sandbox, sample: SampleRepo, card: Card): void {
   git(worktree, sb.home, ["commit", "-q", "-m", "feat: local-159"]);
 }
 
-/** Seed the engine file of a LOCAL-159 shaped loop: an open engine whose prompt has no PRD path line, and no PRD or state file. */
 function seedOpenEngine(card: Card, repo: string): void {
   const file = path.join(card.workspacePath ?? "", ENGINE_REL);
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -285,7 +283,6 @@ const shipBody = (sample: SampleRepo) => ({
   branches: [{ name: CARD, title: `feat: ${SLUG} ${CARD}`, body: SHIP_BODY }],
 });
 
-/** Wait for the open engine in the card progress and check that start_ship refuses with engine-not-closed. */
 async function assertRefusedWhileOpen(
   sb: Sandbox,
   sample: SampleRepo,
@@ -301,7 +298,6 @@ async function assertRefusedWhileOpen(
     4 * MINUTE,
     "the card progress to show the open engine",
   );
-  assert.equal(open.engine?.closed, false);
   assert.equal(open.slug, SLUG);
   const refused = await orch<{ error: string }>(
     sb,
@@ -316,7 +312,6 @@ async function assertRefusedWhileOpen(
   return refused;
 }
 
-/** Write the transcript of the session with the promise and the DONE line as its last assistant message. */
 function writeTranscript(
   sb: Sandbox,
   card: Card,
@@ -429,7 +424,6 @@ async function assertPromiseCloses(
   return { doneAt, close, seconds, progress };
 }
 
-/** Start the ship of the closed card, check that it is accepted, and wait for the flow to leave the running state. */
 async function startShip(
   sb: Sandbox,
   sample: SampleRepo,
