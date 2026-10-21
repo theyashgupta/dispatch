@@ -17,7 +17,8 @@ export type AttentionKind =
   | "usage_stop"
   | "budget_stop"
   | "failed_gate"
-  | "resume_failed";
+  | "resume_failed"
+  | "budget_warning";
 
 export interface AttentionItem {
   id: string;
@@ -31,6 +32,7 @@ export interface AttentionItem {
   reply: boolean;
   lost?: boolean;
   gate?: { unit: number; phase: number; attempt: number; limit: number | null };
+  warning?: { cost: number; budget: number; percent: number };
 }
 
 function waitMinutesOf(since: string, now: Date): number {
@@ -156,6 +158,30 @@ function gateItem(card: Card, now: Date): AttentionItem | null {
   };
 }
 
+function warningItem(
+  card: Card,
+  session: ActiveSessionView | null,
+  now: Date,
+): AttentionItem | null {
+  const mark = card.budgetWarning;
+  if (!mark || card.column === "done") return null;
+  if (session?.state === "needs_input" && session.stateReason === "budget") {
+    return null;
+  }
+  return {
+    id: `budget_warning:${card.id}`,
+    kind: "budget_warning",
+    cardId: card.id,
+    groupId: card.identifier,
+    state: null,
+    waitingSince: mark.at,
+    waitMinutes: waitMinutesOf(mark.at, now),
+    text: null,
+    reply: false,
+    warning: { cost: mark.cost, budget: mark.budget, percent: mark.percent },
+  };
+}
+
 /**
  * A Needs Input card that no supervisor state explains, as on a board with the supervisor off.
  *
@@ -221,6 +247,8 @@ export function buildAttentionQueue(input: {
     }
     const fromGate = gateItem(card, now);
     if (fromGate !== null) items.push(fromGate);
+    const fromWarning = warningItem(card, session, now);
+    if (fromWarning !== null) items.push(fromWarning);
   }
   const identifiers = new Map(cards.map((card) => [card.id, card.identifier]));
   for (const decision of input.decisions) {

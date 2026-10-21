@@ -97,6 +97,18 @@ test("a running branch shows the meters it has and never Not started", () => {
   );
 });
 
+test("a branch with a group budget shows the cost as spent of budget", () => {
+  assert.deepEqual(
+    tileMeters({
+      state: "running",
+      contextPercent: null,
+      cost: 8.5,
+      budget: 10,
+    }),
+    ["$8.50 of $10.00"],
+  );
+});
+
 test("the region state is loading, error, empty or ready", () => {
   assert.equal(
     regionState({ loading: true, error: false, empty: false }),

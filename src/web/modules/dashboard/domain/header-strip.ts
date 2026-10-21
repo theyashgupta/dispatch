@@ -1,5 +1,5 @@
 import type { Card } from "../../../../shared/types.js";
-import { dollars } from "./cost-rows.js";
+import { dollars } from "../../../../shared/cost-text.js";
 
 export const NEEDS_YOUR_CALL_ID = "needs-your-call";
 

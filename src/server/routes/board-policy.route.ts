@@ -51,6 +51,7 @@ const policyBodySchema = z
         .positive("invalid-budgetPerGroup")
         .max(100_000, "invalid-budgetPerGroup")
         .nullable(),
+      budgetWarnPercent: whole("budgetWarnPercent", 1, 99).optional(),
       supervisor: z.enum(["on", "off"], "invalid-supervisor"),
       groupPlaybook: z
         .string("invalid-groupPlaybook")

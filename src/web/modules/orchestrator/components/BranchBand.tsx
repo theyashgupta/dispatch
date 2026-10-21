@@ -7,7 +7,6 @@ import type { BandKey } from "@/modules/orchestrator/domain/centre-graph";
 const TINTS: Partial<Record<BandKey, string>> = {
   needs_you: "rounded-md bg-warn-soft p-(--space-sm)",
   done: "rounded-md bg-ok-soft p-(--space-sm)",
-  shipped: "rounded-md bg-ok-soft p-(--space-sm)",
 };
 
 interface BranchBandProps {

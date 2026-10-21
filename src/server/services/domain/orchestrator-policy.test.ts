@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
+  budgetWarningStep,
   checkBudget,
   checkCap,
   checkShipRights,
@@ -50,4 +51,36 @@ void test("checkShipRights refuses none and allows open_prs and merge", () => {
   });
   assert.deepEqual(checkShipRights({ shipRights: "open_prs" }), { ok: true });
   assert.deepEqual(checkShipRights({ shipRights: "merge" }), { ok: true });
+});
+
+void test("budgetWarningStep sets at the threshold, keeps a mark on a cost drop, refreshes a changed setting the cost still passes and clears by the re-arm rule", () => {
+  const mark = {
+    at: "2026-10-20T00:00:00.000Z",
+    cost: 8.5,
+    budget: 10,
+    percent: 80,
+  };
+  const step = (
+    budget: number | null,
+    percent: number,
+    cost: number,
+    withMark: boolean,
+  ) =>
+    budgetWarningStep({
+      budget,
+      percent,
+      cost,
+      mark: withMark ? mark : undefined,
+    });
+  assert.equal(step(10, 80, 7.99, false), "keep");
+  assert.equal(step(10, 80, 8, false), "set");
+  assert.equal(step(10, 80, 9.5, true), "keep");
+  assert.equal(step(null, 80, 9.5, true), "clear");
+  assert.equal(step(null, 80, 9.5, false), "keep");
+  assert.equal(step(20, 80, 9.5, true), "clear");
+  assert.equal(step(20, 80, 17, true), "refresh");
+  assert.equal(step(10, 70, 9, true), "refresh");
+  assert.equal(step(10, 80, 5, true), "keep");
+  assert.equal(step(10, 90, 8.5, true), "clear");
+  assert.equal(step(0.5, 1, 0.01, false), "set");
 });

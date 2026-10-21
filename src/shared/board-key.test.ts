@@ -50,6 +50,7 @@ void test("the default policy has the D-6 values and the supervisor off only on 
     usageLimit: "wait",
     shipRights: "none",
     budgetPerGroup: null,
+    budgetWarnPercent: 80,
     supervisor: "off",
     groupPlaybook: null,
     wakeMinutes: 15,

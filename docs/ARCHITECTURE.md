@@ -1988,6 +1988,17 @@ below the hooks floor) records the newest file of the folder after the kickoff a
 `GET /api/cards/:id/resume-target` returns the same choice and writes nothing; the detail panel shows
 it beside the Resume button.
 
+**Resume refuses a missing workspace folder (LOCAL-163).** Before the relaunch path of
+`resumeSession` launches claude, it checks that `card.workspacePath` is a folder. If the folder is
+missing, `resumeSession` launches nothing. It sets the session to `needs_input` with
+`resume_failed`, and `recordResumeFailure` writes `Resume failed: workspace-missing: <path>` and
+emits one `resume_failed` event. The reason: tmux starts a pane in the home folder when its cwd is
+missing, and a continued claude there resumes the newest conversation of a different session. This
+rule applies to the Resume route, Reconnect, the orchestrator `resume_session` tool and the boot
+resume sweep, because all of them go through `resumeSession`. On the boot sweep the supervisor also
+moves the card to Needs input. A reattach to a live tmux session does not launch claude, so it does
+not check the folder.
+
 In Review's opposite in-edge/out-edge asymmetry versus Agent Done, and the full trigger-by-trigger
 spec, are homed in [Column Transition Specification](#column-transition-specification) (`BOARD-06`).
 
@@ -2780,6 +2791,16 @@ geometry is required for sane `capture-pane` output BEFORE any client attaches: 
 detached pane has a tiny default size, the claude TUI paints into that cramped geometry, and both
 readiness detection and `DISPATCH_STATUS` marker parsing become unreliable. It is load-bearing, not
 cosmetic.
+
+**A client does not change the window size (`LOCAL-162`).** The tmux default `window-size latest`
+sizes the window to the last client that attached, and the window keeps that size after the client
+detaches. A narrow phone client can then leave the pane at 44 columns. At that width Claude Code
+truncates its status row, `parseStatusLine` does not match, and `contextPercent` stops changing.
+`newSession` and `ensureTerminal` run `set-option -t <name> window-size manual`, so the window stays
+at 200x50 and a smaller ttyd client shows a clipped view of it. `reconnectTerminal` and the
+supervisor pane sample run `widenNarrowWindow`: when `#{window_width}` is below 120, it runs
+`resize-window -x 200 -y 50` once and logs a warning. `resize-window` also sets `window-size
+manual`, so the next probe finds 200 columns.
 
 **The leading `set -g history-limit` rides in the SAME invocation, and the order is load-bearing
 (`TERM-05`).** tmux allocates a pane's history buffer at pane creation, so raising the limit after
@@ -5056,12 +5077,19 @@ seven `--src-*` source colors and the "active sidebar row" accent job are ratifi
 **Two custom properties carry the shell's geometry to the detail panel.** `components/ShellFrame.tsx`
 sets `--nav-current` (the live sidebar width: `var(--nav-width)`, `var(--nav-width-collapsed)`, or `0px`
 when the sidebar becomes a phone sheet) with classes on its root element. The hook
-`hooks/use-chrome-top.ts` sets `--chrome-top` (the measured height of the top bar, banner and
-page header) on the same element with `style.setProperty`. The docked (Orca) `PanelFrame.tsx` reads
+`usePublishedHeight` in `hooks/use-published-height.ts` sets `--chrome-top` (the measured height of
+the top bar, banner and page header) on the same element with `style.setProperty`. The docked (Orca) `PanelFrame.tsx` reads
 both: `top: var(--chrome-top)`, `left: calc(var(--nav-current, 0px) + var(--orca-nav-width))` and
 `width: calc(100% - var(--nav-current, 0px) - var(--orca-nav-width))`, so collapsing the sidebar
 shifts the docked panel by style values alone and never remounts the terminal iframe. Measured at
 1280px with the sidebar expanded: left 520, top 52, width 760, right edge 1280.
+
+**The phone bottom bar publishes its height on the document root.** Below 768px,
+`components/BottomBar.tsx` sits in flow at the end of the content column, so page content never goes
+under it. The same hook sets `--bottom-bar-height` on `document.documentElement`: 64px when the bar
+shows, 0px when it hides on scroll down, and unset on desktop. The root is the target because toasts
+and sheets portal to the body. The toaster, `SelectionBar.tsx` and `SessionsBulkBar.tsx` add the
+variable to their bottom offset.
 
 **The active row carries its own tint.** `AppSidebar.tsx` renders each row as a shadcn
 `SidebarMenuButton`. The active row (`data-active="true"`) takes the tint
@@ -6124,6 +6152,8 @@ Scenario 11 (tests/e2e/scenario-11-user-started-ship.e2e.ts) proves that a singl
 
 Scenario 13 (tests/e2e/scenario-13-feature-scope.e2e.ts) proves that a feature orchestrator with an empty scope sees and starts only the ticket that the user assigns to it: the board has a main orchestrator (kind **board**) and an extra orchestrator `feat` (kind **feature**) with no scope, and the test mints both tokens with `POST /api/boards/:key/orchestrators/:id/token` without a start of either orchestrator. One user ticket is in To Do. `list_cards` for `feat` answers `total` 0, and `list_cards` for the main includes the ticket. `start_card` from `feat` on the ticket answers 403 `out-of-scope`, and the card has no `launch` and no session. The user then assigns the ticket to `feat` with `PUT /api/boards/:key/cards/:cardId/orchestrator`, which answers 200 with `changed` true and adds exactly one `intake_submitted` event for `feat` and the ticket. After the assignment, `list_cards` for `feat` answers `total` 1, `start_card` from `feat` answers 202 with the Write code directly playbook, and the card carries `launch.playbook`. `start_card` from the main on the same card then answers 403 `other-owner`. All sandbox folders are under the sandbox root and not under `~/.dispatch`. The test types no key into any pane.
 
+Scenario 14 (tests/e2e/scenario-14-missing-workspace.e2e.ts) proves that the boot resume sweep refuses a lost session whose workspace folder is missing (LOCAL-163). The test starts one card with the fake `claude`, sets `supervisor: on`, stops the server, stops the sandbox tmux server and renames the workspace folder of the card. It then boots the server again on the same data folder. The card must show `Resume failed: workspace-missing: <path>`, stay lost, be in Needs input with `resume_failed`, and have exactly one `resume_failed` event. The fake `claude` must record no new launch, and the sandbox tmux server must have no session.
+
 The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
 ## Orchestration Initiative
@@ -6265,7 +6295,12 @@ action that finds nothing to do, such as an `Escape` already sent, writes no row
   and the board is under `concurrencyCap`, and sets `needs_input` with `budget` at the next gate
   change after the cost of a group reaches `budgetPerGroup`. The cost of a session is a running
   total: when its status line meter drops (a claude relaunch starts it at 0), the pass adds the
-  last value. The total lives in server memory.
+  last value. The total lives in server memory. Each pass also compares the group cost with
+  `budgetWarnPercent` of the effective budget. At or above it, a card with no mark gets
+  `budgetWarning` and one `supervisor_action` row with `action: "budget_warning"`. The mark clears
+  when the budget is removed, or when the budget or percent changes and the cost is below the new
+  threshold. The attention queue shows one `budget_warning` item per mark, hidden in Done and under
+  a `budget` stop.
 - Group state events (`group-state-events.ts`, `domain/group-state.ts`): `recordGroupState` appends
   one `group_state` row (`{ state, reason }`) for a group card only, never for the orchestrator card
   or a ticket card, and skips a state equal to the last `group_state` row of that card, unless that card's session went back to `working` after it. The writers
@@ -6327,7 +6362,8 @@ user route; no orchestrator route or tool changes a policy. The `groupPlaybook` 
 or null) is one of these fields. A save that omits `groupPlaybook` keeps the stored value, and a save
 with null clears it. `wakeMinutes` (whole number, 0 to 1440, else 400 `invalid-wakeMinutes`) is optional
 the same way, and so are `memoryFloorMb` (0 to 65536, default 1024, else 400 `invalid-memoryFloorMb`)
-and `swapCeilingMb` (256 to 65536, default 8192, else 400 `invalid-swapCeilingMb`). The store reads each stored policy as the defaults of `defaultBoardPolicy` with
+and `swapCeilingMb` (256 to 65536, default 8192, else 400 `invalid-swapCeilingMb`). `budgetWarnPercent`
+(whole number, 1 to 99, default 80, else 400 `invalid-budgetWarnPercent`) is optional the same way. The store reads each stored policy as the defaults of `defaultBoardPolicy` with
 the stored values over them, so a board saved before a new field gets its default. A stored policy
 that is JSON `null` or an array reads as the defaults alone.
 
@@ -6622,6 +6658,9 @@ and `resume-loop` runs no cap or budget check. They are state changing user rout
 route `/boards/$key/orchestrator/{-$id}` shows it. The entry button is in the page header (Screen 5).
 Its label is "Add orchestrator" on a board with no record. Its label is "Orchestrator" on a board with a
 record. It reads only the `Board` that the board list holds.
+
+The tile of a group branch and the detail panel header of a group card show the group cost total from
+`GET /api/boards/:key/orchestration`. The text is "$X of $Y" when the group has a budget. Otherwise it is "$X".
 
 The toolbar of the centre shows one control for the selected record. It is Start on a board with no
 record. It is also Start on a stopped record, unless the session state is `lost` or `shell_prompt`. It is
