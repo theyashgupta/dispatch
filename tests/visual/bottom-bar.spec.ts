@@ -38,7 +38,7 @@ const spaceXlPx = (page: Page) =>
 
 const box = async (locator: Locator) => {
   const found = await locator.boundingBox();
-  if (!found) throw new Error(`no bounding box for ${locator}`);
+  if (!found) throw new Error(`no bounding box for ${String(locator)}`);
   return found;
 };
 
