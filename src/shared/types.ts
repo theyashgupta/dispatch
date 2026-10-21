@@ -207,6 +207,13 @@ export interface Item {
   autoResolved?: boolean;
 }
 
+export interface BudgetWarning {
+  at: string;
+  cost: number;
+  budget: number;
+  percent: number;
+}
+
 export interface Card {
   /** Internal card id (can equal issueId in Phase 1). */
   id: string;
@@ -365,6 +372,7 @@ export interface Card {
   transcriptPath?: string;
   dependsOn?: string[];
   blockedBy?: string[];
+  budgetWarning?: BudgetWarning;
   startQueued?: boolean;
   createdByOrchestrator?: string;
   ownerOrchestrator?: string;
@@ -1840,6 +1848,7 @@ export interface BoardPolicy {
   usageLimit: "wait" | "stop";
   shipRights: "none" | "open_prs" | "merge";
   budgetPerGroup: number | null;
+  budgetWarnPercent: number;
   supervisor: "on" | "off";
   groupPlaybook: string | null;
   wakeMinutes: number;

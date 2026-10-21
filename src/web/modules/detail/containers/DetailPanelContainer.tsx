@@ -45,6 +45,7 @@ import {
   useStartCardMutation,
   useUnpauseCardMutation,
 } from "@/queries/cards-queries";
+import { useOrchestrationSummaryQuery } from "@/queries/orchestration-summary-queries";
 import { useSessionAccountMove } from "@/queries/session-account-queries";
 import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { useItems } from "@/components/ui/hooks/use-items";
@@ -86,6 +87,7 @@ import { UnknownProbeRow } from "@/modules/detail/components/UnknownProbeRow";
 import { reviewHeader as buildReviewHeader } from "@/modules/detail/domain/review-header";
 import { heldPrItems } from "../../../../shared/pr-rows.js";
 import { panelEscapeAction } from "@/modules/detail/domain/panel-escape";
+import { groupCostLine } from "@/modules/detail/domain/group-cost-line";
 import {
   hasSessionFlow,
   terminalReady,
@@ -152,6 +154,10 @@ export function DetailPanelContainer() {
   const editors = board?.editors;
   const accounts = accountsData?.accounts;
   const cardIdentifiers = identifiersOf(cards ?? []);
+  const summary = useOrchestrationSummaryQuery(
+    card?.boardKey ?? boardKey,
+    card?.source === "group",
+  );
   const onClose = appStore.closePanel;
   const onRetryPinFetch = appStore.retryPinFetch;
   const onStartRequest = (req: string | StartRequest) =>
@@ -545,6 +551,7 @@ export function DetailPanelContainer() {
             account={accountGroup}
             resumeLine={resumeLine}
             reviewHeader={reviewHeader}
+            costLine={groupCostLine(c, summary.data?.groups ?? [])}
           />
 
           {c != null && hasSessionFlow(c) ? (

@@ -15,6 +15,7 @@ import { getDecisions } from "@/queries/attention-actions-api";
 import {
   attentionActionsKeys,
   openDecisionsQueryOptions,
+  orchestrationKey,
 } from "@/queries/attention-actions-queries";
 import {
   boardListKeys,
@@ -193,7 +194,7 @@ export function useConversationQuery(board: BoardKey, id: string) {
  * Build the mutation options of Save policy.
  *
  * @remarks
- * A saved policy replaces the board in the cached board list at once, so the form never shows the old values between the save and the next refetch.
+ * A saved policy replaces the board in the cached board list at once, so the form never shows the old values between the save and the next refetch. It also refreshes the orchestration summary, because the group budgets in it come from the policy.
  */
 export function savePolicyMutationOptions(
   queryClient: QueryClient,
@@ -213,6 +214,7 @@ export function savePolicyMutationOptions(
               ),
             },
       );
+      void queryClient.invalidateQueries({ queryKey: orchestrationKey(board) });
     },
   };
 }

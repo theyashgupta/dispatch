@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { costRows } from "./cost-rows.js";
 
-function row(cost: number, budget: number | null) {
-  const [first] = costRows([
-    { cardId: "c1", groupId: "GROUP-1", cost, budget },
-  ]);
+function row(cost: number, budget: number | null, nearPercent = 80) {
+  const [first] = costRows(
+    [{ cardId: "c1", groupId: "GROUP-1", cost, budget }],
+    nearPercent,
+  );
   assert.ok(first);
   return first;
 }
@@ -27,6 +28,13 @@ test("0.79 is not near and 0.80 is", () => {
   assert.equal(row(80, 100).text, "$80.00 of $100.00, 80%, near budget");
 });
 
+test("the near mark follows the warning percent of the board", () => {
+  assert.equal(row(72, 100, 70).near, true);
+  assert.equal(row(72, 100, 70).text, "$72.00 of $100.00, 72%, near budget");
+  assert.equal(row(85, 100, 90).near, false);
+  assert.equal(row(85, 100, 90).text, "$85.00 of $100.00, 85%");
+});
+
 test("86 percent reads near budget", () => {
   const near = row(17.1, 20);
   assert.equal(near.text, "$17.10 of $20.00, 86%, near budget");
@@ -44,22 +52,26 @@ test("no budget shows the cost only", () => {
 });
 
 test("the row names the group by the identifier of the summary", () => {
-  const [first] = costRows([
-    { cardId: "zz", groupId: "GROUP-9", cost: 1, budget: null },
-  ]);
+  const [first] = costRows(
+    [{ cardId: "zz", groupId: "GROUP-9", cost: 1, budget: null }],
+    80,
+  );
   assert.equal(first?.groupId, "GROUP-9");
 });
 
 test("a budget set by an owner override names the owner", () => {
-  const [first] = costRows([
-    {
-      cardId: "c1",
-      groupId: "GROUP-1",
-      cost: 6,
-      budget: 12,
-      ownerName: "Release extra",
-    },
-  ]);
+  const [first] = costRows(
+    [
+      {
+        cardId: "c1",
+        groupId: "GROUP-1",
+        cost: 6,
+        budget: 12,
+        ownerName: "Release extra",
+      },
+    ],
+    80,
+  );
   assert.equal(
     first?.text,
     "$6.00 of $12.00, 50%, budget set by Release extra",

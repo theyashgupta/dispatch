@@ -62,6 +62,7 @@ interface PanelHeaderProps {
   account?: ReactNode;
   resumeLine?: ResumeLine;
   reviewHeader?: ReviewHeader | null;
+  costLine?: string | null;
 }
 
 const ICON_BUTTON_CLASS = "text-muted-foreground hover:text-muted-foreground";
@@ -92,6 +93,7 @@ export function PanelHeader({
   account,
   resumeLine,
   reviewHeader,
+  costLine,
 }: PanelHeaderProps) {
   const c = card;
   const unwindIdentifier = c?.source === "group" ? c.identifier : c?.groupId;
@@ -110,6 +112,11 @@ export function PanelHeader({
         </span>
         {c && <TeamCycleText card={c} />}
         {c && <LinearStateChip card={c} />}
+        {costLine && (
+          <span className="flex-none text-xs text-muted-foreground">
+            {costLine}
+          </span>
+        )}
         <h1
           title={c?.title}
           className="m-0 min-w-0 truncate text-lg font-semibold text-foreground"
