@@ -251,3 +251,16 @@ test("a budget warning reads the numbers of the item when no group matches", () 
   );
   assert.equal(row?.body, "Budget warning: $8.00 of $10.00, warning at 80%.");
 });
+
+test("a pushover_missing item row shows the Notifications badge and its text with no action", () => {
+  const text = "Pushover PUSHOVER_USER_KEY is empty.";
+  const row = body("pushover_missing", {
+    cardId: null,
+    groupId: null,
+    text,
+  });
+  assert.deepEqual(row?.badge, { kind: "label", label: "Notifications" });
+  assert.equal(row?.body, text);
+  assert.equal(row?.action, null);
+  assert.equal(row?.changeBudgetHref, null);
+});

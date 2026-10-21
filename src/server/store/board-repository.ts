@@ -78,6 +78,8 @@ export interface BoardRepository {
     cursors: Record<string, SourceCursor>,
   ): Promise<void>;
   setEnabledSources(ids: string[]): void;
+  setPushoverMissing(names: readonly string[], now?: Date): void;
+  pushoverMissing(): { names: string[]; since: string } | null;
   setSyncUnreachable(flag: boolean): Promise<void>;
   trackedIssueIds(
     scope: BoardScope,

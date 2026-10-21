@@ -904,6 +904,7 @@ export interface BoardSnapshot {
   doneCounts?: { awaiting: number; cleaned: number; total: number };
   items?: Item[];
   enabledSources?: string[];
+  pushoverMissing?: { names: string[]; since: string };
 }
 
 /**

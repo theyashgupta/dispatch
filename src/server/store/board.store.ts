@@ -560,6 +560,7 @@ class BoardStore extends EventEmitter {
     cursor: false,
   };
   private enabledSourceIds: string[] = [];
+  private pushoverGap: { names: string[]; since: string } | null = null;
   /**
    * Registered workspace-folder paths, persisted in board.json and broadcast on every snapshot so
    * the start modal reads them live. Runtime state (unlike the boot-only pollIntervalMs/editors), so
@@ -1317,6 +1318,14 @@ class BoardStore extends EventEmitter {
         return held !== undefined && held.column !== "done";
       }),
       enabledSources: this.enabledSourceIds,
+      ...(this.pushoverGap
+        ? {
+            pushoverMissing: {
+              ...this.pushoverGap,
+              names: [...this.pushoverGap.names],
+            },
+          }
+        : {}),
     };
   }
 
@@ -1419,6 +1428,40 @@ class BoardStore extends EventEmitter {
       next.every((id, i) => id === this.enabledSourceIds[i]);
     this.enabledSourceIds = next;
     if (!same) this.emit("change");
+  }
+
+  /**
+   * Record the empty Pushover names so every board shows one attention item for them.
+   *
+   * @remarks The gap lives in memory only; `since` stays while the gap lasts and an unchanged list
+   * does not broadcast.
+   */
+  setPushoverMissing(names: readonly string[], now: Date = new Date()): void {
+    const current = this.pushoverGap;
+    if (
+      current !== null &&
+      current.names.length === names.length &&
+      current.names.every((name, i) => name === names[i])
+    ) {
+      return;
+    }
+    if (names.length === 0) {
+      if (current === null) return;
+      this.pushoverGap = null;
+    } else {
+      this.pushoverGap = {
+        names: [...names],
+        since: current?.since ?? now.toISOString(),
+      };
+    }
+    this.emit("change");
+  }
+
+  /** Read the empty Pushover names and the time the gap began, or null when none is empty. */
+  pushoverMissing(): { names: string[]; since: string } | null {
+    return this.pushoverGap === null
+      ? null
+      : { ...this.pushoverGap, names: [...this.pushoverGap.names] };
   }
 
   /**

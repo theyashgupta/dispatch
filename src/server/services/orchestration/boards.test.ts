@@ -818,3 +818,17 @@ test("createBoard refuses with no-workspaces-root when no folder is given and Co
     setOrchestrationConfig({ linearApiKey: "", workspaceRoot: sessions });
   }
 });
+
+test("boardCounts counts the Pushover item on an empty board and drops it when cleared", async () => {
+  const board = key("CNTP");
+  await createBoard(input({ key: board, name: board }), countingReader([]));
+  const find = () =>
+    boardCounts().counts.find((count) => count.key === board)?.attention;
+  store.setPushoverMissing(["PUSHOVER_USER_KEY"]);
+  try {
+    assert.equal(find(), 1);
+  } finally {
+    store.setPushoverMissing([]);
+  }
+  assert.equal(find(), 0);
+});
