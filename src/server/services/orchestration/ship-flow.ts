@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { ENGINE_FILE } from "../domain/loop-progress.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { hasLoopProgress, isLoopCard } from "../../../shared/running-group.js";
@@ -54,6 +55,10 @@ export const shipTools: {
 const DISPATCH_PACKAGE = "@theyashgupta/dispatch";
 const CHECK_TIMEOUT_MS = 30 * 60_000;
 const SLOT_WAIT_SECONDS = 5400;
+const CHECK_TAIL_LINES = 40;
+const CHECK_OUTPUT_KEEP = 262144;
+const REASON_MAX_CHARS = 4000;
+const NPM_HEADER_RE = /^> \S+@\S+ (\S+)/;
 const SLOT_WAITING = "with-check-slot: waiting for a free slot";
 const SLOT_ACQUIRED = "with-check-slot: acquired";
 const CALL_TIMEOUT_MS = 120_000;
@@ -128,6 +133,35 @@ function firstLine(
   );
 }
 
+/**
+ * The stored reason of a failed check: the failing step, the exit code and the tail of the output.
+ *
+ * @remarks The first stderr line is often a warning, and the end of the output holds the failure.
+ * The tail drops the oldest lines first, so the header and the last line always stay.
+ */
+function checkFailureReason(
+  err: unknown,
+  step: string,
+  streamed: string,
+): string {
+  const e = err as { code?: unknown; stdout?: string; stderr?: string };
+  const text = streamed !== "" ? streamed : (e.stdout ?? "") + (e.stderr ?? "");
+  const header = `check command failed at step ${step} with exit code ${
+    typeof e.code === "number" ? e.code : "unknown"
+  }:`;
+  const lines = stripVTControlCharacters(text)
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .filter((l) => l !== "" && !isSlotLine(l.trim()))
+    .slice(-CHECK_TAIL_LINES);
+  const room = (): number => REASON_MAX_CHARS - header.length - 1;
+  while (lines.length > 1 && lines.join("\n").length > room()) lines.shift();
+  if (lines.length === 1 && lines[0]!.length > room()) {
+    lines[0] = lines[0]!.slice(-room());
+  }
+  return lines.length === 0 ? header : `${header}\n${lines.join("\n")}`;
+}
+
 /** Tell if a line is the slot gate's waiting or acquired line. */
 function isSlotLine(line: string): boolean {
   return line.startsWith(SLOT_WAITING) || line === SLOT_ACQUIRED;
@@ -148,8 +182,21 @@ export async function runCheck(
   const startBudget = (): NodeJS.Timeout =>
     setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS);
   let timer = startBudget();
+  let combined = "";
+  let step = argv[0] ?? "check";
+  let stdoutPartial = "";
+  const onStdout = (chunk: string): void => {
+    combined = (combined + chunk).slice(-CHECK_OUTPUT_KEEP);
+    const lines = (stdoutPartial + chunk).split("\n");
+    stdoutPartial = lines.pop() ?? "";
+    for (const line of lines) {
+      const script = NPM_HEADER_RE.exec(line.trim())?.[1];
+      if (script !== undefined) step = script;
+    }
+  };
   let partial = "";
   const onStderr = (chunk: string): void => {
+    combined = (combined + chunk).slice(-CHECK_OUTPUT_KEEP);
     const lines = (partial + chunk).split("\n");
     partial = lines.pop() ?? "";
     for (const line of lines.map((l) => l.trim())) {
@@ -172,6 +219,7 @@ export async function runCheck(
       {
         ...callOptions(worktree, SLOT_WAIT_SECONDS * 1000 + CHECK_TIMEOUT_MS),
         signal: controller.signal,
+        onStdout,
         onStderr,
       },
     );
@@ -179,7 +227,7 @@ export async function runCheck(
     throw new ShipStop(
       controller.signal.aborted
         ? "check command failed: timed out after 30 minutes in the check slot"
-        : `check command failed: ${firstLine(err, isSlotLine)}`,
+        : checkFailureReason(err, step, combined),
     );
   } finally {
     clearTimeout(timer);

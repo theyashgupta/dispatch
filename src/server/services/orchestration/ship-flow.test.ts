@@ -830,6 +830,42 @@ void test("a failing check command stops at checking before any push", async () 
   assert.deepEqual(groupStatesOf(stack.card.id), ["ship_stopped"]);
 });
 
+void test("a failing check stores the step, the exit code and the failing test in the flow, the decision and the group state", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ship-check-"));
+  const script = path.join(dir, "check.mjs");
+  fs.writeFileSync(
+    script,
+    [
+      'process.stderr.write("[boundaries][warning]: legacy selector\\n");',
+      'process.stdout.write("> @acme/app@1.0.0 test\\n");',
+      'process.stdout.write("not ok 1 - the real failure\\n");',
+      "process.exitCode = 3;",
+    ].join("\n"),
+  );
+  const stack = await newStack({ checkCommand: `node ${script}` });
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "stopped");
+  assert.equal(flow.failedStep, "checking");
+  const reason = flow.reason ?? "";
+  assert.match(reason, /step test/);
+  assert.match(reason, /exit code 3/);
+  assert.match(reason, /not ok 1 - the real failure/);
+  const [item] = decisionsOf(stack.card.id);
+  assert.equal(item?.kind, "ship_failure");
+  assert.ok(item?.question.includes(reason));
+  const stopped = store
+    .listOrchestrationEvents(SBX, 0, 1000)
+    .filter(
+      (e) =>
+        e.cardId === stack.card.id &&
+        e.kind === "group_state" &&
+        e.data.state === "ship_stopped",
+    )
+    .at(-1);
+  assert.equal(stopped?.data.reason, reason);
+});
+
 void test("a signature rule refusal merges once more as admin and records it", async () => {
   const stack = await newStack({
     scenario: { checks: "pass", signatureBlock: true },
@@ -2129,7 +2165,7 @@ void test("a check that holds the slot 31 minutes fails", async (t) => {
   }
 });
 
-void test("a failed check reports its own first line, not the slot gate lines", async () => {
+void test("a failed check reason holds the output tail without the slot gate lines", async () => {
   const check = heldCheck();
   try {
     const done = runCheck("/sbx", ["npm", "run", "check"]);
@@ -2139,7 +2175,62 @@ void test("a failed check reports its own first line, not the slot gate lines", 
       }),
     );
     await assert.rejects(done, {
-      message: "check command failed: lint: 2 problems",
+      message:
+        "check command failed at step npm with exit code unknown:\nlint: 2 problems",
+    });
+  } finally {
+    check.restore();
+  }
+});
+
+void test("a failed check reason names the failing step, the exit code and the failing test after a warning", async () => {
+  const check = heldCheck();
+  try {
+    const done = runCheck("/sbx", ["npm", "run", "check"]);
+    const warning = "[boundaries][warning]: Detected legacy selector syntax";
+    check.opts().onStderr?.(`${warning}\n`);
+    check
+      .opts()
+      .onStdout?.(
+        "\n> @theyashgupta/dispatch@1.0.0 test\n> node scripts/run-tests.mjs unit\n\n",
+      );
+    check.opts().onStdout?.("not ok 12 - ship flow adopts the PR\n");
+    check.finish(Object.assign(new Error("Command failed: env"), { code: 1 }));
+    await assert.rejects(done, (err: Error) => {
+      assert.ok(
+        err.message.startsWith(
+          "check command failed at step test with exit code 1:",
+        ),
+      );
+      assert.ok(err.message.includes("not ok 12 - ship flow adopts the PR"));
+      assert.ok(err.message.includes(warning));
+      return true;
+    });
+  } finally {
+    check.restore();
+  }
+});
+
+void test("a failed check reason keeps only the last 40 lines and at most 4000 characters", async () => {
+  const check = heldCheck();
+  try {
+    const done = runCheck("/sbx", ["npm", "run", "check"]);
+    for (let i = 1; i <= 100; i++) {
+      check
+        .opts()
+        .onStdout?.(`line ${String(i).padStart(3, "0")} ${"x".repeat(193)}\n`);
+    }
+    check.finish(Object.assign(new Error("Command failed: env"), { code: 2 }));
+    await assert.rejects(done, (err: Error) => {
+      assert.ok(err.message.length <= 4000);
+      assert.ok(
+        err.message.startsWith(
+          "check command failed at step npm with exit code 2:",
+        ),
+      );
+      assert.ok(err.message.includes("line 100 "));
+      assert.ok(!err.message.includes("line 001 "));
+      return true;
     });
   } finally {
     check.restore();
