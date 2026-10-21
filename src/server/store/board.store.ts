@@ -26,6 +26,7 @@ import type {
   ArchiveBoardResult,
   Board,
   BoardPolicy,
+  BudgetWarning,
   OrchestratorRecord,
   BoardKey,
   BoardPatch,
@@ -4635,6 +4636,17 @@ class BoardStore extends EventEmitter {
       if (!card) return [];
       if (ids.length === 0) delete card.blockedBy;
       else card.blockedBy = [...ids];
+      return [];
+    });
+  }
+
+  /** Store the budget warning mark of a card; null removes the field and an unknown card is a no-op. */
+  setBudgetWarning(id: string, warning: BudgetWarning | null): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      if (warning === null) delete card.budgetWarning;
+      else card.budgetWarning = { ...warning };
       return [];
     });
   }
