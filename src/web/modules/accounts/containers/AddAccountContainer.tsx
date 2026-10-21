@@ -20,9 +20,20 @@ const SUBMIT_FAILED = "Couldn't submit the code.";
 const FOREIGN_NOTICE =
   "Another Claude login is in progress in a different window. Finish or cancel it there first.";
 
+function dialogTitle(
+  accountId: string | undefined,
+  accountEmail: string | undefined,
+  managedDefault: true | undefined,
+): string {
+  if (accountId) return `Re-login ${accountEmail ?? "account"}`;
+  if (managedDefault) return "Log in for the Default account";
+  return "Add a Claude account";
+}
+
 interface AddAccountContainerProps {
   accountId?: string;
   accountEmail?: string;
+  managedDefault?: true;
   onClose: () => void;
   onAdded: () => void;
 }
@@ -30,6 +41,7 @@ interface AddAccountContainerProps {
 export function AddAccountContainer({
   accountId,
   accountEmail,
+  managedDefault,
   onClose,
   onAdded,
 }: AddAccountContainerProps) {
@@ -47,11 +59,14 @@ export function AddAccountContainer({
   const [notice, setNotice] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [read, setRead] = useState<ClaudeLoginView | undefined>(undefined);
+  const [refused, setRefused] = useState(false);
 
   if (login.data !== undefined && login.data !== read) {
     setRead(login.data);
     const seen = viewAccountId(login.data);
-    if (isForeignLogin(ownId, seen, pendingStarts > 0)) {
+    if (refused) {
+      setForeign(false);
+    } else if (isForeignLogin(ownId, seen, pendingStarts > 0)) {
       setForeign(true);
       setNotice(FOREIGN_NOTICE);
     } else {
@@ -62,20 +77,21 @@ export function AddAccountContainer({
 
   const begin = useCallback(
     () =>
-      startLogin(accountId)
+      startLogin({ accountId, managedDefault })
         .then(
           (result) => {
             if (result.ok) {
               setOwnStart(true);
               setOwnId((id) => result.accountId ?? id);
             } else if (!result.inFlight) {
+              setRefused(true);
               setNotice(result.error);
             }
           },
           () => setNotice(START_FAILED),
         )
         .finally(() => setAnswered(true)),
-    [startLogin, accountId],
+    [startLogin, accountId, managedDefault],
   );
 
   useEffect(() => {
@@ -103,6 +119,7 @@ export function AddAccountContainer({
     cancel.mutate(undefined, {
       onSettled: () => {
         setNotice(null);
+        setRefused(false);
         void begin();
       },
     });
@@ -119,14 +136,10 @@ export function AddAccountContainer({
 
   return (
     <AddAccountDialog
-      title={
-        accountId
-          ? `Re-login ${accountEmail ?? "account"}`
-          : "Add a Claude account"
-      }
+      title={dialogTitle(accountId, accountEmail, managedDefault)}
       view={view}
       notice={notice}
-      foreign={foreign}
+      foreign={foreign || refused}
       code={code}
       canSubmit={isSubmittableCode(code)}
       submitting={submit.isPending}

@@ -204,6 +204,25 @@ void test("a launch and a move on the external account do not seed trust into it
   assert.deepEqual(snapshot(externalDir), before, "the launch wrote nothing");
 });
 
+void test("removing an added account signs out its own dir and never the home dir", async () => {
+  const logoutLog = path.join(env.root, "logout.log");
+  process.env.FAKE_CLAUDE_LOGOUT_LOG = logoutLog;
+  try {
+    assert.deepEqual(await removeAccountAndLogout(EXTERNAL_ID), {
+      ok: false,
+      error: "not-found",
+    });
+    assert.equal(fs.existsSync(logoutLog), false);
+    const dir = accounts.accountDir(OTHER_ID);
+    assert.deepEqual(await removeAccountAndLogout(OTHER_ID), { ok: true });
+    assert.deepEqual(fs.readFileSync(logoutLog, "utf8").trim().split("\n"), [
+      `CLAUDE_CONFIG_DIR=${dir}`,
+    ]);
+  } finally {
+    delete process.env.FAKE_CLAUDE_LOGOUT_LOG;
+  }
+});
+
 void test.after(() => {
   if (previousOverride === undefined) delete process.env.DISPATCH_ACCOUNT_DIRS;
   else process.env.DISPATCH_ACCOUNT_DIRS = previousOverride;

@@ -6,7 +6,7 @@ import {
 } from "../../../shared/types.js";
 import { hasSession, sessionEnvHas } from "../../adapters/tmux.js";
 import { boardRepository as store } from "../../store/board-repository.js";
-import { readRegistry } from "./claude-accounts.js";
+import { canonicalAccountId, readRegistry } from "./claude-accounts.js";
 import { planApply, type PlanSession } from "./session-account-plan.js";
 import {
   moveSessionAccount,
@@ -45,7 +45,7 @@ async function planSessions(): Promise<PlanSession[]> {
       return {
         cardId: card.id,
         sessionId: session.id,
-        accountId: session.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID,
+        accountId: canonicalAccountId(session.claudeAccountId),
         lost: !alive,
         legacy: alive && !(await sessionEnvHas(target, SHELL_SESSION_ENV)),
         turn: alive

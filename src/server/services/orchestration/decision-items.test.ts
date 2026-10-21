@@ -1,4 +1,4 @@
-import test, { after } from "node:test";
+import test, { after, mock } from "node:test";
 import assert from "node:assert/strict";
 import { parseBoardKey } from "../../../shared/board-key.js";
 import type { BoardKey } from "../../../shared/types.js";
@@ -11,7 +11,7 @@ import {
 
 const env = isolateEnv();
 const { store } = await import("../../store/board.store.js");
-const { answerDecisionItem, createDecisionItem } =
+const { answerDecisionItem, createDecisionItem, onDecisionAnswered } =
   await import("./decision-items.js");
 const { createOrchestratorTicket } = await import("./orchestrator-tickets.js");
 const listDecisionItems = store.listDecisionItems.bind(store);
@@ -438,4 +438,31 @@ void test("create_ticket works at once on an auto-approved proposal and is refus
       (err) => err instanceof ConflictError && err.code === "proposal-open",
     );
   });
+});
+
+void test("onDecisionAnswered listeners get the answered item, and a throwing listener never fails the answer", () => {
+  const seen: string[] = [];
+  onDecisionAnswered(() => {
+    throw new Error("listener broke");
+  });
+  onDecisionAnswered((item) => {
+    seen.push(`${item.id}:${item.answer?.optionId}`);
+  });
+  const warn = mock.method(console, "warn", () => undefined);
+  try {
+    const item = createDecisionItem(CALLER, {
+      kind: "ruling",
+      question: "Which way?",
+      options: OPTIONS,
+    });
+    const answered = answerDecisionItem(item.id, {
+      optionId: "yes",
+      note: null,
+    });
+    assert.equal(answered.state, "answered");
+    assert.deepEqual(seen, [`${item.id}:yes`]);
+    assert.equal(warn.mock.callCount(), 1);
+  } finally {
+    warn.mock.restore();
+  }
 });

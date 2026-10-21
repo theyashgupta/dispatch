@@ -13,8 +13,10 @@ import { getClaudeAccountsSettings } from "../infra/config-holder.js";
 import { continueActionFor } from "../domain/limit-surface.js";
 import {
   accountDir,
+  canonicalAccountId,
   isExternalAccountDir,
   getActiveAccountId,
+  getManagedDefaultId,
   listAccounts,
   readChainOrder,
   readRegistry,
@@ -116,7 +118,7 @@ export async function listAccountSessions(): Promise<AccountSessionEntry[]> {
   const activeId = getActiveAccountId();
   return Promise.all(
     store.sessionsWithTmux(ALL_BOARDS).map(async ({ card, session }) => {
-      const accountId = session.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID;
+      const accountId = canonicalAccountId(session.claudeAccountId);
       const turn = await liveTurnState(
         card.id,
         session.id,
@@ -144,9 +146,24 @@ export async function listAccountSessions(): Promise<AccountSessionEntry[]> {
 }
 
 /**
+ * True when Default can be offered a managed login: none exists and the home login is not held by a record.
+ */
+export async function managedDefaultOffered(): Promise<boolean> {
+  if (getManagedDefaultId() !== undefined) return false;
+  const home = await homeIdentity();
+  if (!home.loggedIn) return false;
+  return !(await readRegistry()).some(
+    (a) =>
+      a.email === home.email &&
+      (!a.orgId || !home.orgId || a.orgId === home.orgId),
+  );
+}
+
+/**
  * Remove an added account with its dir, registry record, cached usage, queued moves and chain entry.
  *
- * @remarks The dir is signed out first so Claude Code deletes its own keychain item.
+ * @remarks The dir is signed out first so Claude Code deletes its own keychain item. Removing the
+ * managed default first retags its sessions to `default`, which is the home login again.
  */
 export async function removeAccountAndLogout(
   id: string,
@@ -154,6 +171,19 @@ export async function removeAccountAndLogout(
   const known = (await readRegistry()).some((a) => a.id === id);
   if (!known || isExternalAccountDir(id))
     return { ok: false, error: "not-found" };
+  if (id === getManagedDefaultId()) {
+    for (const card of store.listCards(ALL_BOARDS)) {
+      for (const session of card.sessions ?? []) {
+        if (session.claudeAccountId === id) {
+          await store.setSessionAccount(
+            card.id,
+            session.id,
+            DEFAULT_CLAUDE_ACCOUNT_ID,
+          );
+        }
+      }
+    }
+  }
   await logoutClaudeConfigDir(accountDir(id));
   const result = await removeAccount(id);
   if (result.ok) {

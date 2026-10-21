@@ -23,7 +23,11 @@ import {
   planLimitKeys,
   type LimitSurface,
 } from "../domain/limit-surface.js";
-import { readRegistry, resolveLaunchAccount } from "./claude-accounts.js";
+import {
+  canonicalAccountId,
+  readRegistry,
+  resolveLaunchAccount,
+} from "./claude-accounts.js";
 import { withCardLock } from "./card-lock.js";
 import { forgetTurnState, paneTurnState, turnStateOf } from "./session-turn.js";
 import {
@@ -268,7 +272,8 @@ export async function moveSessionAccount(
     if (!(await sessionEnvHas(sessionTarget, SHELL_SESSION_ENV)))
       return "legacy";
     if (
-      (session.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID) === accountId &&
+      canonicalAccountId(session.claudeAccountId) ===
+        canonicalAccountId(accountId) &&
       session.claudeAccountStale !== true
     ) {
       return "same";

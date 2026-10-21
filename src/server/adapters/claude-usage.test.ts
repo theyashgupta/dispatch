@@ -182,6 +182,22 @@ void test("parseCredential reads only a finite positive refreshTokenExpiresAt nu
   }
 });
 
+void test("parseCredential returns the access token expiry only for a finite positive epoch ms number", () => {
+  const body = (value: unknown): string =>
+    JSON.stringify({ claudeAiOauth: { accessToken: "x", expiresAt: value } });
+  assert.deepEqual(usage.parseCredential(body(1760000000000)), {
+    token: "x",
+    loginExpiresAt: null,
+    accessExpiresAt: 1760000000000,
+  });
+  for (const raw of [body(0), body(-5), body("1760"), body(null), body(1e16)]) {
+    assert.deepEqual(usage.parseCredential(raw), {
+      token: "x",
+      loginExpiresAt: null,
+    });
+  }
+});
+
 void test("readCredential returns the token and the login expiry from one credentials file and nothing else", async () => {
   const dir = path.join(env.root, "usage-dir-credential");
   fs.mkdirSync(dir, { recursive: true });
@@ -201,6 +217,7 @@ void test("readCredential returns the token and the login expiry from one creden
   assert.deepEqual(await usage.readCredential(service, dir), {
     token: "sk-ant-oat01-FAKE-FILE",
     loginExpiresAt: new Date(1760000000000).toISOString(),
+    accessExpiresAt: 1,
   });
   fs.writeFileSync(
     path.join(dir, ".credentials.json"),
