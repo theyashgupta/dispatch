@@ -6038,6 +6038,8 @@ Scenario 13 (tests/e2e/scenario-13-feature-scope.e2e.ts) proves that a feature o
 
 Scenario 14 (tests/e2e/scenario-14-missing-workspace.e2e.ts) proves that the boot resume sweep refuses a lost session whose workspace folder is missing (LOCAL-163). The test starts one card with the fake `claude`, sets `supervisor: on`, stops the server, stops the sandbox tmux server and renames the workspace folder of the card. It then boots the server again on the same data folder. The card must show `Resume failed: workspace-missing: <path>`, stay lost, be in Needs input with `resume_failed`, and have exactly one `resume_failed` event. The fake `claude` must record no new launch, and the sandbox tmux server must have no session.
 
+Scenario 15 (tests/e2e/scenario-15-frozen-relaunch.e2e.ts) proves that a session frozen after an idle compaction is relaunched once with resume (LOCAL-170). The sandbox sets `DISPATCH_FROZEN_RELAUNCH_MS` to 20 s through the `env` option of `startSandbox` and a memory sample file with low swap. The board has the supervisor on. The test starts one card with the fake `claude` and posts a `UserPromptSubmit` hook so the card holds the conversation id `conv-frozen`. It then rewrites the scenario file: the pane shows "Compacted while idle", the status line shows context 0 percent, and a `freezeFile` makes the fake hold every `Enter`. `POST /api/sessions/FRZ-1/input` must answer `unconfirmed`, and a `send` row must carry the reason `held in prompt box`. The card must reach the state `frozen` with no new launch and no `relaunch_frozen` row. Then one `relaunch_frozen` row with `result: "stopped"` must appear at least 20 s after `stateSince`. The freeze file must be gone, because the signal ended the fake, and the newest launch line must hold `--resume conv-frozen`. A confirmed `resume` row must follow, and the transcript must hold the resume prompt as a user entry. The card must have exactly one `session_relaunch` event. After a 60 s pause of the server, there must still be one `relaunch_frozen` row and one `session_relaunch` event.
+
 The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
 ## Orchestration Initiative
@@ -6121,9 +6123,9 @@ supervisor uses that capture and adds no second capture loop. The registry
 (`supervisor-registry.ts`) keeps one watcher per tmux session name.
 
 **States.** `supervisor-state.ts` (pure) reads the pane, the transcript tail and the loop
-progress and gives one of 12 states: `working`, `idle`, `needs_input`, `permission_prompt`,
+progress and gives one of 13 states: `working`, `idle`, `needs_input`, `permission_prompt`,
 `handoff_ready`, `roadmap_complete`, `usage_limit_dialog`, `usage_limit_wait`, `api_error`,
-`stale`, `lost` and `shell_prompt`. A dialog state needs two captures that agree, and `idle`
+`stale`, `lost`, `shell_prompt` and `frozen`. A dialog state needs two captures that agree, and `idle`
 needs three equal samples 60 s apart. Each change is one `supervisor_state` row in
 `orchestration_events` and sets `state`, `stateReason` and `stateSince` on the session. A
 `needs_input` state moves the card to the Needs input column.
@@ -6145,6 +6147,20 @@ action that finds nothing to do, such as an `Escape` already sent, writes no row
   takes the foreground, within 60 s. A failed relaunch, a lost session that stays gone, or claude
   that does not start sets `resume_failed`; an unconfirmed resume prompt is recorded as
   unconfirmed.
+- Frozen session: the state is `frozen` when the pane shows the line "Compacted while idle" above
+  the input line, the status line shows context 0 percent, the input box holds text, and the
+  transcript does not grow for 60 s. The supervisor relaunches the session
+  `FROZEN_RELAUNCH_MINUTES` (15) after `stateSince`. A sandbox server reads
+  `DISPATCH_FROZEN_RELAUNCH_MS` instead. `relaunchFrozen` in `supervisor-actions.ts` sends
+  SIGTERM, and then SIGKILL, to the foreground process group of the pane. It never signals the
+  group of the root shell. A typed `/exit` would only queue in the box. The relaunch then uses the
+  resume path: `runClaude` types the launch line with `--resume <claudeSessionId>` in the same
+  tmux window, and the supervisor types the loop prompt one time. The relaunch writes one
+  `supervisor_action` row with `action: "relaunch_frozen"`, `result: "stopped"` and `frozenSince`,
+  and one `session_relaunch` activity event. A session gets one relaunch per freeze. A second
+  freeze in the same unit and phase sets `needs_input` with `supervisor_gave_up`. While the line
+  stays in the box, `send_input` answers `unconfirmed` with the reason `held in prompt box`.
+  `relaunchFrozen` is the one function where a check before the relaunch goes.
 - Handoff (`supervisor-handoff.ts`): at `handoffPercent` the session gets the handoff request
   once per crossing, and once more at `handoffHardPercent`; the hard request tells the loop to
   hand off now. At `handoff_ready` the supervisor waits until the pane is ready and not busy (a
