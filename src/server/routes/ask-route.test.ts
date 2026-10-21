@@ -251,7 +251,7 @@ void test("askClaude runs on the managed default dir once one exists and on the 
   const id = "44444444-4444-4444-8444-444444444444";
   const dir = accounts.accountDir(id);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  await accounts.upsertAccount({
+  await accounts.adoptManagedDefault({
     id,
     email: "managed@example.com",
     orgId: "org-x",
@@ -260,11 +260,10 @@ void test("askClaude runs on the managed default dir once one exists and on the 
     createdAt: "2026-09-02T00:00:00.000Z",
     lastLoginAt: "2026-09-02T00:00:00.000Z",
   });
-  await accounts.setManagedDefault(id);
   try {
     await askClaude("prompt", signal);
   } finally {
-    await accounts.setManagedDefault(undefined);
+    await accounts.removeAccount(id);
   }
   assert.equal(fs.readFileSync(configDirFile, "utf8").trim(), dir);
 });

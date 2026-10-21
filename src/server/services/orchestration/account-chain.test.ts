@@ -32,7 +32,7 @@ const {
   getActiveAccountId,
   removeAccount,
   setActiveAccount,
-  setManagedDefault,
+  adoptManagedDefault,
   writeDefaultIdentity,
 } = await import("./claude-accounts.js");
 const { emptyChainState, readChainState, writeChainState } =
@@ -1665,6 +1665,32 @@ async function beginWithStoredWeeklyLimit(): Promise<void> {
   stop = await startAccountChain(fakeDeps);
 }
 
+void test("a managed login drops the stale default entry from the chain", async () => {
+  await beginWithStoredWeeklyLimit();
+  assert.ok((await readChainState()).accounts.default);
+  const { startLogin, submitLoginCode, getLoginView } =
+    await import("./claude-login.js");
+  assert.deepEqual(await startLogin(undefined, { managedDefault: true }), {
+    ok: true,
+  });
+  for (let i = 0; getLoginView().state !== "awaiting-code" && i < 100; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  assert.deepEqual(submitLoginCode("home"), { ok: true });
+  for (let i = 0; getLoginView().state !== "done" && i < 100; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  const view = getLoginView();
+  assert.equal(view.state, "done");
+  try {
+    await whenChainIdle();
+    assert.equal((await readChainState()).accounts.default, undefined);
+  } finally {
+    if (view.state === "done") await removeAccount(view.account.id);
+    await setActiveAccount("default");
+  }
+});
+
 void test("an ok read that shows a new period releases a limited account in one read", async () => {
   await beginWithStoredWeeklyLimit();
   await handleUsageRead("default", {
@@ -2035,7 +2061,16 @@ void test("the home login of the other account shadows it instead", async () => 
 });
 
 void test("no account is shadowed once a managed default exists", async () => {
-  await setManagedDefault(ACCOUNT_B);
+  const managed = "55555555-5555-4555-8555-555555555555";
+  await adoptManagedDefault({
+    id: managed,
+    email: "managed@example.com",
+    orgId: "org",
+    orgName: "Org",
+    subscriptionType: "max",
+    createdAt: "2026-10-03T00:00:00.000Z",
+    lastLoginAt: "2026-10-03T00:00:00.000Z",
+  });
   try {
     await begin({}, {}, IDENTITY_A);
     await noteHomeIdentity(IDENTITY_A);
@@ -2044,7 +2079,7 @@ void test("no account is shadowed once a managed default exists", async () => {
       "shadowed-by-home",
     );
   } finally {
-    await setManagedDefault(undefined);
+    await removeAccount(managed);
     await setActiveAccount("default");
   }
 });

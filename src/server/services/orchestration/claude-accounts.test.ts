@@ -544,11 +544,45 @@ void test("the registry writers carry managedDefaultId and a reorder needs no de
     await accounts.setChainOrder([DEFAULT_CLAUDE_ACCOUNT_ID, ID_B, ID_A, ID_C]),
     { ok: false, error: "invalid-order" },
   );
-  await accounts.setManagedDefault(ID_A);
+  await accounts.adoptManagedDefault(record(ID_A, "a@example.com"));
   assert.equal(accounts.getManagedDefaultId(), ID_A);
-  await accounts.setManagedDefault(undefined);
+  assert.equal(registryOnDisk().managedDefaultId, ID_A);
+  await accounts.removeAccount(ID_A);
   assert.equal(registryOnDisk().managedDefaultId, undefined);
   assert.equal(accounts.getManagedDefaultId(), undefined);
+});
+
+void test("a registry file naming a managed account that is not in it loads as not managed", async () => {
+  managedRegistry({ managedDefaultId: ID_C });
+  await accounts.loadManagedDefault();
+  assert.equal(accounts.getManagedDefaultId(), undefined);
+  assert.deepEqual(await accounts.readChainOrder(), [
+    ID_A,
+    DEFAULT_CLAUDE_ACCOUNT_ID,
+    ID_B,
+  ]);
+});
+
+void test("canonicalAccountId maps default to the managed account only while one exists", async () => {
+  seedRegistry([ID_A]);
+  await accounts.loadManagedDefault();
+  assert.equal(
+    accounts.canonicalAccountId(undefined),
+    DEFAULT_CLAUDE_ACCOUNT_ID,
+  );
+  assert.equal(
+    accounts.canonicalAccountId(DEFAULT_CLAUDE_ACCOUNT_ID),
+    DEFAULT_CLAUDE_ACCOUNT_ID,
+  );
+  assert.equal(accounts.canonicalAccountId(ID_A), ID_A);
+
+  managedRegistry();
+  await accounts.loadManagedDefault();
+  assert.equal(accounts.canonicalAccountId(undefined), ID_B);
+  assert.equal(accounts.canonicalAccountId(DEFAULT_CLAUDE_ACCOUNT_ID), ID_B);
+  assert.equal(accounts.canonicalAccountId(ID_A), ID_A);
+  seedRegistry([ID_A]);
+  await accounts.loadManagedDefault();
 });
 
 void test("removing the managed account clears the field and Default is the home login again", async () => {
@@ -635,6 +669,7 @@ void test("managedClaudeEnv gives the managed dir only while a managed default w
   fs.rmSync(accounts.accountDir(ID_B), { recursive: true, force: true });
   assert.deepEqual(await accounts.managedClaudeEnv(), {});
 
-  await accounts.setManagedDefault(undefined);
+  seedRegistry([ID_A]);
+  await accounts.loadManagedDefault();
   assert.deepEqual(await accounts.managedClaudeEnv(), {});
 });

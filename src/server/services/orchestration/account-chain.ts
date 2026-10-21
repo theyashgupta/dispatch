@@ -47,6 +47,7 @@ import {
 } from "./account-decisions.js";
 import {
   accountDir,
+  canonicalAccountId,
   getActiveAccountId,
   readChainOrder,
   getManagedDefaultId,
@@ -55,7 +56,7 @@ import {
   setActiveAccount,
   type DefaultIdentity,
 } from "./claude-accounts.js";
-import { startLogin } from "./claude-login.js";
+import { onManagedDefaultAdopted, startLogin } from "./claude-login.js";
 import {
   getUsage,
   onUsageRefreshed,
@@ -208,7 +209,7 @@ export function chainTimers(): { key: string; at: string }[] {
 const nowIso = (): string => new Date(deps.now()).toISOString();
 
 const accountOf = (session: { claudeAccountId?: string }): string =>
-  session.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID;
+  canonicalAccountId(session.claudeAccountId);
 
 function cancel(key: string): void {
   const timer = timers.get(key);
@@ -905,6 +906,9 @@ export async function startAccountChain(
       if (running) void handleUsageRead(id, usage).catch(() => undefined);
     });
     onDecisionAnswered(handleDecisionAnswered);
+    onManagedDefaultAdopted(() =>
+      forgetChainAccount(DEFAULT_CLAUDE_ACCOUNT_ID),
+    );
     onLimitSignal((cardId, sessionId, pane) => {
       if (running) {
         void handleLimitSignal(cardId, sessionId, pane).catch(() => undefined);

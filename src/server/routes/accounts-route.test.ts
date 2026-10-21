@@ -232,6 +232,26 @@ void test("login: a good code lands in done and the account is listed; a duplica
   assert.equal(malformed.status, 400);
 });
 
+void test("the managed default offer is withdrawn while a record holds the home identity", async () => {
+  const held = "66666666-6666-4666-8666-666666666666";
+  await accounts.upsertAccount({
+    id: held,
+    email: "home@example.com",
+    orgId: "org-home",
+    orgName: "Home Org",
+    subscriptionType: "max",
+    createdAt: "2026-10-01T00:00:00.000Z",
+    lastLoginAt: "2026-10-01T00:00:00.000Z",
+  });
+  try {
+    const body = (await call("GET", "/accounts")).body;
+    assert.equal(body.managedDefaultOffer, false);
+  } finally {
+    await accounts.removeAccount(held);
+  }
+  assert.equal((await call("GET", "/accounts")).body.managedDefaultOffer, true);
+});
+
 void test("login: managedDefault validates, moves the home login under the offer flag and refuses a second one", async () => {
   const before = await call("GET", "/accounts");
   assert.equal(before.body.managedDefaultOffer, true);

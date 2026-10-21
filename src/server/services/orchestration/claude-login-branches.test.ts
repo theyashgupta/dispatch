@@ -237,4 +237,96 @@ void test("a managed login with another identity is refused and leaves no trace"
   assert.equal(storedPointer(), pointerBefore);
 });
 
+const OTHER_HOME = JSON.stringify({
+  loggedIn: true,
+  email: "moved@example.com",
+  orgId: "org-moved",
+  orgName: "Moved Org",
+  subscriptionType: "max",
+});
+const ORIGINAL_HOME = JSON.stringify({
+  loggedIn: true,
+  email: "home@example.com",
+  orgId: "org-home",
+  orgName: "Home Org",
+  subscriptionType: "max",
+});
+
+async function relogin(id: string, code: string, end: string): Promise<void> {
+  assert.deepEqual(await login.startLogin(id), { ok: true });
+  await waitFor("awaiting-code");
+  assert.deepEqual(login.submitLoginCode(code), { ok: true });
+  await waitFor(end);
+}
+
+void test("a managed re-login is checked against its own record, not the current home login", async () => {
+  const id = await runWithCode("home", "done", { managedDefault: true });
+  await login.cancelLogin();
+  const homeFile = path.join(env.root, "moved-home.json");
+  const loginFile = path.join(env.root, "login-identity.json");
+  fs.writeFileSync(homeFile, OTHER_HOME);
+  fs.writeFileSync(loginFile, ORIGINAL_HOME);
+  process.env.FAKE_CLAUDE_IDENTITY_FILE = homeFile;
+  process.env.FAKE_CLAUDE_LOGIN_IDENTITY_FILE = loginFile;
+  try {
+    await relogin(id, "good", "done");
+    assert.equal(accounts.getManagedDefaultId(), id);
+    await login.cancelLogin();
+
+    fs.rmSync(loginFile);
+    await relogin(id, "good", "error");
+    assert.equal(
+      errorMessage(),
+      "Sign in with the same Claude account as your terminal login (home@example.com).",
+    );
+    await login.cancelLogin();
+  } finally {
+    delete process.env.FAKE_CLAUDE_IDENTITY_FILE;
+    delete process.env.FAKE_CLAUDE_LOGIN_IDENTITY_FILE;
+    await accounts.removeAccount(id);
+  }
+});
+
+void test("with a managed default, a login of the home identity is a duplicate, not a home login", async () => {
+  const id = await runWithCode("home", "done", { managedDefault: true });
+  await login.cancelLogin();
+  try {
+    await assertFailure(
+      "home",
+      "duplicate",
+      "home@example.com is already added as a Claude account.",
+    );
+  } finally {
+    await accounts.removeAccount(id);
+  }
+});
+
+void test("a managed login lets the chain forget the stale default entry", async () => {
+  let forgotten = 0;
+  login.onManagedDefaultAdopted(() => {
+    forgotten += 1;
+    return Promise.resolve();
+  });
+  const id = await runWithCode("home", "done", { managedDefault: true });
+  await login.cancelLogin();
+  assert.equal(forgotten, 1);
+  await accounts.removeAccount(id);
+});
+
+void test("removing the account during a managed re-login cancels it instead of adopting", async () => {
+  const id = await runWithCode("home", "done", { managedDefault: true });
+  await login.cancelLogin();
+  const before = events.length;
+  assert.deepEqual(await login.startLogin(id), { ok: true });
+  await waitFor("awaiting-code");
+  assert.deepEqual(await accounts.removeAccount(id), { ok: true });
+  assert.deepEqual(login.submitLoginCode("home"), { ok: true });
+  await waitFor("idle");
+  assert.deepEqual(events.slice(before), [
+    { type: "account_login_failed", reason: "cancelled", cardId: null },
+  ]);
+  assert.equal(accounts.getManagedDefaultId(), undefined);
+  assert.equal((await registryEmails()).includes("home@example.com"), false);
+});
+
 void test.after(() => env.cleanup());

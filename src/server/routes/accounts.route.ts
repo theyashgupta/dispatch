@@ -6,14 +6,13 @@ import {
 } from "../../shared/types.js";
 import {
   getActiveAccountId,
-  getManagedDefaultId,
   readRegistry,
   setActiveAccount,
   setChainOrder,
 } from "../services/orchestration/claude-accounts.js";
 import {
   listAccountSessions,
-  homeIdentity,
+  managedDefaultOffered,
   listAccountSummaries,
   readChainView,
   removeAccountAndLogout,
@@ -65,8 +64,7 @@ accountsRouter.get("/accounts", async (_req, res) => {
     accounts: await listAccountSummaries(),
     sessions: await listAccountSessions(),
     chain: await readChainView(),
-    managedDefaultOffer:
-      getManagedDefaultId() === undefined && (await homeIdentity()).loggedIn,
+    managedDefaultOffer: await managedDefaultOffered(),
   }));
   res.status(200).json(body);
 });

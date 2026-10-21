@@ -158,7 +158,7 @@ test("CC11 runConnectorCall runs on the home login without a managed default and
   const id = "44444444-4444-4444-8444-444444444444";
   const dir = accounts.accountDir(id);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  await accounts.upsertAccount({
+  await accounts.adoptManagedDefault({
     id,
     email: "managed@example.com",
     orgId: "org-x",
@@ -167,11 +167,10 @@ test("CC11 runConnectorCall runs on the home login without a managed default and
     createdAt: "2026-09-02T00:00:00.000Z",
     lastLoginAt: "2026-09-02T00:00:00.000Z",
   });
-  await accounts.setManagedDefault(id);
   try {
     await call();
   } finally {
-    await accounts.setManagedDefault(undefined);
+    await accounts.removeAccount(id);
   }
   assert.equal(
     fs.readFileSync(log, "utf8"),

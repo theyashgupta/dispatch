@@ -100,7 +100,7 @@ test("C7: readMcpList returns the fixture text and logs one list read and no mod
 async function useManagedDefault(id: string): Promise<string> {
   const dir = accounts.accountDir(id);
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
-  await accounts.upsertAccount({
+  await accounts.adoptManagedDefault({
     id,
     email: "managed@example.com",
     orgId: "org-x",
@@ -109,7 +109,6 @@ async function useManagedDefault(id: string): Promise<string> {
     createdAt: "2026-09-02T00:00:00.000Z",
     lastLoginAt: "2026-09-02T00:00:00.000Z",
   });
-  await accounts.setManagedDefault(id);
   return dir;
 }
 
@@ -122,7 +121,7 @@ test("C8: readMcpList runs on the home login without a managed default and on th
   try {
     await readMcpList(fake);
   } finally {
-    await accounts.setManagedDefault(undefined);
+    await accounts.removeAccount("44444444-4444-4444-8444-444444444444");
   }
   assert.equal(
     fs.readFileSync(log, "utf8"),

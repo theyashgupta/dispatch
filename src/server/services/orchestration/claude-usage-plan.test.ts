@@ -8,8 +8,13 @@ import { isolateEnv } from "../../test-support/fixtures.js";
 
 const env = isolateEnv();
 const usage = await import("./claude-usage.js");
-const { accountDir, upsertAccount, setActiveAccount, setManagedDefault } =
-  await import("./claude-accounts.js");
+const {
+  accountDir,
+  adoptManagedDefault,
+  removeAccount,
+  upsertAccount,
+  setActiveAccount,
+} = await import("./claude-accounts.js");
 const { setOrchestrationConfig } = await import("../infra/config-holder.js");
 setOrchestrationConfig({ linearApiKey: "", port: 4700 });
 const { USAGE_REQUEST_LOG_PATH } =
@@ -287,7 +292,7 @@ void test("an idle account that becomes the active one is read within 300 second
 void test("the tick never reads Default once a managed default exists", async () => {
   const MANAGED = "44444444-4444-4444-8444-444444444444";
   fs.mkdirSync(accountDir(MANAGED), { recursive: true });
-  await upsertAccount({
+  await adoptManagedDefault({
     id: MANAGED,
     email: "managed@example.com",
     orgId: "org",
@@ -296,13 +301,12 @@ void test("the tick never reads Default once a managed default exists", async ()
     createdAt: "2026-10-01T00:00:00.000Z",
     lastLoginAt: "2026-10-01T00:00:00.000Z",
   });
-  await setManagedDefault(MANAGED);
   try {
     await usage.runUsageTick();
     assert.equal(logLines().filter((l) => l.account === "default").length, 0);
     assert.equal(hits, 0);
   } finally {
-    await setManagedDefault(undefined);
+    await removeAccount(MANAGED);
   }
   await usage.runUsageTick();
   assert.equal(hits, 1);

@@ -396,6 +396,12 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   await seedPlaybooks();
 
   await store.load();
+  await loadManagedDefault().catch((err) =>
+    console.warn(
+      "[accounts] managed default not loaded",
+      err instanceof Error ? err.message : err,
+    ),
+  );
 
   store.setPollInterval(config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
   store.setCleanupDelayDays(
@@ -516,7 +522,6 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   });
   startArtifactDetectionLoop(port);
   if (config.updateCheck !== false) startUpdateCheckLoop(config);
-  await loadManagedDefault().catch(() => undefined);
   onDefaultUsageRefreshed(() => void checkDefaultIdentity());
   startDefaultIdentityWatch();
   await startAccountChain();

@@ -208,7 +208,7 @@ void test("a check hands the home login to the chain, which shadows the account 
 
 void test("with a managed default a home change records the event and marks nothing stale", async () => {
   const MANAGED = "66666666-6666-4666-8666-666666666666";
-  await accounts.upsertAccount({
+  await accounts.adoptManagedDefault({
     id: MANAGED,
     email: "managed@example.com",
     orgId: "org-m",
@@ -217,7 +217,6 @@ void test("with a managed default a home change records the event and marks noth
     createdAt: "2026-10-01T00:00:00.000Z",
     lastLoginAt: "2026-10-01T00:00:00.000Z",
   });
-  await accounts.setManagedDefault(MANAGED);
   try {
     const s = await sessionCard("w-managed");
     const before = changedEvents().length;
@@ -230,6 +229,6 @@ void test("with a managed default a home change records the event and marks noth
       orgId: "org-moved",
     });
   } finally {
-    await accounts.setManagedDefault(undefined);
+    await accounts.removeAccount(MANAGED);
   }
 });
