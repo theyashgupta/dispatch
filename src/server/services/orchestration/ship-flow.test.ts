@@ -894,9 +894,7 @@ void test("failed PR checks stop the flow at waiting_checks", async () => {
 });
 
 /**
- * A check command outside every worktree that appends one line to a count file and exits 0.
- *
- * @remarks With `failFirst` it exits 1 when the count file was empty before the append.
+ * A check command outside every worktree that counts its runs and can fail its first run.
  */
 function countingCheck(failFirst = false): {
   command: string;

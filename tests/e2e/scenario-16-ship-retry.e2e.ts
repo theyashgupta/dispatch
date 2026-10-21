@@ -93,7 +93,7 @@ async function orch<T = Record<string, unknown>>(
 /**
  * Write the check script into the sandbox folder, outside every repository, and return its path with its controls.
  *
- * @remarks The script reads a mode file next to it, so the worktree stays clean between the three ships. Mode `fail` prints a warning to stderr, an npm header and a failing line to stdout, and exits 3. Mode `pass` appends one line to a count file.
+ * @remarks The script reads a mode file next to it, so the worktree stays clean between the three ships.
  */
 function writeCheckScript(sb: Sandbox): CheckScript & { file: string } {
   const folder = path.join(sb.root, "check");
@@ -250,7 +250,6 @@ const awaitSession = (sb: Sandbox, id: string): Promise<Card> =>
     `the session of ${id}`,
   );
 
-/** Start one card with the orchestrator start_card route, commit its work file and move it to Agent done. */
 async function startAndFinish(
   sb: Sandbox,
   sample: SampleRepo,
@@ -286,7 +285,6 @@ async function startAndFinish(
   return card;
 }
 
-/** Call start_ship for the card branch and wait until the flow is stopped or done. */
 async function shipUntilEnd(
   sb: Sandbox,
   sample: SampleRepo,
@@ -337,7 +335,6 @@ const groupStates = async (
     )
     .map((e) => ({ reason: e.data.reason }));
 
-/** Ship with a failing check command and assert the stored reason, the decision item question and the group state carry the failing step, the exit code and the output tail. */
 async function assertFailedCheckReason(
   sb: Sandbox,
   sample: SampleRepo,
@@ -365,7 +362,6 @@ async function assertFailedCheckReason(
   note("ship stopped at checking with the failing step and the output tail");
 }
 
-/** Ship again with a passing check command and failing PR checks, so the flow stops at waiting_checks with one PR. */
 async function assertStopsAtChecks(
   sb: Sandbox,
   sample: SampleRepo,
@@ -438,7 +434,6 @@ async function assertSkipAndAdopt(
   note("third ship skipped the check command, adopted the PR and merged");
 }
 
-/** Seed an open PR for the card branch in the fake gh state, ship once, and assert the flow adopts it with no pr create call for that branch. */
 async function assertSeededPrAdopted(
   sb: Sandbox,
   sample: SampleRepo,

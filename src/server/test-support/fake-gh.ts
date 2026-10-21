@@ -178,9 +178,7 @@ function shellQuote(value: string): string {
  * in `<dir>/gh-state.json`. A merge squashes the PR head into the local bare `origin` of the
  * calling worktree, so nothing reaches a network remote. A stored PR may set `base`, `cross` and
  * `headRefOid`; the list answers the head commit of `origin` when it sets none. A head view answers
- * the stored `headRefOid` for the first `staleViews` reads, then the head commit of `origin`. A
- * create for a head that has an open same-base PR fails the way GitHub does, and `hideOpenPrs`
- * makes the list leave open PRs out to emulate its lag after a push.
+ * the stored `headRefOid` for the first `staleViews` reads, then the head commit of `origin`.
  */
 export function writeFakeGh(
   binDir: string,
