@@ -355,6 +355,44 @@ void test(
 );
 
 void test(
+  "a session at the shell prompt whose workspace folder is missing is not relaunched and sets needs_input with workspace-missing",
+  { skip: !hasTmux },
+  async () => {
+    const loop = await loopCard("resume-missing-ws", { logAllKeys: true });
+    const relaunched: string[] = [];
+    const gone = `${loop.root}-gone`;
+    fs.renameSync(loop.root, gone);
+    try {
+      await runActions(
+        loop.card(),
+        loop.session(),
+        [{ kind: "resume" }],
+        "tmux: pane at shell prompt",
+        deps({
+          relaunch: (cardId) => {
+            relaunched.push(cardId);
+            return Promise.resolve("launched");
+          },
+          atShellPrompt: () => Promise.resolve(true),
+        }),
+      );
+    } finally {
+      fs.renameSync(gone, loop.root);
+    }
+    assert.deepEqual(relaunched, []);
+    assert.deepEqual(await loop.keysSettled(1), []);
+    assert.equal(loop.userTexts().length, 0);
+    assert.equal(loop.session().state, "needs_input");
+    assert.equal(loop.session().stateReason, "resume_failed");
+    assert.equal(loop.card().column, "needs_input");
+    assert.equal(
+      loop.card().statusReason,
+      `resume: Resume failed: workspace-missing: ${loop.root}`,
+    );
+  },
+);
+
+void test(
   "a lost session runs the resume saga and never the relaunch",
   { skip: !hasTmux },
   async () => {

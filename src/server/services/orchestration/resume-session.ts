@@ -27,11 +27,13 @@ import { assertMemoryHeadroom, memoryCheck } from "./memory-governor.js";
 const ACCOUNT_STEP = "resolving Claude account";
 const MEMORY_STEP = "checking memory";
 
-const isFolder = (dir: string): Promise<boolean> =>
-  fsp.stat(dir).then(
+/** Whether a path names an existing folder; any stat error reads as missing. */
+export function isFolder(dir: string): Promise<boolean> {
+  return fsp.stat(dir).then(
     (s) => s.isDirectory(),
     () => false,
   );
+}
 
 /**
  * Refuse the relaunch of a session whose workspace folder is gone, with one `resume_failed` event.
