@@ -754,7 +754,7 @@ When the supervisor is on, Dispatch finds the freeze and handles it:
 3. Dispatch types the loop prompt one time.
 4. The dashboard **Changed since** log shows the relaunch.
 
-Dispatch relaunches a session one time for each freeze. When the session freezes a second time in the same unit and phase, Dispatch does not relaunch it again. The card moves to **Needs input**.
+Dispatch relaunches a session one time for each freeze. When the session freezes a second time in the same unit and phase, Dispatch does not relaunch it again. The card moves to **Needs input** with a failed resume. When memory is low, Dispatch does not stop Claude. The card moves to **Needs input** and Claude keeps running.
 
 While a line stays in the prompt box, the `send_input` call answers `unconfirmed` with the reason "held in prompt box". Dispatch does not count the line as received.
 
