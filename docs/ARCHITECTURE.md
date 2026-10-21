@@ -456,19 +456,19 @@ Mount prefix: `/api`.
 
 Mount prefix: `/api`.
 
-| Method | Path                              | Auth | Purpose                                                                              |
-| ------ | --------------------------------- | ---- | ------------------------------------------------------------------------------------ |
-| GET    | `/api/accounts`                   | User | List the Claude accounts, the active id, the account sessions and the account chain. |
-| PUT    | `/api/accounts/active`            | User | Set the active account, and optionally apply it to running sessions.                 |
-| PUT    | `/api/accounts/chain/order`       | User | Set the order of the account chain.                                                  |
-| PUT    | `/api/accounts/chain/settings`    | User | Save the account chain settings.                                                     |
-| POST   | `/api/accounts/chain/switch-now`  | User | Fail over to the next account of the chain now.                                      |
-| GET    | `/api/accounts/login`             | User | Read the state of the account login.                                                 |
-| POST   | `/api/accounts/login`             | User | Start the login of an account.                                                       |
-| POST   | `/api/accounts/login/code`        | User | Submit the login code.                                                               |
-| DELETE | `/api/accounts/login`             | User | Cancel the login.                                                                    |
-| POST   | `/api/accounts/:id/usage/refresh` | User | Refresh the usage of an account.                                                     |
-| DELETE | `/api/accounts/:id`               | User | Remove an account and log it out.                                                    |
+| Method | Path                              | Auth | Purpose                                                                                                     |
+| ------ | --------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/accounts`                   | User | List the Claude accounts, the active id, the account sessions, the account chain and `managedDefaultOffer`. |
+| PUT    | `/api/accounts/active`            | User | Set the active account, and optionally apply it to running sessions.                                        |
+| PUT    | `/api/accounts/chain/order`       | User | Set the order of the account chain.                                                                         |
+| PUT    | `/api/accounts/chain/settings`    | User | Save the account chain settings.                                                                            |
+| POST   | `/api/accounts/chain/switch-now`  | User | Fail over to the next account of the chain now.                                                             |
+| GET    | `/api/accounts/login`             | User | Read the state of the account login.                                                                        |
+| POST   | `/api/accounts/login`             | User | Start the login of an account. The body can hold `managedDefault: true`.                                    |
+| POST   | `/api/accounts/login/code`        | User | Submit the login code.                                                                                      |
+| DELETE | `/api/accounts/login`             | User | Cancel the login.                                                                                           |
+| POST   | `/api/accounts/:id/usage/refresh` | User | Refresh the usage of an account.                                                                            |
+| DELETE | `/api/accounts/:id`               | User | Remove an account and log it out.                                                                           |
 
 ### `routes/items.route.ts`
 
@@ -2905,6 +2905,64 @@ subprocess adapters may import only themselves and `shared`.
 `<configDir>/.claude.json` for an added account and into the home file for Default, since Claude
 Code reads the trust map from the config dir it runs under.
 
+#### Managed Default
+
+**Record (2026-10-21, LOCAL-159).** The user can move Default from the home login to a Dispatch
+login. The Dispatch login is a registry account in its own config dir. It stands in for Default.
+Dispatch then tracks its usage and moves its sessions like those of any added account.
+
+**Registry field.** `accounts.json` has an optional `managedDefaultId`. It is the id of the registry
+account that stands in for Default. When the field is absent, Default is the home login
+(`~/.claude`). The server caches the value in memory, loads it at boot and updates it on every
+registry write.
+
+**The offer.** `GET /api/accounts` returns `managedDefaultOffer: true` while `managedDefaultId` is
+absent and the home login is signed in. The Accounts page then shows the panel `Move the Default
+account to a Dispatch login` with a `Log in` button. The user cannot dismiss the panel. It goes away
+when the move is done.
+
+**The managed login.** `POST /api/accounts/login` with `{ "managedDefault": true }` starts the login.
+The route refuses the body with 400 `invalid-id` when it also holds `accountId`. It refuses with 409
+`managed-exists` when a managed default exists. The login makes a new config dir like the login of an
+added account. At the end, the signed in identity must be the home identity: the same email, and the
+same organization when both identities carry one. Another identity fails with `not-home-identity`
+and the message `Sign in with the same Claude account as your terminal login (<email>).`. The
+server removes the new dir. The `home-login` refusal does not apply in this mode. It does not apply
+to a re-login of the managed account. On success, one registry write puts the record at the Default
+position and sets `managedDefaultId`. The active pointer moves to the managed id when it was
+`default`. No running session moves.
+
+**The mapping.** After the move, these calls use the managed account for a session recorded on
+`default`:
+
+- `resolveLaunchAccount("default")` resolves the managed account. A start, a resume or a move of
+  a session recorded on `default` launches on the managed config dir. A shell that already runs
+  keeps its environment.
+- `getActiveAccountId()` returns the managed id for a stored `default`.
+- The chain order lists the managed id at the Default position and no `default`.
+- The usage poll does not read the home login.
+- `GET /api/accounts` hides the home row. The managed row has `managedDefault: true`, and its meta
+  reads `Default (Dispatch login)`.
+
+**Removal.** The removal of the managed account clears `managedDefaultId`. Default is the home
+login again, and the offer shows again.
+
+**Identity watch.** After the move, a change of the terminal login records `account_login_changed`
+and marks no session stale. Before the move, the watch works as in Session Account Move. The home
+duplicate check `shadowed-by-home` is off after the move, because the home login is not a chain
+account. The login flow refuses a second record with the managed identity (`duplicate`).
+
+**Headless Claude calls.** `managedClaudeEnv()` returns `{ CLAUDE_CONFIG_DIR: <managed dir> }` when
+a managed default exists, else `{}`. These calls merge it into their env: the connector calls and
+`claude mcp list` (the Granola and Slack rounds), the playbook, group title, meeting draft, Linear
+sync and ticket generators, and Ask. They use the managed default, not the active account, because
+the claude.ai connectors belong to the terminal identity. A broken managed account (the record or
+the dir is missing) falls back to the home login.
+
+**Known limit.** Dispatch copies `.claude.json` once from the home login into the managed dir, at
+its first use. A user scope MCP server that the user adds to the terminal login later is not in the
+managed dir. The user must add it there too.
+
 ### Session Account Move
 
 **Record (2026-10-05, LOCAL-80).** This record replaces the earlier rule, under which an account
@@ -2995,7 +3053,7 @@ its range.
 rule that applies sets the state:
 
 - `shadowed-by-home`: the registry account holds the home login (see Home login duplicate). This
-  state wins over every other state. The entry has no `limitedUntil`.
+  state wins over every other state. The entry has no `limitedUntil`. The check is off once Default is managed (see Managed Default).
 - `needs-login`: 2 consecutive reads were `token-rejected` (see Needs login). The state wins over
   `limited`, `login-expired` and `unknown`. The entry has no `limitedUntil`.
 - `login-expired`: the token read failed (401, 403 or no token) and the folder is logged out.

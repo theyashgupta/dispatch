@@ -756,6 +756,20 @@ When an account shows **Same login as Default**, choose **Remove duplicate**. Th
 
 When every account is at its limit, Dispatch raises the decision "Every Claude account is at its limit". The text shows when the first account resets. Work resumes at that time. To continue sooner, choose **Add an account** and add an account on the **Accounts** page. Choose **Wait for the reset** to do nothing. The decision closes by itself when an account is usable again.
 
+When the home login is signed in and you did not move Default, the **Accounts** page shows the panel **Move the Default account to a Dispatch login**. You cannot dismiss the panel. It goes away when you finish the move.
+
+After the move, Dispatch can track the usage of **Default** and can move its sessions, as it does for any other account. To do the move:
+
+1. Choose **Log in** in the panel.
+2. Open the sign-in address and paste the code into the dialog.
+3. Sign in with the same Claude account as your terminal login.
+
+If you sign in with another account, the login fails. The dialog shows "Sign in with the same Claude account as your terminal login (<email>)." Choose **Log in** again and use the account of your terminal login.
+
+Running sessions keep running. New starts, resumes and moves use the Dispatch login. Your terminal login stays signed in.
+
+To undo the move, remove the account with the meta **Default (Dispatch login)**. **Default** is then your home login again, and the panel shows again.
+
 ## Resume a lost session
 
 When the tmux session of a card ends, for example after a shutdown, the card shows **Resume**. Resume starts Claude again in the card workspace and opens the newest conversation of the card.
