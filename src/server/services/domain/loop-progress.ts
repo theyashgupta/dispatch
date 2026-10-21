@@ -46,6 +46,8 @@ interface AttemptLine {
   at: string;
 }
 
+type ClosedReason = NonNullable<LoopEngine["closedReason"]>;
+
 interface EngineParse {
   engine: LoopEngine | null;
   reason: string | null;
@@ -331,6 +333,14 @@ export function parseAttemptLines(text: string): AttemptLine[] {
   return lines;
 }
 
+function frontMatterFences(lines: string[]): (number | undefined)[] {
+  const fences: number[] = [];
+  lines.forEach((line, index) => {
+    if (line.trim() === "---" && fences.length < 2) fences.push(index);
+  });
+  return [fences[0], fences[1]];
+}
+
 /**
  * Reads the front matter of a ralph loop engine file.
  *
@@ -338,12 +348,7 @@ export function parseAttemptLines(text: string): AttemptLine[] {
  */
 export function parseEngineFile(text: string, closed: boolean): EngineParse {
   const lines = toLines(text);
-  const fences: number[] = [];
-  lines.forEach((line, index) => {
-    if (line.trim() === "---" && fences.length < 2) fences.push(index);
-  });
-  const start = fences[0];
-  const end = fences[1];
+  const [start, end] = frontMatterFences(lines);
   if (start === undefined || end === undefined) {
     return { engine: null, reason: "no front matter" };
   }
@@ -367,9 +372,39 @@ export function parseEngineFile(text: string, closed: boolean): EngineParse {
       handoffPending: sessionId === HANDOFF_PENDING,
       startedAt: fields.get("started_at") || null,
       closed,
+      ...(closed && {
+        closedReason: closedReasonOf(fields.get("closed_reason")),
+      }),
     },
     reason: null,
   };
+}
+
+function closedReasonOf(value: string | undefined): ClosedReason {
+  return value === "promise" || value === "close_loop" ? value : "manual";
+}
+
+/**
+ * Writes the reason a loop engine file was closed into its front matter.
+ *
+ * @remarks Text without a front matter comes back unchanged.
+ */
+export function withClosedReason(
+  text: string,
+  reason: "promise" | "close_loop",
+): string {
+  const lines = toLines(text);
+  const [start, end] = frontMatterFences(lines);
+  if (start === undefined || end === undefined) return text;
+  const kept = lines
+    .slice(start + 1, end)
+    .filter((line) => !/^closed_reason:/.test(line));
+  return [
+    ...lines.slice(0, start + 1),
+    ...kept,
+    `closed_reason: ${reason}`,
+    ...lines.slice(end),
+  ].join("\n");
 }
 
 /**

@@ -13,6 +13,7 @@ import {
   parseStateLines,
   phaseDir,
   unitFilePaths,
+  withClosedReason,
 } from "./loop-progress.js";
 
 const READ_AT = "2026-10-06T12:00:00.000Z";
@@ -807,4 +808,53 @@ void test("the model has no roadmap file and carries the PRD file", () => {
   assert.equal(result.slug, "demo-feature");
   assert.equal(result.units[0]?.prdPath, PRD_FILE);
   assert.equal(result.readAt, PRD_READ_AT);
+});
+
+const FENCED = "---\nactive: true\niteration: 2\n---\nbody line\n";
+
+void test("withClosedReason inserts the reason before the second fence and keeps the body", () => {
+  assert.equal(
+    withClosedReason(FENCED, "promise"),
+    "---\nactive: true\niteration: 2\nclosed_reason: promise\n---\nbody line\n",
+  );
+});
+
+void test("withClosedReason replaces an existing closed_reason line", () => {
+  const text = "---\nactive: true\nclosed_reason: promise\n---\nbody\n";
+  assert.equal(
+    withClosedReason(text, "close_loop"),
+    "---\nactive: true\nclosed_reason: close_loop\n---\nbody\n",
+  );
+});
+
+void test("withClosedReason returns text without a front matter unchanged", () => {
+  assert.equal(withClosedReason("no fences\n", "promise"), "no fences\n");
+  assert.equal(
+    withClosedReason("---\nactive: true\n", "promise"),
+    "---\nactive: true\n",
+  );
+});
+
+void test("a closed engine file reports the closed_reason it holds", () => {
+  for (const reason of ["promise", "close_loop"]) {
+    const text = `---\nactive: true\nclosed_reason: ${reason}\n---\nbody`;
+    assert.equal(parseEngineFile(text, true).engine?.closedReason, reason);
+  }
+});
+
+void test("a closed engine file with no or an unknown closed_reason reports manual", () => {
+  assert.equal(parseEngineFile(FENCED, true).engine?.closedReason, "manual");
+  assert.equal(
+    parseEngineFile("---\nactive: true\nclosed_reason: other\n---\nbody", true)
+      .engine?.closedReason,
+    "manual",
+  );
+});
+
+void test("an open engine file has no closedReason key", () => {
+  const text = "---\nactive: true\nclosed_reason: promise\n---\nbody";
+  assert.equal(
+    "closedReason" in (parseEngineFile(text, false).engine ?? {}),
+    false,
+  );
 });

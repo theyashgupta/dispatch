@@ -15,6 +15,8 @@ import {
   type DetectMemory,
   type Detection,
 } from "../domain/supervisor-state.js";
+import { loopCompletionOf } from "../domain/loop-completion.js";
+import { isPrdModel } from "../domain/prd-progress.js";
 import { groupStateOfSupervisor } from "../domain/group-state.js";
 import {
   holdsNeedsInput,
@@ -275,6 +277,13 @@ export async function supervisePane(
     ]);
     const engine = card.loopProgress?.engine;
     const engineOpen = engine?.active === true && !engine.closed;
+    const progress = card.loopProgress;
+    const promised =
+      engineOpen &&
+      progress !== undefined &&
+      isPrdModel(progress) &&
+      progress.units[0]?.phaseTotal == null &&
+      loopCompletionOf(transcript?.lastAssistantText, progress.slug).promise;
     const detection = detectState({
       now,
       tmuxAlive: true,
@@ -282,7 +291,9 @@ export async function supervisePane(
       paused: card.paused ?? null,
       pane: sample.pane,
       engineSessionId: engineSessionIdOf(card),
-      completion: card.loopProgress?.completion ?? null,
+      completion: promised
+        ? "complete"
+        : (card.loopProgress?.completion ?? null),
       engineOpen,
       transcript,
       memory: watcher.memory,

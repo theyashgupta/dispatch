@@ -5,7 +5,7 @@ import { isHiddenCard } from "../../../shared/hidden-card.js";
 import type { Card, Session } from "../../../shared/types.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import { capturePane, paneAtPrompt, sendKeys } from "../../adapters/tmux.js";
-import { ENGINE_FILE } from "../domain/loop-progress.js";
+import { ENGINE_FILE, withClosedReason } from "../domain/loop-progress.js";
 import {
   declineKeys,
   type SupervisorAction,
@@ -82,16 +82,29 @@ async function answerPrompt(
 async function closeLoop(card: Card, session: Session): Promise<void> {
   const root = rootOf(card, session);
   const engine = path.join(root, ENGINE_FILE);
+  const reason =
+    card.loopProgress?.completion === "complete" ? "close_loop" : "promise";
   let result = "closed";
   if (root === "") result = "failed: no session root";
   else {
     try {
       await fsp.rename(engine, `${engine}.done`);
+      await fsp
+        .readFile(`${engine}.done`, "utf8")
+        .then((text) =>
+          fsp.writeFile(`${engine}.done`, withClosedReason(text, reason)),
+        )
+        .catch(() => undefined);
     } catch (err) {
       result = `failed: ${(err as NodeJS.ErrnoException).code ?? "error"}`;
     }
   }
-  record(card, session, { action: "close_loop", file: engine, result });
+  record(card, session, {
+    action: "close_loop",
+    file: engine,
+    result,
+    reason,
+  });
   await refreshLoopProgress(card.id);
 }
 
