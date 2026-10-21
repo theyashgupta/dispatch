@@ -56,6 +56,7 @@ const SUPERVISOR_ACTIONS: Record<string, (g: string) => string> = {
   limit_escape: (g) => `left the usage limit prompt of ${g}`,
   answer_prompt: (g) => `answered a prompt of ${g}`,
   resume: (g) => `resumed ${g}`,
+  relaunch_frozen: (g) => `relaunched frozen ${g} with resume`,
   handoff_request: (g) => `requested a handoff from ${g}`,
   handoff_cancel: (g) => `cancelled the handoff of ${g}`,
   close_loop: (g) => `closed the loop of ${g}`,

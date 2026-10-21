@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { DEFAULT_BOARD_KEY, parseBoardKey } from "../../../shared/board-key.js";
 import type { BoardKey } from "../../../shared/types.js";
+import type { ActionDeps } from "./supervisor-actions.js";
 import { startedGroup } from "../../test-support/group-fixtures.js";
 
 const env = isolateEnv();
@@ -15,6 +16,7 @@ const {
   supervisePane,
   superviseLost,
 } = await import("./supervisor-registry.js");
+const { setActionDeps } = await import("./supervisor-actions.js");
 await store.load();
 after(() => env.cleanup());
 
@@ -366,5 +368,97 @@ void test("superviseLost records lost and runs the duty once for a whole-card lo
     assert.equal(supervisorEvents(SBX, ids.cardId).length, events.length);
   } finally {
     store.endStart(ids.cardId);
+  }
+});
+
+function frozenFixture() {
+  const calls = { stop: 0, relaunch: 0, resume: 0 };
+  let atPrompt = false;
+  const fake: ActionDeps = {
+    stopClaude: () => {
+      calls.stop++;
+      atPrompt = true;
+      return Promise.resolve(true);
+    },
+    relaunch: () => {
+      calls.relaunch++;
+      atPrompt = false;
+      return Promise.resolve("launched");
+    },
+    resume: () => {
+      calls.resume++;
+      return Promise.resolve();
+    },
+    atShellPrompt: () => Promise.resolve(atPrompt),
+    send: () => Promise.resolve("confirmed"),
+    claudeUpMs: 50,
+    exitMs: 50,
+  };
+  return { calls, fake };
+}
+
+function relaunchEvents(cardId: string) {
+  return store
+    .listOrchestrationEvents(SBX, 0, 500)
+    .filter(
+      (e) =>
+        e.cardId === cardId &&
+        e.kind === "supervisor_action" &&
+        e.data.action === "relaunch_frozen",
+    );
+}
+
+async function frozenSession(title: string) {
+  const ids = await startedCard(SBX, title);
+  const base = Date.now();
+  await supervisePane({ ...ids, pane: pane("frozen-compacted.txt") }, base);
+  await supervisePane(
+    { ...ids, pane: pane("frozen-compacted.txt") },
+    base + 60_000,
+  );
+  const session = sessionOf(ids.cardId);
+  assert.equal(session?.state, "frozen");
+  return { ids, since: Date.parse(session!.stateSince!) };
+}
+
+void test("a session frozen for 15 minutes is relaunched once and later samples add nothing", async () => {
+  delete process.env.DISPATCH_FROZEN_RELAUNCH_MS;
+  const { calls, fake } = frozenFixture();
+  setActionDeps(fake);
+  try {
+    const { ids, since } = await frozenSession("frozen-15");
+    const frozen = { ...ids, pane: pane("frozen-compacted.txt") };
+    await supervisePane(frozen, since + 15 * 60_000 - 1_000);
+    assert.equal(calls.stop, 0);
+    assert.equal(relaunchEvents(ids.cardId).length, 0);
+    await supervisePane(frozen, since + 15 * 60_000);
+    assert.equal(calls.stop, 1);
+    assert.equal(calls.relaunch, 1);
+    assert.equal(relaunchEvents(ids.cardId).length, 1);
+    await supervisePane(frozen, since + 16 * 60_000);
+    await supervisePane(frozen, since + 17 * 60_000);
+    assert.equal(calls.stop, 1);
+    assert.equal(calls.relaunch, 1);
+    assert.equal(relaunchEvents(ids.cardId).length, 1);
+  } finally {
+    setActionDeps();
+  }
+});
+
+void test("DISPATCH_FROZEN_RELAUNCH_MS moves the relaunch time", async () => {
+  process.env.DISPATCH_FROZEN_RELAUNCH_MS = "120000";
+  const { calls, fake } = frozenFixture();
+  setActionDeps(fake);
+  try {
+    const { ids, since } = await frozenSession("frozen-env");
+    const frozen = { ...ids, pane: pane("frozen-compacted.txt") };
+    await supervisePane(frozen, since + 119_000);
+    assert.equal(calls.stop, 0);
+    await supervisePane(frozen, since + 120_000);
+    assert.equal(calls.stop, 1);
+    assert.equal(relaunchEvents(ids.cardId).length, 1);
+  } finally {
+    delete process.env.DISPATCH_FROZEN_RELAUNCH_MS;
+    setActionDeps();
   }
 });

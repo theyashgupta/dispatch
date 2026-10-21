@@ -112,6 +112,18 @@ test("supervisor actions use the map and unknown ones fall back", () => {
   );
 });
 
+test("a relaunch_frozen action reads as a relaunch of the group", () => {
+  assert.deepEqual(
+    texts([
+      event(1, "supervisor_action", "c14", {
+        action: "relaunch_frozen",
+        result: "stopped",
+      }),
+    ]),
+    ["relaunched frozen GROUP-14 with resume"],
+  );
+});
+
 test("rows are newest first with a 24 hour time and the actor", () => {
   const rows = activityRows(
     [

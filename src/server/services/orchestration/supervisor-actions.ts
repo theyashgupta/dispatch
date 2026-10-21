@@ -4,7 +4,12 @@ import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { isHiddenCard } from "../../../shared/hidden-card.js";
 import type { Card, Session } from "../../../shared/types.js";
 import { boardRepository as store } from "../../store/board-repository.js";
-import { capturePane, paneAtPrompt, sendKeys } from "../../adapters/tmux.js";
+import {
+  capturePane,
+  paneAtPrompt,
+  sendKeys,
+  signalForeground,
+} from "../../adapters/tmux.js";
 import { ENGINE_FILE } from "../domain/loop-progress.js";
 import {
   declineKeys,
@@ -34,6 +39,11 @@ export interface ActionDeps {
   atShellPrompt: (target: string) => Promise<boolean>;
   claudeUpMs: number;
   send?: typeof sendConfirmed;
+  stopClaude?: (
+    target: string,
+    signal: "SIGTERM" | "SIGKILL",
+  ) => Promise<boolean>;
+  exitMs?: number;
 }
 
 const DEFAULT_DEPS: ActionDeps = {
@@ -43,6 +53,12 @@ const DEFAULT_DEPS: ActionDeps = {
   claudeUpMs: 60_000,
 };
 const POLL_MS = 500;
+let defaultDeps: ActionDeps = DEFAULT_DEPS;
+
+/** Replace the default action dependencies, or restore them; the test seam for the supervisor registry. */
+export function setActionDeps(deps?: ActionDeps): void {
+  defaultDeps = deps ?? DEFAULT_DEPS;
+}
 
 /**
  * Decline a dangerous delete or a held peer message by moving the cursor to the decline row.
@@ -164,6 +180,74 @@ async function resume(
 }
 
 /**
+ * Stop a frozen claude in its tmux window, then relaunch it with resume and type the loop prompt once.
+ *
+ * @remarks A typed `/exit` would only queue in the frozen box, so the foreground process group gets
+ * SIGTERM and then SIGKILL. LOCAL-166 adds its workspace check here.
+ */
+export async function relaunchFrozen(
+  card: Card,
+  session: Session,
+  frozenSince: string,
+  evidence: string,
+  deps: ActionDeps,
+): Promise<void> {
+  if (session.tmuxSession === undefined) {
+    record(card, session, {
+      action: "relaunch_frozen",
+      result: "failed",
+      reason: "no tmux session",
+      frozenSince,
+      evidence,
+    });
+    await markNeedsInput(
+      card,
+      session,
+      "resume_failed",
+      "relaunch: no tmux session",
+    );
+    return;
+  }
+  const target = `=${session.tmuxSession}:`;
+  const stop = deps.stopClaude ?? signalForeground;
+  const exitMs = deps.exitMs ?? 10_000;
+  const atPrompt = () => deps.atShellPrompt(target);
+  let down = await atPrompt();
+  for (const signal of ["SIGTERM", "SIGKILL"] as const) {
+    if (down) break;
+    await stop(target, signal);
+    down = await waitFor(atPrompt, exitMs, POLL_MS);
+  }
+  if (!down) {
+    record(card, session, {
+      action: "relaunch_frozen",
+      result: "failed",
+      reason: "claude did not exit",
+      frozenSince,
+      evidence,
+    });
+    await markNeedsInput(
+      card,
+      session,
+      "resume_failed",
+      "relaunch: claude did not exit",
+    );
+    return;
+  }
+  record(card, session, {
+    action: "relaunch_frozen",
+    result: "stopped",
+    frozenSince,
+    evidence,
+  });
+  await store.recordSessionRelaunch(
+    card.id,
+    `relaunched with resume after a freeze since ${frozenSince}`,
+  );
+  await resume(card, session, deps);
+}
+
+/**
  * Run the planned actions of one state change in order and record each as one event.
  *
  * @remarks Runs inside the session's sampling turn, so a slow send holds later samples of that
@@ -174,7 +258,7 @@ export async function runActions(
   session: Session,
   actions: SupervisorAction[],
   evidence: string,
-  deps: ActionDeps = DEFAULT_DEPS,
+  deps: ActionDeps = defaultDeps,
 ): Promise<void> {
   for (const action of actions) {
     switch (action.kind) {
@@ -220,6 +304,9 @@ export async function runActions(
         break;
       case "handoff":
         await runHandoff(card, session);
+        break;
+      case "relaunch_frozen":
+        await relaunchFrozen(card, session, action.frozenSince, evidence, deps);
         break;
     }
   }

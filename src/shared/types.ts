@@ -37,6 +37,7 @@ export type EventType =
   | "status_done"
   | "session_start"
   | "session_resume"
+  | "session_relaunch"
   | "session_lost"
   | "session_failed"
   | "resume_failed"

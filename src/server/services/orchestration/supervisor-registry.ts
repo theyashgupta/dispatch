@@ -1,6 +1,7 @@
 import type { Card, Session, SupervisorState } from "../../../shared/types.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { isLoopCard } from "../../../shared/running-group.js";
+import { FROZEN_RELAUNCH_MINUTES } from "../../../shared/orchestrator-limits.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import type { PaneSample } from "../../adapters/markers/watcher.js";
 import {
@@ -21,6 +22,7 @@ import {
   holdsNeedsInput,
   initialPlanMemory,
   planActions,
+  planFrozenRelaunch,
   type LoopFacts,
   type PlanMemory,
 } from "../domain/supervisor-plan.js";
@@ -49,6 +51,7 @@ export interface SupervisorWatcher {
   plan: PlanMemory;
   progressRead: boolean;
   closeTriedAt: number;
+  relaunchedFor: string | null;
 }
 
 const CLOSE_RETRY_MS = 60_000;
@@ -76,6 +79,7 @@ export function ensureWatcher(
       plan: initialPlanMemory(),
       progressRead: false,
       closeTriedAt: 0,
+      relaunchedFor: null,
     };
     watchers.set(tmuxSession, watcher);
   }
@@ -180,6 +184,39 @@ function engineSessionIdOf(card: Card): string | null {
   return card.loopProgress?.engine?.sessionId ?? null;
 }
 
+/** How long a session stays frozen before the relaunch; the env override is for the sandbox e2e. */
+function frozenRelaunchMs(): number {
+  return (
+    Number(process.env.DISPATCH_FROZEN_RELAUNCH_MS) ||
+    FROZEN_RELAUNCH_MINUTES * 60_000
+  );
+}
+
+/**
+ * Plan and run the frozen relaunch once the session has been frozen long enough.
+ *
+ * @remarks The clock starts at the stored `stateSince`, so a server restart does not reset it.
+ */
+async function relaunchIfDue(
+  card: Card,
+  session: Session,
+  watcher: SupervisorWatcher,
+  evidence: string,
+  now: number,
+): Promise<void> {
+  const since = session.stateSince;
+  if (
+    since === undefined ||
+    watcher.relaunchedFor === since ||
+    now - Date.parse(since) < frozenRelaunchMs()
+  )
+    return;
+  watcher.relaunchedFor = since;
+  const planned = planFrozenRelaunch(loopOf(card, now), watcher.plan, since);
+  watcher.plan = planned.memory;
+  await runActions(card, session, planned.actions, evidence);
+}
+
 /** Record one change, then plan and run its actions in the same sampling turn. */
 async function act(
   card: Card,
@@ -244,7 +281,8 @@ export async function superviseLost(cardId: string): Promise<void> {
  * into the pane, is skipped. A group card's loop files are read before its first plan, and an orchestrator
  * card gets the wake duty after the sample's own state work, which a state change skips. The first sample
  * of a new watcher that reads a stored `usage_limit_wait` plans once as if from no state, so a restart
- * re-arms the limit move or wait.
+ * re-arms the limit move or wait. A session that stays `frozen` past the relaunch delay gets the
+ * relaunch duty once per freeze.
  */
 export async function supervisePane(
   sample: PaneSample,
@@ -316,6 +354,8 @@ export async function supervisePane(
         detection.evidence,
       );
     }
+    if (!changed && session.state === "frozen" && detection.state === "frozen")
+      await relaunchIfDue(card, session, watcher, detection.evidence, now);
     if (
       created &&
       !changed &&

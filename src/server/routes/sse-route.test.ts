@@ -305,6 +305,7 @@ test("an activity event of every type on ACME reaches no LOCAL client and every 
     status_done: true,
     session_start: true,
     session_resume: true,
+    session_relaunch: true,
     session_lost: true,
     session_failed: true,
     resume_failed: true,

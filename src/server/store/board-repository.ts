@@ -293,6 +293,7 @@ export interface BoardRepository {
     reason: string,
     cardId?: string | null,
   ): Promise<void>;
+  recordSessionRelaunch(cardId: string, reason: string): Promise<void>;
   listArchive(board: BoardKey): ArchivedGroup[];
   getArchived(archiveId: string): ArchivedGroup | undefined;
   archiveDueForDelete(

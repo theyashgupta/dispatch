@@ -611,3 +611,111 @@ void test(
     assert.deepEqual(loop.userTexts(), []);
   },
 );
+
+function frozenDeps(startsAtPrompt: boolean, exits: boolean) {
+  const calls = {
+    stop: [] as string[],
+    relaunch: 0,
+    sends: [] as { text: string; kind: string }[],
+  };
+  let atPrompt = startsAtPrompt;
+  const overrides: Partial<ActionDeps> = {
+    stopClaude: (_target, signal) => {
+      calls.stop.push(signal);
+      if (exits) atPrompt = true;
+      return Promise.resolve(true);
+    },
+    relaunch: () => {
+      calls.relaunch++;
+      atPrompt = false;
+      return Promise.resolve("launched");
+    },
+    atShellPrompt: () => Promise.resolve(atPrompt),
+    send: (_card, _session, text, kind) => {
+      calls.sends.push({ text, kind });
+      return Promise.resolve("confirmed");
+    },
+    claudeUpMs: 200,
+    exitMs: 50,
+  };
+  return { calls, deps: deps(overrides) };
+}
+
+void test(
+  "a frozen claude gets SIGTERM, a relaunch with resume and one resume prompt",
+  { skip: !hasTmux },
+  async () => {
+    const loop = await loopCard("relaunch-frozen", {});
+    const { calls, deps: injected } = frozenDeps(false, true);
+    await runActions(
+      loop.card(),
+      loop.session(),
+      [{ kind: "relaunch_frozen", frozenSince: "2026-10-21T10:00:00.000Z" }],
+      "pane: frozen",
+      injected,
+    );
+    assert.deepEqual(calls.stop, ["SIGTERM"]);
+    assert.equal(calls.relaunch, 1);
+    assert.equal(calls.sends.length, 1);
+    assert.equal(calls.sends[0].kind, "resume");
+    assert.ok(calls.sends[0].text.startsWith("The session was restarted."));
+    const relaunched = loop
+      .actions()
+      .filter((e) => e.data.action === "relaunch_frozen");
+    assert.equal(relaunched.length, 1);
+    assert.equal(relaunched[0].data.result, "stopped");
+    assert.equal(relaunched[0].data.frozenSince, "2026-10-21T10:00:00.000Z");
+    assert.equal(
+      loop.actions().filter((e) => e.data.action === "resume").length,
+      1,
+    );
+    assert.equal(
+      store
+        .listEvents(SBX, loop.card().id, 50)
+        .filter((e) => e.type === "session_relaunch").length,
+      1,
+    );
+  },
+);
+
+void test(
+  "a frozen session whose shell is already at the prompt is not signalled",
+  { skip: !hasTmux },
+  async () => {
+    const loop = await loopCard("relaunch-at-prompt", {});
+    const { calls, deps: injected } = frozenDeps(true, true);
+    await runActions(
+      loop.card(),
+      loop.session(),
+      [{ kind: "relaunch_frozen", frozenSince: "2026-10-21T10:00:00.000Z" }],
+      "pane: frozen",
+      injected,
+    );
+    assert.deepEqual(calls.stop, []);
+    assert.equal(calls.relaunch, 1);
+  },
+);
+
+void test(
+  "a claude that ignores SIGTERM and SIGKILL is not relaunched and gets resume_failed",
+  { skip: !hasTmux },
+  async () => {
+    const loop = await loopCard("relaunch-stuck", {});
+    const { calls, deps: injected } = frozenDeps(false, false);
+    await runActions(
+      loop.card(),
+      loop.session(),
+      [{ kind: "relaunch_frozen", frozenSince: "2026-10-21T10:00:00.000Z" }],
+      "pane: frozen",
+      injected,
+    );
+    assert.deepEqual(calls.stop, ["SIGTERM", "SIGKILL"]);
+    assert.equal(calls.relaunch, 0);
+    const failed = loop
+      .actions()
+      .filter((e) => e.data.action === "relaunch_frozen");
+    assert.equal(failed.length, 1);
+    assert.equal(failed[0].data.result, "failed");
+    assert.equal(loop.session().stateReason, "resume_failed");
+  },
+);

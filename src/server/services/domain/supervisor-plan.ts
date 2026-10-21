@@ -15,7 +15,8 @@ export type SupervisorAction =
   | { kind: "answer_limit" }
   | { kind: "escape_limit" }
   | { kind: "limit_move" }
-  | { kind: "handoff" };
+  | { kind: "handoff" }
+  | { kind: "relaunch_frozen"; frozenSince: string };
 
 export interface LoopFacts {
   engineActive: boolean;
@@ -164,6 +165,27 @@ export function planActions(input: PlanInput): {
     default:
       return none;
   }
+}
+
+/**
+ * Plan the relaunch of a session that stayed frozen, once per unit and phase.
+ *
+ * @remarks The second freeze in the same phase marks the session `needs_input` instead.
+ */
+export function planFrozenRelaunch(
+  loop: LoopFacts | null,
+  memory: PlanMemory,
+  frozenSince: string,
+): { actions: SupervisorAction[]; memory: PlanMemory } {
+  const key = `frozen:${loop?.unitPhase ?? "none"}`;
+  const sent = memory.prompts[key] ?? 0;
+  const next = { prompts: { ...memory.prompts, [key]: sent + 1 } };
+  return sent === 0
+    ? { actions: [{ kind: "relaunch_frozen", frozenSince }], memory: next }
+    : {
+        actions: [{ kind: "needs_input", reason: "supervisor_gave_up" }],
+        memory: next,
+      };
 }
 
 const MENU_ROW = /^\s*(❯)?\s*(\d+\.\s+\S.*|Deny\b.*|Deliver this message.*)$/;
