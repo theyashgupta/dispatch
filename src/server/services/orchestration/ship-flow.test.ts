@@ -1212,6 +1212,60 @@ void test("a new start_ship reuses the open PR of a branch in place of a second 
   await assertSafeCalls(stack);
 });
 
+const createdHeads = (stack: Stack): string[] =>
+  ghCalls(stack)
+    .filter((a) => a[1] === "create")
+    .map((a) => a[a.indexOf("--head") + 1] ?? "");
+
+void test("an open PR seeded before the start is looked up before the push and adopted even when the list hides it after the push", async () => {
+  const stack = await newStack({ scenario: { hideOpenPrs: "afterPush" } });
+  await gitOutput(stack.worktree, "push", "-q", "origin", "unit-1");
+  const pushed = (
+    await gitOutput(stack.worktree, "rev-parse", "origin/unit-1")
+  ).trim();
+  seedPr(stack, "unit-1", { headRefOid: pushed });
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.deepEqual(
+    flow.branches.map((b) => [b.name, b.pr]),
+    [["unit-1", 7]],
+  );
+  assert.deepEqual(createdHeads(stack), []);
+  await assertSafeCalls(stack);
+});
+
+void test("a branch with only a closed PR opens a new PR", async () => {
+  const stack = await newStack();
+  await gitOutput(stack.worktree, "push", "-q", "origin", "unit-1");
+  seedPr(stack, "unit-1", { state: "CLOSED" });
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.deepEqual(
+    flow.branches.map((b) => [b.name, b.pr]),
+    [["unit-1", 8]],
+  );
+  assert.deepEqual(createdHeads(stack), ["unit-1"]);
+  await assertSafeCalls(stack);
+});
+
+void test("a create that reports an existing PR adopts the PR its message names", async () => {
+  const stack = await newStack({ scenario: { hideOpenPrs: "always" } });
+  await gitOutput(stack.worktree, "push", "-q", "origin", "unit-1");
+  seedPr(stack, "unit-1", {});
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.equal(flow.reason?.includes("already exists") ?? false, false);
+  assert.deepEqual(
+    flow.branches.map((b) => [b.name, b.pr]),
+    [["unit-1", 7]],
+  );
+  assert.deepEqual(createdHeads(stack), ["unit-1"]);
+  await assertSafeCalls(stack);
+});
+
 void test("ship rights set to none during a flow stop it at the current step", async () => {
   try {
     const stack = await newStack({

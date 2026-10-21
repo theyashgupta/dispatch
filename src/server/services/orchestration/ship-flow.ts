@@ -657,8 +657,8 @@ async function check(r: Runner, branch: ShipBranch): Promise<void> {
  * The number of the open PR the branch can reuse, or null when there is none.
  *
  * @remarks Only a same-repository PR into main counts, so a PR into another base or a fork PR with
- * the same head name is never adopted. The head commit is not compared here: right after the push
- * the list can still answer the previous head, so `waitPrHead` reads it instead.
+ * the same head name is never adopted. The head commit is not compared here: a list read around a
+ * push can answer a stale head, so `waitPrHead` reads it instead.
  */
 async function openPrOf(r: Runner, branch: ShipBranch): Promise<number | null> {
   const out = await exec(
@@ -712,12 +712,13 @@ async function waitPrHead(
 /**
  * Push the branch and open its PR unless a PR is recorded or open for the branch.
  *
- * @remarks A new `start_ship` after a stop has no recorded PR, so it reuses the open PR of the
- * branch, since `gh pr create` refuses a second PR for one head.
+ * @remarks The PR list can answer empty right after a push, so the lookup runs before the push. A
+ * create that still reports an existing PR adopts the PR its message names.
  */
 async function pushAndOpen(r: Runner, branch: ShipBranch): Promise<void> {
   if (branch.checked === null)
     throw new ShipStop("branch moved since the check");
+  const open = branch.pr === null ? await openPrOf(r, branch) : null;
   await exec(
     r,
     "git",
@@ -725,29 +726,42 @@ async function pushAndOpen(r: Runner, branch: ShipBranch): Promise<void> {
     NETWORK_TIMEOUT_MS,
   );
   if (branch.pr !== null) return;
-  const open = await openPrOf(r, branch);
   if (open !== null) {
     await waitPrHead(r, open, branch.checked);
     branch.pr = open;
     await persist(r);
     return;
   }
-  const url = await exec(
-    r,
-    "gh",
-    ghArgs(r, [
-      "pr",
-      "create",
-      "--base",
-      "main",
-      "--head",
-      branch.name,
-      "--title",
-      branch.title,
-      "--body",
-      branch.body,
-    ]),
-  );
+  let url: string;
+  try {
+    url = await exec(
+      r,
+      "gh",
+      ghArgs(r, [
+        "pr",
+        "create",
+        "--base",
+        "main",
+        "--head",
+        branch.name,
+        "--title",
+        branch.title,
+        "--body",
+        branch.body,
+      ]),
+    );
+  } catch (err) {
+    const named = Number(
+      /already exists[\s\S]*?\/pull\/(\d+)/.exec(
+        (err as { stderr?: string }).stderr ?? "",
+      )?.[1],
+    );
+    if (!Number.isSafeInteger(named) || named <= 0) throw err;
+    await waitPrHead(r, named, branch.checked);
+    branch.pr = named;
+    await persist(r);
+    return;
+  }
   const pr = Number(url.split("\n").at(-1)?.split("/").at(-1));
   if (!Number.isSafeInteger(pr) || pr <= 0) {
     throw new ShipStop(`no PR number in gh output: ${url.slice(0, 200)}`);
