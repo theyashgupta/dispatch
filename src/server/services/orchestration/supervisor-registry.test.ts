@@ -458,6 +458,8 @@ void test("a session frozen for 15 minutes is relaunched once and later samples 
     assert.equal(calls.kill, 1);
     assert.equal(calls.relaunch, 1);
     assert.equal(relaunchEvents(ids.cardId).length, 1);
+    assert.equal(sessionOf(ids.cardId)?.state, "frozen");
+    assert.equal(Date.parse(sessionOf(ids.cardId)!.stateSince!), since);
   } finally {
     Object.assign(actionTools, realTools);
   }

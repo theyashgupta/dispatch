@@ -842,6 +842,46 @@ void test(
 );
 
 void test(
+  "a frozen relaunch for a changed tmux session or a held card lock records skipped and sends no signal",
+  { skip: !hasTmux },
+  async () => {
+    const { withCardLock } = await import("./card-lock.js");
+    const loop = await loopCard("relaunch-stale", {});
+    const { calls, deps: injected } = frozenDeps(false, true);
+    const relaunch = (session: ReturnType<typeof loop.session>) =>
+      runActions(
+        loop.card(),
+        session,
+        [{ kind: "relaunch_frozen", frozenSince: SINCE }],
+        "pane: frozen",
+        injected,
+      );
+    await relaunch({ ...loop.session(), tmuxSession: "dsp-other" });
+    let release = () => {};
+    const held = withCardLock(
+      loop.card().id,
+      () => new Promise<void>((resolve) => (release = resolve)),
+    );
+    try {
+      await relaunch(loop.session());
+    } finally {
+      release();
+      await held;
+    }
+    assert.deepEqual(calls.kill, []);
+    assert.equal(calls.relaunch, 0);
+    assert.deepEqual(
+      frozenEvents(loop).map((e) => [e.data.result, e.data.reason]),
+      [
+        ["skipped", "the tmux session changed"],
+        ["skipped", "card busy"],
+      ],
+    );
+    assert.notEqual(loop.session().stateReason, "resume_failed");
+  },
+);
+
+void test(
   "a frozen relaunch while a start is in flight records skipped and sends no signal",
   { skip: !hasTmux },
   async () => {
