@@ -81,3 +81,13 @@ test("onStderr receives the stderr chunks as strings and stderr is still capture
   assert.equal(chunks.join(""), "one\ntwo\n");
   assert.equal(stderr, "one\ntwo\n");
 });
+
+test("onStdout receives the stdout chunks as strings and stdout is still captured", async () => {
+  const chunks: unknown[] = [];
+  const { stdout } = await run("sh", ["-c", "echo one; echo two"], {
+    onStdout: (chunk) => chunks.push(chunk),
+  });
+  assert.ok(chunks.every((c) => typeof c === "string"));
+  assert.equal(chunks.join(""), "one\ntwo\n");
+  assert.equal(stdout, "one\ntwo\n");
+});

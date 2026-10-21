@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { ENGINE_FILE } from "../domain/loop-progress.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { hasLoopProgress, isLoopCard } from "../../../shared/running-group.js";
@@ -54,6 +55,10 @@ export const shipTools: {
 const DISPATCH_PACKAGE = "@theyashgupta/dispatch";
 const CHECK_TIMEOUT_MS = 30 * 60_000;
 const SLOT_WAIT_SECONDS = 5400;
+const CHECK_TAIL_LINES = 40;
+const CHECK_OUTPUT_KEEP = 262144;
+const REASON_MAX_CHARS = 4000;
+const NPM_HEADER_RE = /^> \S+@\S+ (\S{1,100})/;
 const SLOT_WAITING = "with-check-slot: waiting for a free slot";
 const SLOT_ACQUIRED = "with-check-slot: acquired";
 const CALL_TIMEOUT_MS = 120_000;
@@ -128,6 +133,35 @@ function firstLine(
   );
 }
 
+/**
+ * The stored reason of a failed check: the failing step, the exit code and the tail of the output.
+ *
+ * @remarks The first stderr line is often a warning, and the end of the output holds the failure.
+ * The tail drops the oldest lines first, so the header and the last line always stay.
+ */
+function checkFailureReason(
+  err: unknown,
+  step: string,
+  streamed: string,
+): string {
+  const e = err as { code?: unknown; stdout?: string; stderr?: string };
+  const text = streamed !== "" ? streamed : (e.stdout ?? "") + (e.stderr ?? "");
+  const header = `check command failed at step ${step} with exit code ${
+    typeof e.code === "number" ? e.code : "unknown"
+  }:`;
+  const lines = stripVTControlCharacters(text)
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .filter((l) => l !== "" && !isSlotLine(l.trim()))
+    .slice(-CHECK_TAIL_LINES);
+  const room = REASON_MAX_CHARS - header.length - 1;
+  while (lines.length > 1 && lines.join("\n").length > room) lines.shift();
+  if (lines.length === 1 && lines[0].length > room) {
+    lines[0] = lines[0].slice(-room);
+  }
+  return lines.length === 0 ? header : `${header}\n${lines.join("\n")}`;
+}
+
 /** Tell if a line is the slot gate's waiting or acquired line. */
 function isSlotLine(line: string): boolean {
   return line.startsWith(SLOT_WAITING) || line === SLOT_ACQUIRED;
@@ -148,8 +182,27 @@ export async function runCheck(
   const startBudget = (): NodeJS.Timeout =>
     setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS);
   let timer = startBudget();
+  let combined = "";
+  let step = argv[0] ?? "check";
+  const append = (chunk: string): void => {
+    combined += chunk;
+    if (combined.length > 2 * CHECK_OUTPUT_KEEP) {
+      combined = combined.slice(-CHECK_OUTPUT_KEEP);
+    }
+  };
+  let stdoutPartial = "";
+  const onStdout = (chunk: string): void => {
+    append(chunk);
+    const lines = (stdoutPartial + chunk).split("\n");
+    stdoutPartial = lines.pop() ?? "";
+    for (const line of lines) {
+      const script = NPM_HEADER_RE.exec(line.trim())?.[1];
+      if (script !== undefined) step = script;
+    }
+  };
   let partial = "";
   const onStderr = (chunk: string): void => {
+    append(chunk);
     const lines = (partial + chunk).split("\n");
     partial = lines.pop() ?? "";
     for (const line of lines.map((l) => l.trim())) {
@@ -172,6 +225,7 @@ export async function runCheck(
       {
         ...callOptions(worktree, SLOT_WAIT_SECONDS * 1000 + CHECK_TIMEOUT_MS),
         signal: controller.signal,
+        onStdout,
         onStderr,
       },
     );
@@ -179,7 +233,7 @@ export async function runCheck(
     throw new ShipStop(
       controller.signal.aborted
         ? "check command failed: timed out after 30 minutes in the check slot"
-        : `check command failed: ${firstLine(err, isSlotLine)}`,
+        : checkFailureReason(err, step, combined),
     );
   } finally {
     clearTimeout(timer);
@@ -463,6 +517,8 @@ export async function startShip(
       "get-url",
       "origin",
     ]).catch(() => "");
+    const previous =
+      card.shipFlow?.repository === input.repository ? card.shipFlow : null;
     const flow: ShipFlow = {
       state: "running",
       rights,
@@ -479,6 +535,9 @@ export async function startShip(
         admin: false,
         tip: null,
         checked: null,
+        passed:
+          previous?.branches.find((p) => p.name === b.name)?.passed ?? null,
+        checkSkipped: false,
       })),
       failedStep: null,
       reason: null,
@@ -617,7 +676,8 @@ function isDispatchRepo(worktree: string): boolean {
  * Check that the diff holds only this branch, the prose rule and the repository check command.
  *
  * @remarks The branch's own files run from the previous branch's stored tip to this branch's tip
- * before the merge. Only the first branch, which has no previous tip, uses its merge base.
+ * before the merge. Only the first branch, which has no previous tip, uses its merge base. A retry
+ * on the commit that already passed skips only the check command.
  */
 async function check(r: Runner, branch: ShipBranch): Promise<void> {
   const tip = branch.tip ?? (await exec(r, "git", ["rev-parse", "HEAD"]));
@@ -650,15 +710,27 @@ async function check(r: Runner, branch: ShipBranch): Promise<void> {
   }
   const argv = r.checkCommand.split(/\s+/).filter((a) => a !== "");
   if (argv.length === 0) return;
+  if (branch.passed != null && branch.passed === branch.checked) {
+    branch.checkSkipped = true;
+    await persist(r);
+    recordGroupState(
+      store.getCard(r.cardId),
+      "ship_check_skipped",
+      `check skipped: ${branch.checked} already passed it`,
+    );
+    return;
+  }
   await runCheck(r.worktree, argv);
+  branch.passed = branch.checked;
+  await persist(r);
 }
 
 /**
  * The number of the open PR the branch can reuse, or null when there is none.
  *
  * @remarks Only a same-repository PR into main counts, so a PR into another base or a fork PR with
- * the same head name is never adopted. The head commit is not compared here: right after the push
- * the list can still answer the previous head, so `waitPrHead` reads it instead.
+ * the same head name is never adopted. The head commit is not compared here: a list read around a
+ * push can answer a stale head, so `waitPrHead` reads it instead.
  */
 async function openPrOf(r: Runner, branch: ShipBranch): Promise<number | null> {
   const out = await exec(
@@ -712,12 +784,13 @@ async function waitPrHead(
 /**
  * Push the branch and open its PR unless a PR is recorded or open for the branch.
  *
- * @remarks A new `start_ship` after a stop has no recorded PR, so it reuses the open PR of the
- * branch, since `gh pr create` refuses a second PR for one head.
+ * @remarks The PR list can answer empty right after a push, so the lookup runs before the push. A
+ * create that still reports an existing PR adopts the PR its message names.
  */
 async function pushAndOpen(r: Runner, branch: ShipBranch): Promise<void> {
   if (branch.checked === null)
     throw new ShipStop("branch moved since the check");
+  const open = branch.pr === null ? await openPrOf(r, branch) : null;
   await exec(
     r,
     "git",
@@ -725,29 +798,42 @@ async function pushAndOpen(r: Runner, branch: ShipBranch): Promise<void> {
     NETWORK_TIMEOUT_MS,
   );
   if (branch.pr !== null) return;
-  const open = await openPrOf(r, branch);
   if (open !== null) {
     await waitPrHead(r, open, branch.checked);
     branch.pr = open;
     await persist(r);
     return;
   }
-  const url = await exec(
-    r,
-    "gh",
-    ghArgs(r, [
-      "pr",
-      "create",
-      "--base",
-      "main",
-      "--head",
-      branch.name,
-      "--title",
-      branch.title,
-      "--body",
-      branch.body,
-    ]),
-  );
+  let url: string;
+  try {
+    url = await exec(
+      r,
+      "gh",
+      ghArgs(r, [
+        "pr",
+        "create",
+        "--base",
+        "main",
+        "--head",
+        branch.name,
+        "--title",
+        branch.title,
+        "--body",
+        branch.body,
+      ]),
+    );
+  } catch (err) {
+    const named = Number(
+      /already exists[\s\S]*?\/pull\/(\d+)/.exec(
+        (err as { stderr?: string }).stderr ?? "",
+      )?.[1],
+    );
+    if (!Number.isSafeInteger(named) || named <= 0) throw err;
+    await waitPrHead(r, named, branch.checked);
+    branch.pr = named;
+    await persist(r);
+    return;
+  }
   const pr = Number(url.split("\n").at(-1)?.split("/").at(-1));
   if (!Number.isSafeInteger(pr) || pr <= 0) {
     throw new ShipStop(`no PR number in gh output: ${url.slice(0, 200)}`);

@@ -1,6 +1,7 @@
 import test, { after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { isolateEnv, waitFor } from "../../test-support/fixtures.js";
 import { startedGroup } from "../../test-support/group-fixtures.js";
@@ -829,6 +830,43 @@ void test("a failing check command stops at checking before any push", async () 
   assert.deepEqual(groupStatesOf(stack.card.id), ["ship_stopped"]);
 });
 
+void test("a failing check stores the step, the exit code and the failing test in the flow, the decision and the group state", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ship-check-"));
+  roots.push(dir);
+  const script = path.join(dir, "check.mjs");
+  fs.writeFileSync(
+    script,
+    [
+      'process.stderr.write("[boundaries][warning]: legacy selector\\n");',
+      'process.stdout.write("> @acme/app@1.0.0 test\\n");',
+      'process.stdout.write("not ok 1 - the real failure\\n");',
+      "process.exitCode = 3;",
+    ].join("\n"),
+  );
+  const stack = await newStack({ checkCommand: `node ${script}` });
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "stopped");
+  assert.equal(flow.failedStep, "checking");
+  const reason = flow.reason ?? "";
+  assert.match(reason, /step test/);
+  assert.match(reason, /exit code 3/);
+  assert.match(reason, /not ok 1 - the real failure/);
+  const [item] = decisionsOf(stack.card.id);
+  assert.equal(item?.kind, "ship_failure");
+  assert.ok(item?.question.includes(reason));
+  const stopped = store
+    .listOrchestrationEvents(SBX, 0, 1000)
+    .filter(
+      (e) =>
+        e.cardId === stack.card.id &&
+        e.kind === "group_state" &&
+        e.data.state === "ship_stopped",
+    )
+    .at(-1);
+  assert.equal(stopped?.data.reason, reason);
+});
+
 void test("a signature rule refusal merges once more as admin and records it", async () => {
   const stack = await newStack({
     scenario: { checks: "pass", signatureBlock: true },
@@ -852,6 +890,156 @@ void test("failed PR checks stop the flow at waiting_checks", async () => {
   assert.equal(flow.branches[0]?.checks, "failed");
   assert.equal(
     ghCalls(stack).some((a) => a[1] === "merge"),
+    false,
+  );
+});
+
+/**
+ * A check command outside every worktree that counts its runs and can fail its first run.
+ */
+function countingCheck(failFirst = false): {
+  command: string;
+  runs: () => number;
+} {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ship-check-"));
+  roots.push(dir);
+  const script = path.join(dir, "check.js");
+  const count = path.join(dir, "count.txt");
+  fs.writeFileSync(
+    script,
+    [
+      `const fs = require("node:fs");`,
+      `const seen = fs.existsSync(${JSON.stringify(count)}) && fs.readFileSync(${JSON.stringify(count)}, "utf8") !== "";`,
+      `fs.appendFileSync(${JSON.stringify(count)}, "x\\n");`,
+      `process.exit(${failFirst ? "seen ? 0 : 1" : "0"});`,
+    ].join("\n"),
+  );
+  return {
+    command: `node ${script}`,
+    runs: () =>
+      fs.existsSync(count)
+        ? fs.readFileSync(count, "utf8").split("\n").filter(Boolean).length
+        : 0,
+  };
+}
+
+async function retryAfterFailedPrChecks(
+  stack: Stack,
+  between: () => Promise<void> = () => Promise.resolve(),
+): Promise<ShipFlow> {
+  await startShip(stack, ["unit-1"]);
+  const first = await finished(stack.card);
+  assert.equal(first.failedStep, "waiting_checks");
+  await between();
+  setGhScenario(stack.ghScenario, { checks: "pass" });
+  await startShip(stack, ["unit-1"]);
+  return finished(stack.card);
+}
+
+void test("a retry on the merged tip whose check passed skips the check command and records the skip", async () => {
+  const check = countingCheck();
+  const stack = await newStack({
+    checkCommand: check.command,
+    scenario: { checks: "fail" },
+  });
+  const flow = await retryAfterFailedPrChecks(stack);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.equal(check.runs(), 1);
+  assert.equal(flow.branches[0]?.checkSkipped, true);
+  assert.equal(flow.branches[0]?.passed, flow.branches[0]?.checked);
+  assert.deepEqual(groupStatesOf(stack.card.id), [
+    "ship_stopped",
+    "ship_check_skipped",
+    "shipped",
+  ]);
+});
+
+void test("a retry after a new commit on the branch runs the check again", async () => {
+  const check = countingCheck();
+  const stack = await newStack({
+    checkCommand: check.command,
+    scenario: { checks: "fail" },
+  });
+  const flow = await retryAfterFailedPrChecks(stack, async () => {
+    const inTree = (...args: string[]) => gitOutput(stack.worktree, ...args);
+    await inTree("checkout", "-q", "unit-1");
+    fs.writeFileSync(path.join(stack.worktree, "extra.txt"), "more\n");
+    await inTree("add", "-A");
+    await inTree("commit", "-qm", "more work");
+    await inTree("checkout", "-q", "group-work");
+  });
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.equal(check.runs(), 2);
+  assert.equal(flow.branches[0]?.checkSkipped, false);
+  assert.equal(
+    groupStatesOf(stack.card.id).includes("ship_check_skipped"),
+    false,
+  );
+});
+
+void test("a retry after a failed check runs the check again", async () => {
+  const check = countingCheck(true);
+  const stack = await newStack({ checkCommand: check.command });
+  await startShip(stack, ["unit-1"]);
+  const first = await finished(stack.card);
+  assert.equal(first.failedStep, "checking");
+  assert.equal(check.runs(), 1);
+  assert.equal(first.branches[0]?.passed, null);
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.equal(check.runs(), 2);
+  assert.equal(flow.branches[0]?.checkSkipped, false);
+});
+
+void test("a flow on another branch name or another repository does not inherit the passed commit", async () => {
+  for (const other of [
+    { name: "unit-0", repository: undefined },
+    { name: "unit-1", repository: "/tmp/elsewhere" },
+  ]) {
+    const check = countingCheck();
+    const stack = await newStack({ checkCommand: check.command });
+    const tip = (await gitOutput(stack.worktree, "rev-parse", "unit-1")).trim();
+    await storeRunning(stack, { name: other.name, passed: tip });
+    const stored = store.getCard(stack.card.id)!.shipFlow!;
+    await store.setShipFlow(stack.card.id, {
+      ...stored,
+      state: "stopped",
+      repository: other.repository ?? stored.repository,
+    });
+    await startShip(stack, ["unit-1"]);
+    const flow = await finished(stack.card);
+    assert.equal(flow.state, "done", flow.reason ?? "");
+    assert.equal(check.runs(), 1, JSON.stringify(other));
+    assert.equal(flow.branches[0]?.checkSkipped, false);
+    assert.equal(
+      groupStatesOf(stack.card.id).includes("ship_check_skipped"),
+      false,
+    );
+  }
+});
+
+void test("an empty check command records no passed commit and no skip", async () => {
+  const stack = await newStack({
+    checkCommand: "",
+    scenario: { checks: "fail" },
+  });
+  await startShip(stack, ["unit-1"]);
+  const first = await finished(stack.card);
+  assert.equal(first.failedStep, "waiting_checks");
+  assert.equal(first.branches[0]?.passed, null);
+  setGhScenario(stack.ghScenario, { checks: "pass" });
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.equal(flow.branches[0]?.passed, null);
+  assert.equal(flow.branches[0]?.checkSkipped, false);
+  assert.equal(
+    groupStatesOf(stack.card.id).includes("ship_check_skipped"),
+    false,
+  );
+  assert.equal(
+    calls.some((c) => c.cmd === "env"),
     false,
   );
 });
@@ -967,6 +1155,8 @@ void test("resumeShipFlows finishes a stored running flow from its stored tips w
     admin: false,
     tip: null,
     checked: null,
+    passed: null,
+    checkSkipped: false,
     ...fields,
   });
   await store.setShipFlow(stack.card.id, {
@@ -1212,6 +1402,64 @@ void test("a new start_ship reuses the open PR of a branch in place of a second 
   await assertSafeCalls(stack);
 });
 
+const createdHeads = (stack: Stack): string[] =>
+  ghCalls(stack)
+    .filter((a) => a[1] === "create")
+    .map((a) => a[a.indexOf("--head") + 1] ?? "");
+
+void test("an open PR seeded before the start is looked up before the push and adopted even when the list hides it after the push", async () => {
+  const stack = await newStack({ scenario: { hideOpenPrs: "afterPush" } });
+  const older = (await gitOutput(stack.worktree, "rev-parse", "main")).trim();
+  await gitOutput(
+    stack.worktree,
+    "push",
+    "-q",
+    "origin",
+    `${older}:refs/heads/unit-1`,
+  );
+  seedPr(stack, "unit-1", { headRefOid: older });
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.deepEqual(
+    flow.branches.map((b) => [b.name, b.pr]),
+    [["unit-1", 7]],
+  );
+  assert.deepEqual(createdHeads(stack), []);
+  await assertSafeCalls(stack);
+});
+
+void test("a branch with only a closed PR opens a new PR", async () => {
+  const stack = await newStack();
+  await gitOutput(stack.worktree, "push", "-q", "origin", "unit-1");
+  seedPr(stack, "unit-1", { state: "CLOSED" });
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.deepEqual(
+    flow.branches.map((b) => [b.name, b.pr]),
+    [["unit-1", 8]],
+  );
+  assert.deepEqual(createdHeads(stack), ["unit-1"]);
+  await assertSafeCalls(stack);
+});
+
+void test("a create that reports an existing PR adopts the PR its message names", async () => {
+  const stack = await newStack({ scenario: { hideOpenPrs: "always" } });
+  await gitOutput(stack.worktree, "push", "-q", "origin", "unit-1");
+  seedPr(stack, "unit-1", {});
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.equal(flow.reason?.includes("already exists") ?? false, false);
+  assert.deepEqual(
+    flow.branches.map((b) => [b.name, b.pr]),
+    [["unit-1", 7]],
+  );
+  assert.deepEqual(createdHeads(stack), ["unit-1"]);
+  await assertSafeCalls(stack);
+});
+
 void test("ship rights set to none during a flow stop it at the current step", async () => {
   try {
     const stack = await newStack({
@@ -1436,6 +1684,8 @@ void test("a resumed flow whose HEAD is not the checked commit stops before it p
         admin: false,
         tip: tip1,
         checked: tip1,
+        passed: null,
+        checkSkipped: false,
       },
     ],
     failedStep: null,
@@ -1516,6 +1766,8 @@ void test("a resumed flow on a card with no workspace path stops with a decision
         admin: false,
         tip: "a".repeat(40),
         checked: "a".repeat(40),
+        passed: null,
+        checkSkipped: false,
       },
     ],
     failedStep: null,
@@ -1748,6 +2000,8 @@ function storeRunning(
         admin: false,
         tip: null,
         checked: null,
+        passed: null,
+        checkSkipped: false,
         ...fields,
       },
     ],
@@ -1966,7 +2220,7 @@ void test("a check that holds the slot 31 minutes fails", async (t) => {
   }
 });
 
-void test("a failed check reports its own first line, not the slot gate lines", async () => {
+void test("a failed check reason holds the output tail without the slot gate lines", async () => {
   const check = heldCheck();
   try {
     const done = runCheck("/sbx", ["npm", "run", "check"]);
@@ -1976,7 +2230,65 @@ void test("a failed check reports its own first line, not the slot gate lines", 
       }),
     );
     await assert.rejects(done, {
-      message: "check command failed: lint: 2 problems",
+      message:
+        "check command failed at step npm with exit code unknown:\nlint: 2 problems",
+    });
+  } finally {
+    check.restore();
+  }
+});
+
+void test("a failed check reason names the failing step, the exit code and the failing test after a warning", async () => {
+  const check = heldCheck();
+  try {
+    const done = runCheck("/sbx", ["npm", "run", "check"]);
+    const warning = "[boundaries][warning]: Detected legacy selector syntax";
+    check.opts().onStderr?.(`${warning}\n`);
+    check
+      .opts()
+      .onStdout?.(
+        "\n> @theyashgupta/dispatch@1.0.0 test\n> node scripts/run-tests.mjs unit\n\n",
+      );
+    check
+      .opts()
+      .onStdout?.("\u001b[31mnot ok 12 - ship flow adopts the PR\u001b[39m\n");
+    check.finish(Object.assign(new Error("Command failed: env"), { code: 1 }));
+    await assert.rejects(done, (err: Error) => {
+      assert.ok(
+        err.message.startsWith(
+          "check command failed at step test with exit code 1:",
+        ),
+      );
+      assert.ok(err.message.includes("not ok 12 - ship flow adopts the PR"));
+      assert.equal(err.message.includes("\u001b"), false);
+      assert.ok(err.message.includes(warning));
+      return true;
+    });
+  } finally {
+    check.restore();
+  }
+});
+
+void test("a failed check reason keeps only the last 40 lines and at most 4000 characters", async () => {
+  const check = heldCheck();
+  try {
+    const done = runCheck("/sbx", ["npm", "run", "check"]);
+    for (let i = 1; i <= 100; i++) {
+      check
+        .opts()
+        .onStdout?.(`line ${String(i).padStart(3, "0")} ${"x".repeat(193)}\n`);
+    }
+    check.finish(Object.assign(new Error("Command failed: env"), { code: 2 }));
+    await assert.rejects(done, (err: Error) => {
+      assert.ok(err.message.length <= 4000);
+      assert.ok(
+        err.message.startsWith(
+          "check command failed at step npm with exit code 2:",
+        ),
+      );
+      assert.ok(err.message.includes("line 100 "));
+      assert.ok(!err.message.includes("line 001 "));
+      return true;
     });
   } finally {
     check.restore();
