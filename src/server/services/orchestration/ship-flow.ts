@@ -58,7 +58,7 @@ const SLOT_WAIT_SECONDS = 5400;
 const CHECK_TAIL_LINES = 40;
 const CHECK_OUTPUT_KEEP = 262144;
 const REASON_MAX_CHARS = 4000;
-const NPM_HEADER_RE = /^> \S+@\S+ (\S+)/;
+const NPM_HEADER_RE = /^> \S+@\S+ (\S{1,100})/;
 const SLOT_WAITING = "with-check-slot: waiting for a free slot";
 const SLOT_ACQUIRED = "with-check-slot: acquired";
 const CALL_TIMEOUT_MS = 120_000;
@@ -154,10 +154,10 @@ function checkFailureReason(
     .map((l) => l.trimEnd())
     .filter((l) => l !== "" && !isSlotLine(l.trim()))
     .slice(-CHECK_TAIL_LINES);
-  const room = (): number => REASON_MAX_CHARS - header.length - 1;
-  while (lines.length > 1 && lines.join("\n").length > room()) lines.shift();
-  if (lines.length === 1 && lines[0]!.length > room()) {
-    lines[0] = lines[0]!.slice(-room());
+  const room = REASON_MAX_CHARS - header.length - 1;
+  while (lines.length > 1 && lines.join("\n").length > room) lines.shift();
+  if (lines.length === 1 && lines[0]!.length > room) {
+    lines[0] = lines[0]!.slice(-room);
   }
   return lines.length === 0 ? header : `${header}\n${lines.join("\n")}`;
 }
@@ -184,9 +184,15 @@ export async function runCheck(
   let timer = startBudget();
   let combined = "";
   let step = argv[0] ?? "check";
+  const append = (chunk: string): void => {
+    combined += chunk;
+    if (combined.length > 2 * CHECK_OUTPUT_KEEP) {
+      combined = combined.slice(-CHECK_OUTPUT_KEEP);
+    }
+  };
   let stdoutPartial = "";
   const onStdout = (chunk: string): void => {
-    combined = (combined + chunk).slice(-CHECK_OUTPUT_KEEP);
+    append(chunk);
     const lines = (stdoutPartial + chunk).split("\n");
     stdoutPartial = lines.pop() ?? "";
     for (const line of lines) {
@@ -196,7 +202,7 @@ export async function runCheck(
   };
   let partial = "";
   const onStderr = (chunk: string): void => {
-    combined = (combined + chunk).slice(-CHECK_OUTPUT_KEEP);
+    append(chunk);
     const lines = (partial + chunk).split("\n");
     partial = lines.pop() ?? "";
     for (const line of lines.map((l) => l.trim())) {
@@ -703,6 +709,7 @@ async function check(r: Runner, branch: ShipBranch): Promise<void> {
     throw new ShipStop("the repository has no board entry");
   }
   const argv = r.checkCommand.split(/\s+/).filter((a) => a !== "");
+  if (argv.length === 0) return;
   if (branch.passed != null && branch.passed === branch.checked) {
     branch.checkSkipped = true;
     await persist(r);
@@ -713,7 +720,7 @@ async function check(r: Runner, branch: ShipBranch): Promise<void> {
     );
     return;
   }
-  if (argv.length > 0) await runCheck(r.worktree, argv);
+  await runCheck(r.worktree, argv);
   branch.passed = branch.checked;
   await persist(r);
 }

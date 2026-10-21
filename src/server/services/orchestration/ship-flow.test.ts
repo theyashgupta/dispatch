@@ -832,6 +832,7 @@ void test("a failing check command stops at checking before any push", async () 
 
 void test("a failing check stores the step, the exit code and the failing test in the flow, the decision and the group state", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ship-check-"));
+  roots.push(dir);
   const script = path.join(dir, "check.mjs");
   fs.writeFileSync(
     script,
@@ -989,6 +990,58 @@ void test("a retry after a failed check runs the check again", async () => {
   assert.equal(flow.state, "done", flow.reason ?? "");
   assert.equal(check.runs(), 2);
   assert.equal(flow.branches[0]?.checkSkipped, false);
+});
+
+void test("a flow on another branch name or another repository does not inherit the passed commit", async () => {
+  for (const other of [
+    { name: "unit-0", repository: undefined },
+    { name: "unit-1", repository: "/tmp/elsewhere" },
+  ]) {
+    const check = countingCheck();
+    const stack = await newStack({ checkCommand: check.command });
+    const tip = (await gitOutput(stack.worktree, "rev-parse", "unit-1")).trim();
+    await storeRunning(stack, { name: other.name, passed: tip });
+    const stored = store.getCard(stack.card.id)!.shipFlow!;
+    await store.setShipFlow(stack.card.id, {
+      ...stored,
+      state: "stopped",
+      repository: other.repository ?? stored.repository,
+    });
+    await startShip(stack, ["unit-1"]);
+    const flow = await finished(stack.card);
+    assert.equal(flow.state, "done", flow.reason ?? "");
+    assert.equal(check.runs(), 1, JSON.stringify(other));
+    assert.equal(flow.branches[0]?.checkSkipped, false);
+    assert.equal(
+      groupStatesOf(stack.card.id).includes("ship_check_skipped"),
+      false,
+    );
+  }
+});
+
+void test("an empty check command records no passed commit and no skip", async () => {
+  const stack = await newStack({
+    checkCommand: "",
+    scenario: { checks: "fail" },
+  });
+  await startShip(stack, ["unit-1"]);
+  const first = await finished(stack.card);
+  assert.equal(first.failedStep, "waiting_checks");
+  assert.equal(first.branches[0]?.passed, null);
+  setGhScenario(stack.ghScenario, { checks: "pass" });
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.equal(flow.branches[0]?.passed, null);
+  assert.equal(flow.branches[0]?.checkSkipped, false);
+  assert.equal(
+    groupStatesOf(stack.card.id).includes("ship_check_skipped"),
+    false,
+  );
+  assert.equal(
+    calls.some((c) => c.cmd === "env"),
+    false,
+  );
 });
 
 void test("a merge conflict with main stops at merging_main and aborts the merge", async () => {
@@ -1356,11 +1409,15 @@ const createdHeads = (stack: Stack): string[] =>
 
 void test("an open PR seeded before the start is looked up before the push and adopted even when the list hides it after the push", async () => {
   const stack = await newStack({ scenario: { hideOpenPrs: "afterPush" } });
-  await gitOutput(stack.worktree, "push", "-q", "origin", "unit-1");
-  const pushed = (
-    await gitOutput(stack.worktree, "rev-parse", "origin/unit-1")
-  ).trim();
-  seedPr(stack, "unit-1", { headRefOid: pushed });
+  const older = (await gitOutput(stack.worktree, "rev-parse", "main")).trim();
+  await gitOutput(
+    stack.worktree,
+    "push",
+    "-q",
+    "origin",
+    `${older}:refs/heads/unit-1`,
+  );
+  seedPr(stack, "unit-1", { headRefOid: older });
   await startShip(stack, ["unit-1"]);
   const flow = await finished(stack.card);
   assert.equal(flow.state, "done", flow.reason ?? "");
@@ -2192,7 +2249,9 @@ void test("a failed check reason names the failing step, the exit code and the f
       .onStdout?.(
         "\n> @theyashgupta/dispatch@1.0.0 test\n> node scripts/run-tests.mjs unit\n\n",
       );
-    check.opts().onStdout?.("not ok 12 - ship flow adopts the PR\n");
+    check
+      .opts()
+      .onStdout?.("\u001b[31mnot ok 12 - ship flow adopts the PR\u001b[39m\n");
     check.finish(Object.assign(new Error("Command failed: env"), { code: 1 }));
     await assert.rejects(done, (err: Error) => {
       assert.ok(
@@ -2201,6 +2260,7 @@ void test("a failed check reason names the failing step, the exit code and the f
         ),
       );
       assert.ok(err.message.includes("not ok 12 - ship flow adopts the PR"));
+      assert.equal(err.message.includes("\u001b"), false);
       assert.ok(err.message.includes(warning));
       return true;
     });

@@ -446,6 +446,14 @@ async function assertSeededPrAdopted(
     next: number;
     prs: Record<string, unknown>;
   };
+  const worktree = path.join(card.workspacePath ?? "", sample.name);
+  const older = git(worktree, sb.home, ["rev-parse", "HEAD~1"]);
+  git(worktree, sb.home, [
+    "push",
+    "-q",
+    "origin",
+    `${older}:refs/heads/${card.identifier}`,
+  ]);
   const seeded = state.next;
   state.prs[String(seeded)] = {
     head: card.identifier,
@@ -454,15 +462,17 @@ async function assertSeededPrAdopted(
     state: "OPEN",
     polls: 0,
     mergePolls: 0,
+    headRefOid: older,
   };
   state.next += 1;
   fs.writeFileSync(stateFile, JSON.stringify(state));
-  setGhScenario(sb.gh.scenario, { checks: "pass" });
+  setGhScenario(sb.gh.scenario, { checks: "pass", hideOpenPrs: "afterPush" });
 
   const flow = await shipUntilEnd(sb, sample, token, card);
   assert.equal(flow.state, "done", flow.reason ?? "");
   assert.equal(flow.branches[0]?.pr, seeded);
   const created = ghCalls(sb, "create").map((c) => c[c.indexOf("--head") + 1]);
+  assert.equal(created.includes(card.identifier), false);
   assert.deepEqual(created, [retryBranch]);
   assert.equal(ghCalls(sb, "merge").length, 2);
   assert.equal(
