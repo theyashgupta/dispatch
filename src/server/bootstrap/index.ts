@@ -34,6 +34,12 @@ import {
 } from "../services/orchestration/default-identity-watch.js";
 import { loadOrCreateVapidKeys } from "../services/infra/push-keys.js";
 import { VAPID_KEYS_PATH } from "../services/infra/paths.js";
+import { envVaultPresence } from "../services/infra/vault.js";
+import {
+  PUSHOVER_NAMES,
+  missingPushover,
+  pushoverStartLine,
+} from "../services/domain/pushover-check.js";
 import {
   getCrossSessionInbound,
   setHooksRuntime,
@@ -374,6 +380,10 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   buildRegistry(config);
   loadOrCreateVapidKeys();
   console.log(`[push] VAPID keypair loaded from ${VAPID_KEYS_PATH}`);
+  const pushoverLine = pushoverStartLine(
+    missingPushover(await envVaultPresence(PUSHOVER_NAMES)),
+  );
+  if (pushoverLine !== null) console.warn(pushoverLine);
 
   const statusChannel = config.statusChannel ?? "auto";
   await installHookArtifacts(getCrossSessionInbound());

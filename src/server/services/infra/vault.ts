@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import fsp from "node:fs/promises";
 import writeFileAtomic from "write-file-atomic";
-import type { VaultKeySummary } from "../../../shared/types.js";
+import type { EnvPresence, VaultKeySummary } from "../../../shared/types.js";
 import {
   VAULT_DIR,
   VAULT_METADATA_PATH,
@@ -538,3 +538,50 @@ export const readPrevious = (name: string) =>
  */
 export const readCurrent = (name: string) =>
   readStoredValue(VAULT_VALUES_PATH, name);
+
+/**
+ * Report whether each env-vault name is unset, empty or filled.
+ *
+ * @remarks It answers presence states only and never returns, logs or stores a value. The process
+ * environment wins over the files, so a test can set fake values.
+ */
+export async function envVaultPresence(
+  names: readonly string[],
+  env: NodeJS.ProcessEnv = process.env,
+  files: { schema: string; values: string } = {
+    schema: ENV_VAULT_SCHEMA_PATH,
+    values: ENV_VAULT_VALUES_PATH,
+  },
+): Promise<Record<string, EnvPresence>> {
+  const valueLines = await readEnvLines(files.values);
+  const schemaLines = (await readEnvLines(files.schema))
+    .map((line) => line.trim())
+    .filter((line) => !line.startsWith("#"));
+  const out: Record<string, EnvPresence> = {};
+  for (const name of names) {
+    const valueLine = valueLines.find(isLineFor(name));
+    if (Object.hasOwn(env, name)) {
+      out[name] = (env[name] ?? "").trim() !== "" ? "filled" : "empty";
+    } else if (valueLine !== undefined) {
+      out[name] =
+        valueLine
+          .slice(name.length + 1)
+          .replace(/^(['"])(.*)\1$/, "$2")
+          .trim() !== ""
+          ? "filled"
+          : "empty";
+    } else if (
+      schemaLines.some(
+        (line) =>
+          line === name ||
+          line.startsWith(`${name}=`) ||
+          line.startsWith(`${name} `),
+      )
+    ) {
+      out[name] = "empty";
+    } else {
+      out[name] = "unset";
+    }
+  }
+  return out;
+}

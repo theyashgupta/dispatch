@@ -2239,3 +2239,5 @@ export interface SlackMcpStatus {
   lastCount?: number;
   polledAt?: string;
 }
+
+export type EnvPresence = "unset" | "empty" | "filled";
