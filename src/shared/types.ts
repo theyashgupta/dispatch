@@ -2071,6 +2071,8 @@ export interface ShipBranch {
   admin: boolean;
   tip: string | null;
   checked: string | null;
+  passed: string | null;
+  checkSkipped: boolean;
 }
 
 export interface ShipFlow {
@@ -2109,6 +2111,7 @@ export type GroupState =
   | "start_failed"
   | "shipped"
   | "ship_stopped"
+  | "ship_check_skipped"
   | "loop_error"
   | "usage_limit";
 

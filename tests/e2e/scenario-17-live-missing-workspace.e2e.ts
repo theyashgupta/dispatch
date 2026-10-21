@@ -16,14 +16,14 @@ import {
   type Sandbox,
 } from "./harness/sandbox.js";
 
-const NAME = "scenario-16";
+const NAME = "scenario-17";
 const BOARD = "LWM";
 const CARD = "LWM-1";
 const ARGV_FILE = path.join(SANDBOX_ROOT, NAME, "argv.jsonl");
 
 const SAMPLE_FILE = path.join(SANDBOX_ROOT, `${NAME}-memory-sample.json`);
 
-const note = makeNote("scenario-16");
+const note = makeNote("scenario-17");
 
 const launches = (): number =>
   fs.existsSync(ARGV_FILE)
@@ -160,7 +160,7 @@ async function runScenario(sb: Sandbox): Promise<void> {
 }
 
 void test(
-  "scenario 16: the supervisor does not relaunch claude in a live shell whose workspace folder is missing",
+  "scenario 17: the supervisor does not relaunch claude in a live shell whose workspace folder is missing",
   { timeout: 10 * MINUTE },
   async () => {
     process.env.FAKE_CLAUDE_ARGV_FILE = ARGV_FILE;
