@@ -5089,10 +5089,10 @@ shifts the docked panel by style values alone and never remounts the terminal if
 under it. The same hook sets `--bottom-bar-height` on `document.documentElement`: 64px when the bar
 shows, 0px when it hides on scroll down, and unset on desktop. The root is the target because toasts
 and sheets portal to the body. The toaster, `SelectionBar.tsx` and `SessionsBulkBar.tsx` add the
-variable to their bottom offset. At 390px, the spec tests/visual/bottom-bar.spec.ts checks three behaviours: the toaster
-and `SelectionBar.tsx` clear the bar through the variable, the bar hides on scroll down and shows on
-scroll up with no transition under reduced motion, and editable fields use 16px text or more on a
-touch device.
+variable to their bottom offset. At 390px, the spec tests/visual/bottom-bar.spec.ts checks three
+behaviours: the toaster and `SelectionBar.tsx` clear the bar through the variable; the bar hides on
+scroll down, shows on scroll up, and under reduced motion stays shown with no transition; and on a
+touch device the fields of the create ticket dialog and the command palette use 16px text or more.
 
 **The active row carries its own tint.** `AppSidebar.tsx` renders each row as a shadcn
 `SidebarMenuButton`. The active row (`data-active="true"`) takes the tint
