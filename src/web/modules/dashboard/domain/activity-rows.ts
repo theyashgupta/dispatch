@@ -46,6 +46,7 @@ const GROUP_STATE_LABELS: Record<GroupState, string> = {
   start_failed: "failed to start",
   shipped: "shipped",
   ship_stopped: "ship stopped",
+  ship_check_skipped: "skipped a repeated check",
   loop_error: "loop error",
   usage_limit: "hit a usage limit",
 };
@@ -81,6 +82,7 @@ const GROUP_STATE_TONES: Record<string, ActivityTone> = {
   usage_limit: "warn",
   agent_done: "ok",
   shipped: "ok",
+  ship_check_skipped: "ok",
 };
 
 const ACTION_TONES: Record<string, ActivityTone> = {
