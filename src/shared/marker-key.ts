@@ -23,6 +23,12 @@ export const NEEDS_INPUT_MARKER_KIND = "NEEDS_INPUT";
  */
 export const NEEDS_INPUT_MARKER_PREFIX = `${NEEDS_INPUT_MARKER_KIND} `;
 
+/** The `Marker.kind` spelling for a done marker. */
+export const DONE_MARKER_KIND = "DONE";
+
+/** Prefix a `markerKey()` result carries when its marker is a done marker. */
+export const DONE_MARKER_PREFIX = `${DONE_MARKER_KIND} `;
+
 /**
  * The single write-time-AND-load-time footgun predicate: a playbook body must never be able to
  * smuggle the status-protocol marker into a kickoff. Both `loadPlaybooks` (skip) and the write

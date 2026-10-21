@@ -169,7 +169,10 @@ function seedFinishedLoop(ws: string = stack.ws, phases: number = 2): string {
 }
 
 /** Write a transcript whose last assistant message ends with the promise and the DONE marker. */
-function seedTranscript(name: string = "sess-151"): string {
+function seedTranscript(
+  name: string = "sess-151",
+  text: string = `Both phases are green and the branch is ready.\n<promise>${PROMISE}</promise>\nDISPATCH_STATUS: DONE - ${SLUG} built`,
+): string {
   const file = path.join(stack.root, "transcripts", `${name}.jsonl`);
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const entry = (type: "user" | "assistant", text: string) =>
@@ -181,13 +184,8 @@ function seedTranscript(name: string = "sess-151"): string {
     });
   fs.writeFileSync(
     file,
-    [
-      entry("user", "build sbx-151"),
-      entry(
-        "assistant",
-        `Both phases are green and the branch is ready.\n<promise>${PROMISE}</promise>\nDISPATCH_STATUS: DONE - ${SLUG} built`,
-      ),
-    ].join("\n") + "\n",
+    [entry("user", "build sbx-151"), entry("assistant", text)].join("\n") +
+      "\n",
   );
   return file;
 }
@@ -276,11 +274,13 @@ void test("a finished single PRD loop whose promise is only in the transcript is
   assert.equal(reply.status, 202, JSON.stringify(reply.body));
 
   assert.equal(closedEvents(card).length, 1);
+  assert.equal(closedEvents(card)[0]?.data.reason, "close_loop");
   await sampleThrice(card, 4);
   assert.equal(closeLoopEvents(card).length, 1);
   const progress = store.getCard(card.id)?.loopProgress;
   assert.equal(progress?.completion, "complete");
   assert.equal(progress?.engine?.closed, true);
+  assert.equal(progress?.engine?.closedReason, "close_loop");
   assert.equal(fs.existsSync(engine), false);
   assert.equal(fs.existsSync(`${engine}.done`), true);
   await waitFor(
@@ -385,4 +385,98 @@ void test("a failed rename is recorded, leaves the engine open, and is retried o
   assert.equal(closedEvents(card).length, 1);
   assert.equal(store.getCard(card.id)?.loopProgress?.engine?.closed, true);
   assert.equal(fs.existsSync(`${engine}.done`), true);
+});
+
+/** Seeds an engine file whose prompt has no PRD path line, so no phase can vouch for completion. */
+function seedLoopWithoutPrdPath(ws: string): string {
+  const engine = path.join(ws, ".claude", "ralph-loop.local.md");
+  fs.mkdirSync(path.dirname(engine), { recursive: true });
+  fs.writeFileSync(
+    engine,
+    `---\nactive: true\niteration: 1\nsession_id: sess-151\ncompletion_promise: "${PROMISE}"\n---\nExecute ${SLUG} per the ralph-loop skill. Unit A: PRD .planning/prds/demo.md, state .planning/${SLUG}/state.md. When done output the phrase ${PROMISE} wrapped in promise tags.\n`,
+  );
+  return engine;
+}
+
+async function superviseLoopWithoutPrdPath(
+  card: Card,
+  ws: string,
+  transcript: string,
+): Promise<string> {
+  const engine = seedLoopWithoutPrdPath(ws);
+  await refreshLoopProgress(card.id);
+  await store.setTranscriptPath(card.id, sessionOf(card).id, transcript);
+  await sampleThrice(card);
+  return engine;
+}
+
+void test("a single PRD loop with no PRD path in its prompt is closed on the promise in the transcript", async () => {
+  await enableSupervisor();
+  const ws = ownRoot("ws-unvouched");
+  const card = await launchedTicket(ws);
+  const engine = await superviseLoopWithoutPrdPath(
+    card,
+    ws,
+    seedTranscript("sess-unvouched"),
+  );
+
+  assert.equal(fs.existsSync(engine), false);
+  const done = fs.readFileSync(`${engine}.done`, "utf8");
+  assert.match(done, /^closed_reason: promise$/m);
+  assert.match(done, /wrapped in promise tags\.\n$/);
+  const events = closeLoopEvents(card);
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.data.result, "closed");
+  assert.equal(events[0]?.data.reason, "promise");
+  const stored = store.getCard(card.id)?.loopProgress?.engine;
+  assert.equal(stored?.closed, true);
+  assert.equal(stored?.closedReason, "promise");
+});
+
+void test("a single PRD loop with no PRD path keeps its engine open when the promise is for another slug", async () => {
+  await enableSupervisor();
+  const ws = ownRoot("ws-other-slug");
+  const card = await launchedTicket(ws);
+  const engine = await superviseLoopWithoutPrdPath(
+    card,
+    ws,
+    seedTranscript(
+      "sess-other-slug",
+      "All done.\n<promise>RALPH COMPLETE other-slug</promise>\nDISPATCH_STATUS: DONE - other-slug built",
+    ),
+  );
+
+  assert.equal(fs.existsSync(engine), true);
+  assert.equal(fs.existsSync(`${engine}.done`), false);
+  assert.equal(store.getCard(card.id)?.loopProgress?.engine?.closed, false);
+  assert.equal(closeLoopEvents(card).length, 0);
+});
+
+void test("a loop whose engine file the plugin already removed is closed on the promise", async () => {
+  await enableSupervisor();
+  const ws = ownRoot("ws-plugin-removed");
+  const card = await launchedTicket(ws);
+  const engine = seedLoopWithoutPrdPath(ws);
+  await refreshLoopProgress(card.id);
+  await store.setTranscriptPath(
+    card.id,
+    sessionOf(card).id,
+    seedTranscript("sess-plugin-removed"),
+  );
+  fs.unlinkSync(engine);
+  await sampleThrice(card);
+
+  const done = fs.readFileSync(`${engine}.done`, "utf8");
+  assert.match(done, /^closed_reason: promise$/m);
+  assert.match(done, /^active: false$/m);
+  const stored = store.getCard(card.id)?.loopProgress;
+  assert.equal(stored?.engine?.closed, true);
+  assert.equal(stored?.engine?.closedReason, "promise");
+  assert.equal(stored?.completion, "complete");
+  const events = closeLoopEvents(card);
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.data.result, "closed");
+  const reply = await shipOf(card);
+  assert.notEqual(reply.body.error, "engine-not-closed");
+  assert.notEqual(reply.body.error, "loop-not-finished");
 });
