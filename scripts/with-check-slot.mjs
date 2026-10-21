@@ -12,7 +12,12 @@ import {
 import { constants, homedir, totalmem } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { isAlive, readOwner } from "./check-slot-holder.mjs";
+import {
+  checkHolder,
+  readOwner,
+  releaseLine,
+  shouldRelease,
+} from "./check-slot-holder.mjs";
 
 const [command, ...args] = process.argv.slice(2);
 const env = process.env;
@@ -21,12 +26,14 @@ const slots = positiveInt(
   Math.max(1, Math.floor(totalmem() / 2 ** 30 / 8)),
 );
 const waitSeconds = nonNegativeInt(env.DISPATCH_CHECK_WAIT_SECONDS, 5400);
+const stoppedLimit = nonNegativeInt(env.DISPATCH_CHECK_STOPPED_SECONDS, 300);
 const lockDir =
   env.DISPATCH_CHECK_LOCK_DIR || join(homedir(), ".dispatch", "locks");
 const POLL_MS = 500;
 const GUARD_STALE_MS = 60_000;
 let heldSlot = null;
 let child = null;
+const stoppedSince = new Map();
 
 /**
  * Parse a positive integer and fall back to the default for any other value.
@@ -46,10 +53,10 @@ function nonNegativeInt(value, fallback) {
 }
 
 /**
- * Tell if a slot owner is gone: a stale slot, or a pid that no process has.
+ * Tell if a slot must be freed: a stale slot, or a holder that is gone or stopped past the limit.
  */
-function isDead(owner) {
-  return owner === "stale" || (typeof owner === "number" && !isAlive(owner));
+function mustFree(check) {
+  return check.verdict === "stale" || shouldRelease(check, stoppedLimit);
 }
 
 /**
@@ -84,12 +91,12 @@ function readToken(path) {
 }
 
 /**
- * Free a slot whose owner is gone, under a guard directory that admits one reclaimer at a time.
+ * Free a slot whose holder must be freed, under a guard directory that admits one reclaimer at a time.
  *
  * @remarks
- * The guard holds a random token, and the slot is removed only while the guard still holds this caller's token, so a reclaimer whose stale guard was replaced removes nothing. The owner is read again under the guard, so a slot that another process freed and retook is kept.
+ * The guard holds a random token, and the slot is removed only while the guard still holds this caller's token, so a reclaimer whose stale guard was replaced removes nothing. The holder is checked again under the guard and the slot is removed only when the same pid still must be freed, so a slot that was freed and retaken, or a holder that runs again, is kept.
  */
-function reclaim(slotPath) {
+function reclaim(slotPath, pid) {
   const guard = join(lockDir, ".reclaim");
   const tokenFile = join(guard, "owner");
   const token = randomUUID();
@@ -105,9 +112,15 @@ function reclaim(slotPath) {
   }
   try {
     writeFileSync(tokenFile, token);
-    const owner = readOwner(slotPath);
-    if (isDead(owner) && readToken(tokenFile) === token) {
+    const check = checkHolder(slotPath, { stoppedSince });
+    if (
+      mustFree(check) &&
+      check.pid === pid &&
+      readToken(tokenFile) === token
+    ) {
+      const line = check.pid ? releaseLine(slotPath, check) : null;
       rmSync(slotPath, { recursive: true, force: true });
+      if (line) console.error(line);
     }
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
@@ -120,15 +133,18 @@ function reclaim(slotPath) {
 
 /**
  * Take the first free slot and return its path, or null when all slots are held.
+ *
+ * @remarks
+ * Every poll checks each holder, so a stopped holder is released on the first poll after the limit.
  */
 function tryAcquire() {
   for (let i = 0; i < slots; i += 1) {
     const slotPath = join(lockDir, `check-slot-${i}`);
-    const owner = readOwner(slotPath);
-    if (owner === "free") {
+    const check = checkHolder(slotPath, { stoppedSince });
+    if (check.verdict === "free") {
       if (tryTake(slotPath)) return slotPath;
-    } else if (isDead(owner)) {
-      reclaim(slotPath);
+    } else if (mustFree(check)) {
+      reclaim(slotPath, check.pid);
       if (tryTake(slotPath)) return slotPath;
     }
   }

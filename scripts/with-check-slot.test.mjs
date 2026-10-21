@@ -16,6 +16,7 @@ import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
+import { psState } from "./check-slot-holder.mjs";
 
 const script = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -28,6 +29,7 @@ const baseEnv = { ...process.env };
 for (const key of [
   "DISPATCH_CHECK_SLOTS",
   "DISPATCH_CHECK_WAIT_SECONDS",
+  "DISPATCH_CHECK_STOPPED_SECONDS",
   "DISPATCH_CHECK_SLOT_HELD",
 ]) {
   delete baseEnv[key];
@@ -173,7 +175,14 @@ test("reclaims slots whose owner is dead", async () => {
     "-e",
     "",
   );
-  assert.equal((await done).code, 0);
+  const { code, stderr } = await done;
+  assert.equal(code, 0);
+  assert.match(
+    stderr,
+    new RegExp(
+      `with-check-slot: released check-slot-0, holder pid ${deadPid} state gone, held \\d+s`,
+    ),
+  );
   assert.ok(Date.now() - started < 5000);
   const owners = slotsLeft(lockDir).map((name) =>
     readFileSync(join(lockDir, name), "utf8"),
@@ -195,6 +204,67 @@ test("keeps a slot held by a live process and gives up with 75", async () => {
   const { code, stderr } = await done;
   assert.equal(code, 75);
   assert.match(stderr, /gave up after 1s/);
+  assert.equal(existsSync(marker), false);
+  assert.equal(readFileSync(slot, "utf8"), String(process.pid));
+});
+
+test("releases a slot whose holder is stopped past the threshold", async () => {
+  const lockDir = scratchDir();
+  const holder = spawn("sleep", ["30"], { stdio: "ignore" });
+  try {
+    const pid = holder.pid;
+    process.kill(pid, "SIGSTOP");
+    await waitFor(() => psState(pid)?.startsWith("T"));
+    holdSlot(lockDir, 0, pid);
+    const started = Date.now();
+    const { done } = startGate(
+      lockDir,
+      {
+        DISPATCH_CHECK_SLOTS: "1",
+        DISPATCH_CHECK_STOPPED_SECONDS: "1",
+        DISPATCH_CHECK_WAIT_SECONDS: "20",
+      },
+      process.execPath,
+      "-e",
+      "",
+    );
+    const { code, stderr } = await done;
+    assert.equal(code, 0);
+    assert.ok(Date.now() - started >= 1000);
+    assert.match(
+      stderr,
+      new RegExp(
+        `with-check-slot: released check-slot-0, holder pid ${pid} state T stopped \\d+s, held \\d+s\\n`,
+      ),
+    );
+    assert.ok(
+      stderr.indexOf("with-check-slot: released") <
+        stderr.indexOf("with-check-slot: acquired"),
+    );
+    assert.deepEqual(slotsLeft(lockDir), []);
+  } finally {
+    holder.kill("SIGKILL");
+  }
+});
+
+test("keeps a slot whose live holder runs, whatever the threshold", async () => {
+  const lockDir = scratchDir();
+  const marker = join(scratchDir(), "ran");
+  const slot = holdSlot(lockDir, 0, process.pid);
+  const { done } = startGate(
+    lockDir,
+    {
+      DISPATCH_CHECK_SLOTS: "1",
+      DISPATCH_CHECK_STOPPED_SECONDS: "0",
+      DISPATCH_CHECK_WAIT_SECONDS: "2",
+    },
+    process.execPath,
+    "-e",
+    `require("node:fs").writeFileSync(${JSON.stringify(marker)}, "")`,
+  );
+  const { code, stderr } = await done;
+  assert.equal(code, 75);
+  assert.doesNotMatch(stderr, /released/);
   assert.equal(existsSync(marker), false);
   assert.equal(readFileSync(slot, "utf8"), String(process.pid));
 });
