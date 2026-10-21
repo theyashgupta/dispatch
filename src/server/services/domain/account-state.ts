@@ -14,6 +14,8 @@ export type DerivedAccountState = Pick<
   "state" | "limitedUntil"
 >;
 
+export const NEEDS_LOGIN_READS = 2;
+
 const NEAR_LIMIT_PERCENT = 80;
 const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -25,6 +27,57 @@ const SURFACE_TIME =
  */
 export function isTokenReadFailed(usage: ClaudeUsageSnapshot): boolean {
   return usage.status === "stale" || usage.status === "unavailable";
+}
+
+/**
+ * Tell whether a registry account holds the same login as the home `~/.claude` login.
+ *
+ * @remarks The emails must match and both organisation ids must be non-empty and equal. A missing
+ * id on either side is not a match, since a wrong shadow hides a live account from the chain.
+ */
+export function isShadowOfHome(
+  record: { email: string; orgId: string },
+  home: { email: string; orgId: string } | undefined,
+): boolean {
+  if (home === undefined || home.email === "" || home.orgId === "") {
+    return false;
+  }
+  return record.email === home.email && record.orgId === home.orgId;
+}
+
+/**
+ * Pick the stored chain state of one account from the signals of a read.
+ *
+ * @remarks A home login shadow wins over every other state, then `needs-login`, then a limited
+ * hold, and the derived state is the last resort.
+ */
+export function chainStateOf(input: {
+  shadowed: boolean;
+  needsLogin: boolean;
+  held: boolean;
+  heldUntil: string | null;
+  derived: DerivedAccountState;
+}): DerivedAccountState {
+  if (input.shadowed) return { state: "shadowed-by-home", limitedUntil: null };
+  if (input.needsLogin) return { state: "needs-login", limitedUntil: null };
+  if (input.held) return { state: "limited", limitedUntil: input.heldUntil };
+  return input.derived;
+}
+
+/**
+ * Count consecutive reads whose token the server rejected.
+ *
+ * @remarks A rejected read adds one. An ok read or an expired access token resets the count, since
+ * the next launch renews that token. A 429 or a network error says nothing about the token.
+ */
+export function nextRejectedReads(
+  prior: number | undefined,
+  usage: ClaudeUsageSnapshot,
+): number {
+  if (usage.error === "token-rejected") return (prior ?? 0) + 1;
+  return usage.status === "ok" || usage.error === "token-expired"
+    ? 0
+    : (prior ?? 0);
 }
 
 /**
@@ -122,6 +175,44 @@ export function deriveAccountState(
   if (windows.length === 0) return { state: "unknown", limitedUntil: null };
   const near = windows.some((w) => w.percent >= NEAR_LIMIT_PERCENT);
   return { state: near ? "near-limit" : "available", limitedUntil: null };
+}
+
+/**
+ * Tell whether a snapshot shows a new usage period for an account held as limited.
+ *
+ * @remarks A not ok read keeps the last good windows and `fetchedAt`, so only a `fetchedAt` newer than
+ * the stored one counts as fresh. The windows must all be below the threshold, and either a period
+ * started after the stored read or no reset still equals `limitedUntil`.
+ */
+export function showsNewPeriod(
+  usage: ClaudeUsageSnapshot,
+  prior: { fetchedAt?: string | null; limitedUntil: string | null },
+  thresholdPercent: number,
+): boolean {
+  if (
+    usage.status === "stale" ||
+    usage.fetchedAt === null ||
+    usage.windows.length === 0
+  ) {
+    return false;
+  }
+  const priorFetched =
+    prior.fetchedAt == null ? null : Date.parse(prior.fetchedAt);
+  if (priorFetched !== null && !(Date.parse(usage.fetchedAt) > priorFetched)) {
+    return false;
+  }
+  if (usage.windows.some((w) => w.percent >= thresholdPercent)) return false;
+  const limitedUntil =
+    prior.limitedUntil === null ? NaN : Date.parse(prior.limitedUntil);
+  const startedAfterRead =
+    priorFetched !== null &&
+    usage.windows.some(
+      (w) => w.periodStart !== null && Date.parse(w.periodStart) > priorFetched,
+    );
+  const resetMoved = !usage.windows.some(
+    (w) => w.resetsAt !== null && Date.parse(w.resetsAt) === limitedUntil,
+  );
+  return startedAfterRead || resetMoved;
 }
 
 /**

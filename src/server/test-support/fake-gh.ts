@@ -12,6 +12,7 @@ export interface FakeGhScenario {
   prState?: "OPEN" | "CLOSED";
   mergeError?: string;
   adminError?: string;
+  hideOpenPrs?: "always" | "afterPush";
 }
 
 const FAKE_GH_SCRIPT = String.raw`import fs from "node:fs";
@@ -77,6 +78,11 @@ if (verb === "list") {
     ? []
     : Object.entries(state.prs)
         .filter(([, p]) => p.head === head && p.state === "OPEN")
+        .filter(() => scenario.hideOpenPrs !== "always")
+        .filter(
+          ([, p]) =>
+            scenario.hideOpenPrs !== "afterPush" || !p.headRefOid || p.headRefOid === remoteHead(head),
+        )
         .filter(([, p]) => base === undefined || (p.base ?? "main") === base)
         .map(([n, p]) => ({
           number: Number(n),
@@ -93,6 +99,17 @@ if (verb === "view" && (state.failedViews ?? 0) < (scenario.failViews ?? 0)) {
   fail("fake gh: error connecting to api.github.com");
 }
 if (verb === "create") {
+  const head = flag("--head");
+  const base = flag("--base");
+  const twin = Object.entries(state.prs).find(
+    ([, p]) => p.state === "OPEN" && p.head === head && (p.base ?? "main") === (base ?? "main") && p.cross !== true,
+  );
+  if (twin) {
+    fail(
+      'a pull request for branch "' + head + '" into branch "' + (base ?? "main") + '" already exists:\n' +
+        "https://github.com/acme/app/pull/" + twin[0],
+    );
+  }
   const n = state.next++;
   state.prs[n] = { head: flag("--head"), base: flag("--base"), title: flag("--title"), state: "OPEN", polls: 0, mergePolls: 0 };
   save();

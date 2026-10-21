@@ -730,6 +730,46 @@ Claude shows a usage limit dialog when the account reaches its limit. The field 
 
 Only you resume a loop that stopped at a usage limit or a budget.
 
+### Claude accounts
+
+The **Accounts** page shows one state for each Claude account:
+
+- **Available**: the account has allowance.
+- **Near limit**: a usage window is at 80 percent or more.
+- **Limited**: a usage window is full. The row shows when the account resets.
+- **Needs login**: Claude rejected the saved login two times in a row. Log in again.
+- **Same login as Default**: the account uses the same login as your home login (**Default**). The chain does not use it.
+- **Login expired**: the saved login ran out. Log in again.
+- **Unknown**: Dispatch has no usable usage read for the account yet.
+
+A limited account returns by itself. When its usage shows a new period, Dispatch puts the account back in the chain before the old reset time. You do nothing.
+
+When an account needs a login, Dispatch raises the decision "Account <email> needs a login" on the default board:
+
+1. Choose **Start the login**.
+2. Open the link in the decision. It opens the login dialog of that account.
+3. Open the sign-in address and paste the code into the dialog.
+
+The account returns to the chain after the login. You do not restart Dispatch. Choose **Not now** to leave the account out of the chain. The decision closes by itself when the account works again, or when you remove the account.
+
+When an account shows **Same login as Default**, choose **Remove duplicate**. The button removes the account and signs out only the folder of that account. Your home login stays signed in.
+
+When every account is at its limit, Dispatch raises the decision "Every Claude account is at its limit". The text shows when the first account resets. Work resumes at that time. To continue sooner, choose **Add an account** and add an account on the **Accounts** page. Choose **Wait for the reset** to do nothing. The decision closes by itself when an account is usable again.
+
+When the home login is signed in and you did not move Default, the **Accounts** page shows the panel **Move the Default account to a Dispatch login**. If an added account has the same login as Default, remove that duplicate first; the panel then shows. You cannot dismiss the panel. It goes away when you finish the move.
+
+After the move, Dispatch can track the usage of **Default** and can move its sessions, as it does for any other account. To do the move:
+
+1. Choose **Log in** in the panel.
+2. Open the sign-in address and paste the code into the dialog.
+3. Sign in with the same Claude account as your terminal login.
+
+If you sign in with another account, the login fails. The dialog shows "Sign in with the same Claude account as your terminal login (<email>)." Choose **Log in** again and use the account of your terminal login.
+
+Running sessions keep running. New starts, resumes and moves use the Dispatch login. Your terminal login stays signed in.
+
+To undo the move, remove the account with the meta **Default (Dispatch login)**. **Default** is then your home login again, and the panel shows again.
+
 ## Resume a lost session
 
 When the tmux session of a card ends, for example after a shutdown, the card shows **Resume**. Resume starts Claude again in the card workspace and opens the newest conversation of the card.

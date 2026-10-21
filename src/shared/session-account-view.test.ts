@@ -50,6 +50,15 @@ test("the Default account shows as Default, an added one as its email", () => {
   assert.equal(accountName(accounts, "acc-1"), "work@corp.test");
 });
 
+test("the managed Default row reads Default, and so does the default id beside it", () => {
+  const withManaged = [
+    account({ id: "m-1", email: "me@home.test", managedDefault: true }),
+    accounts[1],
+  ];
+  assert.equal(accountName(withManaged, "m-1"), "Default");
+  assert.equal(accountName(withManaged, "default"), "Default");
+});
+
 test("an account missing from the list shows as its id", () => {
   assert.equal(accountName(accounts, "gone"), "gone");
 });

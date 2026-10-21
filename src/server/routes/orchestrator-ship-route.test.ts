@@ -725,6 +725,8 @@ const doneFlow = (branchName: string): ShipFlow => ({
       admin: false,
       tip: null,
       checked: null,
+      passed: null,
+      checkSkipped: false,
     },
   ],
   failedStep: null,

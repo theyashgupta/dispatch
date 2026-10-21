@@ -76,8 +76,9 @@ interface SandboxOptions {
   reuseDir?: boolean;
   memorySampleFile?: string;
   usageUrl?: string;
-  seed?: (folders: { dir: string; home: string }) => void;
+  usageTimeScale?: number;
   env?: Record<string, string>;
+  seed?: (folders: { dir: string; home: string }) => void;
 }
 
 export interface OrchestrationEventRow {
@@ -401,7 +402,10 @@ export async function startSandbox(opts: SandboxOptions): Promise<Sandbox> {
     GIT_AUTHOR_EMAIL: SHIP_IDENTITY.email,
     GIT_COMMITTER_NAME: SHIP_IDENTITY.name,
     GIT_COMMITTER_EMAIL: SHIP_IDENTITY.email,
-    ...(opts.env ?? {}),
+    ...(opts.usageTimeScale === undefined
+      ? {}
+      : { DISPATCH_USAGE_TIME_SCALE: String(opts.usageTimeScale) }),
+    ...opts.env,
   });
   assertFakeClaude(env, claude);
 

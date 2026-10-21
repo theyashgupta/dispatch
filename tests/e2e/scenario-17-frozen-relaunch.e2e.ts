@@ -16,7 +16,7 @@ import {
   type Sandbox,
 } from "./harness/sandbox.js";
 
-const NAME = "scenario-15";
+const NAME = "scenario-17";
 const BOARD = "FRZ";
 const CARD = "FRZ-1";
 const CONVERSATION = "conv-frozen";
@@ -26,7 +26,7 @@ const SAMPLE_FILE = path.join(SANDBOX_ROOT, `${NAME}-memory-sample.json`);
 const RESUME_TEXT =
   "The session was restarted. Continue from where you stopped.";
 
-const note = makeNote("scenario-15");
+const note = makeNote("scenario-17");
 
 const argvLines = (): string[] =>
   fs.existsSync(ARGV_FILE)
@@ -276,7 +276,7 @@ async function runScenario(sb: Sandbox): Promise<void> {
 }
 
 void test(
-  "scenario 15: a session frozen after an idle compaction is relaunched once with resume",
+  "scenario 17: a session frozen after an idle compaction is relaunched once with resume",
   { timeout: 10 * MINUTE },
   async () => {
     process.env.FAKE_CLAUDE_ARGV_FILE = ARGV_FILE;

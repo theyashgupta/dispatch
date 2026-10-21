@@ -1463,6 +1463,7 @@ export interface ClaudeAccountSummary {
   orgName: string;
   subscriptionType: string;
   isDefault: boolean;
+  managedDefault?: boolean;
   lastLoginAt?: string;
   usage: ClaudeUsageSnapshot;
   position: number;
@@ -1532,7 +1533,13 @@ export const CLAUDE_ACCOUNTS_BOUNDS = {
 } as const;
 
 export type ChainAccountState =
-  "available" | "near-limit" | "limited" | "login-expired" | "unknown";
+  | "available"
+  | "near-limit"
+  | "limited"
+  | "login-expired"
+  | "needs-login"
+  | "shadowed-by-home"
+  | "unknown";
 
 export interface ChainBucket {
   kind: string;
@@ -1544,6 +1551,8 @@ export interface ChainAccountEntry {
   state: ChainAccountState;
   buckets: ChainBucket[];
   limitedUntil: string | null;
+  fetchedAt?: string | null;
+  rejectedReads?: number;
 }
 
 export interface ChainExhaustedRecord {
@@ -1571,6 +1580,7 @@ export interface ChainStateFile {
   exhausted: ChainExhaustedRecord | null;
   moves: ChainMove[];
   loginExpiryNotified: Record<string, string>;
+  decisions: Record<string, string>;
 }
 
 /**
@@ -2062,6 +2072,8 @@ export interface ShipBranch {
   admin: boolean;
   tip: string | null;
   checked: string | null;
+  passed: string | null;
+  checkSkipped: boolean;
 }
 
 export interface ShipFlow {
@@ -2100,6 +2112,7 @@ export type GroupState =
   | "start_failed"
   | "shipped"
   | "ship_stopped"
+  | "ship_check_skipped"
   | "loop_error"
   | "usage_limit";
 

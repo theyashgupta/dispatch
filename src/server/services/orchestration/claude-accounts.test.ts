@@ -325,6 +325,7 @@ function registryOnDisk(): {
   version: number;
   defaultPosition: number;
   defaultIdentity?: unknown;
+  managedDefaultId?: string;
   accounts: { id: string; position: number }[];
 } {
   return JSON.parse(
@@ -482,4 +483,193 @@ void test("upsertAccount puts a new account after Default when Default is last i
     DEFAULT_CLAUDE_ACCOUNT_ID,
     ID_C,
   ]);
+});
+
+function managedRegistry(extra: Record<string, unknown> = {}): void {
+  writeRegistryJson({
+    version: 2,
+    defaultPosition: 1,
+    managedDefaultId: ID_B,
+    accounts: [
+      { ...record(ID_A, "a@example.com"), position: 0 },
+      { ...record(ID_B, "b@example.com"), position: 2 },
+    ],
+    ...extra,
+  });
+  for (const id of [ID_A, ID_B]) {
+    fs.mkdirSync(accounts.accountDir(id), { recursive: true, mode: 0o700 });
+  }
+}
+
+void test("a managed default replaces the home login in launch, pointer, order and listing", async () => {
+  managedRegistry();
+  await accounts.loadManagedDefault();
+  assert.equal(accounts.getManagedDefaultId(), ID_B);
+
+  const launch = await accounts.resolveLaunchAccount(DEFAULT_CLAUDE_ACCOUNT_ID);
+  assert.equal(launch.id, ID_B);
+  assert.equal(launch.configDir, accounts.accountDir(ID_B));
+  assert.equal(await accounts.isLaunchableAccount("default"), true);
+
+  assert.equal(accounts.getActiveAccountId(), ID_B);
+  await accounts.setActiveAccount(DEFAULT_CLAUDE_ACCOUNT_ID);
+  assert.equal(readConfig().activeClaudeAccountId, ID_B);
+  await accounts.setActiveAccount(ID_A);
+  assert.equal(accounts.getActiveAccountId(), ID_A);
+
+  assert.deepEqual(await accounts.readChainOrder(), [ID_A, ID_B]);
+  const listed = await accounts.listAccounts(HOME_IDENTITY);
+  assert.deepEqual(
+    listed.map((a) => [a.id, a.managedDefault, a.isDefault]),
+    [
+      [ID_A, undefined, false],
+      [ID_B, true, false],
+    ],
+  );
+});
+
+void test("the registry writers carry managedDefaultId and a reorder needs no default", async () => {
+  managedRegistry();
+  await accounts.loadManagedDefault();
+  await accounts.writeDefaultIdentity({ email: "h@example.com", orgId: "o" });
+  assert.equal(registryOnDisk().managedDefaultId, ID_B);
+  await accounts.upsertAccount(record(ID_C, "c@example.com"));
+  assert.equal(registryOnDisk().managedDefaultId, ID_B);
+  assert.deepEqual(await accounts.setChainOrder([ID_C, ID_B, ID_A]), {
+    ok: true,
+    order: [ID_C, ID_B, ID_A],
+  });
+  assert.equal(registryOnDisk().managedDefaultId, ID_B);
+  assert.deepEqual(
+    await accounts.setChainOrder([DEFAULT_CLAUDE_ACCOUNT_ID, ID_B, ID_A, ID_C]),
+    { ok: false, error: "invalid-order" },
+  );
+  await accounts.adoptManagedDefault(record(ID_A, "a@example.com"));
+  assert.equal(accounts.getManagedDefaultId(), ID_A);
+  assert.equal(registryOnDisk().managedDefaultId, ID_A);
+  await accounts.removeAccount(ID_A);
+  assert.equal(registryOnDisk().managedDefaultId, undefined);
+  assert.equal(accounts.getManagedDefaultId(), undefined);
+});
+
+void test("a registry file naming a managed account that is not in it loads as not managed", async () => {
+  managedRegistry({ managedDefaultId: ID_C });
+  await accounts.loadManagedDefault();
+  assert.equal(accounts.getManagedDefaultId(), undefined);
+  assert.deepEqual(await accounts.readChainOrder(), [
+    ID_A,
+    DEFAULT_CLAUDE_ACCOUNT_ID,
+    ID_B,
+  ]);
+});
+
+void test("canonicalAccountId maps default to the managed account only while one exists", async () => {
+  seedRegistry([ID_A]);
+  await accounts.loadManagedDefault();
+  assert.equal(
+    accounts.canonicalAccountId(undefined),
+    DEFAULT_CLAUDE_ACCOUNT_ID,
+  );
+  assert.equal(
+    accounts.canonicalAccountId(DEFAULT_CLAUDE_ACCOUNT_ID),
+    DEFAULT_CLAUDE_ACCOUNT_ID,
+  );
+  assert.equal(accounts.canonicalAccountId(ID_A), ID_A);
+
+  managedRegistry();
+  await accounts.loadManagedDefault();
+  assert.equal(accounts.canonicalAccountId(undefined), ID_B);
+  assert.equal(accounts.canonicalAccountId(DEFAULT_CLAUDE_ACCOUNT_ID), ID_B);
+  assert.equal(accounts.canonicalAccountId(ID_A), ID_A);
+  seedRegistry([ID_A]);
+  await accounts.loadManagedDefault();
+});
+
+void test("removing the managed account clears the field and Default is the home login again", async () => {
+  managedRegistry();
+  await accounts.loadManagedDefault();
+  await accounts.setActiveAccount(DEFAULT_CLAUDE_ACCOUNT_ID);
+  assert.deepEqual(await accounts.removeAccount(ID_B), { ok: true });
+  assert.equal(registryOnDisk().managedDefaultId, undefined);
+  assert.equal(accounts.getManagedDefaultId(), undefined);
+  assert.deepEqual(
+    await accounts.resolveLaunchAccount(DEFAULT_CLAUDE_ACCOUNT_ID),
+    { id: DEFAULT_CLAUDE_ACCOUNT_ID },
+  );
+  assert.equal(accounts.getActiveAccountId(), DEFAULT_CLAUDE_ACCOUNT_ID);
+  assert.equal(
+    (await accounts.listAccounts(HOME_IDENTITY))[0]?.id,
+    DEFAULT_CLAUDE_ACCOUNT_ID,
+  );
+});
+
+void test("a managedDefaultId without a record is ignored, and a registry without the field behaves as before", async () => {
+  managedRegistry({ managedDefaultId: ID_C });
+  await accounts.loadManagedDefault();
+  assert.equal(accounts.getManagedDefaultId(), undefined);
+  assert.deepEqual(
+    await accounts.resolveLaunchAccount(DEFAULT_CLAUDE_ACCOUNT_ID),
+    { id: DEFAULT_CLAUDE_ACCOUNT_ID },
+  );
+  managedRegistry({ managedDefaultId: undefined });
+  await accounts.loadManagedDefault();
+  assert.equal(accounts.getManagedDefaultId(), undefined);
+  assert.deepEqual(await accounts.readChainOrder(), [
+    ID_A,
+    DEFAULT_CLAUDE_ACCOUNT_ID,
+    ID_B,
+  ]);
+  assert.equal(
+    (await accounts.listAccounts(HOME_IDENTITY))[0]?.id,
+    DEFAULT_CLAUDE_ACCOUNT_ID,
+  );
+  await accounts.setActiveAccount(DEFAULT_CLAUDE_ACCOUNT_ID);
+});
+
+void test("adoptManagedDefault takes Default's position and moves a default pointer, but leaves an explicit pointer", async () => {
+  managedRegistry({ managedDefaultId: undefined });
+  await accounts.loadManagedDefault();
+  await accounts.setActiveAccount(DEFAULT_CLAUDE_ACCOUNT_ID);
+  await accounts.adoptManagedDefault(record(ID_C, "c@example.com"));
+  const adopted = registryOnDisk();
+  assert.equal(adopted.managedDefaultId, ID_C);
+  assert.equal(
+    adopted.accounts.find((a) => a.id === ID_C)?.position,
+    adopted.defaultPosition,
+  );
+  assert.equal(readConfig().activeClaudeAccountId, ID_C);
+  assert.deepEqual(await accounts.readChainOrder(), [ID_A, ID_C, ID_B]);
+
+  await accounts.setActiveAccount(ID_A);
+  await accounts.adoptManagedDefault({
+    ...record(ID_C, "c@example.com"),
+    lastLoginAt: "2026-10-01T00:00:00.000Z",
+  });
+  assert.equal(readConfig().activeClaudeAccountId, ID_A);
+  assert.equal(registryOnDisk().managedDefaultId, ID_C);
+  assert.equal(
+    registryOnDisk().accounts.find((a) => a.id === ID_C)?.position,
+    adopted.defaultPosition,
+  );
+  await accounts.removeAccount(ID_C);
+  await accounts.setActiveAccount(DEFAULT_CLAUDE_ACCOUNT_ID);
+});
+
+void test("managedClaudeEnv gives the managed dir only while a managed default with a dir exists", async () => {
+  seedRegistry([ID_A]);
+  await accounts.loadManagedDefault();
+  assert.deepEqual(accounts.managedClaudeEnv(), {});
+
+  managedRegistry();
+  await accounts.loadManagedDefault();
+  assert.deepEqual(accounts.managedClaudeEnv(), {
+    CLAUDE_CONFIG_DIR: accounts.accountDir(ID_B),
+  });
+
+  fs.rmSync(accounts.accountDir(ID_B), { recursive: true, force: true });
+  assert.deepEqual(accounts.managedClaudeEnv(), {});
+
+  seedRegistry([ID_A]);
+  await accounts.loadManagedDefault();
+  assert.deepEqual(accounts.managedClaudeEnv(), {});
 });
