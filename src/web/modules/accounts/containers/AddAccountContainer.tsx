@@ -59,11 +59,14 @@ export function AddAccountContainer({
   const [notice, setNotice] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const [read, setRead] = useState<ClaudeLoginView | undefined>(undefined);
+  const [refused, setRefused] = useState(false);
 
   if (login.data !== undefined && login.data !== read) {
     setRead(login.data);
     const seen = viewAccountId(login.data);
-    if (isForeignLogin(ownId, seen, pendingStarts > 0)) {
+    if (refused) {
+      setForeign(false);
+    } else if (isForeignLogin(ownId, seen, pendingStarts > 0)) {
       setForeign(true);
       setNotice(FOREIGN_NOTICE);
     } else {
@@ -81,6 +84,7 @@ export function AddAccountContainer({
               setOwnStart(true);
               setOwnId((id) => result.accountId ?? id);
             } else if (!result.inFlight) {
+              setRefused(true);
               setNotice(result.error);
             }
           },
@@ -115,6 +119,7 @@ export function AddAccountContainer({
     cancel.mutate(undefined, {
       onSettled: () => {
         setNotice(null);
+        setRefused(false);
         void begin();
       },
     });
@@ -134,7 +139,7 @@ export function AddAccountContainer({
       title={dialogTitle(accountId, accountEmail, managedDefault)}
       view={view}
       notice={notice}
-      foreign={foreign}
+      foreign={foreign || refused}
       code={code}
       canSubmit={isSubmittableCode(code)}
       submitting={submit.isPending}
