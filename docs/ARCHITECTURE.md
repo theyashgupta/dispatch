@@ -6258,6 +6258,12 @@ card and into `sessionSummaries`. A status line of another format gives no meter
 `Phase <number>` patterns for the loop file modules only, because those words are their input
 format.
 
+**Loop settings.** Boot and the config route also write `hook-settings-<value>-orchestrator.json`
+for each inbound value, which the orchestrator session gets, and every other session gets
+`hook-settings-<value>.json`, which also sets `idleCompaction` and `promptSuggestionEnabled` to
+`false` so that a loop session does not compact while idle and its prompt box never shows a
+suggested `/ship` line (LOCAL-184).
+
 ### Session Supervisor
 
 LOCAL-89 adds the supervisor: server code that watches each Claude session of a board and does

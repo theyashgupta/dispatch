@@ -812,7 +812,10 @@ export async function buildLaunch(
     claudePath: (await resolveBinaryPath("claude")) ?? "claude",
     claudeArgs: policy?.claudeArgs ?? configured,
     leadingArgs: [...(policy?.leadingArgs ?? []), ...leadingArgs],
-    settingsPath: hookSettingsPath(inbound),
+    settingsPath: hookSettingsPath(
+      inbound,
+      current !== undefined && isHiddenCard(current),
+    ),
     hooks,
     configDir: account.configDir,
   });
