@@ -637,3 +637,51 @@ test("a budget stop shows the budget_stop item and no budget_warning item", () =
     ["budget_stop"],
   );
 });
+
+const ONE_NAME =
+  "Pushover PUSHOVER_USER_KEY is empty or not set. Loop phase notifications are not sent. Fill the value in the env vault.";
+const TWO_NAMES =
+  "Pushover PUSHOVER_USER_KEY and PUSHOVER_APP_TOKEN are empty or not set. Loop phase notifications are not sent. Fill the values in the env vault.";
+
+function withGap(names: string[], cards: Card[] = [], since = minutesAgo(10)) {
+  return buildAttentionQueue({
+    boardKey: DEFAULT_BOARD_KEY,
+    cards,
+    decisions: [],
+    pushoverMissing: { names, since },
+    now: NOW,
+  });
+}
+
+test("one empty Pushover name gives one pushover_missing item", () => {
+  const [item, ...rest] = withGap(["PUSHOVER_USER_KEY"]);
+  assert.equal(rest.length, 0);
+  assert.equal(item?.id, "pushover_missing");
+  assert.equal(item?.kind, "pushover_missing");
+  assert.equal(item?.cardId, null);
+  assert.equal(item?.groupId, null);
+  assert.equal(item?.waitMinutes, 10);
+  assert.equal(item?.text, ONE_NAME);
+});
+
+test("two empty Pushover names give the two-name text", () => {
+  const [item] = withGap(["PUSHOVER_USER_KEY", "PUSHOVER_APP_TOKEN"]);
+  assert.equal(item?.text, TWO_NAMES);
+});
+
+test("an empty names list and an absent input give no pushover_missing item", () => {
+  assert.deepEqual(withGap([]), []);
+  assert.deepEqual(build([]), []);
+});
+
+test("the pushover_missing item sorts by its since among other items", () => {
+  const queue = withGap(
+    ["PUSHOVER_USER_KEY"],
+    [withSession("GROUP-1", "stale", minutesAgo(20))],
+    minutesAgo(30),
+  );
+  assert.deepEqual(
+    queue.map((i) => i.kind),
+    ["pushover_missing", "stale"],
+  );
+});
