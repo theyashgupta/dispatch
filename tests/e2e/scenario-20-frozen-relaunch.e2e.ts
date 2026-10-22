@@ -16,7 +16,7 @@ import {
   type Sandbox,
 } from "./harness/sandbox.js";
 
-const NAME = "scenario-19";
+const NAME = "scenario-20";
 const BOARD = "FRZ";
 const CARD = "FRZ-1";
 const CONVERSATION = "conv-frozen";
@@ -26,7 +26,7 @@ const SAMPLE_FILE = path.join(SANDBOX_ROOT, `${NAME}-memory-sample.json`);
 const RESUME_TEXT =
   "The session was restarted. Continue from where you stopped.";
 
-const note = makeNote("scenario-19");
+const note = makeNote("scenario-20");
 
 const argvLines = (): string[] =>
   fs.existsSync(ARGV_FILE)

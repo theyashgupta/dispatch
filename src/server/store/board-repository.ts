@@ -2,6 +2,7 @@ import type { EventEmitter } from "node:events";
 import type { CardSearchResult } from "../../shared/search.js";
 import type {
   AccountEventType,
+  PushoverGap,
   ActivityEvent,
   ArchiveBoardResult,
   ArchivedGroup,
@@ -78,6 +79,8 @@ export interface BoardRepository {
     cursors: Record<string, SourceCursor>,
   ): Promise<void>;
   setEnabledSources(ids: string[]): void;
+  setPushoverMissing(names: readonly string[], now?: Date): void;
+  pushoverMissing(): PushoverGap | null;
   setSyncUnreachable(flag: boolean): Promise<void>;
   trackedIssueIds(
     scope: BoardScope,

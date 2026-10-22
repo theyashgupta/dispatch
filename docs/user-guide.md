@@ -531,16 +531,17 @@ The attention queue is the card **Needs your call** on the dashboard. Dispatch b
 
 Each item shows the group id, a badge, the wait time ("waiting 34 min", "waiting 5 h" or "waiting 3 d") and the actions of its kind.
 
-| Item                  | What it shows                                                                                                            | Actions                                                                                       |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| **Decision**          | The question, and who asked it and when. One button for each option. The recommended option has a **Recommended** badge. | Choose an option. Or type in "Or type an answer" and choose **Send answer**.                  |
-| **Needs input**       | The last question of the loop.                                                                                           | Reply in the field "Reply to <group id>". Choose **Send reply**. Or choose **Open terminal**. |
-| **No progress**       | "No progress for <n> min." The loop did not grow its transcript for 15 minutes while it worked.                          | Same as **Needs input**.                                                                      |
-| **Permission prompt** | The prompt text from the pane.                                                                                           | **Open terminal**. Answer the prompt in the terminal.                                         |
-| Usage limit stop      | "Stopped at the usage limit. The limit resets at <time>."                                                                | **Resume loop**, **Open terminal**.                                                           |
-| Budget stop           | "Budget reached: $<cost> of $<budget>."                                                                                  | **Resume loop**, **Change budget**, **Open terminal**.                                        |
-| **Failed gate**       | "Phase <n> gate failed, attempt <k> of <limit>."                                                                         | **Open terminal**.                                                                            |
-| Failed resume         | "The session was lost and the resume failed: <reason>." or "Claude exited and the resume failed: <reason>."              | **Try resume again**, **Open terminal**.                                                      |
+| Item                  | What it shows                                                                                                               | Actions                                                                                       |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| **Decision**          | The question, and who asked it and when. One button for each option. The recommended option has a **Recommended** badge.    | Choose an option. Or type in "Or type an answer" and choose **Send answer**.                  |
+| **Needs input**       | The last question of the loop.                                                                                              | Reply in the field "Reply to <group id>". Choose **Send reply**. Or choose **Open terminal**. |
+| **No progress**       | "No progress for <n> min." The loop did not grow its transcript for 15 minutes while it worked.                             | Same as **Needs input**.                                                                      |
+| **Permission prompt** | The prompt text from the pane.                                                                                              | **Open terminal**. Answer the prompt in the terminal.                                         |
+| Usage limit stop      | "Stopped at the usage limit. The limit resets at <time>."                                                                   | **Resume loop**, **Open terminal**.                                                           |
+| Budget stop           | "Budget reached: $<cost> of $<budget>."                                                                                     | **Resume loop**, **Change budget**, **Open terminal**.                                        |
+| **Failed gate**       | "Phase <n> gate failed, attempt <k> of <limit>."                                                                            | **Open terminal**.                                                                            |
+| Failed resume         | "The session was lost and the resume failed: <reason>." or "Claude exited and the resume failed: <reason>."                 | **Try resume again**, **Open terminal**.                                                      |
+| **Notifications**     | "Pushover <names> <is or are> empty or not set. Loop phase notifications are not sent. Fill the value(s) in the env vault." | None in Dispatch. Fill the value in the env vault.                                            |
 
 How each action works:
 
@@ -550,6 +551,8 @@ How each action works:
 - **Try resume again.** It starts the resume of the dead session again. This is the same resume that the supervisor tried.
 - **Open terminal.** It opens the detail panel of the group with its live terminal.
 - **Permission prompt.** The queue has no approve button and no deny button. Answer the prompt in the terminal. The supervisor itself declines only two prompts: a dangerous delete, and a held message from a peer session.
+
+The **Notifications** item shows when loop phase notifications are on and `PUSHOVER_USER_KEY` or `PUSHOVER_APP_TOKEN` is empty or not set. Notifications are on when a Pushover name is set in the server environment or in the env vault. When both have the same name, the env vault file wins over the server environment. Each board shows the item. Dispatch checks the values every 60 seconds. Dispatch removes the item a maximum of 60 seconds after you fill both values. Dispatch does not see the messages that the loop sends. Thus Dispatch removes the item when both values have text, also if a send fails. When no Pushover name is set, the item does not show. The start log has one line that names the variables that are empty or not set. Dispatch never shows a value and never writes a value to the log.
 
 A board with the supervisor **Off** still lists a card at **Needs input**, with a reply field when the card has a session.
 
