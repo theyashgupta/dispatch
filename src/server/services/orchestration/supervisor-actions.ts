@@ -151,16 +151,16 @@ async function closeEngineFile(
   }
 }
 
-async function closeLoop(
-  card: Card,
-  session: Session,
-  forcedReason?: "done_marker",
-): Promise<void> {
+/**
+ * Close the loop engine file and record the `close_loop` action.
+ *
+ * @remarks
+ * Every supervisor close writes the reason `done_marker`, because only a DONE line closes a loop.
+ */
+async function closeLoop(card: Card, session: Session): Promise<void> {
   const root = rootOf(card, session);
   const engine = path.join(root, ENGINE_FILE);
-  const closedBy =
-    forcedReason ??
-    (card.loopProgress?.completion === "complete" ? "close_loop" : "promise");
+  const closedBy = "done_marker";
   const { result, reason } =
     root === ""
       ? { result: "failed: no session root", reason: closedBy }
@@ -204,7 +204,7 @@ export async function closeLoopOnDone(
       !promiseCompletes(progress, true, message)
     )
       return;
-    await closeLoop(card, session, "done_marker");
+    await closeLoop(card, session);
   } catch (err) {
     console.warn("[hooks] close loop on DONE failed", err);
   }

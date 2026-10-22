@@ -65,11 +65,21 @@ void test("each transition maps to its action list", () => {
     ],
     [{ to: "permission_prompt", promptKind: "other" }, []],
     [{ to: "permission_prompt" }, []],
-    [{ to: "roadmap_complete" }, [{ kind: "close_loop" }]],
+    [{ to: "roadmap_complete", doneLine: true }, [{ kind: "close_loop" }]],
+    [{ to: "roadmap_complete" }, []],
     [
       {
         to: "roadmap_complete",
+        doneLine: true,
         loop: { engineActive: false, handoffPending: false, unitPhase: "4/9" },
+      },
+      [],
+    ],
+    [
+      {
+        to: "roadmap_complete",
+        doneLine: true,
+        loop: { ...LOOP, orchestrator: true },
       },
       [],
     ],
