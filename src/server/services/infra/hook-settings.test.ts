@@ -13,6 +13,7 @@ interface Parsed {
   hooks: unknown;
   idleCompaction?: boolean;
   permissions: { deny: string[] };
+  promptSuggestionEnabled?: boolean;
 }
 
 const parse = (json: string) => JSON.parse(json) as Parsed;
@@ -46,17 +47,19 @@ void test("hookSettingsPath names the orchestrator file of its value", () => {
   }
 });
 
-void test("every loop settings file turns idle compaction off", () => {
+void test("every loop settings file turns idle compaction and prompt suggestions off", () => {
   for (const value of CROSS_SESSION_INBOUND_VALUES) {
     assert.equal(parse(hookSettingsJson(value)).idleCompaction, false);
+    assert.equal(parse(hookSettingsJson(value)).promptSuggestionEnabled, false);
   }
 });
 
-void test("every orchestrator settings file leaves idle compaction out and keeps the rest", () => {
+void test("every orchestrator settings file leaves both loop keys out and keeps the rest", () => {
   for (const value of CROSS_SESSION_INBOUND_VALUES) {
     const loop = parse(hookSettingsJson(value));
     const orchestrator = parse(hookSettingsJson(value, true));
     assert.equal("idleCompaction" in orchestrator, false);
+    assert.equal("promptSuggestionEnabled" in orchestrator, false);
     assert.deepEqual(orchestrator.hooks, loop.hooks);
     assert.deepEqual(orchestrator.permissions, loop.permissions);
     assert.equal(orchestrator.crossSessionInbound, loop.crossSessionInbound);

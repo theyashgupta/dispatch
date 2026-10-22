@@ -20,8 +20,9 @@ export const PAUSE_TOOL_NAMES = new Set(["AskUserQuestion", "ExitPlanMode"]);
  * flip-back branches in hook-events cannot drift from it. The deny rule covers the Read tool and
  * the guard covers Bash (T-105-03, T-105-06). The rule keeps a double leading slash, because
  * `VAULT_VALUES_PATH` carries one and a single slash is a silent no-op on the installed CLI.
- * A loop file sets `idleCompaction` to false, because a compaction while idle froze loop sessions
- * (LOCAL-184); the orchestrator file leaves the key out.
+ * A loop file sets `idleCompaction` and `promptSuggestionEnabled` to false, because a compaction
+ * while idle froze loop sessions and a suggested `/ship` line sat unsent in a loop prompt box
+ * (LOCAL-184); the orchestrator file leaves both keys out.
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  * @see docs/ARCHITECTURE.md#security-threat-model
  */
@@ -52,7 +53,9 @@ export function hookSettingsJson(
         },
       ],
     },
-    ...(orchestrator ? {} : { idleCompaction: false }),
+    ...(orchestrator
+      ? {}
+      : { idleCompaction: false, promptSuggestionEnabled: false }),
   };
   return JSON.stringify(settings, null, 2) + "\n";
 }
