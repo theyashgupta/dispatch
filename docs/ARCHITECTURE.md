@@ -5807,7 +5807,8 @@ question; none of them read prose for truth.
   less than its own timeout. When no slot becomes free, it reports that the checks were skipped and
   lets the stop continue. Each gated step has its own wait limit. If the steps before a waiting
   step take more than 30 seconds, the timeout occurs first, and the hook lets the stop continue
-  with no report.
+  with no report. A gate with `DISPATCH_CHECK_PRIORITY=ship` writes the marker `.wait-ship-<pid>`
+  while it waits, and other waiters do not take a free slot while a live marker exists.
 - **`npm run check:changed`** (`scripts/check-changed.mjs`): the fast check for one agent session.
   It holds one slot for the full run. It selects the files changed since `origin/main`, plus staged,
   unstaged and untracked files, and removes deleted files. It runs `prettier --check` on these
@@ -6558,7 +6559,7 @@ signatures`.
 The flow does not rebase. It edits files only in a docs-only merge. Every git and gh call has a
 time limit (120 s, 300 s
 for fetch and push, 30 min for the check command) and a 64 MiB output buffer, and the diffs run
-with fixed color, prefix and path settings. The check command gets `DISPATCH_CHECK_WAIT_SECONDS=5400`.
+with fixed color, prefix and path settings. The check command gets `DISPATCH_CHECK_WAIT_SECONDS=5400` and `DISPATCH_CHECK_PRIORITY=ship`.
 Its 30 min stop while the slot gate prints its waiting line and start again at the gate's
 `with-check-slot: acquired` line, and the call ends after 5400 s plus 30 min in all. The gate lines
 are never the reason of a failed check. A failed check command stores the reason

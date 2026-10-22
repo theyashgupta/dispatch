@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import {
   linkSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -29,7 +30,10 @@ const waitSeconds = nonNegativeInt(env.DISPATCH_CHECK_WAIT_SECONDS, 5400);
 const stoppedLimit = nonNegativeInt(env.DISPATCH_CHECK_STOPPED_SECONDS, 300);
 const lockDir =
   env.DISPATCH_CHECK_LOCK_DIR || join(homedir(), ".dispatch", "locks");
+const shipPriority = env.DISPATCH_CHECK_PRIORITY === "ship";
+const shipMarker = join(lockDir, `.wait-ship-${process.pid}`);
 const POLL_MS = 500;
+const SHIP_MARKER_STALE_MS = 2 * 60 * 60_000;
 const GUARD_STALE_MS = 60_000;
 let heldSlot = null;
 let child = null;
@@ -132,12 +136,53 @@ function reclaim(slotPath, pid) {
 }
 
 /**
+ * Tell if another gate with ship priority waits, and remove the markers of dead waiters.
+ *
+ * @remarks
+ * A marker older than {@link SHIP_MARKER_STALE_MS} is dead whatever its pid, because a killed
+ * waiter leaves its marker and the pid can be reused.
+ */
+function liveShipWaiter() {
+  let names;
+  try {
+    names = readdirSync(lockDir);
+  } catch {
+    return false;
+  }
+  for (const name of names) {
+    const match = /^\.wait-ship-(\d+)$/.exec(name);
+    const pid = match ? Number(match[1]) : 0;
+    if (pid <= 0 || pid === process.pid) continue;
+    const marker = join(lockDir, name);
+    const stat = statSync(marker, { throwIfNoEntry: false });
+    if (!stat) continue;
+    let alive = Date.now() - stat.mtimeMs < SHIP_MARKER_STALE_MS;
+    if (alive) {
+      try {
+        process.kill(pid, 0);
+      } catch (error) {
+        alive = error.code === "EPERM";
+      }
+    }
+    if (alive) return true;
+    try {
+      rmSync(marker, { force: true });
+    } catch {
+      continue;
+    }
+  }
+  return false;
+}
+
+/**
  * Take the first free slot and return its path, or null when all slots are held.
  *
  * @remarks
  * Every poll checks each holder, so a stopped holder is released on the first poll after the limit.
+ * A gate without ship priority takes no slot while a live ship waiter exists.
  */
 function tryAcquire() {
+  if (!shipPriority && liveShipWaiter()) return null;
   for (let i = 0; i < slots; i += 1) {
     const slotPath = join(lockDir, `check-slot-${i}`);
     const check = checkHolder(slotPath, { stoppedSince });
@@ -163,10 +208,19 @@ function holders() {
   return pids;
 }
 
+function clearShipMarker() {
+  try {
+    rmSync(shipMarker, { force: true });
+  } catch {
+    return;
+  }
+}
+
 /**
- * Remove the held slot only when its pid file still names this process.
+ * Remove the ship marker, and the held slot only when its pid file names this process.
  */
 function release() {
+  if (shipPriority) clearShipMarker();
   if (heldSlot && readOwner(heldSlot) === process.pid) {
     rmSync(heldSlot, { force: true });
   }
@@ -229,6 +283,7 @@ try {
   while (!(heldSlot = tryAcquire())) {
     if (!announced) {
       announced = true;
+      if (shipPriority) writeFileSync(shipMarker, String(process.pid));
       console.error(
         `with-check-slot: waiting for a free slot, holders: ${holders().join(",")} (${lockDir})`,
       );
@@ -247,5 +302,6 @@ try {
   );
   process.exit(2);
 }
+if (shipPriority) clearShipMarker();
 if (announced) console.error("with-check-slot: acquired");
 process.exit(await run({ ...env, DISPATCH_CHECK_SLOT_HELD: "1" }));
