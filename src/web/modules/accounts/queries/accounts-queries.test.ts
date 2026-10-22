@@ -103,6 +103,31 @@ test("setActiveAccount reads a 404 as an unregistered account", async () => {
   });
 });
 
+test("setActiveAccount reads a needs-login 409 as a re-login prompt", async () => {
+  reply(409, { error: "account-needs-login" });
+  assert.deepEqual(await setActiveAccount("a", "idle"), {
+    ok: false,
+    error: "This account needs a new login. Log in again, then switch.",
+  });
+});
+
+test("setActiveAccount reads a shadowed-by-home 409 as a duplicate login", async () => {
+  reply(409, { error: "account-shadowed-by-home" });
+  assert.deepEqual(await setActiveAccount("a", "idle"), {
+    ok: false,
+    error:
+      "This account is the same login as Default. Switch to Default or remove the duplicate.",
+  });
+});
+
+test("setActiveAccount keeps the generic message for an unknown 409 code", async () => {
+  reply(409, { error: "something-else" });
+  assert.deepEqual(await setActiveAccount("a", "idle"), {
+    ok: false,
+    error: "Couldn't switch the Claude account.",
+  });
+});
+
 test("setActiveAccount reads any other status as a switch failure", async () => {
   reply(500, {});
   assert.deepEqual(await setActiveAccount("a", "none"), {

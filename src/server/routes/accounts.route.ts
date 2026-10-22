@@ -13,6 +13,7 @@ import {
 import {
   listAccountSessions,
   managedDefaultOffered,
+  manualSwitchRefusal,
   listAccountSummaries,
   readChainView,
   removeAccountAndLogout,
@@ -72,6 +73,10 @@ accountsRouter.get("/accounts", async (_req, res) => {
 accountsRouter.put("/accounts/active", async (req, res) => {
   const { id, applyToRunning } = parseOrThrow(activeBodySchema, req.body);
   const outcome = await runInChainQueue(async () => {
+    const refusal = await orFail("accounts-read-failed", () =>
+      manualSwitchRefusal(id),
+    );
+    if (refusal !== null) return { ok: false as const, error: refusal };
     const result = await orFail("accounts-write-failed", () =>
       setActiveAccount(id),
     );
@@ -83,7 +88,11 @@ accountsRouter.put("/accounts/active", async (req, res) => {
     );
     return { ok: true as const, applied };
   });
-  if (!outcome.ok) throw new NotFoundError(outcome.error);
+  if (!outcome.ok) {
+    throw outcome.error === "not-found"
+      ? new NotFoundError(outcome.error)
+      : new ConflictError(outcome.error);
+  }
   const body: AccountSwitchResponse = {
     activeId: getActiveAccountId(),
     ...outcome.applied,
