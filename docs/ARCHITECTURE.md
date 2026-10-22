@@ -3115,9 +3115,9 @@ controller records the exhausted chain as before.
 
 **Triggers.** `account-chain.ts` is the controller. It runs one task at a time in a queue. A manual
 switch through `PUT /accounts/active` runs in the same queue, so it never overlaps a chain move.
-The route refuses an account in the state `needs-login` with 409 `account-needs-login` and an
-account in the state `shadowed-by-home` with 409 `account-shadowed-by-home`, and it does not change
-the active account. A failover starts on these signals for the account in use:
+The route refuses an account in the state `needs-login` with 409 `account-needs-login`. It refuses
+an account in the state `shadowed-by-home` with 409 `account-shadowed-by-home`. A refused switch does
+not change the active account. A failover starts on these signals for the account in use:
 
 1. A usage read at or above the threshold.
 2. A limit surface on the screen of a session of the account in use. A pane scan each 30 s finds
@@ -6168,7 +6168,7 @@ Scenario 14 (tests/e2e/scenario-14-missing-workspace.e2e.ts) proves that the boo
 
 Scenario 16 (tests/e2e/scenario-16-ship-retry.e2e.ts) proves that a ship retry reports the failing step, skips a check that already passed and adopts the open PR of the branch (LOCAL-171). The board has the ship rights **merge**, and its repository check command is a script in the sandbox folder, outside the repository, that reads a mode file. The test starts two cards with the orchestrator `start_card` route, so both have a `launch`, and moves both to Agent done. Card A ships three times on the same branch. With the mode `fail`, the first `start_ship` stops at `checking`. The stored reason, the `ship_failure` decision item question and the `ship_stopped` group state hold `step test`, `exit code 3` and the last output line `not ok 1 - the real failure`. With the mode `pass` and failing PR checks, the second `start_ship` stops at `waiting_checks` with one PR, and the check script has run once. With passing PR checks, the third `start_ship` ends `done`: the branch shows `checkSkipped` true, the script does not run again, there is one `ship_check_skipped` group state, the fake `gh` log holds one `pr create`, and the bare origin `main` holds the work file. Card B has an open PR in the fake `gh` state before its first `start_ship`. That one ship ends `done` on the seeded PR with no `pr create` call for the branch. The test types no key into any pane.
 
-The two account scenarios (tests/e2e/scenario-14-account-login-decision.e2e.ts and tests/e2e/scenario-15-managed-default.e2e.ts) have one npm script. Run `npm run build` first, then run `npm run test:e2e:accounts`. The script is not part of `npm run check`.
+The two account scenarios (tests/e2e/scenario-14-account-login-decision.e2e.ts and tests/e2e/scenario-15-managed-default.e2e.ts) have one npm script. Run `npm run build` first, then run `npm run test:e2e:accounts`. The script runs the two files one after the other. The script is not part of `npm run check`.
 
 The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
