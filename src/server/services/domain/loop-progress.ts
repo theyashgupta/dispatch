@@ -46,6 +46,8 @@ interface AttemptLine {
   at: string;
 }
 
+type ClosedReason = NonNullable<LoopEngine["closedReason"]>;
+
 interface EngineParse {
   engine: LoopEngine | null;
   reason: string | null;
@@ -331,6 +333,16 @@ export function parseAttemptLines(text: string): AttemptLine[] {
   return lines;
 }
 
+function frontMatterFences(
+  lines: string[],
+): [number | undefined, number | undefined] {
+  const fences: number[] = [];
+  lines.forEach((line, index) => {
+    if (line.trim() === "---" && fences.length < 2) fences.push(index);
+  });
+  return [fences[0], fences[1]];
+}
+
 /**
  * Reads the front matter of a ralph loop engine file.
  *
@@ -338,12 +350,7 @@ export function parseAttemptLines(text: string): AttemptLine[] {
  */
 export function parseEngineFile(text: string, closed: boolean): EngineParse {
   const lines = toLines(text);
-  const fences: number[] = [];
-  lines.forEach((line, index) => {
-    if (line.trim() === "---" && fences.length < 2) fences.push(index);
-  });
-  const start = fences[0];
-  const end = fences[1];
+  const [start, end] = frontMatterFences(lines);
   if (start === undefined || end === undefined) {
     return { engine: null, reason: "no front matter" };
   }
@@ -367,9 +374,59 @@ export function parseEngineFile(text: string, closed: boolean): EngineParse {
       handoffPending: sessionId === HANDOFF_PENDING,
       startedAt: fields.get("started_at") || null,
       closed,
+      ...(closed && {
+        closedReason: closedReasonOf(fields.get("closed_reason")),
+      }),
     },
     reason: null,
   };
+}
+
+function closedReasonOf(value: string | undefined): ClosedReason {
+  return value === "promise" || value === "close_loop" ? value : "manual";
+}
+
+/**
+ * Returns the engine text with one `closed_reason` line in its front matter.
+ *
+ * @remarks Text without a front matter comes back unchanged.
+ */
+export function withClosedReason(
+  text: string,
+  reason: "promise" | "close_loop",
+): string {
+  const lines = toLines(text);
+  const [start, end] = frontMatterFences(lines);
+  if (start === undefined || end === undefined) return text;
+  const kept = lines
+    .slice(start + 1, end)
+    .filter((line) => !/^closed_reason:/.test(line));
+  return [
+    ...lines.slice(0, start + 1),
+    ...kept,
+    `closed_reason: ${reason}`,
+    ...lines.slice(end),
+  ].join("\n");
+}
+
+/**
+ * Returns the text of a closed engine file that Dispatch writes when the plugin already removed the real one.
+ */
+export function closedEngineText(
+  slug: string,
+  sessionId: string | null,
+  reason: "promise" | "close_loop",
+): string {
+  return [
+    "---",
+    "active: false",
+    ...(sessionId === null ? [] : [`session_id: ${sessionId}`]),
+    `completion_promise: "RALPH COMPLETE ${slug}"`,
+    `closed_reason: ${reason}`,
+    "---",
+    "Closed by Dispatch after the loop engine file was removed.",
+    "",
+  ].join("\n");
 }
 
 /**
@@ -763,7 +820,7 @@ export function buildLoopProgress(input: LoopProgressInput): LoopProgress {
 /**
  * Builds the one-unit loop model of a single PRD from the already read texts of one session root.
  *
- * @remarks A missing state or attempts file adds no warning because a PRD that has not started has neither. The result has no roadmap, so `roadmapFile` is empty.
+ * @remarks A missing state or attempts file adds no warning because a PRD that has not started has neither. The result has no roadmap, so `roadmapFile` is empty. A closed engine with no phase headings reads built, because the loop files cannot vouch and the close was the loop's own finish.
  */
 export function buildPrdProgress(input: PrdProgressInput): LoopProgress {
   const ctx: ReadContext = {
@@ -798,7 +855,10 @@ export function buildPrdProgress(input: PrdProgressInput): LoopProgress {
   };
   const phases = phasesOf(headings, evidence);
   const running = engine !== null && engine.active && !engine.closed;
-  const built = phases.length > 0 && phases.every((p) => p.gate === "pass");
+  const built =
+    phases.length > 0
+      ? phases.every((p) => p.gate === "pass")
+      : engine?.closed === true;
   const status: LoopUnitStatus = built
     ? "built, awaiting /ship"
     : running || evidence.passes.length > 0 || evidence.attempts.length > 0

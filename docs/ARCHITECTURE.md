@@ -1997,7 +1997,8 @@ missing, and a continued claude there resumes the newest conversation of a diffe
 rule applies to the Resume route, Reconnect, the orchestrator `resume_session` tool and the boot
 resume sweep, because all of them go through `resumeSession`. On the boot sweep the supervisor also
 moves the card to Needs input. A reattach to a live tmux session does not launch claude, so it does
-not check the folder.
+not check the folder. The supervisor relaunch into a live shell-prompt pane has its own check
+(LOCAL-166, see Session Supervisor).
 
 In Review's opposite in-edge/out-edge asymmetry versus Agent Done, and the full trigger-by-trigger
 spec, are homed in [Column Transition Specification](#column-transition-specification) (`BOARD-06`).
@@ -6168,6 +6169,10 @@ Scenario 14 (tests/e2e/scenario-14-missing-workspace.e2e.ts) proves that the boo
 
 Scenario 16 (tests/e2e/scenario-16-ship-retry.e2e.ts) proves that a ship retry reports the failing step, skips a check that already passed and adopts the open PR of the branch (LOCAL-171). The board has the ship rights **merge**, and its repository check command is a script in the sandbox folder, outside the repository, that reads a mode file. The test starts two cards with the orchestrator `start_card` route, so both have a `launch`, and moves both to Agent done. Card A ships three times on the same branch. With the mode `fail`, the first `start_ship` stops at `checking`. The stored reason, the `ship_failure` decision item question and the `ship_stopped` group state hold `step test`, `exit code 3` and the last output line `not ok 1 - the real failure`. With the mode `pass` and failing PR checks, the second `start_ship` stops at `waiting_checks` with one PR, and the check script has run once. With passing PR checks, the third `start_ship` ends `done`: the branch shows `checkSkipped` true, the script does not run again, there is one `ship_check_skipped` group state, the fake `gh` log holds one `pr create`, and the bare origin `main` holds the work file. Card B has an open PR in the fake `gh` state before its first `start_ship`. That one ship ends `done` on the seeded PR with no `pr create` call for the branch. The test types no key into any pane.
 
+Scenario 17 (tests/e2e/scenario-17-promise-close.e2e.ts) proves that the supervisor closes the engine of a single PRD loop that has no phases from the promise alone (LOCAL-172). The engine file has the LOCAL-159 shape: the prompt has no "Execute the PRD at" line, and the test seeds no PRD file and no state file. The test checks that `get_card_progress` shows the open engine and that `start_ship` answers 409 `engine-not-closed`. The test then writes a session transcript whose last assistant message ends with `<promise>RALPH COMPLETE local-159</promise>` and the `DISPATCH_STATUS: DONE` line, and posts the Stop hook. In 60 s the board holds one `close_loop` row with the result `closed` and the reason `promise`. The engine file is renamed to its `.done` copy, which holds `closed_reason: promise`. `get_card_progress` shows `engine.closedReason` `promise`, `completion` `complete`, 1 unit done of 1, and a `lastMarker` that starts with `DONE `. `start_ship` then answers 202. The test does not check a push, a PR or a merge. The test does not rename the engine file, and it types no key into any pane.
+
+Scenario 18 (tests/e2e/scenario-18-live-missing-workspace.e2e.ts) proves that the supervisor does not relaunch claude in a live shell whose workspace folder is missing (LOCAL-166). The test starts one card with the fake `claude`, renames the workspace folder of the card inside the sandbox, stops the fake `claude` with `C-c` so that the pane is at the shell prompt, and sets `supervisor: on`. The card must be in Needs input with `resume_failed` and the status reason `resume: Resume failed: workspace-missing: <path>`. The card must not be lost, the tmux session must stay live, and the fake `claude` must record no new launch.
+
 The two account scenarios (tests/e2e/scenario-14-account-login-decision.e2e.ts and tests/e2e/scenario-15-managed-default.e2e.ts) have one npm script. Run `npm run build` first, then run `npm run test:e2e:accounts`. The script runs the two files one after the other. The script is not part of `npm run check`.
 
 In the full run, the files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
@@ -6206,6 +6211,12 @@ The reader reads at most 1 MiB per file (`<path>: larger than 1 MiB`). A missing
 adds a warning to `loopProgress.warnings`, and the rest of the model still fills. A root with no
 loop files gives no model, and the card keeps its last stored model. The reader never writes a
 loop file, and no reader error stops the server.
+
+**Closed engine.** The reader reads the `closed_reason` front matter line of a `.done` engine file
+into `engine.closedReason`. The values are `promise`, `close_loop` and `manual`. The value is
+`manual` when the line is missing or unknown, for example in a file that a person renamed by hand.
+A single PRD loop with a closed engine and no phase headings reads as built and complete. When the
+PRD shows phases, the phases decide.
 
 **Report call.** A loop can report a gate result, so that the board shows it at once. A session
 has the variables `DISPATCH_HOOK_PORT` and `DISPATCH_HOOK_TOKEN`. Run this command after each gate
@@ -6271,12 +6282,25 @@ action that finds nothing to do, such as an `Escape` already sent, writes no row
   restart has its own.
 - Prompts: the dangerous delete prompt and the held peer message are declined. Any other
   permission prompt gets no key.
-- Loop close: at `roadmap_complete` the engine file is renamed to its `.done` copy.
+- Loop close: at `roadmap_complete` the engine file is renamed to its `.done` copy. The supervisor
+  also closes a single PRD loop whose model has no phases when the last assistant text of the
+  transcript holds `<promise>RALPH COMPLETE <slug></promise>` for the slug of the loop. The
+  supervisor does not read the pane for this, because the loop prompt and the Stop hook message
+  also show the phrase. The close writes `closed_reason`: `close_loop` when the files read
+  complete, else `promise`. When the plugin already removed the engine file, the supervisor writes a closed `.done` file with the slug and the `closed_reason`. The DONE marker guard applies only when the loop engine is closed. A supervisor stop never replaces the DONE marker of an Agent done card whose loop engine is closed.
 - Lost session and shell prompt: a pane whose shell owns the foreground is relaunched with
   `runClaude`; any other case runs the resume saga. The resume prompt is typed only after claude
   takes the foreground, within 60 s. A failed relaunch, a lost session that stays gone, or claude
   that does not start sets `resume_failed`; an unconfirmed resume prompt is recorded as
   unconfirmed.
+- Missing workspace folder before a relaunch (LOCAL-166): before `runClaude` types the launch line
+  into a shell-prompt pane, the supervisor checks that the session root (the session
+  `workspacePath`, else the card `workspacePath`) is a folder. If the folder is missing, the
+  supervisor launches nothing. It sets the session to `needs_input` with `resume_failed`, moves the
+  card to Needs input and records the LOCAL-163 copy as the status reason:
+  `resume: Resume failed: workspace-missing: <path>`. The tmux session stays live, because a
+  detach would leave a tmux session that no card tracks. The card detail shows the copy in an alert
+  above the terminal.
 - Handoff (`supervisor-handoff.ts`): at `handoffPercent` the session gets the handoff request
   once per crossing, and once more at `handoffHardPercent`; the hard request tells the loop to
   hand off now. At `handoff_ready` the supervisor waits until the pane is ready and not busy (a

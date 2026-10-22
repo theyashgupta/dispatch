@@ -15,6 +15,7 @@ import {
   type DetectMemory,
   type Detection,
 } from "../domain/supervisor-state.js";
+import { promiseCompletes } from "../domain/loop-completion.js";
 import { groupStateOfSupervisor } from "../domain/group-state.js";
 import {
   holdsNeedsInput,
@@ -282,7 +283,13 @@ export async function supervisePane(
       paused: card.paused ?? null,
       pane: sample.pane,
       engineSessionId: engineSessionIdOf(card),
-      completion: card.loopProgress?.completion ?? null,
+      completion: promiseCompletes(
+        card.loopProgress,
+        engineOpen,
+        transcript?.lastAssistantText,
+      )
+        ? "complete"
+        : (card.loopProgress?.completion ?? null),
       engineOpen,
       transcript,
       memory: watcher.memory,

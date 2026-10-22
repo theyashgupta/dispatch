@@ -723,6 +723,23 @@ void test("a single read of a closed loop reads the renamed .done engine file", 
   assert.deepEqual(progress.warnings, []);
 });
 
+void test("a single read of a closed loop with no PRD path reads complete", async () => {
+  const root = emptyTemp();
+  mkdirSync(join(root, ".claude"), { recursive: true });
+  writeFileSync(
+    join(root, ".claude/ralph-loop.local.md.done"),
+    '---\nactive: true\niteration: 1\nsession_id: x\ncompletion_promise: "RALPH COMPLETE local-159"\nclosed_reason: promise\n---\nExecute LOCAL-159 per the ralph-loop skill. Unit A: PRD .planning/prds/local-159-unit-a.md. When done output the phrase RALPH COMPLETE local-159 wrapped in promise tags.\n',
+  );
+  const progress = await readLoopProgress(root, { single: true });
+  assert.ok(progress);
+  assert.equal(progress.slug, "local-159");
+  assert.equal(progress.engine?.closed, true);
+  assert.equal(progress.engine?.closedReason, "promise");
+  assert.equal(progress.completion, "complete");
+  assert.equal(progress.summary.unitsDone, 1);
+  assert.equal(progress.summary.unitsTotal, 1);
+});
+
 void test("a read without single stays null for a root with no ledger", async () => {
   assert.equal(await readLoopProgress(singleRoot()), null);
 });
