@@ -12,6 +12,8 @@ export interface FakeGhScenario {
   prState?: "OPEN" | "CLOSED";
   mergeError?: string;
   adminError?: string;
+  mergeLandsThenFails?: string;
+  mergedHeadRefOid?: string;
   hideOpenPrs?: "always" | "afterPush";
 }
 
@@ -139,6 +141,11 @@ if (verb === "view" && flag("--json") === "state,statusCheckRollup") {
   process.stdout.write(JSON.stringify({ state: pr.state, statusCheckRollup: rollup }) + "\n");
   process.exit(0);
 }
+if (verb === "view" && flag("--json") === "state,headRefOid") {
+  const headRefOid = scenario.mergedHeadRefOid ?? remoteHead(pr.head);
+  process.stdout.write(JSON.stringify({ state: pr.state, headRefOid }) + "\n");
+  process.exit(0);
+}
 if (verb === "view" && flag("--json") === "state") {
   if (pr.state === "OPEN" && scenario.prState) pr.state = scenario.prState;
   if (pr.state === "OPEN") {
@@ -162,6 +169,7 @@ if (verb === "merge") {
   if (scenario.mergeError) fail(scenario.mergeError);
   squashMerge(pr, flag("--subject"));
   save();
+  if (scenario.mergeLandsThenFails) fail(scenario.mergeLandsThenFails);
   process.exit(0);
 }
 fail("fake gh: unsupported " + argv.join(" "));
