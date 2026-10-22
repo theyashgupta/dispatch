@@ -597,6 +597,18 @@ const statusRows: StatusRow[] = [
     },
   },
   {
+    name: "frozen",
+    card: live("CEN-1", { state: "frozen" }),
+    expected: {
+      state: "attention",
+      label: "Frozen after compaction",
+      tone: "attention",
+      band: "needs_you",
+      actions: ["open", "open_terminal"],
+      detail: null,
+    },
+  },
+  {
     name: "api error",
     card: live("CEN-1", { state: "api_error" }),
     expected: {

@@ -11,7 +11,7 @@ import type {
 
 const env = isolateEnv();
 const { store } = await import("../../store/board.store.js");
-const { runActions } = await import("./supervisor-actions.js");
+const { actionTools, runActions } = await import("./supervisor-actions.js");
 
 const SBX = parseBoardKey("SBX") as BoardKey;
 await store.load();
@@ -51,6 +51,7 @@ async function setState(state: OrchestratorRecord["state"]): Promise<void> {
 
 function spyDeps(calls: string[], sent: string[] = []): ActionDeps {
   return {
+    ...actionTools,
     send: (_card, _session, text) => {
       sent.push(text);
       return Promise.resolve("confirmed");

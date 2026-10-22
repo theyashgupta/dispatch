@@ -112,6 +112,7 @@ type Status = Pick<CentreBranch, "state" | "label" | "tone" | "band">;
 
 const ATTENTION_STATES = [
   "stale",
+  "frozen",
   "permission_prompt",
   "api_error",
   "lost",

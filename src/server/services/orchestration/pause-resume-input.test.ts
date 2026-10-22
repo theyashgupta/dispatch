@@ -15,7 +15,7 @@ const { MEMORY_RESUME_LINE } =
   await import("../../../shared/dispatch-lines.js");
 const { paneAtPrompt, paneTerminal, paneTtyCooked } =
   await import("../../adapters/tmux.js");
-const { runActions } = await import("./supervisor-actions.js");
+const { actionTools, runActions } = await import("./supervisor-actions.js");
 const { paneReady } = await import("../domain/supervisor-state.js");
 const { setupSupervisedBoard, startSupervised, stopSupervisedTmux } =
   await import("../../test-support/supervised-session.js");
@@ -243,6 +243,7 @@ void test(
     assert.equal(await paneTtyCooked(target), true, "stty sane made it cooked");
     probeTools.resume = (card, session, evidence) =>
       runActions(card, session, [{ kind: "resume" }], evidence, {
+        ...actionTools,
         resume: () => Promise.resolve(),
         relaunch: async () => {
           await s.launch();

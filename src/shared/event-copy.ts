@@ -60,6 +60,8 @@ export function describeEvent(
       return "session started";
     case "session_resume":
       return "session resumed";
+    case "session_relaunch":
+      return "session relaunched after a freeze";
     case "session_lost":
       return "session lost";
     case "session_failed":

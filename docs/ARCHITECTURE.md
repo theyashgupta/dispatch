@@ -6180,6 +6180,8 @@ Scenario 18 (tests/e2e/scenario-18-live-missing-workspace.e2e.ts) proves that th
 
 Scenario 19 (tests/e2e/scenario-19-pushover-attention.e2e.ts) proves that an empty Pushover value gives one attention item and one start log line, and that filled values give neither (LOCAL-168). The test starts one server with `PUSHOVER_USER_KEY` and `PUSHOVER_APP_TOKEN` set to empty strings. The server log must have exactly one `[notify] loop phase notifications are on` line that names both variables. The board snapshot must carry `pushoverMissing` with both names in that order, and `GET /api/boards/counts` must show `attention` 1 for the default board. The test then starts a second server with fake non-empty values. That server log must have no `[notify]` line, the snapshot must have no `pushoverMissing`, and `attention` must be 0. The fake values must appear in neither log, snapshot nor counts.
 
+Scenario 20 (tests/e2e/scenario-20-frozen-relaunch.e2e.ts) proves that a session frozen after an idle compaction is relaunched once with resume (LOCAL-170). The sandbox sets `DISPATCH_FROZEN_RELAUNCH_MS` to 20 s through the `env` option of `startSandbox` and a memory sample file with low swap. The board has the supervisor on. The test starts one card with the fake `claude` and posts a `UserPromptSubmit` hook so the card holds the conversation id `conv-frozen`. It then rewrites the scenario file: the pane shows "Compacted while idle", the status line shows context 0 percent, and a `freezeFile` makes the fake hold every `Enter`. `POST /api/sessions/FRZ-1/input` must answer `unconfirmed`, and a `send` row must carry the reason `held in prompt box`. The card must reach the state `frozen` with no new launch and no `relaunch_frozen` row. Then one `relaunch_frozen` row with `result: "stopped"` must appear at least 20 s after `stateSince`. The freeze file must be gone, because the signal ended the fake, and the newest launch line must hold `--resume conv-frozen`. A confirmed `resume` row must follow, and the transcript must hold the resume prompt as a user entry. The card must have exactly one `session_relaunch` event. After a 60 s pause of the server, there must still be one `relaunch_frozen` row and one `session_relaunch` event.
+
 The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
 ## Orchestration Initiative
@@ -6269,9 +6271,9 @@ supervisor uses that capture and adds no second capture loop. The registry
 (`supervisor-registry.ts`) keeps one watcher per tmux session name.
 
 **States.** `supervisor-state.ts` (pure) reads the pane, the transcript tail and the loop
-progress and gives one of 12 states: `working`, `idle`, `needs_input`, `permission_prompt`,
+progress and gives one of 14 states: `working`, `idle`, `needs_input`, `permission_prompt`,
 `handoff_ready`, `roadmap_complete`, `usage_limit_dialog`, `usage_limit_wait`, `api_error`,
-`stale`, `lost` and `shell_prompt`. A dialog state needs two captures that agree, and `idle`
+`stale`, `lost`, `shell_prompt`, `paused` and `frozen`. A dialog state needs two captures that agree, and `idle`
 needs three equal samples 60 s apart. Each change is one `supervisor_state` row in
 `orchestration_events` and sets `state`, `stateReason` and `stateSince` on the session. A
 `needs_input` state moves the card to the Needs input column.
@@ -6306,6 +6308,27 @@ action that finds nothing to do, such as an `Escape` already sent, writes no row
   `resume: Resume failed: workspace-missing: <path>`. The tmux session stays live, because a
   detach would leave a tmux session that no card tracks. The card detail shows the copy in an alert
   above the terminal.
+- Frozen session: the state is `frozen` when the pane shows the line "Compacted while idle" above
+  the input line, the status line shows context 0 percent, the input box holds text, the
+  transcript is known and does not grow, no busy line shows, and the box text stays the same for
+  60 s. The supervisor reads the context percent that the watcher stored. A server restart keeps a
+  stored `frozen` state and its `stateSince` while the pane is unchanged. The supervisor relaunches
+  the session `FROZEN_RELAUNCH_MINUTES` (15) after `stateSince`. A sandbox server reads
+  `DISPATCH_FROZEN_RELAUNCH_MS` instead. `relaunchFrozen` in `supervisor-actions.ts` first checks
+  the live card (same session and tmux name, not paused, no start in flight), the workspace
+  folder (a missing folder fails with `workspace-missing`), the orchestrator state, the memory governor and the shell root of the pane. A blocked relaunch sends no signal.
+  It then stops claude with `endJob` (`end-job.ts`, shared with the resume probe) under the card
+  lock: a hangup, then a kill, to the foreground process group of the pane, never to the group of
+  the root shell. A typed `/exit` would only queue in the box. The relaunch then uses the resume
+  path: `runClaude` types the launch line with `--resume <claudeSessionId>` in the same tmux
+  window, and the supervisor types the loop prompt one time. The relaunch writes one
+  `supervisor_action` row with `action: "relaunch_frozen"`, `result: "stopped"` and `frozenSince`.
+  It writes one `session_relaunch` activity event only after the prompt send. A session gets one
+  relaunch per freeze. A second freeze in the same unit and phase sets `needs_input` with
+  `resume_failed`, which a `frozen` reading does not release. A `frozen` reading releases only a
+  `supervisor_gave_up` hold. While the line stays in a live input box, `send_input` answers
+  `unconfirmed` with the reason `held in prompt box`, and the resume probe treats that reason as a
+  stuck REPL. `relaunchFrozen` is the one function where a check before the relaunch goes.
 - Handoff (`supervisor-handoff.ts`): at `handoffPercent` the session gets the handoff request
   once per crossing, and once more at `handoffHardPercent`; the hard request tells the loop to
   hand off now. At `handoff_ready` the supervisor waits until the pane is ready and not busy (a
