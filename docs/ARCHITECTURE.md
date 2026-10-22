@@ -2002,7 +2002,9 @@ rule applies to the Resume route, Reconnect, the orchestrator `resume_session` t
 resume sweep, because all of them go through `resumeSession`. On the boot sweep the supervisor also
 moves the card to Needs input. A reattach to a live tmux session does not launch claude, so it does
 not check the folder. The supervisor relaunch into a live shell-prompt pane has its own check
-(LOCAL-166, see Session Supervisor).
+(LOCAL-166, see Session Supervisor). `runClaude` has the same check for the Run Claude button and
+the orchestrator in-place relaunch (LOCAL-178): if the folder is missing, it launches nothing,
+moves the card to Needs input with the LOCAL-166 status reason and returns `workspace-missing`.
 
 In Review's opposite in-edge/out-edge asymmetry versus Agent Done, and the full trigger-by-trigger
 spec, are homed in [Column Transition Specification](#column-transition-specification) (`BOARD-06`).
