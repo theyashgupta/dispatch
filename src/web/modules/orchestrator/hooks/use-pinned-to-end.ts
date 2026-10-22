@@ -9,12 +9,11 @@ export function usePinnedToEnd(ref: RefObject<HTMLDivElement | null>) {
   useEffect(() => {
     const region = ref.current;
     if (region === null) return;
-    let height = region.clientHeight;
+    let previousHeight = region.clientHeight;
     const observer = new ResizeObserver(() => {
-      if (region.scrollHeight - region.scrollTop - height <= 1) {
+      if (region.scrollHeight - region.scrollTop - previousHeight <= 1)
         region.scrollTop = region.scrollHeight;
-      }
-      height = region.clientHeight;
+      previousHeight = region.clientHeight;
     });
     observer.observe(region);
     return () => observer.disconnect();
