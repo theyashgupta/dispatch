@@ -60,6 +60,11 @@ void test("every orchestrator settings file leaves both loop keys out and keeps 
     const orchestrator = parse(hookSettingsJson(value, true));
     assert.equal("idleCompaction" in orchestrator, false);
     assert.equal("promptSuggestionEnabled" in orchestrator, false);
+    assert.deepEqual(Object.keys(orchestrator), [
+      "permissions",
+      "crossSessionInbound",
+      "hooks",
+    ]);
     assert.deepEqual(orchestrator.hooks, loop.hooks);
     assert.deepEqual(orchestrator.permissions, loop.permissions);
     assert.equal(orchestrator.crossSessionInbound, loop.crossSessionInbound);
