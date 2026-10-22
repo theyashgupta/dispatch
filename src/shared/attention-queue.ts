@@ -18,7 +18,8 @@ export type AttentionKind =
   | "budget_stop"
   | "failed_gate"
   | "resume_failed"
-  | "budget_warning";
+  | "budget_warning"
+  | "pushover_missing";
 
 export interface AttentionItem {
   id: string;
@@ -182,6 +183,24 @@ function warningItem(
   };
 }
 
+function pushoverItem(
+  gap: { names: readonly string[]; since: string },
+  now: Date,
+): AttentionItem {
+  const many = gap.names.length > 1;
+  return {
+    id: "pushover_missing",
+    kind: "pushover_missing",
+    cardId: null,
+    groupId: null,
+    state: null,
+    waitingSince: gap.since,
+    waitMinutes: waitMinutesOf(gap.since, now),
+    text: `Pushover ${gap.names.join(" and ")} ${many ? "are" : "is"} empty or not set. Loop phase notifications are not sent. Fill the ${many ? "values" : "value"} in the env vault.`,
+    reply: false,
+  };
+}
+
 /**
  * A Needs Input card that no supervisor state explains, as on a board with the supervisor off.
  *
@@ -229,6 +248,7 @@ export function buildAttentionQueue(input: {
   cards: readonly Card[];
   decisions: readonly DecisionItem[];
   events?: readonly OrchestrationEvent[];
+  pushoverMissing?: { names: readonly string[]; since: string } | null;
   now: Date;
 }): AttentionItem[] {
   const { boardKey, now, events = [] } = input;
@@ -268,5 +288,7 @@ export function buildAttentionQueue(input: {
       reply: false,
     });
   }
+  const gap = input.pushoverMissing;
+  if (gap && gap.names.length > 0) items.push(pushoverItem(gap, now));
   return items.sort(byWait);
 }
