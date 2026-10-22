@@ -857,16 +857,17 @@ void test("a DONE marker on a loop card forces a write with a newer readAt and t
   const stop = startLoopProgressReader({ intervalMs: 60_000, debounceMs: 50 });
   try {
     await waitFor(() => recorded.length >= 1);
-    assert.equal(recorded[0]?.force, false);
-    await sleep(20);
+    const first = recorded[0];
+    assert.equal(first?.force, false);
+    const firstReadAt = first?.progress.readAt ?? "";
+    await waitFor(() => new Date().toISOString() > firstReadAt);
     const emittedAt = new Date().toISOString();
     activity.emit("activity", doneEvent("card-1"));
-    await waitFor(() => recorded.length >= 2);
-    const [before, after] = recorded.slice(-2);
-    assert.equal(after?.force, true);
-    assert.ok((after?.progress.readAt ?? "") >= emittedAt);
-    assert.ok((after?.progress.readAt ?? "") > (before?.progress.readAt ?? ""));
-    assert.deepEqual(after?.progress.units, before?.progress.units);
+    await waitFor(() => recorded.some((entry) => entry.force));
+    const forced = recorded.find((entry) => entry.force);
+    assert.ok((forced?.progress.readAt ?? "") >= emittedAt);
+    assert.ok((forced?.progress.readAt ?? "") > firstReadAt);
+    assert.deepEqual(forced?.progress.units, first?.progress.units);
   } finally {
     stop();
   }
