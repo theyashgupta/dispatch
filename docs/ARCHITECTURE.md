@@ -3119,8 +3119,10 @@ trigger, the sessions stay on the account in use. If the chain without the filte
 controller records the exhausted chain as before.
 
 **Triggers.** `account-chain.ts` is the controller. It runs one task at a time in a queue. A manual
-switch through `PUT /accounts/active` runs in the same queue, so it never overlaps a chain move. A
-failover starts on these signals for the account in use:
+switch through `PUT /accounts/active` runs in the same queue, so it never overlaps a chain move.
+The route refuses an account in the state `needs-login` with 409 `account-needs-login`. It refuses
+an account in the state `shadowed-by-home` with 409 `account-shadowed-by-home`. A refused switch does
+not change the active account. A failover starts on these signals for the account in use:
 
 1. A usage read at or above the threshold.
 2. A limit surface on the screen of a session of the account in use. A pane scan each 30 s finds
@@ -6182,7 +6184,9 @@ Scenario 19 (tests/e2e/scenario-19-pushover-attention.e2e.ts) proves that an emp
 
 Scenario 20 (tests/e2e/scenario-20-frozen-relaunch.e2e.ts) proves that a session frozen after an idle compaction is relaunched once with resume (LOCAL-170). The sandbox sets `DISPATCH_FROZEN_RELAUNCH_MS` to 20 s through the `env` option of `startSandbox` and a memory sample file with low swap. The board has the supervisor on. The test starts one card with the fake `claude` and posts a `UserPromptSubmit` hook so the card holds the conversation id `conv-frozen`. It then rewrites the scenario file: the pane shows "Compacted while idle", the status line shows context 0 percent, and a `freezeFile` makes the fake hold every `Enter`. `POST /api/sessions/FRZ-1/input` must answer `unconfirmed`, and a `send` row must carry the reason `held in prompt box`. The card must reach the state `frozen` with no new launch and no `relaunch_frozen` row. Then one `relaunch_frozen` row with `result: "stopped"` must appear at least 20 s after `stateSince`. The freeze file must be gone, because the signal ended the fake, and the newest launch line must hold `--resume conv-frozen`. A confirmed `resume` row must follow, and the transcript must hold the resume prompt as a user entry. The card must have exactly one `session_relaunch` event. After a 60 s pause of the server, there must still be one `relaunch_frozen` row and one `session_relaunch` event.
 
-The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
+The two account scenarios (tests/e2e/scenario-14-account-login-decision.e2e.ts and tests/e2e/scenario-15-managed-default.e2e.ts) have one npm script. Run `npm run build` first, then run `npm run test:e2e:accounts`. The script runs the two files one after the other. The script is not part of `npm run check`.
+
+In the full run, the files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
 ## Orchestration Initiative
 

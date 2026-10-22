@@ -9,6 +9,8 @@ const env = isolateEnv();
 const configHolder = await import("../services/infra/config-holder.js");
 const accounts = await import("../services/orchestration/claude-accounts.js");
 const { accountsRouter } = await import("./accounts.route.js");
+const { emptyChainState, writeChainState } =
+  await import("../services/orchestration/account-chain-state.js");
 
 configHolder.setOrchestrationConfig({ linearApiKey: "", port: 4700 });
 
@@ -111,6 +113,83 @@ void test("activate then remove an added account resets the active pointer", asy
 
   const again = await call("DELETE", `/accounts/${ID_A}`);
   assert.equal(again.status, 404);
+});
+
+const ID_GUARDED = "44444444-4444-4444-8444-444444444444";
+
+async function withGuardedAccount<T>(
+  state: "needs-login" | "shadowed-by-home" | "available",
+  run: () => Promise<T>,
+): Promise<T> {
+  await accounts.upsertAccount({
+    id: ID_GUARDED,
+    email: "guarded@example.com",
+    orgId: "org-guarded",
+    orgName: "Org Guarded",
+    subscriptionType: "pro",
+    createdAt: "2026-09-02T00:00:00.000Z",
+    lastLoginAt: "2026-09-02T00:00:00.000Z",
+  });
+  await accounts.materializeConfigDir(ID_GUARDED);
+  const chain = emptyChainState();
+  chain.accounts[ID_GUARDED] = { state, buckets: [], limitedUntil: null };
+  await writeChainState(chain);
+  try {
+    return await run();
+  } finally {
+    await call("DELETE", `/accounts/${ID_GUARDED}`);
+    await writeChainState(emptyChainState());
+  }
+}
+
+void test("PUT /accounts/active refuses a needs-login account with 409 and leaves config untouched", async () => {
+  await withGuardedAccount("needs-login", async () => {
+    const before = fs.readFileSync(configPath, "utf8");
+    const refused = await call("PUT", "/accounts/active", { id: ID_GUARDED });
+    assert.equal(refused.status, 409);
+    assert.equal(refused.body.error, "account-needs-login");
+    assert.equal(fs.readFileSync(configPath, "utf8"), before);
+  });
+});
+
+void test("PUT /accounts/active refuses a shadowed-by-home account with 409 and leaves config untouched", async () => {
+  await withGuardedAccount("shadowed-by-home", async () => {
+    const before = fs.readFileSync(configPath, "utf8");
+    const refused = await call("PUT", "/accounts/active", { id: ID_GUARDED });
+    assert.equal(refused.status, 409);
+    assert.equal(refused.body.error, "account-shadowed-by-home");
+    assert.equal(fs.readFileSync(configPath, "utf8"), before);
+  });
+});
+
+void test("PUT /accounts/active refuses default when its chain state is needs-login", async () => {
+  const chain = emptyChainState();
+  chain.accounts["default"] = {
+    state: "needs-login",
+    buckets: [],
+    limitedUntil: null,
+  };
+  await writeChainState(chain);
+  try {
+    const before = fs.readFileSync(configPath, "utf8");
+    const refused = await call("PUT", "/accounts/active", { id: "default" });
+    assert.equal(refused.status, 409);
+    assert.equal(refused.body.error, "account-needs-login");
+    assert.equal(fs.readFileSync(configPath, "utf8"), before);
+  } finally {
+    await writeChainState(emptyChainState());
+  }
+});
+
+void test("PUT /accounts/active accepts an available account", async () => {
+  await withGuardedAccount("available", async () => {
+    const activated = await call("PUT", "/accounts/active", {
+      id: ID_GUARDED,
+    });
+    assert.equal(activated.status, 200);
+    assert.equal(activated.body.activeId, ID_GUARDED);
+    assert.equal(readConfig().activeClaudeAccountId, ID_GUARDED);
+  });
 });
 
 void test("a malformed registry makes GET /accounts answer 500, never an empty list", async () => {
@@ -280,6 +359,23 @@ void test("login: managedDefault validates, moves the home login under the offer
     (done.account as { managedDefault?: boolean }).managedDefault,
     true,
   );
+
+  const guarded = emptyChainState();
+  guarded.accounts[id] = {
+    state: "needs-login",
+    buckets: [],
+    limitedUntil: null,
+  };
+  await writeChainState(guarded);
+  try {
+    const refusedDefault = await call("PUT", "/accounts/active", {
+      id: "default",
+    });
+    assert.equal(refusedDefault.status, 409);
+    assert.equal(refusedDefault.body.error, "account-needs-login");
+  } finally {
+    await writeChainState(emptyChainState());
+  }
 
   const after = await call("GET", "/accounts");
   assert.equal(after.body.managedDefaultOffer, false);
