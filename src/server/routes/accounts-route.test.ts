@@ -367,12 +367,15 @@ void test("login: managedDefault validates, moves the home login under the offer
     limitedUntil: null,
   };
   await writeChainState(guarded);
-  const refusedDefault = await call("PUT", "/accounts/active", {
-    id: "default",
-  });
-  assert.equal(refusedDefault.status, 409);
-  assert.equal(refusedDefault.body.error, "account-needs-login");
-  await writeChainState(emptyChainState());
+  try {
+    const refusedDefault = await call("PUT", "/accounts/active", {
+      id: "default",
+    });
+    assert.equal(refusedDefault.status, 409);
+    assert.equal(refusedDefault.body.error, "account-needs-login");
+  } finally {
+    await writeChainState(emptyChainState());
+  }
 
   const after = await call("GET", "/accounts");
   assert.equal(after.body.managedDefaultOffer, false);
