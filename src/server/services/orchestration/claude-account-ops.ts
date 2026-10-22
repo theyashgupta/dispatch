@@ -94,6 +94,23 @@ export async function listAccountSummaries(): Promise<ClaudeAccountSummary[]> {
 }
 
 /**
+ * Return the code that refuses a manual switch to an account, or null when the switch may go ahead.
+ *
+ * @remarks
+ * It reads the same chain state file as the account listing, so the page and the guard agree. The
+ * canonical id makes `default` resolve to the managed default.
+ */
+export async function manualSwitchRefusal(
+  id: string,
+): Promise<"account-needs-login" | "account-shadowed-by-home" | null> {
+  const state = (await readChainState()).accounts[canonicalAccountId(id)]
+    ?.state;
+  if (state === "needs-login") return "account-needs-login";
+  if (state === "shadowed-by-home") return "account-shadowed-by-home";
+  return null;
+}
+
+/**
  * Return the chain settings, exhausted record and history for `GET /api/accounts`, newest move first.
  */
 export async function readChainView(): Promise<ChainView> {

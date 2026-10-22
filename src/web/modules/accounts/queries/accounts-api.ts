@@ -7,6 +7,17 @@ import type {
 } from "../../../../shared/types.js";
 import { http, httpError } from "@/lib/http";
 
+const SWITCH_REFUSALS = new Map([
+  [
+    "account-needs-login",
+    "This account needs a new login. Use Re-login on the Accounts page, then switch.",
+  ],
+  [
+    "account-shadowed-by-home",
+    "This account is the same login as Default. Switch to Default or remove the duplicate.",
+  ],
+]);
+
 /**
  * Make an account the one new sessions launch on: PUT /api/accounts/active.
  *
@@ -34,6 +45,9 @@ export async function setActiveAccount(
       skipped: result.data.skipped.length,
     };
   }
+  const refusal =
+    result.status === 409 ? SWITCH_REFUSALS.get(result.error ?? "") : undefined;
+  if (refusal) return { ok: false, error: refusal };
   if (result.status === 404) {
     return { ok: false, error: "That account is no longer registered." };
   }

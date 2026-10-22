@@ -3114,8 +3114,10 @@ trigger, the sessions stay on the account in use. If the chain without the filte
 controller records the exhausted chain as before.
 
 **Triggers.** `account-chain.ts` is the controller. It runs one task at a time in a queue. A manual
-switch through `PUT /accounts/active` runs in the same queue, so it never overlaps a chain move. A
-failover starts on these signals for the account in use:
+switch through `PUT /accounts/active` runs in the same queue, so it never overlaps a chain move.
+The route refuses an account in the state `needs-login` with 409 `account-needs-login` and an
+account in the state `shadowed-by-home` with 409 `account-shadowed-by-home`, and it does not change
+the active account. A failover starts on these signals for the account in use:
 
 1. A usage read at or above the threshold.
 2. A limit surface on the screen of a session of the account in use. A pane scan each 30 s finds
