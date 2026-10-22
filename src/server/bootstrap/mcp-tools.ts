@@ -333,7 +333,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "start_ship",
     description:
-      "Start the ship steps of a finished group card, or of a finished single card, whoever started it, for its branches in stack order. A single card ships its session branch from Agent done. A board with no ship rights is refused. A card in Done, or a card whose ship flow is done, is refused with already-shipped.",
+      "Start the ship steps of a finished group card, or of a finished single card, whoever started it, for its branches in stack order. A single card ships its session branch from Agent done, or from Needs input when its loop is closed and complete. A board with no ship rights is refused. A card in Done, or a card whose ship flow is done, is refused with already-shipped.",
     input: {
       ...cardIdParam,
       repository: z.string().min(1),

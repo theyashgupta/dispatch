@@ -6598,7 +6598,9 @@ reads the identity or writes, `assertAheadAndClean` resolves the base once. The 
 `refs/remotes/origin/<base>` when that ref exists, else `refs/heads/<base>`. It answers 409
 `unknown-base` for a base that is empty, starts with a hyphen, is not a plain branch name or resolves to neither ref. Each branch must be ahead of that ref (409
 `branch-not-ahead`) and the worktree must be clean (409 `worktree-dirty`). A failed git call of
-these two checks answers 409 `no-workspace`. A group with loop progress keeps the D-8 rules.
+these two checks answers 409 `no-workspace`. A group with loop progress keeps the D-8 rules. A card
+that is not a group loop also passes the column check in Needs input when its loop engine is closed
+and its loop completion is complete. The ahead and clean checks still run for that card.
 
 **MCP server.** `dispatch mcp` serves the 37 tools over stdio. `bootstrap/cli.ts` reads and checks
 `DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and
