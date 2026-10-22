@@ -34,6 +34,7 @@ import {
 } from "../services/orchestration/default-identity-watch.js";
 import { loadOrCreateVapidKeys } from "../services/infra/push-keys.js";
 import { VAPID_KEYS_PATH } from "../services/infra/paths.js";
+import { startPushoverWatch } from "../services/orchestration/pushover-watch.js";
 import {
   getCrossSessionInbound,
   setHooksRuntime,
@@ -374,6 +375,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   buildRegistry(config);
   loadOrCreateVapidKeys();
   console.log(`[push] VAPID keypair loaded from ${VAPID_KEYS_PATH}`);
+  await startPushoverWatch();
 
   const statusChannel = config.statusChannel ?? "auto";
   await installHookArtifacts(getCrossSessionInbound());

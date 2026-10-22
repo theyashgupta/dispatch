@@ -106,6 +106,9 @@ function badgeOf(item: AttentionItem): AttentionBadge | null {
   if (item.kind === "budget_warning") {
     return { kind: "label", label: "Budget warning" };
   }
+  if (item.kind === "pushover_missing") {
+    return { kind: "label", label: "Notifications" };
+  }
   return item.state === null ? null : { kind: "state", state: item.state };
 }
 
