@@ -3,7 +3,7 @@ import fs from "node:fs";
 import { after, beforeEach, test } from "node:test";
 import { installCalendarStubs } from "../../test-support/calendar-stubs.js";
 import { fakeBoardRepository } from "../../test-support/fake-board-repository.js";
-import { isolateEnv } from "../../test-support/fixtures.js";
+import { isolateEnv, waitFor } from "../../test-support/fixtures.js";
 
 const env = isolateEnv();
 const stubs = installCalendarStubs(env);
@@ -20,7 +20,8 @@ const {
   calendarReadStatus,
 } = await import("../../adapters/source-gateway.js");
 const { readMacEvents } = await import("../../adapters/calendar-mac.js");
-const { stopPollers } = await import("../../adapters/poller.js");
+const { stopPollers, pollerDiagnostics } =
+  await import("../../adapters/poller.js");
 const {
   applyCalendarSettings,
   calendarStatus,
@@ -401,6 +402,16 @@ test("C24: a granted Check access answers with the read of the poll it started",
   const on = await applyCalendarSettings({ enabled: true, calendars: [] });
   assert.equal(on.ok, true);
   assert.equal(on.ok && on.status.lastError, undefined);
+  await waitFor(
+    () =>
+      Promise.resolve(
+        !pollerDiagnostics().some(
+          (loop) => loop.id === "calendar" && loop.inFlight,
+        ),
+      ),
+    10_000,
+    "the enable poll to settle",
+  );
   stubs.osaReply("events", { error: "boom" });
   stubs.osaDelay("events", 1);
   const status = await checkCalendarAccess();
