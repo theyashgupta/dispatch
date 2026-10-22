@@ -336,7 +336,7 @@ The two limits are **Free memory floor (MB)** (0 to 65536, where 0 turns the flo
 To stop a loop by hand:
 
 1. Open the card of a loop that has a live session. The card panel header shows **Pause** next to **Reset**.
-2. Choose **Pause**. Dispatch stops every process of the loop until you resume it. On a narrow panel the button shows only its icon and keeps the name **Pause**.
+2. Choose **Pause**. Dispatch stops Claude and the commands that it runs until you resume the loop. The terminal stays usable, and keys that you type while the loop is paused reach Claude after the resume. On a narrow panel the button shows only its icon and keeps the name **Pause**.
 3. The card shows a paused badge. The panel shows a note. The note reads "Paused. Resume it when you are ready." after you pause the loop. It reads "Paused for memory. Dispatch resumes it when swap falls." when Dispatch paused the loop because of memory.
 4. Choose **Resume** in the same place to continue the loop.
 
