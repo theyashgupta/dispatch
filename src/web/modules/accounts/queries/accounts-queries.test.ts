@@ -107,8 +107,7 @@ test("setActiveAccount reads a needs-login 409 as a re-login prompt", async () =
   reply(409, { error: "account-needs-login" });
   assert.deepEqual(await setActiveAccount("a", "idle"), {
     ok: false,
-    error:
-      "This account needs a new login. Use Re-login on the Accounts page, then switch.",
+    error: "This account needs a new login. Log in again, then switch.",
   });
 });
 

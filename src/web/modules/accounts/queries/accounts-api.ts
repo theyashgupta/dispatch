@@ -10,7 +10,7 @@ import { http, httpError } from "@/lib/http";
 const SWITCH_REFUSALS = new Map([
   [
     "account-needs-login",
-    "This account needs a new login. Use Re-login on the Accounts page, then switch.",
+    "This account needs a new login. Log in again, then switch.",
   ],
   [
     "account-shadowed-by-home",
