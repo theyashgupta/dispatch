@@ -405,9 +405,8 @@ test("C24: a granted Check access answers with the read of the poll it started",
   await waitFor(
     () =>
       Promise.resolve(
-        !pollerDiagnostics().some(
-          (loop) => loop.id === "calendar" && loop.inFlight,
-        ),
+        pollerDiagnostics().find((loop) => loop.id === "calendar")?.inFlight ===
+          false,
       ),
     10_000,
     "the enable poll to settle",
