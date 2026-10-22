@@ -117,7 +117,7 @@ void test("activate then remove an added account resets the active pointer", asy
 
 const ID_GUARDED = "44444444-4444-4444-8444-444444444444";
 
-async function withChainState<T>(
+async function withGuardedAccount<T>(
   state: "needs-login" | "shadowed-by-home" | "available",
   run: () => Promise<T>,
 ): Promise<T> {
@@ -143,7 +143,7 @@ async function withChainState<T>(
 }
 
 void test("PUT /accounts/active refuses a needs-login account with 409 and leaves config untouched", async () => {
-  await withChainState("needs-login", async () => {
+  await withGuardedAccount("needs-login", async () => {
     const before = fs.readFileSync(configPath, "utf8");
     const refused = await call("PUT", "/accounts/active", { id: ID_GUARDED });
     assert.equal(refused.status, 409);
@@ -153,7 +153,7 @@ void test("PUT /accounts/active refuses a needs-login account with 409 and leave
 });
 
 void test("PUT /accounts/active refuses a shadowed-by-home account with 409 and leaves config untouched", async () => {
-  await withChainState("shadowed-by-home", async () => {
+  await withGuardedAccount("shadowed-by-home", async () => {
     const before = fs.readFileSync(configPath, "utf8");
     const refused = await call("PUT", "/accounts/active", { id: ID_GUARDED });
     assert.equal(refused.status, 409);
@@ -162,8 +162,27 @@ void test("PUT /accounts/active refuses a shadowed-by-home account with 409 and 
   });
 });
 
+void test("PUT /accounts/active refuses default when its chain state is needs-login", async () => {
+  const chain = emptyChainState();
+  chain.accounts["default"] = {
+    state: "needs-login",
+    buckets: [],
+    limitedUntil: null,
+  };
+  await writeChainState(chain);
+  try {
+    const before = fs.readFileSync(configPath, "utf8");
+    const refused = await call("PUT", "/accounts/active", { id: "default" });
+    assert.equal(refused.status, 409);
+    assert.equal(refused.body.error, "account-needs-login");
+    assert.equal(fs.readFileSync(configPath, "utf8"), before);
+  } finally {
+    await writeChainState(emptyChainState());
+  }
+});
+
 void test("PUT /accounts/active accepts an available account", async () => {
-  await withChainState("available", async () => {
+  await withGuardedAccount("available", async () => {
     const activated = await call("PUT", "/accounts/active", {
       id: ID_GUARDED,
     });
@@ -340,6 +359,20 @@ void test("login: managedDefault validates, moves the home login under the offer
     (done.account as { managedDefault?: boolean }).managedDefault,
     true,
   );
+
+  const guarded = emptyChainState();
+  guarded.accounts[id] = {
+    state: "needs-login",
+    buckets: [],
+    limitedUntil: null,
+  };
+  await writeChainState(guarded);
+  const refusedDefault = await call("PUT", "/accounts/active", {
+    id: "default",
+  });
+  assert.equal(refusedDefault.status, 409);
+  assert.equal(refusedDefault.body.error, "account-needs-login");
+  await writeChainState(emptyChainState());
 
   const after = await call("GET", "/accounts");
   assert.equal(after.body.managedDefaultOffer, false);

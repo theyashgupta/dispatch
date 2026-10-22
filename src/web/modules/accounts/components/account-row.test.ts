@@ -7,7 +7,6 @@ import { AccountRow } from "./AccountRow.js";
 
 const NOW = 1_700_000_000_000;
 
-/** Returns the text of static markup with tags removed. */
 function textOf(html: string): string {
   let text = "";
   let inTag = false;
