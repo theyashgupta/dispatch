@@ -744,6 +744,8 @@ export async function resumeOrchestrator(
       const outcome = live ? await orchestratorTools.relaunch(cardId) : null;
       if (outcome === "launched") return;
       if (outcome === "busy") return previous;
+      if (outcome === "workspace-missing")
+        throw new ConflictError("workspace-missing");
       if (live) throw new ConflictError("orchestrator-busy");
       await orchestratorTools.start(
         cardId,

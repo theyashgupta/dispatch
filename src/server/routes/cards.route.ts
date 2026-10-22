@@ -264,6 +264,9 @@ cardsRouter.post("/cards/:id/run-claude", async (req, res) => {
       "the session's Claude account is no longer available",
     );
   }
+  if (outcome === "workspace-missing") {
+    throw new ConflictError("workspace-missing");
+  }
   if (outcome === "no-session") {
     throw new ValidationError("card has no live session");
   }
