@@ -9,6 +9,7 @@ import { CLAUDE_SESSION_ID } from "../../../shared/claude-session-id.js";
 import { getHooksRuntime } from "../infra/config-holder.js";
 import { PAUSE_TOOL_NAMES } from "../infra/hook-settings.js";
 import { runPendingMove } from "./session-account-apply.js";
+import { closeLoopOnDone } from "./supervisor-actions.js";
 import { forgetTurnState, recordTurnEvent } from "./session-turn.js";
 
 /**
@@ -114,6 +115,8 @@ async function applyStopEvent(
     markerKey(marker),
     eventType,
   );
+  if (marker.kind === "DONE")
+    await closeLoopOnDone(cardId, sessionId, lastAssistantMessage);
 }
 
 /**

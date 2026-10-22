@@ -1,11 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { LoopProgress } from "../../../shared/types.js";
-import { parsePrdEngine } from "./prd-progress.js";
+import { doneMatchesLoop, parsePrdEngine } from "./prd-progress.js";
 import {
   buildLoopProgress,
   buildPrdProgress,
   closedEngineText,
+  openEngineText,
   type PrdProgressInput,
   parseAttemptLines,
   parseEngineFile,
@@ -938,5 +939,138 @@ void test("a slot give-up line from the gate leaves the phase attempt count unch
       ["fail", 1],
       ["pending", 0],
     ],
+  );
+});
+
+void test("done_marker round-trips through withClosedReason, closedEngineText and parseEngineFile", () => {
+  const written = withClosedReason(FENCED, "done_marker");
+  assert.match(written, /^closed_reason: done_marker$/m);
+  assert.equal(
+    parseEngineFile(written, true).engine?.closedReason,
+    "done_marker",
+  );
+  const fresh = closedEngineText("local-174", "sess-1", "done_marker");
+  assert.equal(
+    parseEngineFile(fresh, true).engine?.closedReason,
+    "done_marker",
+  );
+});
+
+const LOOP_PREVIOUS = {
+  slug: "local-174",
+  engine: {
+    active: true,
+    iteration: 1,
+    sessionId: "sess-1",
+    handoffPending: false,
+    startedAt: null,
+    closed: false,
+  },
+} as LoopProgress;
+
+void test("doneMatchesLoop is true with no previous loop", () => {
+  assert.equal(
+    doneMatchesLoop(closedEngineText("any", "any", "promise"), undefined),
+    true,
+  );
+});
+
+void test("doneMatchesLoop is false for another slug or another session id", () => {
+  assert.equal(
+    doneMatchesLoop(
+      closedEngineText("other", "sess-1", "promise"),
+      LOOP_PREVIOUS,
+    ),
+    false,
+  );
+  assert.equal(
+    doneMatchesLoop(
+      closedEngineText("local-174", "sess-2", "promise"),
+      LOOP_PREVIOUS,
+    ),
+    false,
+  );
+});
+
+void test("doneMatchesLoop is true for the same slug and session, and for unknown values", () => {
+  assert.equal(
+    doneMatchesLoop(
+      closedEngineText("local-174", "sess-1", "promise"),
+      LOOP_PREVIOUS,
+    ),
+    true,
+  );
+  assert.equal(
+    doneMatchesLoop("---\nactive: false\n---\nbody\n", LOOP_PREVIOUS),
+    true,
+  );
+  assert.equal(
+    doneMatchesLoop(closedEngineText("local-174", null, "promise"), {
+      ...LOOP_PREVIOUS,
+      engine: null,
+    }),
+    true,
+  );
+  assert.equal(
+    doneMatchesLoop(closedEngineText("local-174", "sess-9", "promise"), {
+      ...LOOP_PREVIOUS,
+      engine: null,
+    }),
+    true,
+  );
+});
+
+void test("openEngineText parses back as an open engine with the same session id", () => {
+  const { engine } = parseEngineFile(
+    openEngineText(
+      {
+        ...LOOP_PREVIOUS.engine!,
+        iteration: 3,
+        startedAt: "2026-10-16T04:00:00Z",
+      },
+      "demo",
+    ),
+    false,
+  );
+  assert.equal(engine?.active, true);
+  assert.equal(engine?.closed, false);
+  assert.equal(engine?.keptOpen, true);
+  assert.equal(engine?.sessionId, "sess-1");
+  assert.equal(engine?.iteration, 3);
+  assert.equal(engine?.startedAt, "2026-10-16T04:00:00Z");
+  const bare = parseEngineFile(
+    openEngineText(
+      {
+        ...LOOP_PREVIOUS.engine!,
+        iteration: null,
+        sessionId: null,
+      },
+      "demo",
+    ),
+    false,
+  ).engine;
+  assert.match(openEngineText(LOOP_PREVIOUS.engine!, "demo"), /slug demo\.$/m);
+  assert.equal(bare?.active, true);
+  assert.equal(bare?.sessionId, null);
+  assert.equal(bare?.iteration, null);
+});
+
+void test("doneMatchesLoop reads the slug of a roadmap engine too", () => {
+  const roadmapDone = (slug: string) =>
+    `---\nactive: false\nsession_id: sess-1\ncompletion_promise: "ROADMAP COMPLETE ${slug}"\nclosed_reason: done_marker\n---\nbody\n`;
+  assert.equal(
+    doneMatchesLoop(roadmapDone("other-roadmap"), LOOP_PREVIOUS),
+    false,
+  );
+  assert.equal(
+    doneMatchesLoop(roadmapDone(LOOP_PREVIOUS.slug), LOOP_PREVIOUS),
+    true,
+  );
+});
+
+void test("closedEngineText names the slug in its body, so the roadmap reader can find the loop folder", () => {
+  assert.match(
+    closedEngineText("demo-slug", "sess-1", "done_marker"),
+    /removed, slug demo-slug\.$/m,
   );
 });

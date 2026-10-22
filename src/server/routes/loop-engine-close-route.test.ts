@@ -480,3 +480,21 @@ void test("a loop whose engine file the plugin already removed is closed on the 
   assert.notEqual(reply.body.error, "engine-not-closed");
   assert.notEqual(reply.body.error, "loop-not-finished");
 });
+
+void test("a finished loop whose engine file is deleted with no promise and no DONE line still answers 409 engine-not-closed", async () => {
+  const ws = ownRoot("ws-deleted-open");
+  const card = await launchedTicket(ws);
+  const engine = seedFinishedLoop(ws);
+  await refreshLoopProgress(card.id);
+  assert.equal(store.getCard(card.id)?.loopProgress?.engine?.active, true);
+  fs.unlinkSync(engine);
+  await refreshLoopProgress(card.id);
+
+  const progress = store.getCard(card.id)?.loopProgress;
+  assert.equal(progress?.engine?.active, true);
+  assert.equal(progress?.engine?.closed, false);
+  const reply = await shipOf(card);
+  assert.equal(reply.status, 409, JSON.stringify(reply.body));
+  assert.equal(reply.body.error, "engine-not-closed");
+  assert.equal(fs.existsSync(`${engine}.done`), false);
+});
