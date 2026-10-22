@@ -892,11 +892,38 @@ function isDispatchRepo(worktree: string): boolean {
 }
 
 /**
+ * Tell if HEAD has the tree of the passed commit and the worktree has no change.
+ *
+ * @remarks A failed git read gives false, so an error never skips the check.
+ */
+async function unchangedTree(r: Runner, branch: ShipBranch): Promise<boolean> {
+  if (branch.passed == null) return false;
+  const tree = (rev: string) =>
+    exec(r, "git", ["rev-parse", "--verify", "--quiet", `${rev}^{tree}`]);
+  try {
+    const [passed, head] = await Promise.all([
+      tree(branch.passed),
+      tree("HEAD"),
+    ]);
+    if (passed === "" || passed !== head) return false;
+    return (
+      (await exec(r, "git", [
+        "--no-optional-locks",
+        "status",
+        "--porcelain",
+      ])) === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Check that the diff holds only this branch, the prose rule and the repository check command.
  *
  * @remarks The branch's own files run from the previous branch's stored tip to this branch's tip
  * before the merge. Only the first branch, which has no previous tip, uses its merge base. A retry
- * on the commit that already passed skips only the check command.
+ * on the tree that already passed, with a clean worktree, skips only the check command.
  */
 async function check(r: Runner, branch: ShipBranch): Promise<void> {
   const tip = branch.tip ?? (await exec(r, "git", ["rev-parse", "HEAD"]));
@@ -929,7 +956,7 @@ async function check(r: Runner, branch: ShipBranch): Promise<void> {
   }
   const argv = r.checkCommand.split(/\s+/).filter((a) => a !== "");
   if (argv.length === 0) return;
-  if (branch.passed != null && branch.passed === branch.checked) {
+  if (await unchangedTree(r, branch)) {
     branch.checkSkipped = true;
     await persist(r);
     recordGroupState(
