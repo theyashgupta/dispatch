@@ -31,6 +31,7 @@ for (const key of [
   "DISPATCH_CHECK_WAIT_SECONDS",
   "DISPATCH_CHECK_STOPPED_SECONDS",
   "DISPATCH_CHECK_SLOT_HELD",
+  "DISPATCH_CHECK_PRIORITY",
 ]) {
   delete baseEnv[key];
 }
@@ -479,4 +480,132 @@ test("the default slot count is one per 8 GB of memory, at least one", async () 
     ).length,
     1,
   );
+});
+
+/**
+ * List the ship waiter marker files left in a lock directory.
+ */
+function markersLeft(lockDir) {
+  return readdirSync(lockDir).filter((name) => name.startsWith(".wait-ship-"));
+}
+
+/**
+ * Collect the stderr of a started gate for `waitFor`.
+ */
+function watchStderr(run) {
+  const seen = { text: "" };
+  run.gate.stderr.on("data", (chunk) => (seen.text += chunk));
+  return seen;
+}
+
+test("a ship waiter takes the freed slot before an earlier gate waiter", async () => {
+  const lockDir = scratchDir();
+  const out = join(scratchDir(), "out");
+  const slot = holdSlot(lockDir, 0, process.pid);
+  const waitEnv = {
+    DISPATCH_CHECK_SLOTS: "1",
+    DISPATCH_CHECK_WAIT_SECONDS: "20",
+  };
+  const append = (name) =>
+    `require("node:fs").appendFileSync(${JSON.stringify(out)}, ${JSON.stringify(`${name}\n`)})`;
+  const gate = startGate(
+    lockDir,
+    waitEnv,
+    process.execPath,
+    "-e",
+    append("gate"),
+  );
+  const gateSeen = watchStderr(gate);
+  await waitFor(() => gateSeen.text.includes("waiting for a free slot"));
+  const ship = startGate(
+    lockDir,
+    { ...waitEnv, DISPATCH_CHECK_PRIORITY: "ship" },
+    process.execPath,
+    "-e",
+    `${append("ship")}; setTimeout(() => {}, 500)`,
+  );
+  const shipSeen = watchStderr(ship);
+  await waitFor(() => shipSeen.text.includes("waiting for a free slot"));
+  await waitFor(() => existsSync(join(lockDir, `.wait-ship-${ship.gate.pid}`)));
+  rmSync(slot);
+  const [gateResult, shipResult] = await Promise.all([gate.done, ship.done]);
+  assert.equal(shipResult.code, 0);
+  assert.equal(gateResult.code, 0);
+  assert.equal(readFileSync(out, "utf8"), "ship\ngate\n");
+  assert.deepEqual(markersLeft(lockDir), []);
+});
+
+test("a gate removes the marker of a dead ship waiter and takes the slot", async () => {
+  const lockDir = scratchDir();
+  const deadPid = spawnSync(process.execPath, ["-e", ""]).pid;
+  const marker = join(lockDir, `.wait-ship-${deadPid}`);
+  writeFileSync(marker, String(deadPid));
+  const { done } = startGate(
+    lockDir,
+    { DISPATCH_CHECK_SLOTS: "1", DISPATCH_CHECK_WAIT_SECONDS: "5" },
+    process.execPath,
+    "-e",
+    "",
+  );
+  assert.equal((await done).code, 0);
+  assert.equal(existsSync(marker), false);
+});
+
+test("a ship waiter that gives up with 75 leaves no marker", async () => {
+  const lockDir = scratchDir();
+  holdSlot(lockDir, 0, process.pid);
+  const { done } = startGate(
+    lockDir,
+    {
+      DISPATCH_CHECK_SLOTS: "1",
+      DISPATCH_CHECK_WAIT_SECONDS: "1",
+      DISPATCH_CHECK_PRIORITY: "ship",
+    },
+    process.execPath,
+    "-e",
+    "",
+  );
+  assert.equal((await done).code, 75);
+  assert.deepEqual(markersLeft(lockDir), []);
+});
+
+test("a gate leaves a free slot alone while a live ship marker exists", async () => {
+  const lockDir = scratchDir();
+  const marker = join(lockDir, `.wait-ship-${process.pid}`);
+  writeFileSync(marker, String(process.pid));
+  const blocked = startGate(
+    lockDir,
+    { DISPATCH_CHECK_SLOTS: "1", DISPATCH_CHECK_WAIT_SECONDS: "1" },
+    process.execPath,
+    "-e",
+    "",
+  );
+  assert.equal((await blocked.done).code, 75);
+  assert.deepEqual(slotsLeft(lockDir), []);
+  rmSync(marker);
+  const free = startGate(
+    lockDir,
+    { DISPATCH_CHECK_SLOTS: "1", DISPATCH_CHECK_WAIT_SECONDS: "5" },
+    process.execPath,
+    "-e",
+    "",
+  );
+  assert.equal((await free.done).code, 0);
+});
+
+test("a ship marker older than two hours does not block a gate, even with a live pid", async () => {
+  const lockDir = scratchDir();
+  const marker = join(lockDir, `.wait-ship-${process.pid}`);
+  writeFileSync(marker, String(process.pid));
+  const old = (Date.now() - 3 * 60 * 60 * 1000) / 1000;
+  utimesSync(marker, old, old);
+  const gate = startGate(
+    lockDir,
+    { DISPATCH_CHECK_SLOTS: "1", DISPATCH_CHECK_WAIT_SECONDS: "1" },
+    process.execPath,
+    "-e",
+    "",
+  );
+  assert.equal((await gate.done).code, 0);
+  assert.equal(existsSync(marker), false);
 });

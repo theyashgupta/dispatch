@@ -673,6 +673,7 @@ void test("with merge rights a two unit stack and its specs branch ship in order
     "-u",
     "NODE_ENV",
     "DISPATCH_CHECK_WAIT_SECONDS=5400",
+    "DISPATCH_CHECK_PRIORITY=ship",
     "git",
     "status",
   ]);
@@ -1556,6 +1557,7 @@ void test("a LOCAL group finds the default check command of a workspace folder r
       "-u",
       "NODE_ENV",
       "DISPATCH_CHECK_WAIT_SECONDS=5400",
+      "DISPATCH_CHECK_PRIORITY=ship",
       ...DEFAULT_CHECK_COMMAND.split(" "),
     ]);
   } finally {
@@ -2509,14 +2511,17 @@ type RunOptions = Parameters<typeof shipTools.run>[2];
  */
 function heldCheck(): {
   opts: () => NonNullable<RunOptions>;
+  args: () => readonly string[];
   finish: (err?: Error) => void;
   restore: () => void;
 } {
   const saved = shipTools.run;
   let seen: RunOptions;
+  let seenArgs: readonly string[] = [];
   let settle: (err?: Error) => void = () => {};
-  shipTools.run = (_cmd, _args, opts) => {
+  shipTools.run = (_cmd, args, opts) => {
     seen = opts;
+    seenArgs = args;
     return new Promise((resolve, reject) => {
       settle = (err) =>
         err ? reject(err) : resolve({ stdout: "", stderr: "" });
@@ -2527,6 +2532,7 @@ function heldCheck(): {
   };
   return {
     opts: () => seen!,
+    args: () => seenArgs,
     finish: (err) => settle(err),
     restore: () => {
       shipTools.run = saved;
@@ -2550,6 +2556,7 @@ void test("a check that waits 40 minutes for the slot and runs 5 minutes passes"
     await done;
     assert.equal(check.opts().signal?.aborted, false);
     assert.equal(check.opts().timeout, 5400_000 + 30 * 60_000);
+    assert.ok(check.args().includes("DISPATCH_CHECK_PRIORITY=ship"));
   } finally {
     check.restore();
   }

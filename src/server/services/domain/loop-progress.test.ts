@@ -915,3 +915,28 @@ void test("closedEngineText leaves the session id null when none is given", () =
   assert.equal(engine?.sessionId, null);
   assert.equal(engine?.closedReason, "close_loop");
 });
+
+void test("a slot give-up line from the gate leaves the phase attempt count unchanged", () => {
+  const counts = (attemptsText: string) =>
+    buildPrdProgress(
+      prdInput({
+        stateText: "phase 1 One GREEN 2026-10-22T04:00:00Z gate=pass\n",
+        attemptsText,
+      }),
+    ).units[0]?.phases.map((phase) => [phase.gate, phase.attempts]);
+  assert.deepEqual(counts("phase 2 SLOT gave up 2026-10-22T05:00:00Z\n"), [
+    ["pass", 0],
+    ["pending", 0],
+    ["pending", 0],
+  ]);
+  assert.deepEqual(
+    counts(
+      "phase 2 RED attempt 1 2026-10-22T05:00:00Z\nphase 2 SLOT gave up 2026-10-22T06:00:00Z\n",
+    ),
+    [
+      ["pass", 0],
+      ["fail", 1],
+      ["pending", 0],
+    ],
+  );
+});
