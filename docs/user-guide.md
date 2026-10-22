@@ -749,9 +749,9 @@ When an account needs a login, Dispatch raises the decision "Account <email> nee
 2. Open the link in the decision. It opens the login dialog of that account.
 3. Open the sign-in address and paste the code into the dialog.
 
-The account returns to the chain after the login. You do not restart Dispatch. Choose **Not now** to leave the account out of the chain. The decision closes by itself when the account works again, or when you remove the account.
+The account returns to the chain after the login. You do not restart Dispatch. Choose **Not now** to leave the account out of the chain. The decision closes by itself when the account works again, or when you remove the account. Dispatch refuses a switch to an account that needs a login, and the switch dialog tells you to use **Re-login** first.
 
-When an account shows **Same login as Default**, choose **Remove duplicate**. The button removes the account and signs out only the folder of that account. Your home login stays signed in.
+When an account shows **Same login as Default**, choose **Remove duplicate**. The button removes the account and signs out only the folder of that account. Your home login stays signed in. Dispatch refuses a switch to an account that shows **Same login as Default**, and the switch dialog tells you to switch to **Default** or remove the duplicate.
 
 When every account is at its limit, Dispatch raises the decision "Every Claude account is at its limit". The text shows when the first account resets. Work resumes at that time. To continue sooner, choose **Add an account** and add an account on the **Accounts** page. Choose **Wait for the reset** to do nothing. The decision closes by itself when an account is usable again.
 
