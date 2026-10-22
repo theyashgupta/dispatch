@@ -6549,7 +6549,8 @@ When `gh pr create` fails with `already exists` and a `/pull/<n>` URL, the flow 
 closed PR is not adopted, and a new PR opens. The admin merge retry runs only when every violation clause of the merge error (lines split on
 sentence ends, commas and semicolons) matches the signature rule wording `must have verified
 signatures`.
-The flow never rebases and never edits code. Every git and gh call has a time limit (120 s, 300 s
+The flow does not rebase. It edits files only in a docs-only merge. Every git and gh call has a
+time limit (120 s, 300 s
 for fetch and push, 30 min for the check command) and a 64 MiB output buffer, and the diffs run
 with fixed color, prefix and path settings. The check command gets `DISPATCH_CHECK_WAIT_SECONDS=5400`.
 Its 30 min stop while the slot gate prints its waiting line and start again at the gate's
@@ -6563,11 +6564,21 @@ reason. The runner reads the board policy before each step
 and poll: `none` stops the flow and `open_prs` stops the merges. The runner keeps its board key,
 and a card that is gone stops it with no write; unwind refuses a group whose flow runs with 409
 `ship-running`. A thrown runner is stored as stopped. A refused move to Done after the last merge
-keeps the flow done and raises a `ship_failure` item for a manual move. A conflict, a failed check or an identity mismatch stops the flow
+keeps the flow done and raises a `ship_failure` item for a manual move. A conflict, a refused
+session send, the wait cap, the send cap, a failed check or an identity mismatch stops the flow
 and raises one `ship_failure` decision item. The identity stop compares the author and message of
 the new `origin/main` tip with the `git config` identity that the flow read at its start. One flow
 runs on a board at a time. A flow in the state `running` is started again at boot by
-`resumeShipFlows`, and a stopped flow is replaced by a new `start_ship` call.
+`resumeShipFlows`, and a stopped flow is replaced by a new `start_ship` call. When the merge of
+`origin/main` conflicts only in Markdown files, the flow merges each file with the lines of main
+first and the lines of the branch after them. Then it makes a merge commit. For any other
+conflict, the flow aborts the merge. It sends one merge instruction to the session of the card
+through the send path, with the ship flow exception. Then it waits in `merging_main`. The wait
+ends when the branch holds that main commit, the worktree is clean and the card is in Agent done.
+The wait is 60 minutes for each send, and a branch gets 2 sends. A resumed flow counts one send.
+It waits when the worktree is dirty. After a failed `gh pr merge`, the flow reads the PR state and
+head once. A PR that is `MERGED` on the checked commit counts as merged. For any other answer, the
+first line of the merge error is the stop reason.
 
 **Ship gate for a group with no loop progress.** A group with no loop progress has no
 `loopProgress` or zero units (decision record D-10). `assertShippable` refuses 409
