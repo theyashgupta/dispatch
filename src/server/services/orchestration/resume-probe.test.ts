@@ -105,6 +105,7 @@ beforeEach(() => {
     plan: initialPlanMemory(),
     progressRead: false,
     closeTriedAt: 0,
+    relaunchedFor: null,
   };
   Object.assign(probeTools, {
     capturePane: () =>
@@ -170,7 +171,7 @@ void test("a probe that is confirmed records one confirmed event and changes not
   assert.equal(watcher.running, false);
 });
 
-for (const reason of ["not in transcript", "not ready"]) {
+for (const reason of ["not in transcript", "not ready", "held in prompt box"]) {
   void test(`a probe unconfirmed as "${reason}" on a cooked tty ends the job and resumes the card`, async () => {
     const card = loopCard();
     sendResults = [unconfirmed(reason)];

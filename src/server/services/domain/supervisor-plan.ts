@@ -15,7 +15,8 @@ export type SupervisorAction =
   | { kind: "answer_limit" }
   | { kind: "escape_limit" }
   | { kind: "limit_move" }
-  | { kind: "handoff" };
+  | { kind: "handoff" }
+  | { kind: "relaunch_frozen"; frozenSince: string };
 
 export interface LoopFacts {
   engineActive: boolean;
@@ -49,13 +50,10 @@ export function initialPlanMemory(): PlanMemory {
 /**
  * Keep a stored `needs_input` that the supervisor set with a reason until the session shows life.
  *
- * @remarks Only a real busy sign, a permission prompt (a new tool request), a lost session or a
- * shell prompt releases the hold. A `budget` stop holds until a lost session or a shell prompt, and
- * a `resume_failed` hold until a real busy sign or a confirmed idle prompt, so a failed resume is
- * not planned on every sample. A confirmed idle needs claude up and quiet for three samples, which
- * a shell prompt or a dead pane never shows, so it marks a resume that worked after the hold. A
- * `paused` detection never holds, because the pause is the newer fact. A `roadmap_complete`
- * detection releases the hold only while the engine is open, so a finished loop still closes.
+ * @remarks A real busy sign, a permission prompt, a lost session, a shell prompt or a `frozen`
+ * session releases a `supervisor_gave_up` hold. A `frozen` detection releases no other reason, a
+ * `budget` hold ends only at a lost session or a shell prompt, and a `resume_failed` hold ends at a
+ * busy sign or a confirmed idle prompt, so a failed resume is not planned on every sample.
  */
 export function holdsNeedsInput(
   stored: SupervisorState | null,
@@ -69,6 +67,7 @@ export function holdsNeedsInput(
     (detected.state === "roadmap_complete" && engineOpen)
   )
     return false;
+  if (detected.state === "frozen") return reason !== "supervisor_gave_up";
   if (reason === "budget")
     return detected.state !== "lost" && detected.state !== "shell_prompt";
   if (reason === "resume_failed")
@@ -89,6 +88,24 @@ export function holdsNeedsInput(
 }
 
 /**
+ * Take one slot of a once-per-phase budget: the first call plans `first`, every later call `after`.
+ *
+ * @remarks The count lives in the plan memory under `key`, so the caller stores the returned memory.
+ */
+function oncePerPhase(
+  memory: PlanMemory,
+  key: string,
+  first: SupervisorAction,
+  after: SupervisorAction,
+): { actions: SupervisorAction[]; memory: PlanMemory } {
+  const sent = memory.prompts[key] ?? 0;
+  return {
+    actions: [sent === 0 ? first : after],
+    memory: { prompts: { ...memory.prompts, [key]: sent + 1 } },
+  };
+}
+
+/**
  * Plan the actions for one state change; a repeated state never reaches the planner.
  *
  * @remarks Each continue duty prompts once per unit and phase; the next stop in the same phase
@@ -101,19 +118,13 @@ export function planActions(input: PlanInput): {
   const { from, to, loop, memory } = input;
   const phase = loop?.unitPhase ?? "none";
   const none = { actions: [], memory };
-  const once = (bucket: string, duty: ContinueDuty) => {
-    const key = `${bucket}:${phase}`;
-    const sent = memory.prompts[key] ?? 0;
-    const next = { prompts: { ...memory.prompts, [key]: sent + 1 } };
-    return sent === 0
-      ? { actions: [{ kind: "continue", duty } as const], memory: next }
-      : {
-          actions: [
-            { kind: "needs_input", reason: "supervisor_gave_up" } as const,
-          ],
-          memory: next,
-        };
-  };
+  const once = (bucket: string, duty: ContinueDuty) =>
+    oncePerPhase(
+      memory,
+      `${bucket}:${phase}`,
+      { kind: "continue", duty },
+      { kind: "needs_input", reason: "supervisor_gave_up" },
+    );
 
   switch (to) {
     case "idle": {
@@ -163,6 +174,25 @@ export function planActions(input: PlanInput): {
     default:
       return none;
   }
+}
+
+/**
+ * Plan the relaunch of a session that stayed frozen, once per unit and phase.
+ *
+ * @remarks The second freeze in the same phase marks the session `needs_input` with `resume_failed`,
+ * which a `frozen` detection does not release, so the card waits for a manual retry.
+ */
+export function planFrozenRelaunch(
+  loop: LoopFacts | null,
+  memory: PlanMemory,
+  frozenSince: string,
+): { actions: SupervisorAction[]; memory: PlanMemory } {
+  return oncePerPhase(
+    memory,
+    `frozen:${loop?.unitPhase ?? "none"}`,
+    { kind: "relaunch_frozen", frozenSince },
+    { kind: "needs_input", reason: "resume_failed" },
+  );
 }
 
 const MENU_ROW = /^\s*(❯)?\s*(\d+\.\s+\S.*|Deny\b.*|Deliver this message.*)$/;

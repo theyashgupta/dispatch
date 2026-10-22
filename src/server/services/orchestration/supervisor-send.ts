@@ -9,7 +9,7 @@ import {
 } from "../../adapters/tmux.js";
 import { sleep } from "../../adapters/exec.js";
 import { readTranscriptTail } from "../../adapters/transcript.js";
-import { paneReady } from "../domain/supervisor-state.js";
+import { inputBoxText, paneReady } from "../domain/supervisor-state.js";
 import { record, rootOf } from "./supervisor-record.js";
 import { sessionTranscriptPath } from "./supervisor-transcript.js";
 
@@ -20,6 +20,7 @@ export type SendReason =
   | "not ready"
   | "no session root"
   | "dialog opened"
+  | "held in prompt box"
   | "not in transcript";
 
 export type SendOutcome = { result: SendResult; reason?: SendReason };
@@ -39,9 +40,11 @@ export const SEND_TIMING: SendTiming = {
 };
 const POINTER_OVER = 500;
 const MATCH_CHARS = 80;
+const ECHO_CHARS = 40;
 const CONTROL = /\p{Cc}+/gu;
 
 const normalize = (text: string) => text.replace(/\s+/g, " ").trim();
+const compact = (text: string) => text.replace(/\s+/g, "");
 
 /** The line `sendConfirmed` types for a text: control characters become a space, then trimmed. */
 export function typedLine(text: string): string {
@@ -82,7 +85,8 @@ async function pointerLine(
  * counts user entries that hold the first 80 normalized characters (a pointer line to a file for
  * text over 500 characters matches whole); one more `Enter` is the only retry, and each `Enter`
  * waits for a fresh ready capture so a dialog that opened meanwhile never takes it. A count from
- * another file than the before count, as after `/clear`, is compared with zero.
+ * another file than the before count, as after `/clear`, is compared with zero. A line that stays
+ * in the input box is not confirmed, even when the transcript shows it.
  */
 export async function sendConfirmed(
   card: Card,
@@ -139,6 +143,15 @@ export async function sendLine(
   const needle = pointer
     ? normalize(line)
     : normalize(line).slice(0, MATCH_CHARS);
+  const head = compact(line).slice(0, ECHO_CHARS);
+  const held = async () => {
+    const capture = await capturePane(target).catch(() => "");
+    return (
+      paneReady(capture) &&
+      head !== "" &&
+      compact(inputBoxText(capture)).includes(head)
+    );
+  };
   const matches = async () => {
     const file = await transcriptOf();
     const tail = file === null ? null : await readTranscriptTail(file);
@@ -159,12 +172,18 @@ export async function sendLine(
 
   const seen = async () => {
     const now = await matches();
-    return now.count > (now.file === before.file ? before.count : 0);
+    return (
+      now.count > (now.file === before.file ? before.count : 0) &&
+      !(await held())
+    );
   };
   if (await waitFor(seen, timing.confirmMs, timing.pollMs))
     return { result: "confirmed" };
   if (!(await enterIfReady())) return report("dialog opened", line);
   if (await waitFor(seen, timing.confirmMs, timing.pollMs))
     return { result: "confirmed" };
-  return report("not in transcript", line);
+  return report(
+    (await held()) ? "held in prompt box" : "not in transcript",
+    line,
+  );
 }

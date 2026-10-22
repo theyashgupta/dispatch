@@ -190,6 +190,7 @@ The orchestrator node of the command centre shows the state of the session as a 
 - **Idle**. The session runs and waits.
 - **Needs input**, **Permission prompt**, **Usage limit dialog** and **Waiting for usage reset**. The session waits. Open the **Terminal** tab.
 - **Session lost** and **Claude exited**. The session ended. **Resume** shows.
+- **Frozen after compaction**. Claude stopped after an idle compaction. See [A frozen session](#a-frozen-session).
 
 When the orchestrator waits at its prompt, Dispatch wakes it. Dispatch types one line that starts with "Dispatch wake:" when you answer its decision item, when one of its groups reaches Agent done, needs input, fails to start, ships, stops its ship flow, hits a loop error or a usage limit, and when the **Wake timer (minutes)** of the policy runs out. Dispatch never types while the orchestrator works, types at most one line in 20 seconds, and never wakes a stopped orchestrator.
 
@@ -779,6 +780,26 @@ When the tmux session of a card ends, for example after a shutdown, the card sho
 - Dispatch reads the conversation folder of the card before each Resume. When a newer conversation is on disk than the stored one, Resume opens the newer conversation.
 - When the stored conversation has no file on disk, Resume continues the newest conversation of the workspace.
 - The detail panel shows the line "Resume: <id>, started <time>" beside **Resume**, or "Resume: newest conversation in the workspace". When Dispatch replaced the stored conversation, a tooltip on the line gives the stored id and the reason.
+
+## A frozen session
+
+Sometimes Claude compacts its conversation while it is idle and then stops reacting. The session is frozen. A frozen session shows these signs:
+
+- The pane shows the line "Compacted while idle" above the input line.
+- The status line shows context 0 percent.
+- A line that you type stays in the prompt box. Claude does not run it.
+- The transcript does not grow.
+
+When the supervisor is on, Dispatch finds the freeze and handles it:
+
+1. The card badge shows **Frozen after compaction**. The card detail shows "Frozen after an idle compaction since <time>. Dispatch relaunches Claude with resume 15 minutes after that."
+2. After 15 minutes, Dispatch stops Claude. It starts Claude again with `--resume` in the same tmux window, so the session keeps its conversation.
+3. Dispatch types the loop prompt one time.
+4. The dashboard **Changed since** log shows the relaunch.
+
+Dispatch relaunches a session one time for each freeze. When the session freezes a second time in the same unit and phase, Dispatch does not relaunch it again. The card moves to **Needs input** with a failed resume. When memory is low, Dispatch does not stop Claude. The card moves to **Needs input** and Claude keeps running.
+
+While a line stays in the prompt box, the `send_input` call answers `unconfirmed` with the reason "held in prompt box". Dispatch does not count the line as received.
 
 ## Handoff
 
