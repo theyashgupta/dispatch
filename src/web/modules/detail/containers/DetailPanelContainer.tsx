@@ -64,6 +64,7 @@ import {
   PanelRow,
 } from "@/modules/detail/components/PanelFrame";
 import {
+  frozenNote,
   pauseFailureCopy,
   pausedNote,
 } from "@/modules/detail/domain/pause-copy";
@@ -379,6 +380,7 @@ export function DetailPanelContainer() {
 
   const hasLiveSession = !!(c?.tmuxSession && !c.sessionLost);
   const note = c != null ? pausedNote(c) : null;
+  const frozen = c != null ? frozenNote(c) : null;
   const liveFailure = c != null ? liveResumeFailure(c) : null;
   const activeSessionLost = c?.activeSessionId != null && !c.tmuxSession;
   const resumeTarget = useResumeTargetQuery(c?.id ?? "", activeSessionLost);
@@ -606,6 +608,15 @@ export function DetailPanelContainer() {
                     className="mx-(--space-xl) mb-(--space-lg)"
                   >
                     <PanelMutedNotice label="Status">{note}</PanelMutedNotice>
+                  </div>
+                )}
+
+                {frozen !== null && (
+                  <div
+                    data-testid="frozen-note"
+                    className="mx-(--space-xl) mb-(--space-lg)"
+                  >
+                    <PanelMutedNotice label="Status">{frozen}</PanelMutedNotice>
                   </div>
                 )}
 

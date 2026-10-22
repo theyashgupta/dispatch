@@ -4,7 +4,13 @@ import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { isHiddenCard } from "../../../shared/hidden-card.js";
 import type { Card, Session } from "../../../shared/types.js";
 import { boardRepository as store } from "../../store/board-repository.js";
-import { capturePane, paneAtPrompt, sendKeys } from "../../adapters/tmux.js";
+import {
+  capturePane,
+  paneAtPrompt,
+  paneTerminal,
+  sendKeys,
+  sessionEnvHas,
+} from "../../adapters/tmux.js";
 import {
   closedEngineText,
   ENGINE_FILE,
@@ -14,11 +20,14 @@ import {
   declineKeys,
   type SupervisorAction,
 } from "../domain/supervisor-plan.js";
+import { withCardLock } from "./card-lock.js";
+import { endJob, type EndJobTools } from "./end-job.js";
 import { refreshLoopProgress } from "./loop-progress-reader.js";
 import { memoryCheck } from "./memory-governor.js";
 import { isFolder, resumeSession } from "./resume-session.js";
 import { runClaude, type RunClaudeOutcome } from "./run-claude.js";
-import { sendConfirmed, waitFor } from "./supervisor-send.js";
+import { SHELL_SESSION_ENV } from "./steps.js";
+import { sendConfirmed, waitFor, type SendResult } from "./supervisor-send.js";
 import {
   orchestratorResumePromptText,
   runHandoff,
@@ -32,19 +41,24 @@ import {
   rootOf,
 } from "./supervisor-record.js";
 
-export interface ActionDeps {
+export interface ActionDeps extends EndJobTools {
   resume: (cardId: string) => Promise<void>;
   relaunch: (cardId: string) => Promise<RunClaudeOutcome>;
-  atShellPrompt: (target: string) => Promise<boolean>;
+  shellRoot: (name: string) => Promise<boolean>;
   claudeUpMs: number;
   send?: typeof sendConfirmed;
 }
 
-const DEFAULT_DEPS: ActionDeps = {
+export const actionTools: ActionDeps = {
   resume: resumeSession,
   relaunch: runClaude,
   atShellPrompt: (target) => paneAtPrompt(target).catch(() => false),
+  shellRoot: (name) =>
+    sessionEnvHas(`=${name}`, SHELL_SESSION_ENV).catch(() => false),
   claudeUpMs: 60_000,
+  paneTerminal,
+  kill: (pid, signal) => process.kill(pid, signal),
+  grace: { hangupMs: 10_000, killMs: 5_000, pollMs: 500 },
 };
 const POLL_MS = 500;
 
@@ -148,37 +162,55 @@ async function closeLoop(card: Card, session: Session): Promise<void> {
 }
 
 /**
+ * The reason a resume must not act on a card, or null when it may.
+ *
+ * @remarks A hidden orchestrator card resumes only while its orchestrator runs. The memory check
+ * applies only where a claude launch follows, so `resume` skips it on the lost-session path.
+ */
+function resumeBlocked(card: Card, withMemory = true): string | null {
+  if (isHiddenCard(card) && orchestratorOf(card)?.state !== "running")
+    return "the orchestrator is not running";
+  if (!withMemory) return null;
+  const memory = memoryCheck(card.boardKey ?? DEFAULT_BOARD_KEY);
+  return memory.ok ? null : memory.reason;
+}
+
+/**
  * Bring claude back in a lost or shell-prompt session, then send the resume prompt.
  *
  * @remarks A pane whose shell owns the foreground is relaunched with `runClaude`, since the resume
  * saga reattaches a live tmux session without starting claude. The prompt is typed only after
  * claude takes the foreground, so it never reaches the login shell. A pane whose workspace folder is
  * missing is not relaunched, because the launch would run claude outside the session workspace.
+ * Resolves the send result, or null when the resume skipped or failed before the prompt send.
  */
 async function resume(
   card: Card,
   session: Session,
   deps: ActionDeps,
-): Promise<void> {
+): Promise<SendResult | null> {
   if (store.isStarting(card.id)) {
     record(card, session, {
       action: "resume",
       result: "skipped",
       reason: "a start is in flight",
     });
-    return;
+    return null;
   }
-  const owner = orchestratorOf(card);
-  if (isHiddenCard(card) && owner?.state !== "running") {
+  const hidden = resumeBlocked(card, false);
+  if (hidden !== null) {
     record(card, session, {
       action: "resume",
       result: "skipped",
-      reason: "the orchestrator is not running",
+      reason: hidden,
     });
-    return;
+    return null;
   }
-  const failed = (why: string) =>
-    markNeedsInput(card, session, "resume_failed", `resume: ${why}`);
+  const owner = orchestratorOf(card);
+  const failed = async (why: string) => {
+    await markNeedsInput(card, session, "resume_failed", `resume: ${why}`);
+    return null;
+  };
   if (
     session.tmuxSession !== undefined &&
     (await deps.atShellPrompt(`=${session.tmuxSession}:`))
@@ -186,8 +218,8 @@ async function resume(
     const root = rootOf(card, session);
     if (root !== "" && !(await isFolder(root)))
       return failed(`Resume failed: workspace-missing: ${root}`);
-    const memory = memoryCheck(card.boardKey ?? DEFAULT_BOARD_KEY);
-    if (!memory.ok) return failed(memory.reason);
+    const blocked = resumeBlocked(card);
+    if (blocked !== null) return failed(blocked);
     const outcome = await deps.relaunch(card.id);
     if (outcome !== "launched") return failed(`run claude ${outcome}`);
   } else {
@@ -217,6 +249,75 @@ async function resume(
     "resume",
   );
   record(card, session, { action: "resume", result });
+  return result;
+}
+
+function frozenStale(live: Card | undefined, session: Session): string | null {
+  if (!live) return "the card is gone";
+  const current = live.sessions?.find((s) => s.id === session.id);
+  if (live.activeSessionId !== session.id || !current)
+    return "the session is not the active one";
+  if (current.tmuxSession !== session.tmuxSession)
+    return "the tmux session changed";
+  if (live.paused) return "the card is paused";
+  if (store.isStarting(live.id)) return "a start is in flight";
+  return session.tmuxSession === undefined ? "no tmux session" : null;
+}
+
+/**
+ * Stop a frozen claude in its tmux window, then relaunch it with resume and type the loop prompt once.
+ *
+ * @remarks The stop reuses `endJob` (hangup, then kill of the foreground group, never the shell
+ * group) because a typed `/exit` would only queue in the frozen box. Every check runs before the
+ * first signal.
+ */
+async function relaunchFrozen(
+  card: Card,
+  session: Session,
+  frozenSince: string,
+  evidence: string,
+  deps: ActionDeps,
+): Promise<void> {
+  const event = { action: "relaunch_frozen", frozenSince, evidence };
+  const fail = async (why: string) => {
+    record(card, session, {
+      ...event,
+      result: "failed",
+      reason: why,
+    });
+    await markNeedsInput(card, session, "resume_failed", `relaunch: ${why}`);
+  };
+  const live = store.getCard(card.id);
+  const name = session.tmuxSession;
+  const stale = frozenStale(live, session);
+  if (live === undefined || name === undefined || stale !== null) {
+    record(card, session, { ...event, result: "skipped", reason: stale });
+    return;
+  }
+  const root = rootOf(live, session);
+  if (root !== "" && !(await isFolder(root)))
+    return fail(`workspace-missing: ${root}`);
+  const blocked = resumeBlocked(live);
+  if (blocked !== null) return fail(blocked);
+  if (!(await deps.shellRoot(name))) return fail("no shell root");
+  const target = `=${name}:`;
+  const ended = await withCardLock(card.id, () => endJob(target, deps));
+  if (ended === "busy") {
+    record(card, session, {
+      ...event,
+      result: "skipped",
+      reason: "card busy",
+    });
+    return;
+  }
+  if (!(await deps.atShellPrompt(target))) return fail("claude did not exit");
+  record(card, session, { ...event, result: "stopped" });
+  const sent = await resume(card, session, deps);
+  if (sent !== null)
+    await store.recordSessionRelaunch(
+      card.id,
+      `relaunched with resume after a freeze since ${frozenSince}`,
+    );
 }
 
 /**
@@ -230,7 +331,7 @@ export async function runActions(
   session: Session,
   actions: SupervisorAction[],
   evidence: string,
-  deps: ActionDeps = DEFAULT_DEPS,
+  deps: ActionDeps = actionTools,
 ): Promise<void> {
   for (const action of actions) {
     switch (action.kind) {
@@ -276,6 +377,9 @@ export async function runActions(
         break;
       case "handoff":
         await runHandoff(card, session);
+        break;
+      case "relaunch_frozen":
+        await relaunchFrozen(card, session, action.frozenSince, evidence, deps);
         break;
     }
   }

@@ -10,6 +10,7 @@ import {
   holdsNeedsInput,
   initialPlanMemory,
   planActions,
+  planFrozenRelaunch,
   parseResetAt,
   readMenu,
   type PlanInput,
@@ -151,6 +152,21 @@ void test("a second API error in the same phase gives up, and a sleep cut shares
   assert.deepEqual(cut.actions, [
     { kind: "needs_input", reason: "supervisor_gave_up" },
   ]);
+});
+
+void test("a frozen detection releases only a supervisor_gave_up hold", () => {
+  const frozen = { state: "frozen" } as const;
+  assert.equal(
+    holdsNeedsInput("needs_input", "supervisor_gave_up", frozen),
+    false,
+  );
+  for (const reason of [
+    "usage_stop",
+    "budget",
+    "stop_session",
+    "resume_failed",
+  ] as const)
+    assert.equal(holdsNeedsInput("needs_input", reason, frozen), true, reason);
 });
 
 void test("a supervisor set needs_input holds until a busy sign, a permission prompt or a lost pane", () => {
@@ -315,4 +331,29 @@ void test("an idle orchestrator gets no restart nudge, but its handoff still run
   assert.deepEqual(plan({ to: "handoff_ready", loop: orchestrator }).actions, [
     { kind: "handoff" },
   ]);
+});
+
+void test("a frozen relaunch is planned once per unit and phase, then the session gives up", () => {
+  const since = "2026-10-21T10:00:00.000Z";
+  const first = planFrozenRelaunch(LOOP, initialPlanMemory(), since);
+  assert.deepEqual(first.actions, [
+    { kind: "relaunch_frozen", frozenSince: since },
+  ]);
+  const second = planFrozenRelaunch(LOOP, first.memory, since);
+  assert.deepEqual(second.actions, [
+    { kind: "needs_input", reason: "resume_failed" },
+  ]);
+  const nextPhase = planFrozenRelaunch(
+    { ...LOOP, unitPhase: "2/4" },
+    second.memory,
+    since,
+  );
+  assert.deepEqual(nextPhase.actions, [
+    { kind: "relaunch_frozen", frozenSince: since },
+  ]);
+});
+
+void test("a frozen relaunch without a loop is keyed frozen:none", () => {
+  const planned = planFrozenRelaunch(null, initialPlanMemory(), "t");
+  assert.deepEqual(planned.memory.prompts, { "frozen:none": 1 });
 });

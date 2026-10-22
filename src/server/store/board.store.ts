@@ -3025,6 +3025,13 @@ class BoardStore extends EventEmitter {
     ]);
   }
 
+  /** Append one `session_relaunch` activity row for a card the supervisor relaunched. */
+  recordSessionRelaunch(cardId: string, reason: string): Promise<void> {
+    return this.enqueue(() => [
+      this.event("session_relaunch", { cardId, reason, source: "supervisor" }),
+    ]);
+  }
+
   /** Synchronous archive read, newest first (the `listEvents` precedent: not enqueued). */
   listArchive(board: BoardKey): ArchivedGroup[] {
     return this.db.listArchive().filter((r) => r.boardKey === board);
