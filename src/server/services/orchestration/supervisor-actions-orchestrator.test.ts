@@ -112,7 +112,7 @@ void test("the supervisor relaunches the session of a running orchestrator at th
 void test("after the relaunch the supervisor sends the orchestrator resume prompt and not the loop text", async () => {
   await setState("running");
   await store.completeStart(card.id, undefined, {
-    workspacePath: "/sbx/sessions/lead",
+    workspacePath: env.root,
     tmuxSession: `dsp-${card.id}`,
     branch: "lead",
   });

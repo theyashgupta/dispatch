@@ -73,7 +73,11 @@ import {
   RESUME_TARGET_ERROR,
   RESUME_TARGET_LOADING,
 } from "@/modules/detail/domain/resume-target";
-import { PanelMutedNotice } from "@/modules/detail/components/PanelNotice";
+import {
+  PanelAlert,
+  PanelMutedNotice,
+} from "@/modules/detail/components/PanelNotice";
+import { liveResumeFailure } from "@/modules/detail/domain/live-resume-failure";
 import { PanelHeader } from "@/modules/detail/components/PanelHeader";
 import { PanelResizeHandle } from "@/modules/detail/components/PanelResizeHandle";
 import { RunClaudeButton } from "@/modules/detail/components/RunClaudeButton";
@@ -377,6 +381,7 @@ export function DetailPanelContainer() {
   const hasLiveSession = !!(c?.tmuxSession && !c.sessionLost);
   const note = c != null ? pausedNote(c) : null;
   const frozen = c != null ? frozenNote(c) : null;
+  const liveFailure = c != null ? liveResumeFailure(c) : null;
   const activeSessionLost = c?.activeSessionId != null && !c.tmuxSession;
   const resumeTarget = useResumeTargetQuery(c?.id ?? "", activeSessionLost);
   const resumeLine =
@@ -612,6 +617,15 @@ export function DetailPanelContainer() {
                     className="mx-(--space-xl) mb-(--space-lg)"
                   >
                     <PanelMutedNotice label="Status">{frozen}</PanelMutedNotice>
+                  </div>
+                )}
+
+                {liveFailure !== null && (
+                  <div
+                    data-testid="live-resume-failure"
+                    className="mx-(--space-xl) mb-(--space-lg)"
+                  >
+                    <PanelAlert>{liveFailure}</PanelAlert>
                   </div>
                 )}
 

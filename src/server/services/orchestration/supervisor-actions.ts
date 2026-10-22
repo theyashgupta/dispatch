@@ -24,7 +24,7 @@ import { withCardLock } from "./card-lock.js";
 import { endJob, type EndJobTools } from "./end-job.js";
 import { refreshLoopProgress } from "./loop-progress-reader.js";
 import { memoryCheck } from "./memory-governor.js";
-import { resumeSession } from "./resume-session.js";
+import { isFolder, resumeSession } from "./resume-session.js";
 import { runClaude, type RunClaudeOutcome } from "./run-claude.js";
 import { SHELL_SESSION_ENV } from "./steps.js";
 import { sendConfirmed, waitFor, type SendResult } from "./supervisor-send.js";
@@ -180,8 +180,9 @@ function resumeBlocked(card: Card, withMemory = true): string | null {
  *
  * @remarks A pane whose shell owns the foreground is relaunched with `runClaude`, since the resume
  * saga reattaches a live tmux session without starting claude. The prompt is typed only after
- * claude takes the foreground, so it never reaches the login shell. Resolves the send result, or
- * null when the resume skipped or failed before the prompt send.
+ * claude takes the foreground, so it never reaches the login shell. A pane whose workspace folder is
+ * missing is not relaunched, because the launch would run claude outside the session workspace.
+ * Resolves the send result, or null when the resume skipped or failed before the prompt send.
  */
 async function resume(
   card: Card,
@@ -214,6 +215,9 @@ async function resume(
     session.tmuxSession !== undefined &&
     (await deps.atShellPrompt(`=${session.tmuxSession}:`))
   ) {
+    const root = rootOf(card, session);
+    if (root !== "" && !(await isFolder(root)))
+      return failed(`Resume failed: workspace-missing: ${root}`);
     const blocked = resumeBlocked(card);
     if (blocked !== null) return failed(blocked);
     const outcome = await deps.relaunch(card.id);
@@ -290,6 +294,9 @@ async function relaunchFrozen(
     record(card, session, { ...event, result: "skipped", reason: stale });
     return;
   }
+  const root = rootOf(live, session);
+  if (root !== "" && !(await isFolder(root)))
+    return fail(`workspace-missing: ${root}`);
   const blocked = resumeBlocked(live);
   if (blocked !== null) return fail(blocked);
   if (!(await deps.shellRoot(name))) return fail("no shell root");

@@ -38,10 +38,14 @@ await store.createBoard({
 const PANES = new URL("../../test-support/fixtures/panes/", import.meta.url);
 const pane = (name: string) => readFileSync(new URL(name, PANES), "utf8");
 
-async function startedCard(board: BoardKey, title: string) {
+async function startedCard(
+  board: BoardKey,
+  title: string,
+  workspacePath = `/tmp/ws-${title}`,
+) {
   const created = await store.createLocalCard(board, title, "");
   await store.completeStart(created.id, undefined, {
-    workspacePath: `/tmp/ws-${title}`,
+    workspacePath,
     tmuxSession: `dsp-${title}`,
     branch: title,
   });
@@ -416,7 +420,9 @@ function relaunchEvents(cardId: string) {
 }
 
 async function frozenSession(title: string) {
-  const ids = await startedCard(SBX, title);
+  const workspace = path.join(env.root, "ws", title);
+  mkdirSync(workspace, { recursive: true });
+  const ids = await startedCard(SBX, title, workspace);
   const file = path.join(env.root, "projects", title, "transcript.jsonl");
   mkdirSync(path.dirname(file), { recursive: true });
   writeFileSync(file, '{"type":"summary"}\n');
