@@ -53,7 +53,7 @@ export const HOOK_SCRIPT_PATH = path.join(DISPATCH_DIR, "hook.sh");
  */
 export const HOOK_SETTINGS_PATH = path.join(DISPATCH_DIR, "hook-settings.json");
 
-/** The settings layer a launch passes for one resolved cross-session inbound value, or its orchestrator variant. */
+/** The settings layer a launch passes for one resolved inbound value, loop or orchestrator. */
 export function hookSettingsPath(
   value: CrossSessionInbound,
   orchestrator = false,
