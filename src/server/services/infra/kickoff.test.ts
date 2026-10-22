@@ -74,6 +74,11 @@ test("the status protocol block is unchanged by the section", () => {
   const tail = (s: string) => s.slice(s.indexOf("## Workspace"));
   assert.equal(tail(withImages), tail(without));
   assert.ok(withImages.includes("DISPATCH_STATUS: NEEDS_INPUT"));
+  assert.ok(
+    withImages.includes(
+      "- NEEDS_INPUT is only for a blocking question that stops the work, never for a progress note; a progress note uses WORKING.",
+    ),
+  );
 });
 
 test("a hidden orchestrator card gets only the playbook body with its direction", () => {
