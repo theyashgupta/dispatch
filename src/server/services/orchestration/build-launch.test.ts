@@ -98,9 +98,9 @@ void test("a launch intent replaces the stored card intent", async () => {
   );
 });
 
-void test("an orchestrator card passes the refuse settings file", async () => {
+void test("an orchestrator card passes the refuse orchestrator settings file", async () => {
   const card = cardOf({ source: "orchestrator", ownerOrchestrator: "lead" });
-  assert.equal(await settingsFor(card), hookSettingsPath("refuse"));
+  assert.equal(await settingsFor(card), hookSettingsPath("refuse", true));
 });
 
 void test("a start intent value picks its own settings file", async () => {
@@ -135,13 +135,13 @@ void test("a Roadmap Loop card follows the accept policy of its board", async ()
   assert.equal(await settingsFor(card), hookSettingsPath("accept"));
 });
 
-void test("an orchestrator card follows the accept policy of its board", async () => {
+void test("an orchestrator card follows the accept policy of its board in the orchestrator settings file", async () => {
   const card = cardOf({
     source: "orchestrator",
     boardKey: ROADMAP,
     ownerOrchestrator: "lead",
   });
-  assert.equal(await settingsFor(card), hookSettingsPath("accept"));
+  assert.equal(await settingsFor(card), hookSettingsPath("accept", true));
 });
 
 void test("a ticket card ignores the board policy", async () => {
@@ -169,7 +169,7 @@ void test("a stored intent outside the known values counts as unset", async () =
   assert.equal(await settingsFor(card), hookSettingsPath("accept"));
 });
 
-void test("a stored board policy outside the known values counts as unset", async () => {
+void test("a stored board policy outside the known values counts as unset in the orchestrator settings file", async () => {
   const key = parseBoardKey("BAD");
   assert.ok(key);
   boards.set(key, {
@@ -181,7 +181,7 @@ void test("a stored board policy outside the known values counts as unset", asyn
     boardKey: key,
     ownerOrchestrator: "lead",
   });
-  assert.equal(await settingsFor(card), hookSettingsPath("refuse"));
+  assert.equal(await settingsFor(card), hookSettingsPath("refuse", true));
 });
 
 void test("a ticket card does not read the board", async () => {

@@ -20,10 +20,15 @@ export const PAUSE_TOOL_NAMES = new Set(["AskUserQuestion", "ExitPlanMode"]);
  * flip-back branches in hook-events cannot drift from it. The deny rule covers the Read tool and
  * the guard covers Bash (T-105-03, T-105-06). The rule keeps a double leading slash, because
  * `VAULT_VALUES_PATH` carries one and a single slash is a silent no-op on the installed CLI.
+ * A loop file sets `idleCompaction` to false, because a compaction while idle froze loop sessions
+ * (LOCAL-184); the orchestrator file leaves the key out.
  * @see docs/ARCHITECTURE.md#hooks-status-channel
  * @see docs/ARCHITECTURE.md#security-threat-model
  */
-export function hookSettingsJson(inbound: CrossSessionInbound): string {
+export function hookSettingsJson(
+  inbound: CrossSessionInbound,
+  orchestrator = false,
+): string {
   const entry = [
     { hooks: [{ type: "command", command: HOOK_SCRIPT_PATH, timeout: 5 }] },
   ];
@@ -47,6 +52,7 @@ export function hookSettingsJson(inbound: CrossSessionInbound): string {
         },
       ],
     },
+    ...(orchestrator ? {} : { idleCompaction: false }),
   };
   return JSON.stringify(settings, null, 2) + "\n";
 }
@@ -64,6 +70,11 @@ export async function writeHookSettings(
     await writeFileAtomic(hookSettingsPath(value), hookSettingsJson(value), {
       mode: 0o644,
     });
+    await writeFileAtomic(
+      hookSettingsPath(value, true),
+      hookSettingsJson(value, true),
+      { mode: 0o644 },
+    );
   }
   await writeFileAtomic(HOOK_SETTINGS_PATH, hookSettingsJson(configValue), {
     mode: 0o644,

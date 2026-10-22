@@ -13,6 +13,7 @@ after(() => env.cleanup());
 interface Settings {
   crossSessionInbound?: unknown;
   hooks: Record<string, { matcher?: string; hooks: { timeout: number }[] }[]>;
+  idleCompaction?: boolean;
   permissions: { deny: string[] };
 }
 
@@ -33,11 +34,22 @@ void test("each value file exists with its own value", async () => {
   }
 });
 
-void test("all four settings files keep the hooks and the deny rule", async () => {
+void test("each orchestrator file has its own value and no idle compaction key, each loop file turns it off", async () => {
+  await installHookArtifacts("accept");
+  for (const value of CROSS_SESSION_INBOUND_VALUES) {
+    const orchestrator = read(hookSettingsPath(value, true));
+    assert.equal(orchestrator.crossSessionInbound, value);
+    assert.equal("idleCompaction" in orchestrator, false);
+    assert.equal(read(hookSettingsPath(value)).idleCompaction, false);
+  }
+});
+
+void test("every settings file keeps the hooks and the deny rule", async () => {
   await installHookArtifacts("refuse");
   const files = [
     HOOK_SETTINGS_PATH,
-    ...CROSS_SESSION_INBOUND_VALUES.map(hookSettingsPath),
+    ...CROSS_SESSION_INBOUND_VALUES.map((v) => hookSettingsPath(v)),
+    ...CROSS_SESSION_INBOUND_VALUES.map((v) => hookSettingsPath(v, true)),
   ];
   for (const file of files) {
     const settings = read(file);
