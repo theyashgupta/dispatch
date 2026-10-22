@@ -378,8 +378,9 @@ deny(
 
 /**
  * Idempotently (re)write every `~/.dispatch` boot artifact: the hook script, the vault-run
- * runner, the vault-guard PreToolUse hook, the four settings files (`hook-settings.json` holding
- * `inbound`, plus one file per inbound value), and the vault store scaffold.
+ * runner, the vault-guard PreToolUse hook, the seven settings files (`hook-settings.json` holding
+ * `inbound`, plus one loop file and one orchestrator file per inbound value), and the vault store
+ * scaffold.
  * Regenerating every boot self-heals manual edits or moves and keeps the script paths in the
  * settings current. Atomic writes via write-file-atomic (repo standard); all three scripts must
  * be executable for claude to spawn them. `write-file-atomic`'s `mode` option is create-only, so
