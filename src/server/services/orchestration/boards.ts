@@ -371,6 +371,7 @@ export function boardCounts(): BoardCounts {
       boardKey: count.key,
       cards: cardsByKey.get(count.key) ?? [],
       decisions: store.listDecisionItems(count.key, "open"),
+      pushoverMissing: store.pushoverMissing(),
       now,
     }).length;
   }
