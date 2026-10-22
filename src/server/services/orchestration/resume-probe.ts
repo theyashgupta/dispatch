@@ -1,4 +1,4 @@
-import { MEMORY_RESUME_LINE } from "../../../shared/dispatch-lines.js";
+import { RESUME_PROBE_LINE } from "../../../shared/dispatch-lines.js";
 import type { Card, Session } from "../../../shared/types.js";
 import { sleep } from "../../adapters/exec.js";
 import {
@@ -111,7 +111,7 @@ async function attempt(
   const sent = await probeTools.send(
     before.card,
     before.session,
-    MEMORY_RESUME_LINE,
+    RESUME_PROBE_LINE,
     "resume_probe",
     probeTools.timing,
   );
@@ -161,7 +161,7 @@ async function relaunch(
 }
 
 /**
- * Type one Dispatch line after a memory resume and relaunch claude when the REPL is stuck.
+ * Type one Dispatch line after a whole-tree resume and relaunch claude when the REPL is stuck.
  *
  * @remarks Types only on an idle In Progress loop, and relaunches only when the line is unconfirmed
  * and the pane tty is cooked. It holds the card lock and the supervisor watcher, so typing and

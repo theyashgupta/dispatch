@@ -6,6 +6,7 @@ import {
   parseProcessTable,
   readElapsed,
   signalTree,
+  stopBelowJob,
   treeOf,
   type SignalTreeDeps,
 } from "./process-tree.js";
@@ -60,6 +61,44 @@ void test("signalTree stops root first, then descendants, then a pid seen only i
     [102, "SIGSTOP"],
     [150, "SIGSTOP"],
   ]);
+});
+
+void test("stopBelowJob stops claude and its tools, never the pane shell or the pty shim job", async () => {
+  const table = parseProcessTable(
+    "100 1\n101 100\n102 101\n103 102\n104 103\n",
+  );
+  const deps = fakeDeps([table, table]);
+  assert.deepEqual(await stopBelowJob([100], deps), [102, 103, 104]);
+  assert.deepEqual(deps.calls, [
+    [102, "SIGSTOP"],
+    [103, "SIGSTOP"],
+    [104, "SIGSTOP"],
+  ]);
+});
+
+void test("stopBelowJob in an unwrapped pane stops the tools of claude, never claude itself", async () => {
+  const table = parseProcessTable("100 1\n101 100\n102 101\n");
+  const deps = fakeDeps([table, table]);
+  assert.deepEqual(await stopBelowJob([100], deps), [102]);
+});
+
+void test("stopBelowJob stops a process that appeared below the job in the second read", async () => {
+  const first = parseProcessTable("100 1\n101 100\n");
+  const second = parseProcessTable("100 1\n101 100\n102 101\n103 102\n");
+  const deps = fakeDeps([first, second]);
+  assert.deepEqual(await stopBelowJob([100], deps), [102, 103]);
+});
+
+void test("stopBelowJob stops nothing when the pane has no job or nothing below it", async () => {
+  const deps = fakeDeps([parseProcessTable("100 1\n101 100\n")]);
+  assert.deepEqual(await stopBelowJob([100], deps), []);
+  assert.deepEqual(deps.calls, []);
+});
+
+void test("stopBelowJob returns null and signals nothing when the first table read fails", async () => {
+  const deps = fakeDeps([null]);
+  assert.equal(await stopBelowJob([100], deps), null);
+  assert.deepEqual(deps.calls, []);
 });
 
 void test("signalTree continues the whole tree once", async () => {

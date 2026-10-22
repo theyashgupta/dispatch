@@ -52,6 +52,10 @@ beforeEach(() => {
     signals.push([signal, pids]);
     return Promise.resolve(pids);
   };
+  pauseTools.stopBelowJob = (pids) => {
+    signals.push(["SIGSTOP", pids]);
+    return Promise.resolve(pids);
+  };
 });
 
 afterEach(() => {

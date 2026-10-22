@@ -10,7 +10,11 @@ import { fakeBoardRepository } from "../../test-support/fake-board-repository.js
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { ConflictError, NotFoundError } from "../domain/errors.js";
 import { run, spawnPiped } from "../../adapters/exec.js";
-import { parseProcessTable, signalTree } from "../../adapters/process-tree.js";
+import {
+  parseProcessTable,
+  signalTree,
+  stopBelowJob,
+} from "../../adapters/process-tree.js";
 
 isolateEnv();
 const { store } = await import("../../store/board.store.js");
@@ -20,6 +24,7 @@ const {
   continueSession,
   onPausedPidsReleased,
   pauseCard,
+  pauseEmitter,
   pauseTools,
   unpauseCard,
 } = await import("./pause-card.js");
@@ -81,6 +86,10 @@ beforeEach(() => {
   pauseTools.panePids = () => Promise.resolve(paneMap);
   pauseTools.signalTree = (pids, signal) => {
     signals.push([pids, signal]);
+    return Promise.resolve(pids);
+  };
+  pauseTools.stopBelowJob = (pids) => {
+    signals.push([pids, "SIGSTOP"]);
     return Promise.resolve(pids);
   };
   setBoardRepository(
@@ -254,6 +263,73 @@ void test("unpause continues the tree, clears the mark and logs a resume event",
   assert.ok(!resumed.paused);
   assert.equal(events.length, 2);
   assert.deepEqual(events[1].data, { action: "resume", reason: "user resume" });
+});
+
+void test("a successful unpause of a whole-tree mark emits resumed once with the card id", async () => {
+  const resumed: string[] = [];
+  const listen = (id: string): number => resumed.push(id);
+  pauseEmitter.on("resumed", listen);
+  try {
+    loopCard();
+    await pauseCard("card-1", { by: "user", reason: "r" });
+    assert.deepEqual(resumed, []);
+    await unpauseCard("card-1", { reason: "r" });
+    assert.deepEqual(resumed, ["card-1"]);
+  } finally {
+    pauseEmitter.off("resumed", listen);
+  }
+});
+
+void test("an unpause of a mark below the job types nothing, reads no terminal and emits nothing", async () => {
+  const resumed: string[] = [];
+  const listen = (id: string): number => resumed.push(id);
+  pauseEmitter.on("resumed", listen);
+  try {
+    pauseTools.stopBelowJob = (pids) => {
+      signals.push([pids, "SIGSTOP"]);
+      return Promise.resolve([GRAND]);
+    };
+    loopCard();
+    const paused = await pauseCard("card-1", { by: "user", reason: "r" });
+    assert.deepEqual(paused.paused?.pids, [GRAND]);
+    const resumedCard = await unpauseCard("card-1", { reason: "r" });
+    assert.ok(!resumedCard.paused);
+    assert.deepEqual(killed, [[GRAND, "SIGCONT"]]);
+    assert.deepEqual(signals.at(-1), [[SHELL], "SIGCONT"]);
+    assert.deepEqual(promptTargets, []);
+    assert.deepEqual(typed, []);
+    assert.deepEqual(resumed, []);
+  } finally {
+    pauseEmitter.off("resumed", listen);
+  }
+});
+
+void test("a refused unpause emits nothing", async () => {
+  const resumed: string[] = [];
+  const listen = (id: string): number => resumed.push(id);
+  pauseEmitter.on("resumed", listen);
+  try {
+    loopCard();
+    assert.equal(
+      (await refusal(unpauseCard("card-1", { reason: "r" }))).code,
+      "not-paused",
+    );
+    paneMap = new Map([["dsp-GROUP-1", [SHELL, JOB]]]);
+    await pauseCard("card-1", { by: "user", reason: "r" });
+    terminal = () => owned(OTHER);
+    assert.equal(
+      (await refusal(unpauseCard("card-1", { reason: "r" }))).code,
+      "unpause-incomplete",
+    );
+    terminal = () => owned(SHELL);
+    assert.equal(
+      (await refusal(unpauseCard("card-1", { reason: "r" }))).code,
+      "unpause-incomplete",
+    );
+    assert.deepEqual(resumed, []);
+  } finally {
+    pauseEmitter.off("resumed", listen);
+  }
 });
 
 void test("unpause types nothing when the job already owns the terminal", async () => {
@@ -466,7 +542,7 @@ void test("pause with a failed tmux read leaves no mark and answers no live sess
 
 void test("pause whose process read fails leaves no mark and answers process read failed", async () => {
   loopCard();
-  pauseTools.signalTree = () => Promise.resolve(null);
+  pauseTools.stopBelowJob = () => Promise.resolve(null);
   const err = await refusal(pauseCard("card-1", { by: "user", reason: "r" }));
   assert.equal(err.code, "not-pausable");
   assert.deepEqual(err.details, { reason: "process read failed" });
@@ -476,7 +552,7 @@ void test("pause whose process read fails leaves no mark and answers process rea
 
 void test("pause that signals nothing leaves no mark and answers no live session", async () => {
   loopCard();
-  pauseTools.signalTree = () => Promise.resolve([]);
+  pauseTools.stopBelowJob = () => Promise.resolve([]);
   const err = await refusal(pauseCard("card-1", { by: "user", reason: "r" }));
   assert.deepEqual(err.details, { reason: "no live session" });
   assert.equal(events.length, 0);
@@ -509,8 +585,8 @@ void test("pause whose session changed before the mark answers no live session a
 void test("pause whose session is lost mid-pause continues exactly the signalled pids and answers no live session", async () => {
   paneMap = new Map([["dsp-GROUP-1", [SHELL, JOB, OTHER]]]);
   loopCard();
-  pauseTools.signalTree = (pids, signal) => {
-    signals.push([pids, signal]);
+  pauseTools.stopBelowJob = (pids) => {
+    signals.push([pids, "SIGSTOP"]);
     const card = cards.get("card-1") as Card;
     card.paused = null;
     return Promise.resolve([SHELL, JOB]);
@@ -526,24 +602,44 @@ void test("pause whose session is lost mid-pause continues exactly the signalled
   assert.equal(cards.get("card-1")?.paused, null);
 });
 
-void test("pause and unpause through the real process walk stop the tree in order and type the keys once", async () => {
+void test("pause and unpause through the real process walk stop only below the pane job and type nothing", async () => {
   const sent: [number, string][] = [];
   const table = `    1     0\n ${SHELL}     1\n ${JOB}  ${SHELL}\n ${GRAND}  ${JOB}\n`;
-  pauseTools.signalTree = (roots, sig) =>
-    signalTree(roots, sig, {
-      kill: (pid, signal) => {
-        sent.push([pid, signal]);
-      },
-      readTable: () => Promise.resolve(parseProcessTable(table)),
-    });
+  const deps = {
+    kill: (pid: number, signal: "SIGSTOP" | "SIGCONT") => {
+      sent.push([pid, signal]);
+    },
+    readTable: () => Promise.resolve(parseProcessTable(table)),
+  };
+  pauseTools.stopBelowJob = (roots) => stopBelowJob(roots, deps);
+  pauseTools.signalTree = (roots, sig) => signalTree(roots, sig, deps);
   loopCard();
   const paused = await pauseCard("card-1", { by: "user", reason: "r" });
-  assert.deepEqual(paused.paused?.pids, [4242, 4300, 4301]);
+  assert.deepEqual(paused.paused?.pids, [GRAND]);
+  assert.deepEqual(sent, [[GRAND, "SIGSTOP"]]);
+  sent.length = 0;
+  const resumed = await unpauseCard("card-1", { reason: "r" });
+  assert.deepEqual(killed, [[GRAND, "SIGCONT"]]);
   assert.deepEqual(sent, [
-    [4242, "SIGSTOP"],
-    [4300, "SIGSTOP"],
-    [4301, "SIGSTOP"],
+    [SHELL, "SIGCONT"],
+    [JOB, "SIGCONT"],
+    [GRAND, "SIGCONT"],
   ]);
+  assert.deepEqual(promptTargets, []);
+  assert.deepEqual(typed, []);
+  assert.ok(!resumed.paused);
+});
+
+void test("unpause of a mark that starts with the pane shell still types fg when the shell owns the terminal", async () => {
+  loopCard({
+    paused: {
+      at: "2026-10-22T08:00:00Z",
+      by: "user",
+      sessionId: "session-1",
+      pids: [SHELL, JOB, GRAND],
+      reason: "r",
+    },
+  });
   terminal = () => owned(typed.length === 0 ? SHELL : JOB);
   const resumed = await unpauseCard("card-1", { reason: "r" });
   assert.deepEqual(typed, [
