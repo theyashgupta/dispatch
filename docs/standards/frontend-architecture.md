@@ -123,6 +123,7 @@ Global bans:
 - Each non-test domain file and each `*-queries.ts` file, in a module or in `src/web/queries/`, has a colocated `node:test` file named `<subject>.test.ts`. The `*-queries.ts` tests cover the `*-api.ts` glue.
 - The repo has no `.tsx` test runner. Check views, containers and components in a browser.
 - The screenshot suite in `tests/visual/` (Playwright) compares ten screens in the light and the dark theme, at desktop and phone width, against three seeded servers (seeded, fresh and orchestrated) and the Vite gallery server, with committed baselines per platform, and opens every route to fail on a console or page error. It runs locally and in the CI `visual` job after the `check` job. A changed pixel fails it.
+- When a screenshot is flaky, fix the cause in the test or the page (wait for the settled state, stop the animation, mask the unstable region, or make the page settle, for example a scroll region that stays at its end when a late alert changes its size), and do not increase the pixel tolerance.
 
 ## The only-shadcn rule
 
