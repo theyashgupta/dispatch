@@ -6515,6 +6515,18 @@ then listens to the store `orchestration` event until a match or the time limit,
 540 seconds. A `tool_call` row never ends a wait unless `kinds` names it, because every call,
 the wait call included, writes one. An aborted request ends the wait and leaves no listener.
 
+**Machine sleep (LOCAL-189).** A `machine_wake` row ends every wait, also when `kinds` or
+`cardIds` does not name it, so the orchestrator reads the board again after a sleep. The wait
+reads the deadline from the wall clock once per poll interval (1 s), because a Node timer on
+macOS stops while the machine sleeps. When one poll gap is more than the interval plus 30 s, the
+wait ends with `{ timedOut: true, cursor, machineWake: true }`. Before the supervisor types a
+continue line (`restart`, `api_error` or `sleep_cut`), it reads the input box and the transcript
+user entries. When the box holds text that no user entry shows, the supervisor types nothing,
+records the `continue` action with `result: "skipped"` and `reason: "previous line unsent"`, and
+sets `needs_input` with `supervisor_gave_up`. A continue line spends its once per phase slot only
+when `sendConfirmed` confirms it in the transcript, so an unconfirmed `sleep_cut` line can be sent
+again at the next stop in the 2 minutes after the wake.
+
 **Dashboard reads.** Two user routes serve the dashboard. Both take a board key and answer 400
 `invalid-board` for a bad key and 404 `unknown-board` for a key with no board or an archived
 board. `GET /api/boards/:key/orchestration` returns
