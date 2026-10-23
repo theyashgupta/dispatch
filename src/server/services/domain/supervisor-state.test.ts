@@ -11,6 +11,7 @@ import {
   type Detection,
   paneBusy,
   paneDialog,
+  unsentBoxText,
 } from "./supervisor-state.js";
 import type { SupervisorState } from "../../../shared/types.js";
 
@@ -266,6 +267,16 @@ void test("inputBoxText joins the queued box text and is empty for an idle promp
     "Dispatch wake: decision answered for LOCAL-161 Dispatch wake: decision answered for LOCAL-161 Orchestrator: the wake lines above are already satisfied Orchestrator: no action is needed until the next event",
   );
   assert.equal(inputBoxText(pane("idle.txt")), "");
+});
+
+void test("unsentBoxText is null for an empty box and for a box text the transcript shows", () => {
+  const box = inputBoxText(pane("frozen-compacted.txt"));
+  assert.equal(unsentBoxText(pane("idle.txt"), ["hello"]), null);
+  assert.equal(unsentBoxText(pane("frozen-compacted.txt"), []), box);
+  assert.equal(
+    unsentBoxText(pane("frozen-compacted.txt"), [box.replace(/ /g, "\n")]),
+    null,
+  );
 });
 
 void test("the shortly notice is the usage limit wait evidence", () => {
