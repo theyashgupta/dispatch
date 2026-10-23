@@ -88,7 +88,7 @@ void test(
       "memory queue",
       "",
     );
-    const run = t.mock.method(steps[0]!, "run", () =>
+    const run = t.mock.method(steps[0], "run", () =>
       Promise.reject(new Error("saga stopped by the test")),
     );
     await withMemoryFakes(
@@ -128,7 +128,7 @@ void test(
       "memory refused",
       "",
     );
-    const run = t.mock.method(steps[0]!, "run", () => Promise.resolve());
+    const run = t.mock.method(steps[0], "run", () => Promise.resolve());
     await withMemoryFakes([reading(812)], async () => {
       await startSession(card.id, "", config());
     });
@@ -156,7 +156,7 @@ void test(
       "memory hidden",
       "orch-memory",
     );
-    const run = t.mock.method(steps[0]!, "run", () =>
+    const run = t.mock.method(steps[0], "run", () =>
       Promise.reject(new Error("saga stopped by the test")),
     );
     await withMemoryFakes([812], async ({ slept }) => {

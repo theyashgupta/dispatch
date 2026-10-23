@@ -48,7 +48,7 @@ export async function withMemoryFakes(
   const queue = readings.map((r) =>
     typeof r === "number" ? memoryReading(r) : r,
   );
-  const last = queue[queue.length - 1]!;
+  const last = queue[queue.length - 1];
   const saved = { ...memoryWaitTools };
   let time = 0;
   let hook: () => void = () => {};
