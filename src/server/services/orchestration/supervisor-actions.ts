@@ -21,6 +21,7 @@ import {
   type PlanMemory,
   type SupervisorAction,
 } from "../domain/supervisor-plan.js";
+import { isPrdModel } from "../domain/prd-progress.js";
 import { unsentBoxText } from "../domain/supervisor-state.js";
 import { readTranscriptTail } from "../../adapters/transcript.js";
 import { sessionTranscriptPath } from "./supervisor-transcript.js";
@@ -33,7 +34,9 @@ import { runClaude, type RunClaudeOutcome } from "./run-claude.js";
 import { SHELL_SESSION_ENV } from "./steps.js";
 import { sendConfirmed, waitFor, type SendResult } from "./supervisor-send.js";
 import {
+  isHandoffPending,
   orchestratorResumePromptText,
+  resumePromptText,
   runHandoff,
 } from "./supervisor-handoff.js";
 import { answerLimit, escapeLimit, moveOrWait } from "./supervisor-limit.js";
@@ -185,10 +188,11 @@ function resumeBlocked(card: Card, withMemory = true): string | null {
  * Bring claude back in a lost or shell-prompt session, then send the resume prompt.
  *
  * @remarks A pane whose shell owns the foreground is relaunched with `runClaude`, since the resume
- * saga reattaches a live tmux session without starting claude. The prompt is typed only after
- * claude takes the foreground, so it never reaches the login shell. A pane whose workspace folder is
- * missing is not relaunched, because the launch would run claude outside the session workspace.
- * Resolves the send result, or null when the resume skipped or failed before the prompt send.
+ * saga reattaches a live tmux session without starting claude, and a pane whose workspace folder
+ * is missing is not relaunched. The prompt is typed only after claude takes the foreground, so it
+ * never reaches the login shell, and a loop whose engine waits for a handoff gets the handoff
+ * resume prompt; it resolves the send result, or null when the resume skipped or failed before
+ * the prompt send.
  */
 async function resume(
   card: Card,
@@ -231,6 +235,17 @@ async function resume(
   } else {
     await deps.resume(card.id);
   }
+  return promptAfterResume(card, session, owner, deps, failed);
+}
+
+/** Wait for claude to take the foreground of the relaunched session, then type its resume prompt. */
+async function promptAfterResume(
+  card: Card,
+  session: Session,
+  owner: ReturnType<typeof orchestratorOf>,
+  deps: ActionDeps,
+  failed: (why: string) => Promise<null>,
+): Promise<SendResult | null> {
   const live = store.getCard(card.id);
   const resumed = live?.sessions?.find((s) => s.id === session.id);
   if (!live || !resumed?.tmuxSession) {
@@ -243,15 +258,21 @@ async function resume(
     POLL_MS,
   );
   if (!up) return failed("claude did not start");
+  const slug = live.loopProgress?.slug;
+  const text = owner
+    ? orchestratorResumePromptText(owner.id, live.boardKey ?? DEFAULT_BOARD_KEY)
+    : isHandoffPending(live) && slug
+      ? resumePromptText(
+          slug,
+          rootOf(live, resumed),
+          live.loopProgress?.prdFile,
+          isPrdModel(live.loopProgress),
+        )
+      : continueText(live, resumed, "resume");
   const result = await (deps.send ?? sendConfirmed)(
     live,
     resumed,
-    owner
-      ? orchestratorResumePromptText(
-          owner.id,
-          live.boardKey ?? DEFAULT_BOARD_KEY,
-        )
-      : continueText(live, resumed, "resume"),
+    text,
     "resume",
   );
   record(card, session, { action: "resume", result });
@@ -455,4 +476,32 @@ export async function runPlanned(
     deps,
   );
   return confirmed ? planned.memory : before;
+}
+
+/**
+ * Relaunch a lost card for the `resume_session` tool and type its resume prompt, as the lost-session duty does.
+ *
+ * @remarks The saga starts before any await, so the start latch is taken inside the caller's cap
+ * lock. With the supervisor off or no session record it types nothing.
+ */
+export async function resumeLostCard(
+  card: Card,
+  deps: ActionDeps = actionTools,
+): Promise<void> {
+  const session = card.sessions?.find((s) => s.id === card.activeSessionId);
+  const supervised =
+    store.getBoard(card.boardKey ?? DEFAULT_BOARD_KEY)?.policy.supervisor ===
+    "on";
+  await deps.resume(card.id);
+  if (!session || !supervised) return;
+  await promptAfterResume(
+    card,
+    session,
+    orchestratorOf(card),
+    deps,
+    async (why) => {
+      await markNeedsInput(card, session, "resume_failed", `resume: ${why}`);
+      return null;
+    },
+  );
 }

@@ -290,6 +290,7 @@ function assertBuilt() {
       .trim();
     throw new Error(
       `refusing to run — \`npm run ${BUILD_SCRIPT}\` failed, so dist/ does not reflect src/:\n${detail || err.message}`,
+      { cause: err },
     );
   }
   if (!existsSync(DIST_ENTRY)) {
@@ -1185,7 +1186,7 @@ async function main() {
   let ttyd = null;
   let healthyTmuxName = null;
   let secondSessionTmuxNames = [];
-  let portsHeld = false;
+  let portsHeld;
 
   try {
     const { repoPath, repoBase } = await seedFixtureRepo(home);
