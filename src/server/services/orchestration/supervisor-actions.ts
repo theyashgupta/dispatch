@@ -18,8 +18,12 @@ import {
 } from "../domain/loop-progress.js";
 import {
   declineKeys,
+  type PlanMemory,
   type SupervisorAction,
 } from "../domain/supervisor-plan.js";
+import { unsentBoxText } from "../domain/supervisor-state.js";
+import { readTranscriptTail } from "../../adapters/transcript.js";
+import { sessionTranscriptPath } from "./supervisor-transcript.js";
 import { withCardLock } from "./card-lock.js";
 import { endJob, type EndJobTools } from "./end-job.js";
 import { refreshLoopProgress } from "./loop-progress-reader.js";
@@ -47,6 +51,8 @@ export interface ActionDeps extends EndJobTools {
   shellRoot: (name: string) => Promise<boolean>;
   claudeUpMs: number;
   send?: typeof sendConfirmed;
+  capture?: (target: string) => Promise<string>;
+  userTexts?: (card: Card, session: Session) => Promise<string[]>;
 }
 
 export const actionTools: ActionDeps = {
@@ -320,11 +326,32 @@ async function relaunchFrozen(
     );
 }
 
+async function defaultUserTexts(
+  card: Card,
+  session: Session,
+): Promise<string[]> {
+  const file = await sessionTranscriptPath(card, session);
+  const tail = file === null ? null : await readTranscriptTail(file);
+  return tail?.userTexts ?? [];
+}
+
+async function unsentLine(
+  card: Card,
+  session: Session,
+  deps: ActionDeps,
+): Promise<string | null> {
+  const target = `=${session.tmuxSession}:`;
+  const pane = await (deps.capture ?? capturePane)(target).catch(() => "");
+  const texts = await (deps.userTexts ?? defaultUserTexts)(card, session);
+  return unsentBoxText(pane, texts);
+}
+
 /**
  * Run the planned actions of one state change in order and record each as one event.
  *
  * @remarks Runs inside the session's sampling turn, so a slow send holds later samples of that
- * session instead of letting them plan a second time.
+ * session instead of letting them plan a second time. Resolves true when every continue action
+ * was confirmed in the transcript, or when there is none.
  */
 export async function runActions(
   card: Card,
@@ -332,11 +359,30 @@ export async function runActions(
   actions: SupervisorAction[],
   evidence: string,
   deps: ActionDeps = actionTools,
-): Promise<void> {
+): Promise<boolean> {
+  let confirmed = true;
   for (const action of actions) {
     switch (action.kind) {
       case "continue": {
-        const result = await sendConfirmed(
+        const held = await unsentLine(card, session, deps);
+        if (held !== null) {
+          record(card, session, {
+            action: "continue",
+            duty: action.duty,
+            result: "skipped",
+            reason: "previous line unsent",
+            evidence: held.slice(0, 80),
+          });
+          await markNeedsInput(
+            card,
+            session,
+            "supervisor_gave_up",
+            `previous line unsent: ${held.slice(0, 80)}`,
+          );
+          confirmed = false;
+          break;
+        }
+        const result = await (deps.send ?? sendConfirmed)(
           card,
           session,
           continueText(card, session, action.duty),
@@ -348,6 +394,7 @@ export async function runActions(
           result,
           evidence,
         });
+        if (result !== "confirmed") confirmed = false;
         break;
       }
       case "needs_input":
@@ -383,4 +430,28 @@ export async function runActions(
         break;
     }
   }
+  return confirmed;
+}
+
+/**
+ * Run planned actions and return the plan memory to keep.
+ *
+ * @remarks A continue that the transcript does not show leaves its once-per-phase slot unspent, so the next stop can try again.
+ */
+export async function runPlanned(
+  card: Card,
+  session: Session,
+  planned: { actions: SupervisorAction[]; memory: PlanMemory },
+  before: PlanMemory,
+  evidence: string,
+  deps: ActionDeps = actionTools,
+): Promise<PlanMemory> {
+  const confirmed = await runActions(
+    card,
+    session,
+    planned.actions,
+    evidence,
+    deps,
+  );
+  return confirmed ? planned.memory : before;
 }
