@@ -28,13 +28,16 @@ const SLUG = "unit-branch";
 const BRANCHES = ["feat/UBS-1-unit-1-alpha", "feat/UBS-2-unit-2-beta"];
 const TITLES = ["feat: alpha UBS-1", "feat: beta UBS-2"];
 const FILES = ["alpha.txt", "beta.txt"];
-const RUN_LOG = path.join(EVIDENCE_DIR, "scenario-9-run-log.txt");
+const RUN_LOG = path.join(
+  EVIDENCE_DIR,
+  "local-153-unit-branch-ship-run-log.txt",
+);
 const DONE_MESSAGE = "DISPATCH_STATUS: DONE - built";
 const SHIP_BODY =
   "What\nThe work of the unit.\nWhy\nThe unit is built.\nHow\nShipped by the test.";
 const BUILT = "built, awaiting /ship";
 
-const note = makeNote("scenario-9");
+const note = makeNote("local-153-unit-branch-ship");
 
 interface Reply<T = Record<string, unknown>> {
   status: number;
@@ -436,10 +439,10 @@ async function runScenario(sb: Sandbox): Promise<void> {
 }
 
 void test(
-  "scenario 9: a Roadmap loop group whose unit branches use the feat/ prefix ships through start_ship",
+  "scenario-LOCAL-153-unit-branch-ship: a Roadmap loop group whose unit branches use the feat/ prefix ships through start_ship",
   { timeout: 20 * MINUTE },
   async () => {
-    const sb = await startSandbox({ name: "s9-unit-branch-ship" });
+    const sb = await startSandbox({ name: "local-153-unit-branch-ship" });
     try {
       await runScenario(sb);
     } finally {

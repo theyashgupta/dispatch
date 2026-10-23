@@ -37,7 +37,7 @@ import {
 import { cardOf, readJsonl, writeRunLog } from "./harness/board-reads.js";
 
 const BOARD = "ORC";
-const RUN_LOG = path.join(EVIDENCE_DIR, "scenario-1-run-log.txt");
+const RUN_LOG = path.join(EVIDENCE_DIR, "local-93-orchestrated-run-log.txt");
 const ALPHA_ID = "ORC-6";
 const BETA_ID = "ORC-7";
 const ALPHA_BRANCH = "feat/ORC-1-alpha-unit";
@@ -47,7 +47,7 @@ interface Snapshot {
   cards: Card[];
 }
 
-const note = makeNote("scenario-1");
+const note = makeNote("local-93-orchestrated");
 
 async function snapshot(sb: Sandbox): Promise<Snapshot> {
   const res = await sb.api<Snapshot>("GET", `/api/board?board=${BOARD}`);
@@ -101,7 +101,7 @@ async function runScenario(
   const sample = makeSampleRepo(sb.root, sb.home);
   const t0 = Date.now() - 30 * MINUTE;
   const alpha = loopSpec(
-    "s1-alpha",
+    "local-93-orchestrated-alpha",
     "Alpha",
     "ORC-1",
     ALPHA_BRANCH,
@@ -109,7 +109,7 @@ async function runScenario(
     t0,
   );
   const beta = loopSpec(
-    "s1-beta",
+    "local-93-orchestrated-beta",
     "Beta",
     "ORC-3",
     BETA_BRANCH,
@@ -328,7 +328,7 @@ async function runScenario(
   const sessionId = /^session_id: (.*)$/m.exec(engine)?.[1];
   assert.equal(sessionId, handoff.data.sessionId);
   assert.notEqual(sessionId, "handoff-pending");
-  assert.notEqual(sessionId, "s1-alpha-original");
+  assert.notEqual(sessionId, "local-93-orchestrated-alpha-original");
   assert.match(String(sessionId), /-fresh$/);
   assert.ok(
     fs.existsSync(
@@ -498,9 +498,9 @@ function assertScenarioCoverage(events: OrchestrationEventRow[]): void {
   );
 }
 
-void test("scenario 1: the harness and fixtures name no tmux verb that sends keys", () => {
+void test("scenario-LOCAL-93-orchestrated: the harness and fixtures name no tmux verb that sends keys", () => {
   const here = path.dirname(import.meta.filename);
-  const fixtures = path.join(here, "fixtures", "scenario-1");
+  const fixtures = path.join(here, "fixtures", "local-93-orchestrated");
   const files = [
     path.join(here, "harness", "sandbox.ts"),
     ...fs
@@ -519,10 +519,10 @@ void test("scenario 1: the harness and fixtures name no tmux verb that sends key
 });
 
 void test(
-  "scenario 1: an orchestrated board runs a handoff, a usage stop, a failed gate, a machine sleep and a ship",
+  "scenario-LOCAL-93-orchestrated: an orchestrated board runs a handoff, a usage stop, a failed gate, a machine sleep and a ship",
   { timeout: 25 * MINUTE },
   async () => {
-    const sb = await startSandbox({ name: "s1-orchestrated" });
+    const sb = await startSandbox({ name: "local-93-orchestrated" });
     const watcher = new AbortController();
     try {
       assert.ok(sb.port >= PORT_FIRST && sb.port <= PORT_LAST);

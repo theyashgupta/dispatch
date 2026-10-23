@@ -25,9 +25,9 @@ import {
 const BOARD = "FSC";
 const TICKET = "FSC-1";
 const FEATURE_ID = "feat";
-const RUN_LOG = path.join(EVIDENCE_DIR, "scenario-13-run-log.txt");
+const RUN_LOG = path.join(EVIDENCE_DIR, "local-150-feature-scope-run-log.txt");
 
-const note = makeNote("scenario-13");
+const note = makeNote("local-150-feature-scope");
 
 interface Reply<T = Record<string, unknown>> {
   status: number;
@@ -260,10 +260,10 @@ async function runScenario(sb: Sandbox): Promise<void> {
 }
 
 void test(
-  "scenario 13: a feature orchestrator with an empty scope sees and starts only the ticket that the user assigns to it",
+  "scenario-LOCAL-150-feature-scope: a feature orchestrator with an empty scope sees and starts only the ticket that the user assigns to it",
   { timeout: 20 * MINUTE },
   async () => {
-    const sb = await startSandbox({ name: "s13-feature-scope" });
+    const sb = await startSandbox({ name: "local-150-feature-scope" });
     try {
       assert.ok(sb.port >= PORT_FIRST && sb.port <= PORT_LAST);
       assertSafePort(sb.port);
@@ -282,7 +282,7 @@ void test(
   },
 );
 
-void test("scenario 13 code types no key into any pane", () => {
+void test("scenario-LOCAL-150-feature-scope code types no key into any pane", () => {
   const typing = new RegExp(
     [
       ["send", "keys"].join("-?"),

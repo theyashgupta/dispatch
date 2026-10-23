@@ -17,15 +17,15 @@ import {
   type Sandbox,
 } from "./harness/sandbox.js";
 
-const NAME = "scenario-6";
+const NAME = "local-99-resume-latest";
 const BOARD = "RES";
 const CARD = "RES-1";
-const RUN_LOG = path.join(EVIDENCE_DIR, "scenario-6-run-log.txt");
+const RUN_LOG = path.join(EVIDENCE_DIR, "local-99-resume-latest-run-log.txt");
 const ARGV_FILE = path.join(SANDBOX_ROOT, NAME, "argv.jsonl");
 const OLD_ID = "11111111-1111-4111-8111-111111111111";
 const NEW_ID = "22222222-2222-4222-8222-222222222222";
 
-const note = makeNote("scenario-6");
+const note = makeNote("local-99-resume-latest");
 
 /**
  * Post one hook event the way a real session does, with the token read from the tmux session environment.
@@ -211,7 +211,7 @@ async function runScenario(sb: Sandbox): Promise<void> {
 }
 
 void test(
-  "scenario 6: Resume opens the newest conversation after a clear",
+  "scenario-LOCAL-99-resume-latest: Resume opens the newest conversation after a clear",
   { timeout: 10 * MINUTE },
   async () => {
     process.env.FAKE_CLAUDE_ARGV_FILE = ARGV_FILE;

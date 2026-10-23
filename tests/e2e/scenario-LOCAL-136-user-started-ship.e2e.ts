@@ -23,12 +23,15 @@ const BOARD = "USR";
 const CARD = "USR-1";
 const ORCHESTRATOR_CARD = "USR-2";
 const UNSTARTED = "USR-3";
-const RUN_LOG = path.join(EVIDENCE_DIR, "scenario-11-run-log.txt");
+const RUN_LOG = path.join(
+  EVIDENCE_DIR,
+  "local-136-user-started-ship-run-log.txt",
+);
 const DONE_MESSAGE = "DISPATCH_STATUS: DONE - built";
 const SHIP_BODY =
   "What\nThe work of the card.\nWhy\nThe card is done.\nHow\nShipped by the test.";
 
-const note = makeNote("scenario-11");
+const note = makeNote("local-136-user-started-ship");
 
 interface Reply<T = Record<string, unknown>> {
   status: number;
@@ -331,10 +334,10 @@ async function runScenario(sb: Sandbox): Promise<void> {
 }
 
 void test(
-  "scenario 11: a ticket card that the user started from the board dialog ships through start_ship, and an unstarted card is refused",
+  "scenario-LOCAL-136-user-started-ship: a ticket card that the user started from the board dialog ships through start_ship, and an unstarted card is refused",
   { timeout: 20 * MINUTE },
   async () => {
-    const sb = await startSandbox({ name: "s11-user-started-ship" });
+    const sb = await startSandbox({ name: "local-136-user-started-ship" });
     try {
       note(`sandbox port ${sb.port}`);
       await runScenario(sb);
@@ -351,7 +354,7 @@ void test(
   },
 );
 
-void test("scenario 11 code types no key into any pane", () => {
+void test("scenario-LOCAL-136-user-started-ship code types no key into any pane", () => {
   const typing = new RegExp(
     [
       ["send", "keys"].join("-?"),

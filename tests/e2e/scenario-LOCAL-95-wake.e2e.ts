@@ -28,14 +28,14 @@ import {
 const BOARD = "WAK";
 const GROUP_ID = "WAK-4";
 const ORCHESTRATOR_CARD = "WAK-3";
-const RUN_LOG = path.join(EVIDENCE_DIR, "scenario-5-run-log.txt");
+const RUN_LOG = path.join(EVIDENCE_DIR, "local-95-wake-run-log.txt");
 const MERGED_SUBJECT = "feat: woken group (#1)";
 const DONE_MESSAGE = "DISPATCH_STATUS: DONE - built";
 const WAKE_PREFIX = "Dispatch wake:";
 const MAX_WAKE_SECONDS = 30;
 const WAKE_GAP_MS = 20_000;
 
-const note = makeNote("scenario-5");
+const note = makeNote("local-95-wake");
 
 interface Span {
   from: number;
@@ -427,10 +427,10 @@ async function runScenario(sb: Sandbox): Promise<void> {
 }
 
 void test(
-  "scenario 5: a decision answer and Agent done each wake the orchestrator, and it ships the group",
+  "scenario-LOCAL-95-wake: a decision answer and Agent done each wake the orchestrator, and it ships the group",
   { timeout: 20 * MINUTE },
   async () => {
-    const sb = await startSandbox({ name: "s5-wake" });
+    const sb = await startSandbox({ name: "local-95-wake" });
     try {
       await runScenario(sb);
     } finally {
@@ -446,7 +446,7 @@ void test(
   },
 );
 
-void test("scenario 5 code types no key into any pane", () => {
+void test("scenario-LOCAL-95-wake code types no key into any pane", () => {
   const typing = new RegExp(
     [
       ["send", "keys"].join("-?"),

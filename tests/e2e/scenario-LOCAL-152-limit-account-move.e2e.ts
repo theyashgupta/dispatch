@@ -36,7 +36,7 @@ const CONTINUED_REPLY = "Continuing on the account with headroom.";
 const MOVE_LIMIT_MS = 2 * MINUTE;
 const DAY = 24 * 60 * 60 * 1000;
 
-const note = makeNote("scenario-12");
+const note = makeNote("local-152-limit-account-move");
 
 interface Reply<T = Record<string, unknown>> {
   status: number;
@@ -631,7 +631,7 @@ async function runNoHeadroom(sb: Sandbox): Promise<void> {
 }
 
 void test(
-  "scenario 12: a loop on a weekly-limited account continues on the account with headroom",
+  "scenario-LOCAL-152-limit-account-move: a loop on a weekly-limited account continues on the account with headroom",
   { timeout: 15 * MINUTE },
   async () => {
     const usage = await startUsageServer({
@@ -639,7 +639,7 @@ void test(
       "fake-b": [futureWindow("weekly_all", 13), futureWindow("session", 7)],
     });
     const sb = await startSandbox({
-      name: "s12-limit-move",
+      name: "local-152-limit-account-move-limit-move",
       usageUrl: usage.url,
       seed: ({ dir }) => seedAccounts(dir, [ACCOUNT_A, ACCOUNT_B]),
     });
@@ -649,21 +649,24 @@ void test(
       await finish(
         sb,
         usage,
-        path.join(EVIDENCE_DIR, "scenario-12-limit-move-run-log.txt"),
+        path.join(
+          EVIDENCE_DIR,
+          "local-152-limit-account-move-limit-move-run-log.txt",
+        ),
       );
     }
   },
 );
 
 void test(
-  "scenario 12: a fresh read under the limit clears a stale limited flag in list_accounts",
+  "scenario-LOCAL-152-limit-account-move: a fresh read under the limit clears a stale limited flag in list_accounts",
   { timeout: 10 * MINUTE },
   async () => {
     const usage = await startUsageServer({
       "fake-c": [futureWindow("weekly_all", 13), futureWindow("session", 7)],
     });
     const sb = await startSandbox({
-      name: "s12-limited-flag",
+      name: "local-152-limit-account-move-limited-flag",
       usageUrl: usage.url,
       seed: ({ dir }) => {
         seedAccounts(dir, [ACCOUNT_C]);
@@ -694,14 +697,17 @@ void test(
       await finish(
         sb,
         usage,
-        path.join(EVIDENCE_DIR, "scenario-12-limited-flag-run-log.txt"),
+        path.join(
+          EVIDENCE_DIR,
+          "local-152-limit-account-move-limited-flag-run-log.txt",
+        ),
       );
     }
   },
 );
 
 void test(
-  "scenario 12: with no account under the headroom line the loop waits at the limit and the board shows why",
+  "scenario-LOCAL-152-limit-account-move: with no account under the headroom line the loop waits at the limit and the board shows why",
   { timeout: 10 * MINUTE },
   async () => {
     const usage = await startUsageServer({
@@ -709,7 +715,7 @@ void test(
       "fake-b": [futureWindow("weekly_all", 95), futureWindow("session", 7)],
     });
     const sb = await startSandbox({
-      name: "s12-no-headroom",
+      name: "local-152-limit-account-move-no-headroom",
       usageUrl: usage.url,
       seed: ({ dir }) => seedAccounts(dir, [ACCOUNT_A, ACCOUNT_B]),
     });
@@ -719,7 +725,10 @@ void test(
       await finish(
         sb,
         usage,
-        path.join(EVIDENCE_DIR, "scenario-12-no-headroom-run-log.txt"),
+        path.join(
+          EVIDENCE_DIR,
+          "local-152-limit-account-move-no-headroom-run-log.txt",
+        ),
       );
     }
   },
