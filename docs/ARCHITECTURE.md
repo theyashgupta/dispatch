@@ -165,7 +165,7 @@ Mount prefix: `/api/orchestrator`.
 | POST   | `/api/orchestrator/sessions/:cardId/resume-lost`   | Orchestrator token | Tool `resume_session`: resume a lost session through the Resume saga, refused while memory is low.  |
 | POST   | `/api/orchestrator/sessions/:cardId/stop`          | Orchestrator token | Tool `stop_session`: press Escape in a session pane and park it at Needs input.                     |
 | POST   | `/api/orchestrator/sessions/:cardId/pause`         | Orchestrator token | Tool `pause_card`: stop the processes of a loop in place with a user pause mark.                    |
-| POST   | `/api/orchestrator/sessions/:cardId/unpause`       | Orchestrator token | Tool `resume_card`: continue a paused loop, refused while memory is low.                            |
+| POST   | `/api/orchestrator/sessions/:cardId/unpause`       | Orchestrator token | Tool `resume_card`: continue a paused loop, waits up to 30 minutes while memory is low.             |
 | POST   | `/api/orchestrator/decisions`                      | Orchestrator token | Tool `create_decision_item`: raise a decision item for the user to answer.                          |
 | POST   | `/api/orchestrator/events/wait`                    | Orchestrator token | Tool `wait_for_event`: hold the call until a board event matches or the time limit passes.          |
 | POST   | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `start_ship`: start the ship flow of a finished group card or a finished single card.          |
@@ -2779,8 +2779,9 @@ unless `paneAtPrompt` says the pane's root shell owns the foreground and no star
 same card is in flight (a running claude, a pager, a rc prompt, or a second `send-keys -l`
 interleaving on one shell line is never typed into), `no-session` (400) when the tmux server no
 longer has the session (the seconds before the watcher marks it lost), `legacy` (409) when the
-session lacks the `DISPATCH_SHELL_SESSION` marker, and `account` (409) when the session's recorded
-Claude account no longer resolves, so the handler never falls through to Express's HTML 500.
+session lacks the `DISPATCH_SHELL_SESSION` marker, `account` (409) when the session's recorded
+Claude account no longer resolves, and `workspace-missing` (409) when the card's workspace folder is
+missing, so the handler never falls through to Express's HTML 500.
 Otherwise it types the same launch line a first start would, through `steps.ts#typeLaunchLine`, with
 `--resume <claudeSessionId>` when the hooks channel recorded the conversation id and a NEW
 conversation otherwise (never a guessed `--continue`: measured to refuse with "No conversation found
@@ -4484,15 +4485,16 @@ since LOCAL-99) goes to `store.startClaudeSession` instead and sets the start th
 "session_id mismatch" log any more: a differing id is a new node, not an error. Nodes are never
 deleted; a conversation Claude refuses on `--resume` is stamped `missingAt` and skipped.
 
-**Messages from other sessions (LOCAL-98).** The boot writes four settings files through
+**Messages from other sessions (LOCAL-98).** The boot writes seven settings files through
 `services/infra/hook-settings.ts`: `hook-settings-accept.json`, `hook-settings-hold.json` and
-`hook-settings-refuse.json`, plus `hook-settings.json` with `Config.crossSessionInbound` (default
-`accept`). The files differ only in `crossSessionInbound`. `buildLaunch` in `steps.ts` is the one
-launch chokepoint: it calls the pure `resolveCrossSessionInbound`
+`hook-settings-refuse.json` for loops, the same three with the `-orchestrator` suffix, plus
+`hook-settings.json` with `Config.crossSessionInbound` (default `accept`). The three files of one
+kind differ only in `crossSessionInbound`. `buildLaunch` in `steps.ts` is the one launch chokepoint:
+it calls the pure `resolveCrossSessionInbound`
 (`services/domain/cross-session-inbound.ts`) and passes the file of the result to `--settings`. The
 start intent value wins. A guarded launch (an orchestrator card, or a start intent playbook whose
 name starts with "Roadmap Loop") then takes the board policy value, or `refuse`. Every other launch
-takes the config value. `PUT /api/config/cross-session-inbound` writes `config.json` and the four
+takes the config value. `PUT /api/config/cross-session-inbound` writes `config.json` and the seven
 files. The next launch reads the new config value from memory, so no restart is needed. The file
 rewrite keeps `hook-settings.json` in step with the config. A running session keeps its file.
 
