@@ -6477,6 +6477,15 @@ and `swapCeilingMb` (256 to 65536, default 8192, else 400 `invalid-swapCeilingMb
 the stored values over them, so a board saved before a new field gets its default. A stored policy
 that is JSON `null` or an array reads as the defaults alone.
 
+**Handoff clear and relaunch prompt.** At a handoff the supervisor sends Enter on the typed
+`/clear` when the pane is ready or shows the Claude Code command menu with `/clear` selected, and
+never on another dialog (LOCAL-202). It confirms the clear from the transcript: a new `.jsonl` in
+the same project folder that holds the `/clear` command entry within 10 s. It types `/clear` one more
+time when no confirmation comes, then gives up with step `clear`. The `resume_session` tool relaunches a
+lost card through the `resume` action on a board with the supervisor on, so the supervisor types and
+confirms the resume prompt after claude starts; with the supervisor off the relaunch types nothing. A
+loop whose engine is `handoff-pending` gets the handoff resume prompt instead of the continue line.
+
 ### Orchestrator Control Surface
 
 LOCAL-90 gives an orchestrator a fixed set of server calls (decision records D-4 and D-9). The
