@@ -1,5 +1,5 @@
 /**
- * Doc-drift gate (dev tooling, NOT test code): mechanically catches two classes of stale
+ * Doc-drift gate (dev tooling, NOT test code): mechanically catches three classes of stale
  * documentation drift between docs/ARCHITECTURE.md and src/ — the same category as
  * check-invariants.mjs (plain Node ESM, no assertion framework, no test runner, lives outside
  * src/). It answers narrow, grep-shaped questions only, never "is this paragraph still true":
@@ -293,7 +293,7 @@ function checkPlanningVocabulary() {
 }
 
 /**
- * Run all three checks and set the process exit code.
+ * Run all checks and set the process exit code.
  * @returns Nothing; exits 0 iff every check is clean, 1 otherwise.
  */
 function run() {

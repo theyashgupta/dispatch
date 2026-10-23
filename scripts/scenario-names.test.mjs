@@ -19,6 +19,7 @@ import {
   replaceList,
   rewriteLabels,
   rewriteReferences,
+  scenarioDrift,
   targetName,
   ticketOfSubject,
 } from "./scenario-names.mjs";
@@ -459,4 +460,81 @@ test("--check reports a numbered label in a renamed file", () => {
   const check = runCli(dir, "--check");
   assert.equal(check.status, 1);
   assert.match(check.stderr, /numbered label scenario 21/);
+});
+
+test("rewriteReferences prefers the renamed map over the slug fallback", () => {
+  assert.equal(
+    rewriteReferences(
+      "tests/e2e/scenario-9-ship-retry.e2e.ts",
+      [
+        "scenario-LOCAL-171-ship-retry.e2e.ts",
+        "scenario-LOCAL-200-ship-retry.e2e.ts",
+      ],
+      false,
+      new Map([
+        [
+          "scenario-9-ship-retry.e2e.ts",
+          "scenario-LOCAL-200-ship-retry.e2e.ts",
+        ],
+      ]),
+    ),
+    "tests/e2e/scenario-LOCAL-200-ship-retry.e2e.ts",
+  );
+});
+
+test("rewriteReferences rewrites the markdown lead-in only at line start", () => {
+  const names = ["scenario-LOCAL-7-alpha.e2e.ts"];
+  const midLine = "see Scenario 3 (tests/e2e/scenario-LOCAL-7-alpha.e2e.ts)";
+  assert.equal(rewriteReferences(midLine, names, true), midLine);
+  assert.equal(
+    rewriteReferences(
+      "Scenario 3 (tests/e2e/scenario-LOCAL-7-alpha.e2e.ts)",
+      names,
+      true,
+    ),
+    "The scenario in tests/e2e/scenario-LOCAL-7-alpha.e2e.ts",
+  );
+});
+
+test("--check reports only labels the rename run can rewrite", () => {
+  const dir = initRepo();
+  assert.equal(runCli(dir).status, 0);
+  const file = join(dir, "tests/e2e/scenario-LOCAL-7-alpha.e2e.ts");
+  const base = readFileSync(file, "utf8");
+  writeFileSync(file, `${base}const a = "s1: x";\n`);
+  const colon = runCli(dir, "--check");
+  assert.equal(colon.status, 0, colon.stderr);
+  assert.doesNotMatch(colon.stderr, /numbered label/);
+  writeFileSync(file, `${base}const b = "s1-x";\n`);
+  const dash = runCli(dir, "--check");
+  assert.equal(dash.status, 1);
+  assert.match(dash.stderr, /numbered label s1$/m);
+});
+
+test("--check outside a git repo fails and does not report zero drift", () => {
+  const dir = mkdtempSync(join(tmpdir(), "scenario-names-test-"));
+  scratch.push(dir);
+  put(dir, "tests/e2e/scenario-LOCAL-7-alpha.e2e.ts", "x\n");
+  put(
+    dir,
+    "docs/ARCHITECTURE.md",
+    `Text.\n\n${EMPTY_BLOCK.replace("\n\n", "\n\n- tests/e2e/scenario-LOCAL-7-alpha.e2e.ts (LOCAL-7)\n\n")}\n`,
+  );
+  const check = runCli(dir, "--check");
+  assert.notEqual(check.status, 0);
+  assert.doesNotMatch(check.stdout, /PASS/);
+  assert.throws(() => scenarioDrift(dir));
+});
+
+test("CLI rewrites a reference in a committed text file", () => {
+  const dir = initRepo();
+  put(dir, "notes.txt", "run tests/e2e/scenario-3-alpha.e2e.ts first\n");
+  git(dir, "add", ".");
+  git(dir, "commit", "-q", "-m", "docs: add notes");
+  const run = runCli(dir);
+  assert.equal(run.status, 0, run.stderr);
+  assert.equal(
+    readFileSync(join(dir, "notes.txt"), "utf8"),
+    "run tests/e2e/scenario-LOCAL-7-alpha.e2e.ts first\n",
+  );
 });

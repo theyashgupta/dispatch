@@ -9,12 +9,17 @@ import {
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const NUMBERED = /^scenario-(\d+[a-z]?)-([a-z0-9][a-z0-9-]*)\.e2e\.ts$/;
+const TOKEN = "[0-9]+[a-z]?";
+const NUMBERED_NAME_ERE = `scenario-${TOKEN}-[a-z0-9-]+\\.e2e\\.ts`;
+const NUMBERED = new RegExp(
+  `^scenario-(${TOKEN})-([a-z0-9][a-z0-9-]*)\\.e2e\\.ts$`,
+);
+const NUMBERED_NAME = new RegExp(NUMBERED_NAME_ERE, "g");
 const TICKETED =
   /^scenario-([A-Z][A-Z0-9]*-\d+)-([a-z0-9][a-z0-9-]*)\.e2e\.ts$/;
 const TITLE = /(["'`])scenario \d+[a-z]?(?: part [A-Z])?(?=[:\s])/g;
-const NUMBERED_LABEL = /(["'`])(?:scenario[- ]|s)\d+[a-z]?(?=["'`\s:-])/g;
-const NUMBERED_NAME = /scenario-\d+[a-z]?-[a-z0-9][a-z0-9-]*\.e2e\.ts/g;
+const NUMBERED_LABEL =
+  /(["'`])(?:(?:scenario-|s)\d+[a-z]?(?=["'`-])|scenario \d+[a-z]?(?: part [A-Z])?(?=[:\s]))/g;
 const REFERENCE_PATHSPEC = [
   "--",
   ".",
@@ -22,8 +27,8 @@ const REFERENCE_PATHSPEC = [
 ];
 const LIST_START = "<!-- scenario-list:start -->";
 const LIST_END = "<!-- scenario-list:end -->";
-const MARKERS_MISSING =
-  "docs/ARCHITECTURE.md: scenario list markers are missing";
+const DOC_PATH = "docs/ARCHITECTURE.md";
+const MARKERS_MISSING = `${DOC_PATH}: scenario list markers are missing`;
 
 /**
  * Return the first ticket id that opens a parenthesized group in a commit subject.
@@ -32,17 +37,11 @@ export function ticketOfSubject(subject) {
   return /\(([A-Z][A-Z0-9]*-\d+)[\s,)]/.exec(subject)?.[1];
 }
 
-/**
- * Split a numbered scenario file name into its token and slug.
- */
 export function parseNumbered(fileName) {
   const match = NUMBERED.exec(fileName);
   return match ? { token: match[1], slug: match[2] } : undefined;
 }
 
-/**
- * Build the ticket-based file name for a numbered scenario file.
- */
 export function targetName(fileName, ticket) {
   const { slug } = parseNumbered(fileName);
   return `scenario-${ticket}-${slug}.e2e.ts`;
@@ -69,9 +68,6 @@ export function rewriteLabels(source, { token, ticket, slug }) {
     .replace(TITLE, `$1scenario-${ticket}-${slug}`);
 }
 
-/**
- * Split a ticket-based scenario file name into its ticket and slug.
- */
 export function parseTicketed(fileName) {
   const match = TICKETED.exec(fileName);
   return match ? { ticket: match[1], slug: match[2] } : undefined;
@@ -92,9 +88,9 @@ export function renderList(names) {
   });
   rows.sort(
     (a, b) =>
-      (a.prefix < b.prefix ? -1 : a.prefix > b.prefix ? 1 : 0) ||
+      a.prefix.localeCompare(b.prefix) ||
       a.number - b.number ||
-      (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0),
+      a.slug.localeCompare(b.slug),
   );
   return rows.map((r) => `- tests/e2e/${r.name} (${r.ticket})`).join("\n");
 }
@@ -119,40 +115,58 @@ export function replaceList(docText, list) {
  * Point references to an old scenario file name at the renamed file.
  *
  * @remarks
- * A reference changes only when exactly one existing ticket-based file has the same slug. In markdown, the old "Scenario N (path)" lead-in becomes "The scenario in path".
+ * A name in `renamed` (old base name to new base name) maps first. Otherwise a reference changes only when exactly one existing ticket-based file has the same slug. In markdown, the old "Scenario N (path)" lead-in at the start of a line becomes "The scenario in path".
  */
-export function rewriteReferences(text, existingNames, markdown) {
+export function rewriteReferences(
+  text,
+  existingNames,
+  markdown,
+  renamed = new Map(),
+) {
   const existing = new Set(existingNames);
-  let out = text.replace(
-    /scenario-(\d+[a-z]?)-([a-z0-9][a-z0-9-]*)\.e2e\.ts/g,
-    (match, _token, slug) => {
-      if (existing.has(match)) return match;
-      const sameSlug = new RegExp(
-        `^scenario-[A-Z][A-Z0-9]*-\\d+-${slug}\\.e2e\\.ts$`,
-      );
-      const hits = existingNames.filter((name) => sameSlug.test(name));
-      return hits.length === 1 ? hits[0] : match;
-    },
-  );
+  let out = text.replace(NUMBERED_NAME, (match) => {
+    const mapped = renamed.get(match);
+    if (mapped) return mapped;
+    if (existing.has(match)) return match;
+    const parsed = parseNumbered(match);
+    if (!parsed) return match;
+    const hits = existingNames.filter(
+      (name) => parseTicketed(name)?.slug === parsed.slug,
+    );
+    return hits.length === 1 ? hits[0] : match;
+  });
   if (markdown) {
     out = out.replace(
-      /Scenario \d+[a-z]?(?: part [A-Z])? \((tests\/e2e\/scenario-[A-Z][A-Z0-9]*-\d+-[a-z0-9-]+\.e2e\.ts)\)/g,
+      /^Scenario \d+[a-z]?(?: part [A-Z])? \((tests\/e2e\/scenario-[A-Z][A-Z0-9]*-\d+-[a-z0-9-]+\.e2e\.ts)\)/gm,
       "The scenario in $1",
     );
   }
   return out;
 }
 
-/**
- * Build a git runner that works in the given folder and returns its output.
- */
 function gitIn(root) {
   return (...args) =>
     execFileSync("git", args, {
       cwd: root,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: 64 * 1024 * 1024,
     });
+}
+
+/**
+ * Search the tracked files for numbered scenario file names and return the raw git grep output.
+ *
+ * @remarks
+ * Git grep exits with status 1 when nothing matches, which gives an empty output. Any other failure, such as a folder that is not a git repo, is rethrown so that a broken scan never reads as zero drift.
+ */
+function grepNumbered(git, flags) {
+  try {
+    return git("grep", flags, NUMBERED_NAME_ERE, ...REFERENCE_PATHSPEC);
+  } catch (error) {
+    if (error.status === 1) return "";
+    throw error;
+  }
 }
 
 /**
@@ -164,7 +178,7 @@ function gitIn(root) {
 export function renameScenarios(root) {
   const git = gitIn(root);
   const dir = join(root, "tests", "e2e");
-  const docPath = join(root, "docs", "ARCHITECTURE.md");
+  const docPath = join(root, DOC_PATH);
   if (replaceList(readFileSync(docPath, "utf8"), "") === undefined) {
     console.error(MARKERS_MISSING);
     return 1;
@@ -211,6 +225,7 @@ export function renameScenarios(root) {
     for (const line of errors) console.error(line);
     return 1;
   }
+  const written = new Set();
   for (const { name, target, ticket, token, slug } of plan) {
     const from = `tests/e2e/${name}`;
     const to = `tests/e2e/${target}`;
@@ -222,56 +237,51 @@ export function renameScenarios(root) {
     }
     if (tracked) git("mv", from, to);
     else renameSync(join(root, from), join(root, to));
+    written.add(to);
     const source = readFileSync(join(root, to), "utf8");
     const next = rewriteLabels(source, { token, ticket, slug });
     if (next !== source) writeFileSync(join(root, to), next);
     console.log(`${name} -> ${target}`);
   }
-  let files = [];
-  try {
-    files = git(
-      "grep",
-      "-IlzE",
-      "scenario-[0-9]+[a-z]?-[a-z0-9-]+\\.e2e\\.ts",
-      ...REFERENCE_PATHSPEC,
-    )
-      .split("\0")
-      .filter(Boolean);
-  } catch {
-    files = [];
-  }
-  const existingNames = readdirSync(dir);
+  const renamed = new Map(plan.map((p) => [p.name, p.target]));
+  const files = grepNumbered(git, "-IlzE").split("\0").filter(Boolean);
+  const finalNames = readdirSync(dir);
   for (const file of files) {
     const path = join(root, file);
     const text = readFileSync(path, "utf8");
-    const next = rewriteReferences(text, existingNames, file.endsWith(".md"));
-    if (next !== text) writeFileSync(path, next);
+    const next = rewriteReferences(
+      text,
+      finalNames,
+      file.endsWith(".md"),
+      renamed,
+    );
+    if (next !== text) {
+      writeFileSync(path, next);
+      written.add(file);
+    }
   }
   const doc = readFileSync(docPath, "utf8");
-  const nextDoc = replaceList(doc, renderList(readdirSync(dir)));
-  if (nextDoc !== doc) writeFileSync(docPath, nextDoc);
-  formatFiles(root, [
-    ...readdirSync(dir)
-      .filter((name) => parseTicketed(name))
-      .map((name) => `tests/e2e/${name}`),
-    ...files,
-    "docs/ARCHITECTURE.md",
-  ]);
+  const nextDoc = replaceList(doc, renderList(finalNames));
+  if (nextDoc !== doc) {
+    writeFileSync(docPath, nextDoc);
+    written.add(DOC_PATH);
+  }
+  formatFiles(root, [...written]);
   return 0;
 }
 
 /**
- * Run the repo's prettier on the files so the generated output passes the format check.
+ * Run the repo's prettier on the files this run wrote so the output passes the format check.
  *
  * @remarks
- * A longer label can push a line past the print width. A checkout without `node_modules` skips the step.
+ * A longer label can push a line past the print width. An empty file set or a checkout without `node_modules` skips the step.
  */
 function formatFiles(root, files) {
   const prettier = join(root, "node_modules", ".bin", "prettier");
-  if (!existsSync(prettier)) return;
+  if (files.length === 0 || !existsSync(prettier)) return;
   execFileSync(
     prettier,
-    ["--log-level", "warn", "--write", ...new Set(files)],
+    ["--ignore-unknown", "--log-level", "warn", "--write", ...files],
     {
       cwd: root,
       stdio: "inherit",
@@ -283,7 +293,7 @@ function formatFiles(root, files) {
  * List the numbered scenario names, references and labels and the stale doc list, and change nothing.
  *
  * @remarks
- * The reference scan uses the same git grep and exclusion as the rename run. The label scan covers ticket-based files only.
+ * The reference scan uses the same git grep and exclusion as the rename run. The label scan covers ticket-based files only and reports only labels that the rename run can rewrite.
  */
 export function scenarioDrift(root) {
   const git = gitIn(root);
@@ -297,19 +307,7 @@ export function scenarioDrift(root) {
       );
     }
   }
-  let lines = [];
-  try {
-    lines = git(
-      "grep",
-      "-nIE",
-      "scenario-[0-9]+[a-z]?-[a-z0-9-]+\\.e2e\\.ts",
-      ...REFERENCE_PATHSPEC,
-    )
-      .split("\n")
-      .filter(Boolean);
-  } catch {
-    lines = [];
-  }
+  const lines = grepNumbered(git, "-nIE").split("\n").filter(Boolean);
   for (const line of lines) {
     const match = /^([^:]+):(\d+):(.*)$/.exec(line);
     if (!match) continue;
@@ -326,12 +324,12 @@ export function scenarioDrift(root) {
       violations.push(`tests/e2e/${name}: numbered label ${label.slice(1)}`);
     }
   }
-  const doc = readFileSync(join(root, "docs", "ARCHITECTURE.md"), "utf8");
+  const doc = readFileSync(join(root, DOC_PATH), "utf8");
   const expected = replaceList(doc, renderList(ticketed));
   if (expected === undefined) violations.push(MARKERS_MISSING);
   else if (expected !== doc) {
     violations.push(
-      "docs/ARCHITECTURE.md: scenario list is stale, run node scripts/scenario-names.mjs",
+      `${DOC_PATH}: scenario list is stale, run node scripts/scenario-names.mjs`,
     );
   }
   return violations;
