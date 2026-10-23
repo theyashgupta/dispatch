@@ -6479,6 +6479,15 @@ and `swapCeilingMb` (256 to 65536, default 8192, else 400 `invalid-swapCeilingMb
 the stored values over them, so a board saved before a new field gets its default. A stored policy
 that is JSON `null` or an array reads as the defaults alone.
 
+**Handoff clear and relaunch prompt.** At a handoff the supervisor sends Enter on the typed
+`/clear` when the pane is ready or shows the Claude Code command menu with `/clear` selected, and
+never on another dialog (LOCAL-202). It confirms the clear from the transcript: a new `.jsonl` in
+the same project folder that holds the `/clear` command entry within 10 s. It types `/clear` one more
+time when no confirmation comes, then gives up with step `clear`. The `resume_session` tool relaunches a
+lost card through the `resume` action on a board with the supervisor on, so the supervisor types and
+confirms the resume prompt after claude starts; with the supervisor off the relaunch types nothing. A
+loop whose engine is `handoff-pending` gets the handoff resume prompt instead of the continue line.
+
 ### Orchestrator Control Surface
 
 LOCAL-90 gives an orchestrator a fixed set of server calls (decision records D-4 and D-9). The
@@ -6822,3 +6831,5 @@ The settings sheet on the centre has two tabs:
   `shared/orchestrator-models.ts`, and the route refuses any other model with 400.
 - Orchestrators: the main and the extras, with the form to add an extra, edit its override and move
   groups.
+
+When the engine file of a single PRD loop names no PRD path, the reader finds the PRD by its slug in `.planning/prds/` at the session root or in a repo folder one level below it: the engine slug, or, when the engine names no slug, the card identifier in lowercase and then as written (LOCAL-200).
