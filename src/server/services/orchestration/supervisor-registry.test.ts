@@ -240,9 +240,18 @@ void test("an orchestrator's continue budget is keyed by the UTC day, so a new d
   };
   const dayOne = Date.UTC(2026, 9, 8, 12);
   const dayTwo = Date.UTC(2026, 9, 9, 12);
-  for (const now of [dayOne, dayTwo]) {
-    await store.setSessionStateIfSession(ids.cardId, ids.sessionId, "working");
-    await supervisePane({ ...ids, pane: pane("api-error.txt") }, now);
+  actionTools.send = () => Promise.resolve("confirmed");
+  try {
+    for (const now of [dayOne, dayTwo]) {
+      await store.setSessionStateIfSession(
+        ids.cardId,
+        ids.sessionId,
+        "working",
+      );
+      await supervisePane({ ...ids, pane: pane("api-error.txt") }, now);
+    }
+  } finally {
+    delete actionTools.send;
   }
   assert.deepEqual(ensureWatcher(ids.tmuxSession).plan.prompts, {
     "retry:orchestrator/2026-10-08": 1,
