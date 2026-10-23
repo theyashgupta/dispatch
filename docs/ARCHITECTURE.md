@@ -6292,7 +6292,9 @@ format.
 for each inbound value, which the orchestrator session gets, and every other session gets
 `hook-settings-<value>.json`, which also sets `idleCompaction` and `promptSuggestionEnabled` to
 `false` so that a loop session does not compact while idle and its prompt box never shows a
-suggested `/ship` line (LOCAL-184).
+suggested `/ship` line (LOCAL-184). Each session start also merges both keys into the
+`settings.json` of the config dir it launches on, which for an added account is the link to the home
+file, so a new account dir has them too (LOCAL-198).
 
 ### Session Supervisor
 
