@@ -5767,7 +5767,7 @@ question; none of them read prose for truth.
   `deadcode` (knip), `replay-gate`, `doc-drift`, `invariants`, `check-hooks` and `test:timing` (all below), run in sequence.
 - **`npm run lint`** and **`npm run lint:typed`**: two ESLint modes. `lint` runs every rule that does not
   need type information, which includes all custom rules, and does not build a TypeScript program.
-  It is the local default and a step of `npm run check`. `lint:typed` sets `DISPATCH_LINT_TYPED=1`,
+  It is the local default and a step of `npm run check`. `lint:typed` runs with a 4 GB Node heap and sets `DISPATCH_LINT_TYPED=1`,
   which adds `recommendedTypeChecked`, the project service and the two type-aware rule overrides.
   The CI check job runs `lint:typed` after `npm run check`. Only `lint:typed` reports unused
   `eslint-disable` directives, because a directive for a type-aware rule looks unused to `lint`, and
@@ -6292,7 +6292,9 @@ format.
 for each inbound value, which the orchestrator session gets, and every other session gets
 `hook-settings-<value>.json`, which also sets `idleCompaction` and `promptSuggestionEnabled` to
 `false` so that a loop session does not compact while idle and its prompt box never shows a
-suggested `/ship` line (LOCAL-184).
+suggested `/ship` line (LOCAL-184). Each session start also merges both keys into the
+`settings.json` of the config dir it launches on, which for an added account is the link to the home
+file, so a new account dir has them too (LOCAL-198).
 
 ### Session Supervisor
 
@@ -6829,3 +6831,5 @@ The settings sheet on the centre has two tabs:
   `shared/orchestrator-models.ts`, and the route refuses any other model with 400.
 - Orchestrators: the main and the extras, with the form to add an extra, edit its override and move
   groups.
+
+When the engine file of a single PRD loop names no PRD path, the reader finds the PRD by its slug in `.planning/prds/` at the session root or in a repo folder one level below it: the engine slug, or, when the engine names no slug, the card identifier in lowercase and then as written (LOCAL-200).
