@@ -436,7 +436,8 @@ export async function runActions(
 /**
  * Run planned actions and return the plan memory to keep.
  *
- * @remarks A continue that the transcript does not show leaves its once-per-phase slot unspent, so the next stop can try again.
+ * @remarks A continue that the transcript does not show leaves its once-per-phase slot unspent, so
+ * the next stop can try again.
  */
 export async function runPlanned(
   card: Card,

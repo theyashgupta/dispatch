@@ -76,6 +76,28 @@ void test("the supervisor does not type a second continue line while one is unse
   assert.equal(session().stateReason, "supervisor_gave_up");
 });
 
+void test("the restart and api_error continue lines are not typed while a line is unsent", async () => {
+  for (const duty of ["restart", "api_error"] as const) {
+    const { card, session } = await startedCard(`unsent-${duty}`);
+    const { sent, send } = fakeSend("confirmed");
+    const ok = await runActions(
+      card(),
+      session(),
+      [{ kind: "continue", duty }],
+      "idle",
+      {
+        ...actionTools,
+        send,
+        capture: () => Promise.resolve(HELD_PANE),
+        userTexts: () => Promise.resolve([]),
+      },
+    );
+    assert.equal(ok, false);
+    assert.equal(sent.length, 0);
+    assert.equal(session().stateReason, "supervisor_gave_up");
+  }
+});
+
 void test("a box text the transcript shows does not block the continue line", async () => {
   const { card, session } = await startedCard("unsent-shown");
   const { sent, send } = fakeSend("confirmed");
@@ -102,12 +124,17 @@ void test("an unconfirmed sleep cut line leaves the slot unspent and a confirmed
       now,
       memory,
     });
-  const deps = (result: "confirmed" | "unconfirmed") => ({
-    ...actionTools,
-    send: fakeSend(result).send,
-    capture: () => Promise.resolve(EMPTY_PANE),
-    userTexts: () => Promise.resolve([]),
-  });
+  const sends: string[][] = [];
+  const deps = (result: "confirmed" | "unconfirmed") => {
+    const fake = fakeSend(result);
+    sends.push(fake.sent);
+    return {
+      ...actionTools,
+      send: fake.send,
+      capture: () => Promise.resolve(EMPTY_PANE),
+      userTexts: () => Promise.resolve([]),
+    };
+  };
   const before = initialPlanMemory();
   const first = plan(wokeAt + 60_000, before);
   assert.deepEqual(first.actions, [...CONTINUE]);
@@ -131,6 +158,10 @@ void test("an unconfirmed sleep cut line leaves the slot unspent and a confirmed
     deps("confirmed"),
   );
   assert.deepEqual(spent, second.memory);
+  assert.deepEqual(
+    sends.map((s) => s.length),
+    [1, 1],
+  );
   assert.deepEqual(plan(wokeAt + 100_000, spent).actions, [
     { kind: "needs_input", reason: "supervisor_gave_up" },
   ]);

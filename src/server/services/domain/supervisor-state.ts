@@ -235,7 +235,8 @@ export function inputBoxText(pane: string): string {
 /**
  * Return the input box text that no transcript user entry shows, or null when the box is empty or sent.
  *
- * @remarks Compares the first 40 characters with white space removed, as the send check does for a held line, because the box wraps long lines.
+ * @remarks Compares the first 40 characters with white space removed, as the send check does for a
+ * held line, because the box wraps long lines.
  */
 export function unsentBoxText(
   pane: string,
