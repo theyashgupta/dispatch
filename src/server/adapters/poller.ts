@@ -9,6 +9,7 @@ import { RateLimited, type TicketSource } from "../sources/ticket.source.js";
 import { ALL_BOARDS } from "../../shared/board-key.js";
 
 const MAX_BACKOFF_MS = 15 * 60_000;
+const CATCH_UP_MS = 30_000;
 
 interface Loop {
   source: TicketSource;
@@ -17,6 +18,7 @@ interface Loop {
   backoffMs: number;
   inFlight: boolean;
   rerun: boolean;
+  catchUpUsed: boolean;
   stopped: boolean;
 }
 
@@ -107,6 +109,7 @@ async function pollOnce(loop: Loop): Promise<void> {
     if (cursors !== undefined) await store.setSourceCursors(source.id, cursors);
     if (gen !== loop.generation) return;
     loop.backoffMs = baseInterval(source);
+    loop.catchUpUsed = false;
     scheduleNext(loop, loop.backoffMs);
   } catch (err) {
     if (gen !== loop.generation) return;
@@ -125,13 +128,13 @@ async function pollOnce(loop: Loop): Promise<void> {
         `[poller] ${source.id} network-level poll failure, keeping last-known-good: ${err.message}`,
       );
       if (source.itemsOnly !== true) void store.setSyncUnreachable(true);
-      scheduleNext(loop, baseInterval(source));
+      scheduleRetry(loop);
     } else {
       console.error(
         `[poller] ${source.id} poll failed, keeping last-known-good: ${(err as Error).message}`,
       );
       if (source.itemsOnly !== true) void store.setSyncUnreachable(false);
-      scheduleNext(loop, baseInterval(source));
+      scheduleRetry(loop);
     }
   } finally {
     loop.inFlight = false;
@@ -154,6 +157,23 @@ function scheduleNext(loop: Loop, delayMs: number): void {
     if (gen === loop.generation) void pollOnce(loop);
   }, delayMs);
   loop.timer.unref?.();
+}
+
+/**
+ * Arm the tick after a failed poll: one catch-up run soon, then the regular interval.
+ *
+ * @remarks CPU limit: at most one fetch in flight per source and at most one catch-up run per
+ * failure streak, so a source that keeps failing falls back to one poll per interval. The next
+ * success clears the streak. A rate limit takes the backoff path instead and never catches up.
+ */
+function scheduleRetry(loop: Loop): void {
+  const interval = baseInterval(loop.source);
+  if (loop.catchUpUsed) {
+    scheduleNext(loop, interval);
+    return;
+  }
+  loop.catchUpUsed = true;
+  scheduleNext(loop, Math.min(CATCH_UP_MS, interval));
 }
 
 function stopLoop(loop: Loop): void {
@@ -197,6 +217,7 @@ export function startPollers(sources: readonly TicketSource[]): void {
       existing.stopped = false;
       existing.source = source;
       existing.backoffMs = baseInterval(source);
+      existing.catchUpUsed = false;
       void pollOnce(existing);
       continue;
     }
@@ -207,6 +228,7 @@ export function startPollers(sources: readonly TicketSource[]): void {
       backoffMs: baseInterval(source),
       inFlight: false,
       rerun: false,
+      catchUpUsed: false,
       stopped: false,
     };
     loops.set(source.id, loop);
