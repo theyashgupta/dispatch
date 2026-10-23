@@ -28,11 +28,14 @@ export async function checkPushover(
  * @remarks The timer is unref'd so it never holds the process open. Only the start check logs; a
  * later check updates the store and stays silent.
  */
-export async function startPushoverWatch(): Promise<void> {
-  const line = pushoverStartLine(await checkPushover());
+export async function startPushoverWatch(
+  read: () => Promise<Record<PushoverName, EnvPresence>> = () =>
+    envVaultPresence(PUSHOVER_NAMES),
+): Promise<void> {
+  const line = pushoverStartLine(await checkPushover(read));
   if (line !== null) console.warn(line);
   setInterval(() => {
-    void checkPushover().catch((err: unknown) =>
+    void checkPushover(read).catch((err: unknown) =>
       console.error(
         `[notify] pushover check failed: ${(err as Error).message}`,
       ),

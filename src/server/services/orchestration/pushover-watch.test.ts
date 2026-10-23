@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import path from "node:path";
-import { after, test } from "node:test";
+import { after, mock, test } from "node:test";
 import { buildAttentionQueue } from "../../../shared/attention-queue.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import type { EnvPresence } from "../../../shared/types.js";
@@ -10,7 +10,8 @@ const env = isolateEnv();
 const { store } = await import("../../store/board.store.js");
 const { envVaultPresence } = await import("../infra/vault.js");
 const { PUSHOVER_NAMES } = await import("../domain/pushover-check.js");
-const { checkPushover } = await import("./pushover-watch.js");
+const { checkPushover, startPushoverWatch } =
+  await import("./pushover-watch.js");
 await store.load();
 after(() => env.cleanup());
 
@@ -76,6 +77,34 @@ test("notifications off gives no item", async () => {
   await checkPushover(presence("empty", "empty"));
   await checkPushover(presence("unset", "unset"));
   assert.deepEqual(queue(), []);
+});
+
+test("the watch checks presence once at start and once per 60 seconds", async () => {
+  mock.timers.enable({ apis: ["setInterval"] });
+  try {
+    let checks = 0;
+    const read = () => {
+      checks += 1;
+      return presence("filled", "filled")();
+    };
+    const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+    await startPushoverWatch(read);
+    assert.equal(checks, 1);
+    mock.timers.tick(59_999);
+    await flush();
+    assert.equal(checks, 1);
+    mock.timers.tick(1);
+    await flush();
+    assert.equal(checks, 2);
+    mock.timers.tick(60_000);
+    await flush();
+    assert.equal(checks, 3);
+    mock.timers.tick(60_000);
+    await flush();
+    assert.equal(checks, 4);
+  } finally {
+    mock.timers.reset();
+  }
 });
 
 test("the snapshot never holds a value and names only the empty name", async () => {
