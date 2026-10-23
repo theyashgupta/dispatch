@@ -27,14 +27,14 @@ const ORCHESTRATOR_CARD = "LAM-2";
 const CLAUDE_SESSION = "7d3e9f10-2b4c-4a5d-8e6f-0a1b2c3d4e5f";
 const LOOP_REPLY = "Still running on the managed account.";
 
-const SANDBOX_NAME = "s15-managed-default";
+const SANDBOX_NAME = "local-159-managed-default";
 const HOME_IDENTITY_FILE = path.join(
   SANDBOX_ROOT,
   SANDBOX_NAME,
   "home-identity.json",
 );
 
-const note = makeNote("scenario-15");
+const note = makeNote("local-159-managed-default");
 
 interface Reply<T = Record<string, unknown>> {
   status: number;
@@ -417,7 +417,7 @@ async function finish(sb: Sandbox, runLog: string): Promise<void> {
 }
 
 void test(
-  "scenario 15: a managed default keeps its loop when the home login changes",
+  "scenario-LOCAL-159-managed-default: a managed default keeps its loop when the home login changes",
   { timeout: 10 * MINUTE },
   async () => {
     const sb = await startSandbox({
@@ -432,7 +432,10 @@ void test(
     } finally {
       await finish(
         sb,
-        path.join(EVIDENCE_DIR, "scenario-15-managed-default-run-log.txt"),
+        path.join(
+          EVIDENCE_DIR,
+          "local-159-managed-default-managed-default-run-log.txt",
+        ),
       );
     }
   },

@@ -20,10 +20,10 @@ import {
   type Sandbox,
 } from "./harness/sandbox.js";
 
-const NAME = "scenario-8";
+const NAME = "local-110-memory-pause";
 const BOARD = "MEM";
 const ORCHESTRATOR = "main";
-const RUN_LOG = path.join(EVIDENCE_DIR, "scenario-8-run-log.txt");
+const RUN_LOG = path.join(EVIDENCE_DIR, "local-110-memory-pause-run-log.txt");
 const SAMPLE_FILE = path.join(SANDBOX_ROOT, `${NAME}-memory-sample.json`);
 const CEILING_MB = 8192;
 const RESUME_BELOW_MB = CEILING_MB - 1024;
@@ -33,7 +33,7 @@ const TMUX_MISSING =
     ? "tmux is not installed"
     : false;
 
-const note = makeNote("scenario-8");
+const note = makeNote("local-110-memory-pause");
 
 /**
  * Write the sample file the server reads every 15 s, through a rename so a read never sees half a file.
@@ -407,7 +407,7 @@ async function runScenario(held: Held): Promise<void> {
 }
 
 void test(
-  "scenario 8: swap pressure pauses the newest loop, growth under 256 MB holds, low swap resumes it, and a restart keeps the run",
+  "scenario-LOCAL-110-memory-pause: swap pressure pauses the newest loop, growth under 256 MB holds, low swap resumes it, and a restart keeps the run",
   { timeout: 9 * MINUTE, skip: TMUX_MISSING },
   async () => {
     fs.mkdirSync(SANDBOX_ROOT, { recursive: true });

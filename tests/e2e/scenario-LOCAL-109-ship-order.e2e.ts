@@ -28,7 +28,7 @@ const RELATED = ["SHO-3", "SHO-4"];
 const ORCHESTRATOR_CARD = "SHO-5";
 const GROUP_ID = "SHO-6";
 const CAP = 3;
-const RUN_LOG = path.join(EVIDENCE_DIR, "scenario-6b-run-log.txt");
+const RUN_LOG = path.join(EVIDENCE_DIR, "local-109-ship-order-run-log.txt");
 const WAKE_PREFIX = "Dispatch wake:";
 const DONE_MESSAGE = "DISPATCH_STATUS: DONE - built";
 const SHIP_BODY =
@@ -37,7 +37,7 @@ const PRD_REL = "sample-app/.planning/prds/export.md";
 const STATE_REL = "sample-app/.planning/export/state.md";
 const ENGINE_REL = ".claude/ralph-loop.local.md";
 
-const note = makeNote("scenario-6b");
+const note = makeNote("local-109-ship-order");
 
 interface Reply<T = Record<string, unknown>> {
   status: number;
@@ -666,10 +666,10 @@ async function runScenario(sb: Sandbox): Promise<void> {
 }
 
 void test(
-  "scenario 6 part B: a quick fix, a single feature and a group ship in plan order, and a release card gets the next version",
+  "scenario-LOCAL-109-ship-order: a quick fix, a single feature and a group ship in plan order, and a release card gets the next version",
   { timeout: 20 * MINUTE },
   async () => {
-    const sb = await startSandbox({ name: "s6b-ship-order" });
+    const sb = await startSandbox({ name: "local-109-ship-order" });
     try {
       await runScenario(sb);
     } finally {

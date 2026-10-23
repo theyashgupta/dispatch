@@ -34,7 +34,7 @@ const USAGE_TIME_SCALE = 20;
 const REJECTED_PLAN_MS = 600_000 / USAGE_TIME_SCALE;
 const DAY = 24 * 60 * 60 * 1000;
 
-const SANDBOX_NAME = "s14-login-decision";
+const SANDBOX_NAME = "local-159-account-login-decision-login-decision";
 const LOGIN_IDENTITY_FILE = path.join(
   SANDBOX_ROOT,
   SANDBOX_NAME,
@@ -46,7 +46,7 @@ const HOME_IDENTITY_FILE = path.join(
   "home-identity.json",
 );
 
-const note = makeNote("scenario-14");
+const note = makeNote("local-159-account-login-decision");
 
 interface Reply<T = Record<string, unknown>> {
   status: number;
@@ -612,7 +612,7 @@ async function runLoginDecision(
 }
 
 void test(
-  "scenario 14: a rejected account raises one login decision and the answered login clears it",
+  "scenario-LOCAL-159-account-login-decision: a rejected account raises one login decision and the answered login clears it",
   { timeout: 15 * MINUTE },
   async () => {
     const usage = await startUsageServer({});
@@ -635,7 +635,10 @@ void test(
       await finish(
         sb,
         usage,
-        path.join(EVIDENCE_DIR, "scenario-14-login-decision-run-log.txt"),
+        path.join(
+          EVIDENCE_DIR,
+          "local-159-account-login-decision-login-decision-run-log.txt",
+        ),
       );
     }
   },

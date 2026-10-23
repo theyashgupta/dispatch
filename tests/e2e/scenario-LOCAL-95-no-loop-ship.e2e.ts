@@ -23,12 +23,12 @@ import {
 
 const BOARD = "NOL";
 const GROUP_ID = "NOL-4";
-const RUN_LOG = path.join(EVIDENCE_DIR, "scenario-4-run-log.txt");
+const RUN_LOG = path.join(EVIDENCE_DIR, "local-95-no-loop-ship-run-log.txt");
 const COMMIT_SUBJECT = "feat: no loop group work";
 const MERGED_SUBJECT = "feat: no loop group (#1)";
 const DONE_MESSAGE = "DISPATCH_STATUS: DONE - built";
 
-const note = makeNote("scenario-4");
+const note = makeNote("local-95-no-loop-ship");
 
 /**
  * Post the Stop hook event that a real session sends when its last message holds a status marker.
@@ -276,10 +276,10 @@ async function runScenario(sb: Sandbox): Promise<void> {
 }
 
 void test(
-  "scenario 4: a group with no loop files ships through start_ship to the bare origin",
+  "scenario-LOCAL-95-no-loop-ship: a group with no loop files ships through start_ship to the bare origin",
   { timeout: 20 * MINUTE },
   async () => {
-    const sb = await startSandbox({ name: "s4-no-loop-ship" });
+    const sb = await startSandbox({ name: "local-95-no-loop-ship" });
     try {
       await runScenario(sb);
     } finally {

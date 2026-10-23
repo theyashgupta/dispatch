@@ -30,10 +30,13 @@ const RELATED = ["JDG-3", "JDG-4"];
 const ORCHESTRATOR_CARD = "JDG-5";
 const GROUP_ID = "JDG-6";
 const CAP = 2;
-const RUN_LOG = path.join(EVIDENCE_DIR, "scenario-6-run-log.txt");
+const RUN_LOG = path.join(
+  EVIDENCE_DIR,
+  "local-103-intake-judgment-run-log.txt",
+);
 const DONE_MESSAGE = "DISPATCH_STATUS: DONE - quick fix built";
 
-const note = makeNote("scenario-6");
+const note = makeNote("local-103-intake-judgment");
 
 /**
  * Post the Stop hook event that a real session sends when its last message holds a status marker.
@@ -342,10 +345,10 @@ async function runScenario(sb: Sandbox): Promise<void> {
 }
 
 void test(
-  "scenario 6: the orchestrator judges four tickets into three starts inside a cap of 2",
+  "scenario-LOCAL-103-intake-judgment: the orchestrator judges four tickets into three starts inside a cap of 2",
   { timeout: 20 * MINUTE },
   async () => {
-    const sb = await startSandbox({ name: "s6-intake-judgment" });
+    const sb = await startSandbox({ name: "local-103-intake-judgment" });
     try {
       await runScenario(sb);
     } finally {
@@ -361,7 +364,7 @@ void test(
   },
 );
 
-void test("scenario 6 code types no key into any pane", () => {
+void test("scenario-LOCAL-103-intake-judgment code types no key into any pane", () => {
   const typing = new RegExp(
     [
       ["send", "keys"].join("-?"),

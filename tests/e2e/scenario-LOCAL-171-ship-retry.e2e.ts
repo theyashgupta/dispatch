@@ -24,13 +24,13 @@ const BOARD = "RTY";
 const RETRY_CARD = "RTY-1";
 const SEEDED_CARD = "RTY-2";
 const ORCHESTRATOR_CARD = "RTY-3";
-const RUN_LOG = path.join(EVIDENCE_DIR, "scenario-16-run-log.txt");
+const RUN_LOG = path.join(EVIDENCE_DIR, "local-171-ship-retry-run-log.txt");
 const DONE_MESSAGE = "DISPATCH_STATUS: DONE - built";
 const SHIP_BODY =
   "What\nThe work of the card.\nWhy\nThe card is done.\nHow\nShipped by the test.";
 const FAILURE_LINE = "not ok 1 - the real failure";
 
-const note = makeNote("scenario-16");
+const note = makeNote("local-171-ship-retry");
 
 interface Reply<T = Record<string, unknown>> {
   status: number;
@@ -513,10 +513,10 @@ async function runScenario(sb: Sandbox): Promise<void> {
 }
 
 void test(
-  "scenario 16: a ship retry reports the failing step, skips a passed check and adopts the open PR",
+  "scenario-LOCAL-171-ship-retry: a ship retry reports the failing step, skips a passed check and adopts the open PR",
   { timeout: 20 * MINUTE },
   async () => {
-    const sb = await startSandbox({ name: "s16-ship-retry" });
+    const sb = await startSandbox({ name: "local-171-ship-retry" });
     try {
       note(`sandbox port ${sb.port}`);
       await runScenario(sb);
@@ -533,7 +533,7 @@ void test(
   },
 );
 
-void test("scenario 16 code types no key into any pane", () => {
+void test("scenario-LOCAL-171-ship-retry code types no key into any pane", () => {
   const typing = new RegExp(
     [
       ["send", "keys"].join("-?"),
