@@ -6820,3 +6820,5 @@ The settings sheet on the centre has two tabs:
   `shared/orchestrator-models.ts`, and the route refuses any other model with 400.
 - Orchestrators: the main and the extras, with the form to add an extra, edit its override and move
   groups.
+
+When the engine file of a single PRD loop names no PRD path, the reader finds the PRD by its slug in `.planning/prds/` at the session root or in a repo folder one level below it: the engine slug, or, when the engine names no slug, the card identifier in lowercase and then as written (LOCAL-200).
