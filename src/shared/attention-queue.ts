@@ -248,7 +248,7 @@ export function buildAttentionQueue(input: {
   cards: readonly Card[];
   decisions: readonly DecisionItem[];
   events?: readonly OrchestrationEvent[];
-  pushoverMissing?: { names: readonly string[]; since: string } | null;
+  pushoverMissing: { names: readonly string[]; since: string } | null;
   now: Date;
 }): AttentionItem[] {
   const { boardKey, now, events = [] } = input;
