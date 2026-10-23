@@ -16,9 +16,9 @@ import {
   type Sandbox,
 } from "./harness/sandbox.js";
 
-const SEED = "s2-seed";
-const OLD = "s2-old";
-const NEW = "s2-new";
+const SEED = "local-93-parity-seed";
+const OLD = "local-93-parity-old";
+const NEW = "local-93-parity-new";
 const CARD_COLUMNS: [string, string][] = [
   ["LOCAL-3", "needs_input"],
   ["LOCAL-4", "needs_input"],
@@ -116,7 +116,7 @@ function judgeRoute(
   return { attribution, verdict: pixelsOk && requestsOk ? "pass" : "FAIL" };
 }
 
-const note = makeNote("scenario-2");
+const note = makeNote("local-93-parity");
 
 /** Read the page routes of v4.2.0 as hash fragments from its generated route tree. */
 function oldRoutes(): string[] {
@@ -400,7 +400,7 @@ function writeReport(rows: RouteRow[], box: Box | null, now: number): void {
 }
 
 void test(
-  "scenario 2: a traditional board matches v4.2.0 except the attributed changes and the sidebar Boards section",
+  "scenario-LOCAL-93-parity: a traditional board matches v4.2.0 except the attributed changes and the sidebar Boards section",
   { timeout: 30 * MINUTE, skip: V420_SKIP },
   async () => {
     fs.mkdirSync(OUT, { recursive: true });
@@ -566,7 +566,7 @@ async function dotsPng(page: Page, dots: [number, number][]): Promise<Buffer> {
   return Buffer.from(url.split(",")[1], "base64");
 }
 
-void test("scenario 2: the comparison flags a changed pixel and a changed request outside the allowed list", async () => {
+void test("scenario-LOCAL-93-parity: the comparison flags a changed pixel and a changed request outside the allowed list", async () => {
   const browser = await chromium.launch({ headless: true });
   try {
     const page = await browser.newPage();

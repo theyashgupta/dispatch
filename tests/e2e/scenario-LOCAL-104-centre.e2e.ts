@@ -33,9 +33,9 @@ const QUICK_FIX = "CEN-1";
 const FEATURE = "CEN-2";
 const ORCHESTRATOR_CARD = "CEN-3";
 const COMMENT = "Start CEN-1 first, it unblocks the release.";
-const RUN_LOG = path.join(EVIDENCE_DIR, "scenario-7-run-log.txt");
+const RUN_LOG = path.join(EVIDENCE_DIR, "local-104-centre-run-log.txt");
 
-const note = makeNote("scenario-7");
+const note = makeNote("local-104-centre");
 
 interface Setup {
   replayLog: string;
@@ -333,10 +333,10 @@ async function runScenario(sb: Sandbox): Promise<void> {
 }
 
 void test(
-  "scenario 7: a plan in the conversation, a comment, an approval, then the branches start",
+  "scenario-LOCAL-104-centre: a plan in the conversation, a comment, an approval, then the branches start",
   { timeout: 20 * MINUTE },
   async () => {
-    const sb = await startSandbox({ name: "s7-centre" });
+    const sb = await startSandbox({ name: "local-104-centre" });
     try {
       await runScenario(sb);
     } finally {
@@ -352,7 +352,7 @@ void test(
   },
 );
 
-void test("scenario 7 code types no key into any pane", () => {
+void test("scenario-LOCAL-104-centre code types no key into any pane", () => {
   const typing = new RegExp(
     [
       ["send", "keys"].join("-?"),

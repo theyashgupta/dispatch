@@ -9,7 +9,7 @@ const NOTIFY_ON = "[notify] loop phase notifications are on";
 const FAKE_USER = "fake-user-168";
 const FAKE_TOKEN = "fake-token-168";
 
-const note = makeNote("scenario-19");
+const note = makeNote("local-168-pushover-attention");
 
 interface PushoverSnapshot {
   pushoverMissing?: { names: string[]; since: string };
@@ -19,11 +19,11 @@ const notifyLines = (log: string): string[] =>
   log.split("\n").filter((line) => line.includes("[notify]"));
 
 void test(
-  "scenario 19: empty Pushover values give one attention item and one start log line",
+  "scenario-LOCAL-168-pushover-attention: empty Pushover values give one attention item and one start log line",
   { timeout: 5 * MINUTE },
   async () => {
     const sb = await startSandbox({
-      name: "scenario-19-empty",
+      name: "local-168-pushover-attention-empty",
       env: { PUSHOVER_USER_KEY: "", PUSHOVER_APP_TOKEN: "" },
     });
     try {
@@ -58,11 +58,11 @@ void test(
 );
 
 void test(
-  "scenario 19: fake Pushover values give no item and no log line",
+  "scenario-LOCAL-168-pushover-attention: fake Pushover values give no item and no log line",
   { timeout: 5 * MINUTE },
   async () => {
     const sb = await startSandbox({
-      name: "scenario-19-filled",
+      name: "local-168-pushover-attention-filled",
       env: { PUSHOVER_USER_KEY: FAKE_USER, PUSHOVER_APP_TOKEN: FAKE_TOKEN },
     });
     try {

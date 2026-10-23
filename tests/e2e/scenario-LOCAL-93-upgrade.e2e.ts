@@ -21,8 +21,8 @@ import {
 } from "./harness/sandbox.js";
 
 const REPORT = path.join(EVIDENCE_DIR, "upgrade-report.md");
-const NAME = "s3-upgrade";
-const NEWER = "s3-newer";
+const NAME = "local-93-upgrade";
+const NEWER = "local-93-upgrade-newer";
 const COLUMN_MOVES: [string, string][] = [
   ["LOCAL-3", "needs_input"],
   ["LOCAL-4", "done"],
@@ -52,7 +52,7 @@ interface CardFacts {
 }
 
 const rows: Row[] = [];
-const note = makeNote("scenario-3");
+const note = makeNote("local-93-upgrade");
 
 /** Record one assertion with its expected and observed value, then fail the test when they differ. */
 function expectEqual(assertion: string, expected: unknown, observed: unknown) {
@@ -214,7 +214,7 @@ async function seedOldBuild(old: Sandbox): Promise<void> {
 const logOf = (sb: Sandbox): string => fs.readFileSync(sb.serverLog, "utf8");
 
 void test(
-  "scenario 3: a v4.2.0 data folder upgrades with every card and running session kept",
+  "scenario-LOCAL-93-upgrade: a v4.2.0 data folder upgrades with every card and running session kept",
   { timeout: 15 * MINUTE, skip: V420_SKIP },
   async () => {
     const sandboxes: Sandbox[] = [];

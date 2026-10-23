@@ -16,12 +16,12 @@ import {
   type Sandbox,
 } from "./harness/sandbox.js";
 
-const NAME = "scenario-14";
+const NAME = "local-163-missing-workspace";
 const BOARD = "WSM";
 const CARD = "WSM-1";
 const ARGV_FILE = path.join(SANDBOX_ROOT, NAME, "argv.jsonl");
 
-const note = makeNote("scenario-14");
+const note = makeNote("local-163-missing-workspace");
 
 const launches = (): number =>
   fs.existsSync(ARGV_FILE)
@@ -151,7 +151,7 @@ async function runScenario(sandboxes: Sandbox[]): Promise<void> {
 }
 
 void test(
-  "scenario 14: boot resume refuses a lost session whose workspace folder is missing",
+  "scenario-LOCAL-163-missing-workspace: boot resume refuses a lost session whose workspace folder is missing",
   { timeout: 10 * MINUTE },
   async () => {
     process.env.FAKE_CLAUDE_ARGV_FILE = ARGV_FILE;

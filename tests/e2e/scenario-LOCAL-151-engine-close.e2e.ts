@@ -8,8 +8,9 @@ import {
   makeSampleRepo,
   type SampleRepo,
 } from "./fixtures/scenario-1/repo.js";
+import { passLine, type LoopSpec } from "./fixtures/scenario-1/loop-files.js";
 import { readyRows } from "./fixtures/scenario-1/status-rows.js";
-import { cardOf, writeRunLog } from "./harness/board-reads.js";
+import { cardOf, readJsonl, writeRunLog } from "./harness/board-reads.js";
 import {
   EVIDENCE_DIR,
   MINUTE,
@@ -20,21 +21,23 @@ import {
   type Sandbox,
 } from "./harness/sandbox.js";
 
-const BOARD = "PCL";
-const CARD = "PCL-1";
-const ORCHESTRATOR_CARD = "PCL-2";
-const SLUG = "local-159";
+const BOARD = "ENC";
+const CARD = "ENC-1";
+const ORCHESTRATOR_CARD = "ENC-2";
+const SLUG = "export";
 const PROMISE = `<promise>RALPH COMPLETE ${SLUG}</promise>`;
-const DONE_LINE = "DISPATCH_STATUS: DONE - LOCAL-159 built";
-const CLAUDE_SESSION = "7d1b9c2e-4a3f-4b5c-8d6e-2f3a4b5c6d7e";
-const RUN_LOG = path.join(EVIDENCE_DIR, "scenario-17-run-log.txt");
-const QA_OUT = process.env.LOCAL172_QA_OUT ?? "";
+const DONE_LINE = `DISPATCH_STATUS: DONE - ${SLUG} built`;
+const CLAUDE_SESSION = "5c0a8b1e-3f2d-4e6a-9b7c-1d2e3f4a5b6c";
+const RUN_LOG = path.join(EVIDENCE_DIR, "local-151-engine-close-run-log.txt");
+const QA_OUT = process.env.LOCAL151_QA_OUT ?? "";
 const CLOSE_LIMIT_SECONDS = 60;
+const PRD_REL = "sample-app/.planning/prds/export.md";
+const STATE_REL = "sample-app/.planning/export/state.md";
 const ENGINE_REL = ".claude/ralph-loop.local.md";
 const SHIP_BODY =
   "What\nThe work of the card.\nWhy\nThe card is done.\nHow\nShipped by the test.";
 
-const note = makeNote("scenario-17");
+const note = makeNote("local-151-engine-close");
 
 interface Reply<T = Record<string, unknown>> {
   status: number;
@@ -44,7 +47,6 @@ interface Reply<T = Record<string, unknown>> {
 interface ProgressReply {
   cardId: string;
   loopProgress: LoopProgress | null;
-  lastMarker: string | null;
 }
 
 interface Evidence {
@@ -52,9 +54,8 @@ interface Evidence {
   doneAt: string;
   close: OrchestrationEventRow;
   seconds: number;
-  progress: ProgressReply;
   shipped: Reply;
-  flowState: string;
+  pr: number | null;
 }
 
 /**
@@ -121,16 +122,22 @@ async function orch<T = Record<string, unknown>>(
 const readProgress = async (
   sb: Sandbox,
   token: string,
-): Promise<ProgressReply> =>
-  (await orch<ProgressReply>(sb, token, "GET", `/cards/${CARD}/progress`)).body;
+): Promise<LoopProgress | null> =>
+  (await orch<ProgressReply>(sb, token, "GET", `/cards/${CARD}/progress`)).body
+    .loopProgress;
+
+const phasesPassed = (progress: LoopProgress | null | undefined): boolean => {
+  const phases = progress?.units[0]?.phases ?? [];
+  return phases.length === 2 && phases.every((p) => p.gate === "pass");
+};
 
 async function setup(sb: Sandbox): Promise<SampleRepo> {
   const sample = makeSampleRepo(sb.root, sb.home);
-  const sessions = path.join(sb.workspaces, "pcl-sessions");
+  const sessions = path.join(sb.workspaces, "enc-sessions");
   fs.mkdirSync(sessions, { recursive: true });
   const board = await sb.api("POST", "/api/boards", {
     key: BOARD,
-    name: "Promise close board",
+    name: "Engine close board",
     workspaceRoot: sessions,
     repositories: [
       { path: sample.repo, baseBranch: "main", checkCommand: "true" },
@@ -155,7 +162,7 @@ async function setup(sb: Sandbox): Promise<SampleRepo> {
     "POST",
     `/api/cards?board=${BOARD}`,
     {
-      title: "Build the LOCAL-159 feature",
+      title: "Add the export button",
       description: "One feature of one module.",
     },
   );
@@ -170,7 +177,7 @@ async function setup(sb: Sandbox): Promise<SampleRepo> {
   return sample;
 }
 
-/** Writes replay files whose loop pane shows no promise line, so only the transcript can trigger the close. */
+/** Write the replay files: the loop card shows an idle pane with no promise line, and the orchestrator card idles. */
 function writeScenarios(sb: Sandbox): string {
   const transcript = path.join(sb.logs, "orchestrator.jsonl");
   fs.writeFileSync(transcript, "");
@@ -227,6 +234,7 @@ async function startOrchestrator(
   return minted.body.token;
 }
 
+/** Start the single PRD + Ralph Loop card through the orchestrator route and return it once its session exists. */
 async function startCard(sb: Sandbox, token: string): Promise<Card> {
   const started = await orch(sb, token, "POST", `/cards/${CARD}/start`, {
     playbook: "PRD + Ralph Loop",
@@ -254,25 +262,52 @@ function commitWork(sb: Sandbox, sample: SampleRepo, card: Card): void {
   );
   fs.writeFileSync(path.join(worktree, "feature.txt"), "feature.txt\n");
   git(worktree, sb.home, ["add", "feature.txt"]);
-  git(worktree, sb.home, ["commit", "-q", "-m", "feat: local-159"]);
+  git(worktree, sb.home, ["commit", "-q", "-m", "feat: export"]);
 }
 
-function seedOpenEngine(card: Card, repo: string): void {
-  const file = path.join(card.workspacePath ?? "", ENGINE_REL);
-  fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.writeFileSync(
-    file,
+/** Seed a finished loop at the session root: the PRD, a gate=pass line per phase and an engine file that stays open. */
+function seedFinishedLoop(card: Card): void {
+  const root = card.workspacePath ?? "";
+  const spec: LoopSpec = {
+    slug: SLUG,
+    title: "Export",
+    ticket: CARD,
+    branch: CARD,
+    repoDir: "sample-app",
+    phases: ["Build export", "Add button"],
+    clock: () => new Date().toISOString(),
+  };
+  const write = (rel: string, text: string): void => {
+    fs.mkdirSync(path.dirname(path.join(root, rel)), { recursive: true });
+    fs.writeFileSync(path.join(root, rel), text);
+  };
+  write(
+    PRD_REL,
+    [
+      "# Export PRD",
+      "",
+      ...spec.phases.flatMap((name, i) => [
+        `### Phase ${i + 1}: ${name}`,
+        "- **Retry budget:** 2",
+        "",
+      ]),
+    ].join("\n"),
+  );
+  const at = new Date().toISOString();
+  write(STATE_REL, [1, 2].map((n) => passLine(spec, n, at)).join(""));
+  write(
+    ENGINE_REL,
     [
       "---",
       "active: true",
       "iteration: 1",
       `session_id: ${CLAUDE_SESSION}`,
-      "max_iterations: 45",
+      "max_iterations: 50",
       `completion_promise: "RALPH COMPLETE ${SLUG}"`,
-      `started_at: "${new Date().toISOString()}"`,
+      `started_at: "${at}"`,
       "---",
       "",
-      `Execute LOCAL-159 per the ralph-loop skill in the repo ${repo}. Unit A: PRD .planning/prds/local-159-unit-a.md, state .planning/local-159-unit-a/state.md. When and only when both units have gate=pass for every phase, output the phrase RALPH COMPLETE ${SLUG} wrapped in promise tags.`,
+      `Execute the PRD at ${PRD_REL} per the ralph-loop skill.`,
       "",
     ].join("\n"),
   );
@@ -280,9 +315,10 @@ function seedOpenEngine(card: Card, repo: string): void {
 
 const shipBody = (sample: SampleRepo) => ({
   repository: sample.repo,
-  branches: [{ name: CARD, title: `feat: ${SLUG} ${CARD}`, body: SHIP_BODY }],
+  branches: [{ name: CARD, title: `feat: export ${CARD}`, body: SHIP_BODY }],
 });
 
+/** Wait for the finished loop with its engine still open, and check that start_ship refuses with engine-not-closed. */
 async function assertRefusedWhileOpen(
   sb: Sandbox,
   sample: SampleRepo,
@@ -290,15 +326,18 @@ async function assertRefusedWhileOpen(
 ): Promise<Reply> {
   const open = await waitFor(
     async () => {
-      const progress = (await readProgress(sb, token)).loopProgress;
-      return progress?.engine?.active === true && !progress.engine.closed
+      const progress = await readProgress(sb, token);
+      return phasesPassed(progress) &&
+        progress?.completion === "complete" &&
+        progress.engine?.active === true &&
+        progress.engine.closed === false
         ? progress
         : null;
     },
     4 * MINUTE,
-    "the card progress to show the open engine",
+    "every phase passed, completion complete and the engine open",
   );
-  assert.equal(open.slug, SLUG);
+  assert.equal(open.engine?.closed, false);
   const refused = await orch<{ error: string }>(
     sb,
     token,
@@ -308,10 +347,11 @@ async function assertRefusedWhileOpen(
   );
   assert.equal(refused.status, 409);
   assert.equal(refused.body.error, "engine-not-closed");
-  note("start_ship refused with engine-not-closed before the promise");
+  note("start_ship refused with engine-not-closed before the DONE marker");
   return refused;
 }
 
+/** Write the transcript of the session with the promise and the DONE line as its last assistant message. */
 function writeTranscript(
   sb: Sandbox,
   card: Card,
@@ -320,12 +360,12 @@ function writeTranscript(
   const dir = path.join(sb.home, ".claude", "projects", dashed);
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${CLAUDE_SESSION}.jsonl`);
-  const message = `Both units are green.\n${PROMISE}\n${DONE_LINE}`;
+  const message = `All phases are green.\n${PROMISE}\n${DONE_LINE}`;
   const at = new Date().toISOString();
   const entries = [
     {
       type: "user",
-      message: { role: "user", content: "Execute LOCAL-159." },
+      message: { role: "user", content: "Execute the PRD." },
       timestamp: at,
     },
     {
@@ -353,20 +393,26 @@ const closeRows = (events: OrchestrationEventRow[]): OrchestrationEventRow[] =>
   );
 
 /**
- * Post the DONE Stop hook with a transcript and check that the supervisor closes the engine on the promise, with no restart, within 60 s.
+ * Post the DONE Stop hook with a transcript and check that the supervisor closes the engine, with no restart, within 60 s.
  *
- * @remarks The card holds no PRD and no state file, so no phase can read complete. Only the promise in the transcript tail can close the engine.
+ * @remarks The pane never shows the promise line, so only the transcript tail can tell the supervisor that the loop is complete.
  */
-async function assertPromiseCloses(
+async function assertSupervisorCloses(
   sb: Sandbox,
   token: string,
   card: Card,
-): Promise<{
-  doneAt: string;
-  close: OrchestrationEventRow;
-  seconds: number;
-  progress: ProgressReply;
-}> {
+): Promise<{ doneAt: string; close: OrchestrationEventRow; seconds: number }> {
+  const pane = sb.tmux([
+    "capture-pane",
+    "-p",
+    "-t",
+    `=${card.tmuxSession ?? ""}:`,
+  ]);
+  assert.equal(
+    pane.includes("RALPH COMPLETE"),
+    false,
+    "the pane has no promise",
+  );
   const { file, message } = writeTranscript(sb, card);
   const doneAt = new Date().toISOString();
   await sendStopHook(sb, card.tmuxSession ?? "", message, file);
@@ -379,36 +425,25 @@ async function assertPromiseCloses(
     { pollMs: 500 },
   );
   const seconds = (Date.parse(close.ts) - Date.parse(doneAt)) / 1000;
-  note(`close_loop row ${close.id} came ${seconds} s after the Stop hook`);
+  note(`close_loop row ${close.id} came ${seconds} s after the DONE marker`);
   assert.equal(close.data.result, "closed");
-  assert.equal(close.data.reason, "promise");
   assert.ok(seconds <= CLOSE_LIMIT_SECONDS, `${seconds} s is over the limit`);
 
   const progress = await waitFor(
     async () => {
       const read = await readProgress(sb, token);
-      return read.loopProgress?.engine?.closed === true &&
-        read.loopProgress.completion === "complete"
-        ? read
-        : null;
+      return read?.engine?.closed === true ? read : null;
     },
     30_000,
-    "the card progress to show the closed engine and completion complete",
+    "the card progress to show the closed engine",
   );
-  const loop = progress.loopProgress;
-  assert.equal(loop?.engine?.closedReason, "promise");
-  assert.equal(loop?.summary.unitsDone, 1);
-  assert.equal(loop?.summary.unitsTotal, 1);
   assert.ok(
-    progress.lastMarker?.startsWith("DONE "),
-    `lastMarker is ${String(progress.lastMarker)}`,
+    Date.parse(progress.readAt) >= Date.parse(doneAt),
+    `readAt ${progress.readAt} is before the DONE marker ${doneAt}`,
   );
-
   const root = card.workspacePath ?? "";
   assert.equal(fs.existsSync(path.join(root, ENGINE_REL)), false);
-  const done = path.join(root, `${ENGINE_REL}.done`);
-  assert.equal(fs.existsSync(done), true);
-  assert.match(fs.readFileSync(done, "utf8"), /^closed_reason: promise$/m);
+  assert.equal(fs.existsSync(path.join(root, `${ENGINE_REL}.done`)), true);
 
   const events = await sb.orchestrationEvents(BOARD);
   assert.equal(closeRows(events).length, 1, "exactly one close_loop row");
@@ -421,20 +456,21 @@ async function assertPromiseCloses(
         (e.data.action === "continue" && e.data.duty === "restart")),
   );
   assert.deepEqual(restarts, [], "the supervisor did not restart the loop");
-  return { doneAt, close, seconds, progress };
+  return { doneAt, close, seconds };
 }
 
-async function startShip(
+/** Start the ship of the closed card and wait for the flow, the merged PR and the file on the bare origin main. */
+async function shipAndWait(
   sb: Sandbox,
   sample: SampleRepo,
   token: string,
-): Promise<{ shipped: Reply; flowState: string }> {
+): Promise<{ shipped: Reply; pr: number | null }> {
   await waitFor(
     async () => (await cardOf(sb, BOARD, CARD))?.column === "agent_done",
     MINUTE,
     `${CARD} in agent_done`,
   );
-  const shipped = await orch<{ error?: string }>(
+  const shipped = await orch(
     sb,
     token,
     "POST",
@@ -442,7 +478,6 @@ async function startShip(
     shipBody(sample),
   );
   assert.equal(shipped.status, 202, JSON.stringify(shipped.body));
-  note(`start_ship accepted with ${shipped.status}`);
   const flow = await waitFor(
     async () => {
       const read = await orch<{ flow: ShipFlow }>(
@@ -451,35 +486,49 @@ async function startShip(
         "GET",
         `/groups/${CARD}/ship`,
       );
-      return read.body.flow !== undefined && read.body.flow.state !== "running"
-        ? read.body.flow
-        : null;
+      if (read.body.flow?.state === "stopped") {
+        throw new Error(`the ship of ${CARD} stopped`);
+      }
+      return read.body.flow?.state === "done" ? read.body.flow : null;
     },
-    5 * MINUTE,
-    `the ship flow of ${CARD} to leave the running state`,
+    10 * MINUTE,
+    `the ship of ${CARD} to be done`,
     { pollMs: 1000 },
   );
-  return { shipped, flowState: flow.state };
+  await waitFor(
+    async () => (await cardOf(sb, BOARD, CARD))?.column === "done",
+    MINUTE,
+    `${CARD} in Done`,
+  );
+  const calls = readJsonl(sb.gh.log).map((argv) =>
+    Array.isArray(argv) ? argv.map(String) : [],
+  );
+  const verbs = (verb: string) =>
+    calls.filter((c) => c[0] === "pr" && c[1] === verb);
+  assert.equal(verbs("create").length, 1);
+  assert.equal(verbs("merge").length, 1);
+  assert.equal(
+    git(sample.bare, sb.home, ["show", "main:feature.txt"]),
+    "feature.txt",
+    "the bare origin main holds feature.txt",
+  );
+  note(`${CARD} shipped`);
+  return { shipped, pr: flow.branches[0]?.pr ?? null };
 }
 
 function writeQaFile(sb: Sandbox, e: Evidence): void {
   if (QA_OUT === "") return;
   const text = [
-    "# LOCAL-172 sandbox run: engine close on the promise",
+    "# LOCAL-151 sandbox run: engine close after DONE",
     "",
     `- Sandbox port: ${sb.port}`,
-    `- Stop hook time: ${e.doneAt}`,
+    `- DONE marker time (Stop hook): ${e.doneAt}`,
     `- close_loop event id: ${e.close.id}`,
     `- close_loop event ts: ${e.close.ts}`,
-    `- close_loop event data: ${JSON.stringify(e.close.data)}`,
-    `- Seconds from the Stop hook to the close: ${e.seconds}`,
-    `- start_ship reply before the promise: ${e.refused.status} ${JSON.stringify(e.refused.body)}`,
-    `- Engine after the close: ${JSON.stringify(e.progress.loopProgress?.engine)}`,
-    `- Completion after the close: ${e.progress.loopProgress?.completion}`,
-    `- Summary after the close: ${JSON.stringify(e.progress.loopProgress?.summary)}`,
-    `- lastMarker after the close: ${e.progress.lastMarker}`,
+    `- Seconds from the DONE marker to the close: ${e.seconds}`,
+    `- start_ship reply before the DONE marker: ${e.refused.status} ${JSON.stringify(e.refused.body)}`,
     `- start_ship reply after the close: ${e.shipped.status} ${JSON.stringify(e.shipped.body)}`,
-    `- Ship flow state when the test ended: ${e.flowState}`,
+    `- Merged PR number: ${e.pr ?? "unknown"}`,
     "",
   ].join("\n");
   fs.mkdirSync(path.dirname(QA_OUT), { recursive: true });
@@ -487,7 +536,7 @@ function writeQaFile(sb: Sandbox, e: Evidence): void {
 }
 
 /**
- * Run a LOCAL-159 shaped PRD loop card from its open engine to an accepted start_ship with the engine closed by the supervisor alone.
+ * Run a finished PRD loop card from its start to the merged ship with the engine file closed by the supervisor alone.
  *
  * @remarks The only inputs after the orchestrator start are orchestrator routes called with its token, the Stop hook of the session, a
  * transcript file, and git and file writes in the session folder. The test never renames the engine file.
@@ -498,18 +547,18 @@ async function runScenario(sb: Sandbox): Promise<void> {
   const token = await startOrchestrator(sb, transcript);
   const card = await startCard(sb, token);
   commitWork(sb, sample, card);
-  seedOpenEngine(card, sample.repo);
+  seedFinishedLoop(card);
   const refused = await assertRefusedWhileOpen(sb, sample, token);
-  const closed = await assertPromiseCloses(sb, token, card);
-  const { shipped, flowState } = await startShip(sb, sample, token);
-  writeQaFile(sb, { refused, shipped, flowState, ...closed });
+  const closed = await assertSupervisorCloses(sb, token, card);
+  const { shipped, pr } = await shipAndWait(sb, sample, token);
+  writeQaFile(sb, { refused, shipped, pr, ...closed });
 }
 
 void test(
-  "scenario 17: the supervisor closes the engine of a single PRD loop with no phases from the promise in the transcript tail, and start_ship is then accepted",
+  "scenario-LOCAL-151-engine-close: the supervisor closes the engine of a finished PRD loop from the transcript tail, and start_ship then merges it",
   { timeout: 20 * MINUTE },
   async () => {
-    const sb = await startSandbox({ name: "scenario-17" });
+    const sb = await startSandbox({ name: "local-151-engine-close" });
     try {
       await runScenario(sb);
     } finally {
@@ -525,7 +574,7 @@ void test(
   },
 );
 
-void test("scenario 17 code types no key into any pane", () => {
+void test("scenario-LOCAL-151-engine-close code types no key into any pane", () => {
   const typing = new RegExp(
     [
       ["send", "keys"].join("-?"),
