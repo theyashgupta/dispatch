@@ -28,6 +28,7 @@ await store.createBoard({
 const resumed: Card[] = [];
 sessionTools.resume = (card) => {
   resumed.push(card);
+  return Promise.resolve();
 };
 
 const app = express();

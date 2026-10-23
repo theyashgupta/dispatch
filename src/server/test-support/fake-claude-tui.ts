@@ -112,6 +112,7 @@ let shown = [];
 let dialog = null;
 let lastWarm = null;
 let droppedEnters = 0;
+let droppedClears = 0;
 let transcriptFile = null;
 let clearedAt = 0;
 let statusOverride = null;
@@ -179,7 +180,15 @@ function render() {
   } else {
     lines.push("");
   }
-  lines.push((scenario.prompt ?? "❯ ") + input, "", ...status);
+  lines.push((scenario.prompt ?? "❯ ") + input);
+  if (scenario.slashMenu && input.startsWith("/") && !dialog) {
+    lines.push(
+      "─".repeat(40),
+      "  ❯ /clear      Start a new session with empty context",
+      "    /compact    Clear conversation history but keep a summary",
+    );
+  }
+  lines.push("", ...status);
   process.stdout.write("\x1b[2J\x1b[H" + lines.join("\n"));
 }
 
@@ -203,6 +212,22 @@ function clearConversation() {
     transcriptFile =
       scenario.transcriptDir + "/" + Date.now().toString(36) + "-fresh.jsonl";
     clearedAt = 1;
+    const at = new Date().toISOString();
+    const entry = (content) =>
+      JSON.stringify({
+        type: "user",
+        message: { role: "user", content },
+        timestamp: at,
+      }) + "\n";
+    fs.appendFileSync(
+      transcriptFile,
+      entry(
+        "<local-command-caveat>Caveat: The command below was run directly in Claude Code.</local-command-caveat>",
+      ) +
+        entry(
+          "<command-name>/clear</command-name>\n            <command-message>clear</command-message>\n            <command-args></command-args>",
+        ),
+    );
   }
 }
 
@@ -221,6 +246,11 @@ function submit() {
   const text = input;
   if (text === "") return;
   notifyWaiters(text);
+  if (text === "/clear" && droppedClears < (scenario.dropClears ?? 0)) {
+    droppedClears++;
+    input = "";
+    return;
+  }
   if (text === "/clear") {
     wasCleared = true;
     return clearConversation();
