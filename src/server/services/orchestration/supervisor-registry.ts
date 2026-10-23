@@ -28,7 +28,7 @@ import {
 } from "../domain/supervisor-plan.js";
 import { recordGroupState } from "./group-state-events.js";
 import { driveWake, wakeInFlight } from "./orchestrator-wake.js";
-import { runActions } from "./supervisor-actions.js";
+import { runActions, runPlanned } from "./supervisor-actions.js";
 import {
   checkHandoffCancel,
   checkHandoffThreshold,
@@ -237,9 +237,9 @@ async function act(
     now,
     memory: plan,
   });
-  if (planned.actions.length > 0)
-    await runActions(card, session, planned.actions, change.evidence);
-  return planned.memory;
+  return planned.actions.length > 0
+    ? runPlanned(card, session, planned, plan, change.evidence)
+    : planned.memory;
 }
 
 /**
