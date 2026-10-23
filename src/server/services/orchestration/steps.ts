@@ -54,6 +54,7 @@ import {
 import { recordNewestConversation } from "./resume-target.js";
 import { newHookTokenValue, registerHookToken } from "./hook-tokens.js";
 import { hookSettingsPath } from "../infra/paths.js";
+import { writeLoopSettings } from "../infra/hook-settings.js";
 import { githubRepoAt } from "./github-repos.js";
 import {
   isGuardedLaunch,
@@ -598,6 +599,7 @@ type LaunchHooks = { port: number; token: string; cardId: string } | null;
 export async function launchClaude(input: LaunchClaudeInput): Promise<boolean> {
   const { cardId, sessionId, tmuxSession, cwd, leadingArgs, account } = input;
   if (account.external !== true) await preSeedTrust(cwd, account.configDir);
+  if (account.external !== true) await writeLoopSettings(account.configDir);
   const created = !(await hasSession(`=${tmuxSession}`));
   const hooks = created
     ? await mintHooks(cardId, sessionId)
