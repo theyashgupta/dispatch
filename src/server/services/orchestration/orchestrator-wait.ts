@@ -31,11 +31,16 @@ const SLEPT_MS = 30_000;
  * @remarks A `tool_call` row never matches unless `kinds` names it, else every orchestrator call,
  * the wait call's own record included, would end every wait. An `intake_submitted` row names its
  * target orchestrator and matches only that one when the filter sets `orchestratorId`. A
- * `machine_wake` row ends every wait, so the orchestrator reads the board again after a sleep.
+ * `machine_wake` row ends any wait it arrives during (`live`), so a repeated old `since` never
+ * loops on it.
  */
-function matches(event: OrchestrationEvent, filter: WaitFilter): boolean {
+function matches(
+  event: OrchestrationEvent,
+  filter: WaitFilter,
+  live = false,
+): boolean {
   if (event.id <= filter.since) return false;
-  if (event.kind === "machine_wake") return true;
+  if (live && event.kind === "machine_wake") return true;
   if (filter.kinds) {
     if (!filter.kinds.includes(event.kind)) return false;
   } else if (event.kind === "tool_call") {
@@ -90,7 +95,7 @@ export function waitForEvent(
     const onEvent = (event: OrchestrationEvent): void => {
       if (event.boardKey !== board) return;
       cursor = Math.max(cursor, event.id);
-      if (matches(event, filter)) finish({ event });
+      if (matches(event, filter, true)) finish({ event });
     };
     const onAbort = (): void => finish(null);
     const tick = (): void => {

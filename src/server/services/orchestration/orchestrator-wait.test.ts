@@ -151,11 +151,10 @@ void test("a match past the first 200 rows is still found", async () => {
 
 void test("an abort answers null and leaves no listener or timer", async () => {
   const base = listeners();
-  const since = lastId(SBX);
   const gone = new AbortController();
   const wait = waitForEvent(
     SBX,
-    { since, kinds: ["decision_answered"] },
+    { since: 0, kinds: ["decision_answered"] },
     60_000,
     gone.signal,
   );
@@ -167,7 +166,7 @@ void test("an abort answers null and leaves no listener or timer", async () => {
   assert.equal(
     await waitForEvent(
       SBX,
-      { since, kinds: ["decision_answered"] },
+      { since: 0, kinds: ["decision_answered"] },
       60_000,
       pre,
     ),
@@ -178,15 +177,14 @@ void test("an abort answers null and leaves no listener or timer", async () => {
 
 void test("a wait on group_state returns that event, and a wait on other kinds does not end on it", async () => {
   const base = listeners();
-  const since = lastId(SBX);
   const other = waitForEvent(
     SBX,
-    { since, kinds: ["pr_state"], cardIds: ["g-wait"] },
+    { since: 0, kinds: ["pr_state"], cardIds: ["g-wait"] },
     300,
   );
   const wait = waitForEvent(
     SBX,
-    { since, kinds: ["group_state"], cardIds: ["g-wait"] },
+    { since: 0, kinds: ["group_state"], cardIds: ["g-wait"] },
     10_000,
   );
   const event = append(SBX, "group_state", "g-wait");
@@ -212,16 +210,17 @@ void test("wait_for_event returns on a machine_wake event even when the caller d
   assert.equal(listeners(), base);
 });
 
-void test("a machine_wake row already after since answers at once", async () => {
-  const since = lastId(WAK);
-  const event = append(WAK, "machine_wake", null, { sleptSeconds: 600 });
+void test("a machine_wake row stored before the wait starts does not end a wait for other kinds", async () => {
   const base = listeners();
+  const since = lastId(WAK);
+  append(WAK, "machine_wake", null, { sleptSeconds: 600 });
   const result = await waitForEvent(
     WAK,
     { since, kinds: ["pr_state"], cardIds: ["c1"] },
-    10_000,
+    300,
   );
-  assert.deepEqual(result, { event });
+  assert.ok(result !== null && "timedOut" in result);
+  assert.equal("machineWake" in result, false);
   assert.equal(listeners(), base);
 });
 
