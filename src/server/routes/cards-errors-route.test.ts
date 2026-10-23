@@ -647,7 +647,7 @@ test("POST /cards/:id/resume answers each guard in order", async (t) => {
   }
 });
 
-test("group start and resume answer 409 memory-pressure under pressure, a card start passes the gate to its checks, and nothing changes", async (t) => {
+test("group start answers 409 memory-pressure under pressure, while a card start and a resume pass the gate, and nothing changes", async (t) => {
   const id = await local("memory start");
   const a = await local("memory a");
   const b = await local("memory b");
@@ -677,7 +677,16 @@ test("group start and resume answer 409 memory-pressure under pressure, a card s
         409,
         refusal,
       );
-      await expectReply(call("POST", `/cards/${lost}/resume`), 409, refusal);
+      await expectReply(
+        call("POST", `/cards/${lost}/resume`),
+        202,
+        '{"resuming":true}',
+      );
+      await waitFor(
+        () => Promise.resolve(!store.isStarting(lost)),
+        5000,
+        "the background resume to refuse the missing workspace",
+      );
     }
   } finally {
     recordMemory(2048, 1000);
