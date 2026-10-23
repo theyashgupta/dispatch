@@ -6158,7 +6158,7 @@ env -u NODE_ENV -u CLAUDE_CONFIG_DIR node --import tsx --test tests/e2e/scenario
 
 Run `node scripts/scenario-names.mjs` after you add or rename a scenario file, because the script writes this list from the files.
 
-<!-- scenario-list:start -->
+[//]: # "scenario-list:start"
 
 - tests/e2e/scenario-LOCAL-93-orchestrated.e2e.ts (LOCAL-93)
 - tests/e2e/scenario-LOCAL-93-parity.e2e.ts (LOCAL-93)
@@ -6184,7 +6184,7 @@ Run `node scripts/scenario-names.mjs` after you add or rename a scenario file, b
 - tests/e2e/scenario-LOCAL-171-ship-retry.e2e.ts (LOCAL-171)
 - tests/e2e/scenario-LOCAL-172-promise-close.e2e.ts (LOCAL-172)
 
-<!-- scenario-list:end -->
+[//]: # "scenario-list:end"
 
 The scenario in tests/e2e/scenario-LOCAL-95-no-loop-ship.e2e.ts proves that a group with no loop files ships through `start_ship` to the bare origin of its sandbox, with the fake `claude` as orchestrator and as group session and with the fake `gh`.
 

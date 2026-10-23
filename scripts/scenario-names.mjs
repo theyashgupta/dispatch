@@ -25,8 +25,8 @@ const REFERENCE_PATHSPEC = [
   ".",
   ":(exclude)scripts/scenario-names.test.mjs",
 ];
-const LIST_START = "<!-- scenario-list:start -->";
-const LIST_END = "<!-- scenario-list:end -->";
+const LIST_START = '[//]: # "scenario-list:start"';
+const LIST_END = '[//]: # "scenario-list:end"';
 const DOC_PATH = "docs/ARCHITECTURE.md";
 const MARKERS_MISSING = `${DOC_PATH}: scenario list markers are missing`;
 

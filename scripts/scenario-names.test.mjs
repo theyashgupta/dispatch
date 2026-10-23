@@ -35,7 +35,7 @@ const gitEnv = {
   GIT_CONFIG_NOSYSTEM: "1",
 };
 const EMPTY_BLOCK =
-  "<!-- scenario-list:start -->\n\n<!-- scenario-list:end -->";
+  '[//]: # "scenario-list:start"\n\n[//]: # "scenario-list:end"';
 const ALPHA = `const note = makeNote("scenario-3");
 const sb = startSandbox({ name: "s3-alpha" });
 import x from "./fixtures/scenario-3/x.js";
@@ -261,22 +261,25 @@ test("renderList sorts by prefix, ticket number and slug", () => {
 test("replaceList fills an empty block", () => {
   assert.equal(
     replaceList(`a\n\n${EMPTY_BLOCK}\n\nb\n`, "- x"),
-    "a\n\n<!-- scenario-list:start -->\n\n- x\n\n<!-- scenario-list:end -->\n\nb\n",
+    'a\n\n[//]: # "scenario-list:start"\n\n- x\n\n[//]: # "scenario-list:end"\n\nb\n',
   );
 });
 
 test("replaceList replaces an old block", () => {
   const old =
-    "a\n<!-- scenario-list:start -->\n\n- old\n- older\n\n<!-- scenario-list:end -->\nb\n";
+    'a\n[//]: # "scenario-list:start"\n\n- old\n- older\n\n[//]: # "scenario-list:end"\nb\n';
   assert.equal(
     replaceList(old, "- new"),
-    "a\n<!-- scenario-list:start -->\n\n- new\n\n<!-- scenario-list:end -->\nb\n",
+    'a\n[//]: # "scenario-list:start"\n\n- new\n\n[//]: # "scenario-list:end"\nb\n',
   );
 });
 
 test("replaceList returns undefined without both markers", () => {
   assert.equal(replaceList("no markers\n", "- x"), undefined);
-  assert.equal(replaceList("<!-- scenario-list:start -->\n", "- x"), undefined);
+  assert.equal(
+    replaceList('[//]: # "scenario-list:start"\n', "- x"),
+    undefined,
+  );
 });
 
 test("rewriteReferences rewrites markdown lead-in and path", () => {
@@ -354,7 +357,7 @@ test("CLI renames the file, labels and references", () => {
   );
   assert.equal(
     readFileSync(join(dir, "docs/ARCHITECTURE.md"), "utf8"),
-    "The scenario in tests/e2e/scenario-LOCAL-7-alpha.e2e.ts proves x.\n\n<!-- scenario-list:start -->\n\n- tests/e2e/scenario-LOCAL-7-alpha.e2e.ts (LOCAL-7)\n\n<!-- scenario-list:end -->\n",
+    'The scenario in tests/e2e/scenario-LOCAL-7-alpha.e2e.ts proves x.\n\n[//]: # "scenario-list:start"\n\n- tests/e2e/scenario-LOCAL-7-alpha.e2e.ts (LOCAL-7)\n\n[//]: # "scenario-list:end"\n',
   );
   assert.match(git(dir, "status", "--porcelain"), /^R/m);
 });
@@ -405,7 +408,7 @@ test("CLI writes the doc list and --check passes", () => {
   assert.equal(runCli(dir).status, 0);
   assert.match(
     readFileSync(join(dir, "docs/ARCHITECTURE.md"), "utf8"),
-    /<!-- scenario-list:start -->\n\n- tests\/e2e\/scenario-LOCAL-7-alpha\.e2e\.ts \(LOCAL-7\)\n\n<!-- scenario-list:end -->/,
+    /\[\/\/\]: # "scenario-list:start"\n\n- tests\/e2e\/scenario-LOCAL-7-alpha\.e2e\.ts \(LOCAL-7\)\n\n\[\/\/\]: # "scenario-list:end"/,
   );
   const check = runCli(dir, "--check");
   assert.equal(check.status, 0, check.stderr);
