@@ -173,6 +173,7 @@ export function isolateEnv(): IsolatedEnv {
     FAKE_KEYCHAIN_DIR: process.env.FAKE_KEYCHAIN_DIR,
     DISPATCH_GITHUB_API_URL: process.env.DISPATCH_GITHUB_API_URL,
     DISPATCH_SLACK_API_URL: process.env.DISPATCH_SLACK_API_URL,
+    CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
   };
   process.env.FAKE_KEYCHAIN_DIR = keychainDir;
   process.env.HOME = home;
@@ -180,6 +181,7 @@ export function isolateEnv(): IsolatedEnv {
   process.env.PATH = `${binDir}:${process.env.PATH ?? ""}`;
   delete process.env.DISPATCH_GITHUB_API_URL;
   delete process.env.DISPATCH_SLACK_API_URL;
+  delete process.env.CLAUDE_CONFIG_DIR;
   const cleanup = (): void => {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key];
