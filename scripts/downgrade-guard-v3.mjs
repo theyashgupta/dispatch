@@ -273,6 +273,7 @@ function assertBuilt() {
     throw new Error(
       `refusing to run — \`npm run ${BUILD_SERVER_SCRIPT}\` failed, so dist/ does not reflect ` +
         `src/ and any verdict would describe code you are not running:\n${detail || err.message}`,
+      { cause: err },
     );
   }
   if (!existsSync(DIST_ENTRY)) {
@@ -381,6 +382,7 @@ function buildOldRelease() {
     throw new Error(
       `could not materialize ${OLD_RELEASE_TAG} — leg 1 needs the published release to downgrade ` +
         `to and will not substitute a stand-in for it: ${err.message}`,
+      { cause: err },
     );
   } finally {
     rmSync(tarPath, { force: true });
@@ -402,6 +404,7 @@ function buildOldRelease() {
       .trim();
     throw new Error(
       `could not build ${OLD_RELEASE_TAG} (npm ci may need network on a cold cache):\n${detail || err.message}`,
+      { cause: err },
     );
   }
   if (!existsSync(entry)) {
