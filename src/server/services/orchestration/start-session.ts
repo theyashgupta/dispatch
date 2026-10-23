@@ -269,12 +269,14 @@ export async function startSession(
     const done: SagaStep[] = [];
     let currentStep: SagaStep | undefined;
     try {
-      const memory = await waitForMemory(
-        card.boardKey ?? DEFAULT_BOARD_KEY,
-        () => store.setProvisioning(cardId, "Waiting for memory…"),
-      );
-      if (!memory.ok)
-        throw new StartStepError(MEMORY_STEP, memory.reason, "config");
+      if (!isHiddenCard(card)) {
+        const memory = await waitForMemory(
+          card.boardKey ?? DEFAULT_BOARD_KEY,
+          () => store.setProvisioning(cardId, "Waiting for memory…"),
+        );
+        if (!memory.ok)
+          throw new StartStepError(MEMORY_STEP, memory.reason, "config");
+      }
       for (const step of steps) {
         currentStep = step;
         await store.setProvisioning(cardId, step.statusText);

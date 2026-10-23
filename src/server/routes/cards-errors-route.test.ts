@@ -717,9 +717,13 @@ test("card start and group start under the memory thresholds pass the gate and r
   );
 });
 
-test("card start does not refuse for memory under any board policy", async () => {
+test("the group start gate reads the board's own memory policy and the card start never refuses for memory", async () => {
   const id = await local("memory policy");
+  const a = await local("memory policy a");
+  const b = await local("memory policy b");
   const policy = store.getBoard(DEFAULT_BOARD_KEY)!.policy;
+  const startGroup = (): Promise<Reply> =>
+    call("POST", "/cards/group", { title: "policy", memberIds: [a, b] });
   try {
     await store.setBoardPolicy(DEFAULT_BOARD_KEY, {
       ...policy,
@@ -728,9 +732,9 @@ test("card start does not refuse for memory under any board policy", async () =>
     });
     recordMemory(10, 60000);
     await expectReply(
-      call("POST", `/cards/${id}/start`, {}),
+      startGroup(),
       400,
-      '{"error":"No workspace selected for this ticket","variant":"config"}',
+      '{"error":"No workspace selected for this group","variant":"config"}',
     );
     await store.setBoardPolicy(DEFAULT_BOARD_KEY, {
       ...policy,
@@ -738,6 +742,14 @@ test("card start does not refuse for memory under any board policy", async () =>
       swapCeilingMb: 8192,
     });
     recordMemory(2048, 1000);
+    await expectReply(
+      startGroup(),
+      409,
+      JSON.stringify({
+        error: "memory-pressure",
+        reason: "free memory 2048 MB is below the 65536 MB floor",
+      }),
+    );
     await expectReply(
       call("POST", `/cards/${id}/start`, {}),
       400,

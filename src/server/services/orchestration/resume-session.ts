@@ -171,13 +171,17 @@ export async function resumeSession(cardId: string): Promise<void> {
       await refuseMissingWorkspace(cardId, sessionId, card.workspacePath);
       return;
     }
-    const memory = await waitForMemory(card.boardKey ?? DEFAULT_BOARD_KEY, () =>
-      store.setStatusReason(cardId, "Waiting for memory…"),
+    let waited = false;
+    const memory = await waitForMemory(
+      card.boardKey ?? DEFAULT_BOARD_KEY,
+      () => {
+        waited = true;
+        return store.setStatusReason(cardId, "Waiting for memory…");
+      },
     );
-    if (!memory.ok) {
-      await store.setStatusReason(cardId, null);
+    if (waited) await store.setStatusReason(cardId, null);
+    if (!memory.ok)
       throw new StartStepError(MEMORY_STEP, memory.reason, "config");
-    }
     const recorded = card.sessions?.find((s) => s.id === sessionId);
     const account = await resolveLaunchAccount(
       recorded?.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID,
