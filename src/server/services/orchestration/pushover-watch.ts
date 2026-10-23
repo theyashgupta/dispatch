@@ -29,8 +29,7 @@ export async function checkPushover(
  * later check updates the store and stays silent.
  */
 export async function startPushoverWatch(
-  read: () => Promise<Record<PushoverName, EnvPresence>> = () =>
-    envVaultPresence(PUSHOVER_NAMES),
+  read?: () => Promise<Record<PushoverName, EnvPresence>>,
 ): Promise<void> {
   const line = pushoverStartLine(await checkPushover(read));
   if (line !== null) console.warn(line);
