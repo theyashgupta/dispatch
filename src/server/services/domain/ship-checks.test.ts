@@ -304,6 +304,32 @@ void test("a hunk under a header with no parsed file fails closed, and a deleted
   assert.deepEqual(proseViolations(deleted), []);
 });
 
+void test("the documented generated block marker passes, and an HTML comment marker, prose double hyphen and em dash fail", () => {
+  const file = "docs/ARCHITECTURE.md";
+  assert.deepEqual(
+    kinds(
+      diffOf(file, [
+        '+[//]: # "scenario-list:start"',
+        "+",
+        "+- `LOCAL-185-name`",
+        "+",
+        '+[//]: # "scenario-list:end"',
+      ]),
+    ),
+    [],
+  );
+  assert.deepEqual(
+    kinds(diffOf(file, [`+<!${DH} scenario-list:start ${DH}>`])),
+    [`${file}:double-hyphen`],
+  );
+  assert.deepEqual(kinds(diffOf(file, [`+one ${DH} two`])), [
+    `${file}:double-hyphen`,
+  ]);
+  assert.deepEqual(kinds(diffOf(file, [`+one ${DASH} two`])), [
+    `${file}:em-dash`,
+  ]);
+});
+
 void test("repoOfRemote names a github.com repository and gives null for any other host or a local path", () => {
   const table: [string, string | null][] = [
     ["git@github.com:acme/app.git", "acme/app"],

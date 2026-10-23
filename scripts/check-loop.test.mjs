@@ -118,6 +118,7 @@ test("package scripts route checks through the slot gate", () => {
     assert.ok(!value.includes("check-lock"), `${name} uses check-lock`);
   }
   assert.ok(scripts["lint:typed"].includes("DISPATCH_LINT_TYPED=1"));
+  assert.ok(scripts["lint:typed"].includes("--max-old-space-size=4096"));
   assert.ok(!scripts.lint.includes("DISPATCH_LINT_TYPED"));
   assert.equal(scripts.test, `${gate} node scripts/run-tests.mjs unit`);
   assert.equal(
