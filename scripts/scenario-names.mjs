@@ -1,5 +1,11 @@
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -244,7 +250,33 @@ export function renameScenarios(root) {
   const doc = readFileSync(docPath, "utf8");
   const nextDoc = replaceList(doc, renderList(readdirSync(dir)));
   if (nextDoc !== doc) writeFileSync(docPath, nextDoc);
+  formatFiles(root, [
+    ...readdirSync(dir)
+      .filter((name) => parseTicketed(name))
+      .map((name) => `tests/e2e/${name}`),
+    ...files,
+    "docs/ARCHITECTURE.md",
+  ]);
   return 0;
+}
+
+/**
+ * Run the repo's prettier on the files so the generated output passes the format check.
+ *
+ * @remarks
+ * A longer label can push a line past the print width. A checkout without `node_modules` skips the step.
+ */
+function formatFiles(root, files) {
+  const prettier = join(root, "node_modules", ".bin", "prettier");
+  if (!existsSync(prettier)) return;
+  execFileSync(
+    prettier,
+    ["--log-level", "warn", "--write", ...new Set(files)],
+    {
+      cwd: root,
+      stdio: "inherit",
+    },
+  );
 }
 
 /**
