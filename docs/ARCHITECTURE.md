@@ -5767,7 +5767,7 @@ question; none of them read prose for truth.
   `deadcode` (knip), `replay-gate`, `doc-drift`, `invariants`, `check-hooks` and `test:timing` (all below), run in sequence.
 - **`npm run lint`** and **`npm run lint:typed`**: two ESLint modes. `lint` runs every rule that does not
   need type information, which includes all custom rules, and does not build a TypeScript program.
-  It is the local default and a step of `npm run check`. `lint:typed` sets `DISPATCH_LINT_TYPED=1`,
+  It is the local default and a step of `npm run check`. `lint:typed` runs with a 4 GB Node heap and sets `DISPATCH_LINT_TYPED=1`,
   which adds `recommendedTypeChecked`, the project service and the two type-aware rule overrides.
   The CI check job runs `lint:typed` after `npm run check`. Only `lint:typed` reports unused
   `eslint-disable` directives, because a directive for a type-aware rule looks unused to `lint`, and
