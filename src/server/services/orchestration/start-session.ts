@@ -36,7 +36,9 @@ import {
 } from "./steps.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { isHiddenCard } from "../../../shared/hidden-card.js";
-import { assertMemoryHeadroom } from "./memory-governor.js";
+import { waitForMemory } from "./memory-wait.js";
+
+const MEMORY_STEP = "checking memory";
 
 /** Milliseconds after which a transient reattach statusReason is cleared (shared with resume). */
 export const REATTACH_STATUS_CLEAR_MS = 5000;
@@ -267,6 +269,12 @@ export async function startSession(
     const done: SagaStep[] = [];
     let currentStep: SagaStep | undefined;
     try {
+      const memory = await waitForMemory(
+        card.boardKey ?? DEFAULT_BOARD_KEY,
+        () => store.setProvisioning(cardId, "Waiting for memory…"),
+      );
+      if (!memory.ok)
+        throw new StartStepError(MEMORY_STEP, memory.reason, "config");
       for (const step of steps) {
         currentStep = step;
         await store.setProvisioning(cardId, step.statusText);
@@ -474,7 +482,6 @@ export async function startCardFromDialog(
   input: CardStartInput,
 ): Promise<void> {
   const card = launchableCard(id);
-  assertMemoryHeadroom(card.boardKey ?? DEFAULT_BOARD_KEY);
   const start = {
     ...input,
     workspace: bodyWorkspace(card, input.workspace),

@@ -647,7 +647,7 @@ test("POST /cards/:id/resume answers each guard in order", async (t) => {
   }
 });
 
-test("card start, group start and resume answer 409 memory-pressure under pressure and change nothing", async (t) => {
+test("group start and resume answer 409 memory-pressure under pressure, a card start passes the gate to its checks, and nothing changes", async (t) => {
   const id = await local("memory start");
   const a = await local("memory a");
   const b = await local("memory b");
@@ -667,7 +667,11 @@ test("card start, group start and resume answer 409 memory-pressure under pressu
     for (const [freeMb, swapUsedMb, reason] of refusals) {
       const refusal = JSON.stringify({ error: "memory-pressure", reason });
       recordMemory(freeMb, swapUsedMb);
-      await expectReply(call("POST", `/cards/${id}/start`, {}), 409, refusal);
+      await expectReply(
+        call("POST", `/cards/${id}/start`, {}),
+        400,
+        '{"error":"No workspace selected for this ticket","variant":"config"}',
+      );
       await expectReply(
         call("POST", "/cards/group", { title: "pressured", memberIds: [a, b] }),
         409,
@@ -704,7 +708,7 @@ test("card start and group start under the memory thresholds pass the gate and r
   );
 });
 
-test("card start reads the board's own memory policy", async () => {
+test("card start does not refuse for memory under any board policy", async () => {
   const id = await local("memory policy");
   const policy = store.getBoard(DEFAULT_BOARD_KEY)!.policy;
   try {
@@ -727,8 +731,8 @@ test("card start reads the board's own memory policy", async () => {
     recordMemory(2048, 1000);
     await expectReply(
       call("POST", `/cards/${id}/start`, {}),
-      409,
-      '{"error":"memory-pressure","reason":"free memory 2048 MB is below the 65536 MB floor"}',
+      400,
+      '{"error":"No workspace selected for this ticket","variant":"config"}',
     );
   } finally {
     await store.setBoardPolicy(DEFAULT_BOARD_KEY, {
