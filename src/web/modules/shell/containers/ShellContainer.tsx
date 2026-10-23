@@ -403,7 +403,7 @@ export function ShellContainer({
           boardKey,
           cards: board.cards,
           decisions: decisions.data,
-          pushoverMissing: board.pushoverMissing,
+          pushoverMissing: board.pushoverMissing ?? null,
           now: new Date(nowMs()),
         }).length;
   const meetingItems = items.filter((item) => item.source === "meeting");

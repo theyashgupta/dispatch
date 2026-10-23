@@ -496,6 +496,7 @@ test("three passes over the threshold give one budget_warning item in the attent
     boardKey: board,
     cards: store.listCards(board),
     decisions: [],
+    pushoverMissing: null,
     now: new Date(),
   }).filter((item) => item.kind === "budget_warning");
   assert.equal(items.length, 1);
@@ -537,6 +538,7 @@ test("a warned group that then hits the hard stop shows budget_stop and no budge
     boardKey: board,
     cards: store.listCards(board),
     decisions: [],
+    pushoverMissing: null,
     now: new Date(),
   }).map((item) => item.kind);
   assert.ok(kinds.includes("budget_stop"));

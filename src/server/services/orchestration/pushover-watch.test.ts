@@ -26,7 +26,7 @@ function queue() {
     boardKey: DEFAULT_BOARD_KEY,
     cards: [],
     decisions: [],
-    pushoverMissing: store.snapshot(DEFAULT_BOARD_KEY).pushoverMissing,
+    pushoverMissing: store.snapshot(DEFAULT_BOARD_KEY).pushoverMissing ?? null,
     now: NOW,
   });
 }
