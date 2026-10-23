@@ -20,6 +20,7 @@ import {
   type SendResult,
 } from "./supervisor-send.js";
 import { assertMemoryHeadroom, memoryCheck } from "./memory-governor.js";
+import { waitForMemory } from "./memory-wait.js";
 import { pauseCard, unpauseCard } from "./pause-card.js";
 import { beginResume } from "./resume-session.js";
 
@@ -388,13 +389,51 @@ export async function orchestratorPauseCard(
   });
 }
 
-/** Resume a paused loop on behalf of an orchestrator, refused while memory is low. */
+const memoryWaits = new Set<string>();
+
+/**
+ * Resume a paused loop on behalf of an orchestrator, or wait in the background while memory is low.
+ *
+ * @remarks The wait shows the status reason `Waiting for memory…`, and a second call during the
+ * wait starts no second wait. A refusal after 30 minutes or a failed unpause shows
+ * `Resume failed: <reason>`; a card that another path resumed during the wait only clears the reason.
+ */
 export async function orchestratorResumeCard(
   caller: OrchestratorIdentity,
   card: Card,
-): Promise<void> {
-  assertMemoryHeadroom(card.boardKey);
-  await unpauseCard(card.id, {
-    reason: `resumed by orchestrator ${caller.orchestratorId}`,
-  });
+): Promise<{ resumed: true } | { resumed: false; waitingForMemory: string }> {
+  const reason = `resumed by orchestrator ${caller.orchestratorId}`;
+  const memory = memoryCheck(card.boardKey);
+  if (memory.ok) {
+    await unpauseCard(card.id, { reason });
+    return { resumed: true };
+  }
+  if (!card.paused) throw new ConflictError("not-paused");
+  if (!memoryWaits.has(card.id)) {
+    memoryWaits.add(card.id);
+    void unpauseAfterMemory(card, reason).finally(() =>
+      memoryWaits.delete(card.id),
+    );
+  }
+  return { resumed: false, waitingForMemory: memory.reason };
+}
+
+/** Wait for memory, then unpause the card, leaving the outcome in its status reason. */
+async function unpauseAfterMemory(card: Card, reason: string): Promise<void> {
+  try {
+    await store.setStatusReason(card.id, "Waiting for memory…");
+    const memory = await waitForMemory(card.boardKey);
+    if (!memory.ok) throw new Error(memory.reason);
+    await store.setStatusReason(card.id, null);
+    await unpauseCard(card.id, { reason });
+  } catch (err) {
+    const resumedElsewhere =
+      err instanceof ConflictError && err.code === "not-paused";
+    await store
+      .setStatusReason(
+        card.id,
+        resumedElsewhere ? null : `Resume failed: ${(err as Error).message}`,
+      )
+      .catch(() => undefined);
+  }
 }
