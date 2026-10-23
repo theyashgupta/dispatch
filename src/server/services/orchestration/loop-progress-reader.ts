@@ -199,6 +199,21 @@ interface ReadOptions {
   identifier?: string;
 }
 
+/**
+ * Lists the unit file paths under the card identifier slug, index for index with the roadmap slug list, or null when the two slugs match.
+ *
+ * @remarks A roadmap loop can pass `<identifier>-unit-<N>` to ralph-gate.sh instead of `<roadmap slug>-unit-<N>`, so the gate lines land in that folder (GROUP-27).
+ */
+function cardSlugPaths(
+  roadmapText: string,
+  slug: string,
+  identifier: string | undefined,
+): string[] | null {
+  const alias = identifier?.toLowerCase();
+  if (alias === undefined || alias === slug) return null;
+  return unitFilePaths(roadmapText, alias).paths;
+}
+
 interface GuardedReader {
   warnings: string[];
   refused: Set<string>;
@@ -386,7 +401,21 @@ async function readModel(
   const listed = unitFilePaths(roadmapText, slug);
   warnings.push(...listed.warnings);
   const files = new Map<string, string | null>();
-  for (const rel of new Set(listed.paths)) files.set(rel, await read(rel));
+  const alias = cardSlugPaths(roadmapText, slug, options.identifier);
+  for (const [index, rel] of listed.paths.entries()) {
+    if (files.has(rel)) continue;
+    let text = await read(rel);
+    const other = alias?.[index];
+    if (
+      text === null &&
+      other !== undefined &&
+      other !== rel &&
+      !refused.has(rel)
+    ) {
+      text = await read(other);
+    }
+    files.set(rel, text);
+  }
 
   return buildLoopProgress({
     slug,
