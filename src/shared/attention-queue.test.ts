@@ -134,6 +134,7 @@ function build(cards: Card[], decisions: DecisionItem[] = [], events = []) {
     cards,
     decisions,
     events,
+    pushoverMissing: null,
     now: NOW,
   });
 }
@@ -212,6 +213,7 @@ test("permission_prompt reads the evidence of the newest matching event", () => 
       event(3, minutesAgo(1), "working", "s-GROUP-1"),
       event(4, minutesAgo(1), "permission_prompt", "other"),
     ],
+    pushoverMissing: null,
     now: NOW,
   });
   assert.equal(items[0]?.text, "evidence 2");
@@ -442,6 +444,7 @@ test("a wire-shape permission prompt reads the event evidence", () => {
         ts: minutesAgo(4),
       },
     ],
+    pushoverMissing: null,
     now: NOW,
   });
   assert.equal(items[0]?.text, "Allow Bash?");
@@ -684,4 +687,12 @@ test("the pushover_missing item sorts by its since among other items", () => {
     queue.map((i) => i.kind),
     ["pushover_missing", "stale"],
   );
+});
+
+test("buildAttentionQueue requires the pushoverMissing input", () => {
+  const items = buildAttentionQueue(
+    // @ts-expect-error LOCAL-176: pushoverMissing is a required input
+    { boardKey: DEFAULT_BOARD_KEY, cards: [], decisions: [], now: NOW },
+  );
+  assert.deepEqual(items, []);
 });
