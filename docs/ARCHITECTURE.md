@@ -6143,18 +6143,24 @@ permanently fails)`, which runs the same scenario in the configuration where bot
 
 The scenario tests in `tests/e2e` start sandbox servers with a fake `claude` and a fake `gh`. They are not part of `npm run check`. Run them in this order:
 
-1. Install `tmux` and Node 22.5 or later. Scenario 3 needs the `node:sqlite` module.
+1. Install `tmux` and Node 22.5 or later. The upgrade scenario needs the `node:sqlite` module.
 2. Run `npm run build`. The tests start the built server of this checkout.
-3. For scenarios 2 and 3, build a v4.2.0 checkout and set `DISPATCH_E2E_V420` to its folder. Without a built `dist/` there, these two scenarios skip with a message.
-4. For scenario 2, run `npx playwright install chromium`.
+3. For the parity and upgrade scenarios, build a v4.2.0 checkout and set `DISPATCH_E2E_V420` to its folder. Without a built `dist/` there, these two scenarios skip with a message.
+4. For the parity scenario, run `npx playwright install chromium`.
 5. Optional: set `DISPATCH_E2E_SANDBOX` to the sandbox folder. The default is `.sandbox/e2e` in this checkout, which Git ignores.
 6. Optional: set `DISPATCH_E2E_EVIDENCE` to the folder for run logs, reports and screenshots. The default is `evidence` in the sandbox folder.
-7. Run the three files, or one file:
+7. Run all files, or one file:
 
 ```sh
 env -u NODE_ENV -u CLAUDE_CONFIG_DIR node --import tsx --test tests/e2e/*.e2e.ts
 env -u NODE_ENV -u CLAUDE_CONFIG_DIR node --import tsx --test tests/e2e/scenario-3-upgrade.e2e.ts
 ```
+
+Run `node scripts/scenario-names.mjs` after you add or rename a scenario file, because the script writes this list from the files.
+
+<!-- scenario-list:start -->
+
+<!-- scenario-list:end -->
 
 Scenario 4 (tests/e2e/scenario-4-no-loop-ship.e2e.ts) proves that a group with no loop files ships through `start_ship` to the bare origin of its sandbox, with the fake `claude` as orchestrator and as group session and with the fake `gh`.
 

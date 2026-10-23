@@ -14,6 +14,9 @@ import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   parseNumbered,
+  parseTicketed,
+  renderList,
+  replaceList,
   rewriteLabels,
   rewriteReferences,
   targetName,
@@ -30,6 +33,8 @@ const gitEnv = {
   GIT_CONFIG_GLOBAL: "/dev/null",
   GIT_CONFIG_NOSYSTEM: "1",
 };
+const EMPTY_BLOCK =
+  "<!-- scenario-list:start -->\n\n<!-- scenario-list:end -->";
 const ALPHA = `const note = makeNote("scenario-3");
 const sb = startSandbox({ name: "s3-alpha" });
 import x from "./fixtures/scenario-3/x.js";
@@ -82,7 +87,7 @@ function initRepo(branch = "main") {
   put(
     dir,
     "docs/ARCHITECTURE.md",
-    "Scenario 3 (tests/e2e/scenario-3-alpha.e2e.ts) proves x.\n",
+    `Scenario 3 (tests/e2e/scenario-3-alpha.e2e.ts) proves x.\n\n${EMPTY_BLOCK}\n`,
   );
   git(dir, "add", ".");
   git(dir, "commit", "-q", "-m", "test: add alpha (LOCAL-7) (#1)");
@@ -92,8 +97,8 @@ function initRepo(branch = "main") {
 /**
  * Run the script CLI inside a scratch repo.
  */
-function runCli(dir) {
-  return spawnSync(process.execPath, [script], {
+function runCli(dir, ...args) {
+  return spawnSync(process.execPath, [script, ...args], {
     cwd: dir,
     env: gitEnv,
     encoding: "utf8",
@@ -201,6 +206,78 @@ test("rewriteLabels keeps a suffix that repeats part of the slug", () => {
   );
 });
 
+test("rewriteLabels rewrites a test title that opens with a scenario number", () => {
+  assert.equal(
+    rewriteLabels('"scenario 10 code types no key into any pane"', engine),
+    '"scenario-LOCAL-151-engine-close code types no key into any pane"',
+  );
+  assert.equal(
+    rewriteLabels('"scenario 10: the supervisor closes"', engine),
+    '"scenario-LOCAL-151-engine-close: the supervisor closes"',
+  );
+  assert.equal(
+    rewriteLabels('"scenario 6 part B: a quick fix"', {
+      token: "6b",
+      ticket: "LOCAL-109",
+      slug: "ship-order",
+    }),
+    '"scenario-LOCAL-109-ship-order: a quick fix"',
+  );
+  assert.equal(
+    rewriteLabels('"scenario 17: x"', engine),
+    '"scenario-LOCAL-151-engine-close: x"',
+  );
+  assert.equal(
+    rewriteLabels('"the scenario 10 run"', engine),
+    '"the scenario 10 run"',
+  );
+});
+
+test("parseTicketed reads the ticket and slug", () => {
+  assert.deepEqual(
+    parseTicketed("scenario-LOCAL-163-missing-workspace.e2e.ts"),
+    { ticket: "LOCAL-163", slug: "missing-workspace" },
+  );
+  assert.equal(parseTicketed("scenario-14-x.e2e.ts"), undefined);
+});
+
+test("renderList sorts by prefix, ticket number and slug", () => {
+  assert.equal(
+    renderList([
+      "scenario-LOCAL-93-parity.e2e.ts",
+      "scenario-LOCAL-9-alpha.e2e.ts",
+      "scenario-LOCAL-93-orchestrated.e2e.ts",
+      "scenario-3-numbered.e2e.ts",
+    ]),
+    [
+      "- tests/e2e/scenario-LOCAL-9-alpha.e2e.ts (LOCAL-9)",
+      "- tests/e2e/scenario-LOCAL-93-orchestrated.e2e.ts (LOCAL-93)",
+      "- tests/e2e/scenario-LOCAL-93-parity.e2e.ts (LOCAL-93)",
+    ].join("\n"),
+  );
+});
+
+test("replaceList fills an empty block", () => {
+  assert.equal(
+    replaceList(`a\n\n${EMPTY_BLOCK}\n\nb\n`, "- x"),
+    "a\n\n<!-- scenario-list:start -->\n\n- x\n\n<!-- scenario-list:end -->\n\nb\n",
+  );
+});
+
+test("replaceList replaces an old block", () => {
+  const old =
+    "a\n<!-- scenario-list:start -->\n\n- old\n- older\n\n<!-- scenario-list:end -->\nb\n";
+  assert.equal(
+    replaceList(old, "- new"),
+    "a\n<!-- scenario-list:start -->\n\n- new\n\n<!-- scenario-list:end -->\nb\n",
+  );
+});
+
+test("replaceList returns undefined without both markers", () => {
+  assert.equal(replaceList("no markers\n", "- x"), undefined);
+  assert.equal(replaceList("<!-- scenario-list:start -->\n", "- x"), undefined);
+});
+
 test("rewriteReferences rewrites markdown lead-in and path", () => {
   assert.equal(
     rewriteReferences(
@@ -276,7 +353,7 @@ test("CLI renames the file, labels and references", () => {
   );
   assert.equal(
     readFileSync(join(dir, "docs/ARCHITECTURE.md"), "utf8"),
-    "The scenario in tests/e2e/scenario-LOCAL-7-alpha.e2e.ts proves x.\n",
+    "The scenario in tests/e2e/scenario-LOCAL-7-alpha.e2e.ts proves x.\n\n<!-- scenario-list:start -->\n\n- tests/e2e/scenario-LOCAL-7-alpha.e2e.ts (LOCAL-7)\n\n<!-- scenario-list:end -->\n",
   );
   assert.match(git(dir, "status", "--porcelain"), /^R/m);
 });
@@ -320,4 +397,66 @@ test("CLI refuses the branch ticket for a committed file with no ticket", () => 
   assert.equal(run.status, 1);
   assert.match(run.stderr, /scenario-4-beta\.e2e\.ts/);
   assert.ok(existsSync(join(dir, "tests/e2e/scenario-4-beta.e2e.ts")));
+});
+
+test("CLI writes the doc list and --check passes", () => {
+  const dir = initRepo();
+  assert.equal(runCli(dir).status, 0);
+  assert.match(
+    readFileSync(join(dir, "docs/ARCHITECTURE.md"), "utf8"),
+    /<!-- scenario-list:start -->\n\n- tests\/e2e\/scenario-LOCAL-7-alpha\.e2e\.ts \(LOCAL-7\)\n\n<!-- scenario-list:end -->/,
+  );
+  const check = runCli(dir, "--check");
+  assert.equal(check.status, 0, check.stderr);
+  assert.equal(check.stderr, "");
+});
+
+test("--check reports numbered files, references and a stale list", () => {
+  const dir = initRepo();
+  put(dir, "tests/e2e/scenario-LOCAL-8-beta.e2e.ts", "x\n");
+  const check = runCli(dir, "--check");
+  assert.equal(check.status, 1);
+  assert.match(
+    check.stderr,
+    /tests\/e2e\/scenario-3-alpha\.e2e\.ts: numbered scenario file/,
+  );
+  assert.match(
+    check.stderr,
+    /package\.json:1: numbered scenario reference scenario-3-alpha\.e2e\.ts/,
+  );
+  assert.match(check.stderr, /scenario list is stale/);
+});
+
+test("--check reports a list line that was removed", () => {
+  const dir = initRepo();
+  assert.equal(runCli(dir).status, 0);
+  put(dir, "docs/ARCHITECTURE.md", `Text.\n\n${EMPTY_BLOCK}\n`);
+  const check = runCli(dir, "--check");
+  assert.equal(check.status, 1);
+  assert.match(check.stderr, /scenario list is stale/);
+});
+
+test("a doc without markers fails --check and the apply run", () => {
+  const dir = initRepo();
+  put(dir, "docs/ARCHITECTURE.md", "No markers here.\n");
+  const check = runCli(dir, "--check");
+  assert.equal(check.status, 1);
+  assert.match(check.stderr, /markers are missing/);
+  const apply = runCli(dir);
+  assert.equal(apply.status, 1);
+  assert.match(apply.stderr, /markers are missing/);
+  assert.ok(existsSync(join(dir, "tests/e2e/scenario-3-alpha.e2e.ts")));
+});
+
+test("--check reports a numbered label in a renamed file", () => {
+  const dir = initRepo();
+  assert.equal(runCli(dir).status, 0);
+  const file = join(dir, "tests/e2e/scenario-LOCAL-7-alpha.e2e.ts");
+  writeFileSync(
+    file,
+    `${readFileSync(file, "utf8")}const t = "scenario 21: x";\n`,
+  );
+  const check = runCli(dir, "--check");
+  assert.equal(check.status, 1);
+  assert.match(check.stderr, /numbered label scenario 21/);
 });
