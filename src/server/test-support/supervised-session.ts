@@ -212,7 +212,11 @@ export async function startSupervised(opts: {
     userTexts: (file: string = transcript) =>
       readJsonl(file)
         .filter((e) => e.type === "user")
-        .map((e) => (e.message as { content: string }).content),
+        .map((e) => (e.message as { content: string }).content)
+        .filter(
+          (c) =>
+            !c.startsWith("<command-name>") && !c.startsWith("<local-command-"),
+        ),
     keysSettled: async (count: number) => {
       const until = Date.now() + 20_000;
       while (keys().length < count && Date.now() < until)

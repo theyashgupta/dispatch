@@ -276,6 +276,7 @@ function assertBuilt() {
       .trim();
     throw new Error(
       `refusing to run, \`npm run ${BUILD_SCRIPT}\` failed, so dist/ does not reflect src/:\n${detail || err.message}`,
+      { cause: err },
     );
   }
   if (!existsSync(DIST_ENTRY)) {
@@ -2152,7 +2153,7 @@ async function main() {
   let server = null;
   let chromeChild = null;
   let cdp = null;
-  let portsHeld = false;
+  let portsHeld;
   let breakResult = null;
 
   try {
