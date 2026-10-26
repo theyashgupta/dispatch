@@ -1527,6 +1527,7 @@ async function main() {
         console.error(
           `ASSERTION: ttyd port ${ttyd[key].port} (${key}) still LISTENING after teardown`,
         );
+        // eslint-disable-next-line no-useless-assignment -- portsHeld is read after the loop, oxlint misses the read across the await
         portsHeld = true;
       }
     }

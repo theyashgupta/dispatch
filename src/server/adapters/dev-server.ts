@@ -171,6 +171,7 @@ export async function listeningPortsBySession(
       [...byPort.entries()]
         .sort(([a], [b]) => a - b)
         .map(([port, hosts]) => {
+          // eslint-disable-next-line no-unsafe-optional-chaining -- a missing attribution entry throws here on purpose, the same as before the cast
           const { pid, bindAddress } = attrib?.get(port) as {
             pid: number;
             bindAddress: string;

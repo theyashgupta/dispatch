@@ -75,14 +75,12 @@ function initRepo(files) {
 /**
  * Run ESLint `--print-config` and return the parsed config.
  */
-function printConfig(typed) {
+function printConfig(file) {
   const env = { ...process.env };
   delete env.NODE_ENV;
-  delete env.DISPATCH_LINT_TYPED;
-  if (typed) env.DISPATCH_LINT_TYPED = "1";
   const result = spawnSync(
     join(root, "node_modules/.bin/eslint"),
-    ["--print-config", "src/server/bootstrap/index.ts"],
+    ["--print-config", file],
     { cwd: root, env, encoding: "utf8" },
   );
   assert.equal(result.status, 0, result.stderr);
@@ -96,6 +94,7 @@ test("package scripts route checks through the slot gate", () => {
   const gate = "node scripts/with-check-slot.mjs";
   for (const name of [
     "lint",
+    "lint:eslint-rest",
     "lint:typed",
     "lint:fix",
     "typecheck",
@@ -109,6 +108,8 @@ test("package scripts route checks through the slot gate", () => {
     assert.ok(scripts[name]?.includes(gate), `${name} is not gated`);
   }
   assert.equal(scripts.typecheck, `${gate} npm run typecheck:tsgo`);
+  assert.equal(scripts.format, "oxfmt");
+  assert.equal(scripts["format:check"], "oxfmt --check");
   const tsgo = scripts["typecheck:tsgo"];
   assert.equal(tsgo.split("tsgo --noEmit").length - 1, 2);
   assert.ok(tsgo.includes("-p src/web/tsconfig.json"));
@@ -117,9 +118,9 @@ test("package scripts route checks through the slot gate", () => {
   for (const [name, value] of Object.entries(scripts)) {
     assert.ok(!value.includes("check-lock"), `${name} uses check-lock`);
   }
-  assert.ok(scripts["lint:typed"].includes("DISPATCH_LINT_TYPED=1"));
-  assert.ok(scripts["lint:typed"].includes("--max-old-space-size=4096"));
-  assert.ok(!scripts.lint.includes("DISPATCH_LINT_TYPED"));
+  assert.ok(scripts["lint:typed"].includes("oxlint --type-aware"));
+  assert.equal(scripts.lint, `${gate} npm run lint:unlocked`);
+  assert.equal(scripts["lint:unlocked"], "oxlint && npm run lint:eslint-rest");
   assert.equal(scripts.test, `${gate} node scripts/run-tests.mjs unit`);
   assert.equal(
     scripts["test:timing"],
@@ -143,23 +144,35 @@ test("CI runs the typed lint", () => {
   assert.match(ci, /^\s*run: npm run typecheck:tsc\s*$/m);
 });
 
-test("ESLint is untyped by default and typed with DISPATCH_LINT_TYPED", () => {
-  const untyped = printConfig(false);
-  assert.equal(
-    untyped.languageOptions.parserOptions?.projectService,
-    undefined,
-  );
-  assert.equal(
-    untyped.rules["@typescript-eslint/no-floating-promises"],
-    undefined,
-  );
-  assert.ok(untyped.rules["local/comments-jsdoc-only"]);
-  assert.equal(untyped.linterOptions.reportUnusedDisableDirectives, 0);
-  const typed = printConfig(true);
-  assert.ok(typed.languageOptions.parserOptions?.projectService);
-  assert.ok(typed.rules["@typescript-eslint/no-floating-promises"]);
-  assert.ok(typed.rules["local/comments-jsdoc-only"]);
-  assert.equal(typed.linterOptions.reportUnusedDisableDirectives, 1);
+test("the ESLint rest pass enables only the five rule families", () => {
+  const families = [
+    "local/",
+    "boundaries/",
+    "check-file/",
+    "jsdoc/",
+    "react-hooks/",
+  ];
+  for (const file of [
+    "src/server/bootstrap/index.ts",
+    "src/web/modules/board/components/CardView.tsx",
+    "src/web/components/ui/item.tsx",
+    "src/web/lib/utils.ts",
+    "src/web/routes/__root.tsx",
+  ]) {
+    const { rules } = printConfig(file);
+    for (const [id, setting] of Object.entries(rules)) {
+      const severity = Array.isArray(setting) ? setting[0] : setting;
+      if (severity === 0 || severity === "off") continue;
+      assert.ok(
+        families.some((family) => id.startsWith(family)),
+        `${file}: ${id} is not in a rest-pass family`,
+      );
+    }
+    if (!file.startsWith("src/web/components/ui/")) {
+      assert.ok(rules["local/comments-jsdoc-only"][0] !== 0, file);
+    }
+    assert.ok(rules["boundaries/dependencies"][0] !== 0, file);
+  }
 });
 
 test("changed files cover branch, staged, unstaged and untracked work", () => {

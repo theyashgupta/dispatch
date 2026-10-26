@@ -10,7 +10,7 @@ const bin = (tool) => join(root, "node_modules", ".bin", tool);
  * List the repo-relative files that differ from the base ref, sorted and de-duplicated.
  *
  * @remarks
- * The union covers commits since the merge base, staged edits, unstaged edits and untracked files. Paths missing on disk are dropped so a file deleted at any stage never reaches prettier or ESLint. Git runs at the repository root, because `git diff` prints root-relative paths from any subdirectory.
+ * The union covers commits since the merge base, staged edits, unstaged edits and untracked files. Paths missing on disk are dropped so a file deleted at any stage never reaches oxfmt, oxlint or ESLint. Git runs at the repository root, because `git diff` prints root-relative paths from any subdirectory.
  */
 export function changedFiles(dir, base = "origin/main") {
   const cwd = execFileSync("git", ["rev-parse", "--show-toplevel"], {
@@ -45,17 +45,17 @@ export function changedFiles(dir, base = "origin/main") {
 }
 
 /**
- * Keep the files that ESLint can parse.
+ * Keep the files that oxlint and ESLint can parse.
  */
 export function lintable(files) {
   return files.filter((file) => /\.(?:[cm]?[jt]sx?)$/.test(file));
 }
 
 /**
- * Run prettier, ESLint and the typecheck over the changed files and return the exit code.
+ * Run oxfmt, oxlint, the ESLint rest pass over the changed `src/` files and the typecheck, and return the exit code.
  *
  * @remarks
- * All three steps run even when an earlier one fails, so one run reports every problem.
+ * Every step runs even when an earlier one fails, so one run reports every problem.
  */
 function main() {
   let files;
@@ -75,17 +75,26 @@ function main() {
     statuses.push(result.status);
   };
   if (files.length > 0) {
-    step(bin("prettier"), ["--check", "--ignore-unknown", "--", ...files]);
+    step(bin("oxfmt"), [
+      "--check",
+      "--no-error-on-unmatched-pattern",
+      "--",
+      ...files,
+    ]);
   }
   const lint = lintable(files);
   if (lint.length > 0) {
+    step(bin("oxlint"), ["--no-error-on-unmatched-pattern", "--", ...lint]);
+  }
+  const srcLint = lint.filter((file) => file.startsWith("src/"));
+  if (srcLint.length > 0) {
     step(bin("eslint"), [
       "--cache",
       "--cache-location",
       "node_modules/.cache/eslint/",
       "--no-warn-ignored",
       "--",
-      ...lint,
+      ...srcLint,
     ]);
   }
   step("npm", ["run", "typecheck"]);

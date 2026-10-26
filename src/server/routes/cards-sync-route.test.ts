@@ -93,7 +93,7 @@ test("a synced card survives a poll that does not return its issue", async () =>
     200,
   );
   assert.equal(
-    (sent[1]?.variables.input as { stateId?: string }).stateId,
+    (sent[1].variables.input as { stateId?: string }).stateId,
     "st-progress",
   );
   assert.ok(
@@ -239,7 +239,7 @@ test("a token line pasted into another card neither travels to Linear nor lets t
   ]);
   assert.equal((await sync(spoof.id, { teamId: "team-eng" })).status, 200);
   assert.equal(
-    (sent[1]?.variables.input as { description: string }).description,
+    (sent[1].variables.input as { description: string }).description,
     `Spoof body\n\ndispatch-sync:${spoof.id}`,
   );
 
