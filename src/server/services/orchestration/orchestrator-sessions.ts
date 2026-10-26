@@ -23,12 +23,19 @@ import { assertMemoryHeadroom, memoryCheck } from "./memory-governor.js";
 import { waitForMemory } from "./memory-wait.js";
 import { pauseCard, unpauseCard } from "./pause-card.js";
 import { beginResume } from "./resume-session.js";
+import { runClaude } from "./run-claude.js";
 
 export const sessionTools: {
   send: typeof sendConfirmed;
   keys: typeof sendKeys;
   resume: typeof beginResume;
-} = { send: sendConfirmed, keys: sendKeys, resume: beginResume };
+  runClaude: typeof runClaude;
+} = {
+  send: sendConfirmed,
+  keys: sendKeys,
+  resume: beginResume,
+  runClaude,
+};
 
 const KEYLESS_STATES: ReadonlySet<SupervisorState> = new Set([
   "permission_prompt",
@@ -36,6 +43,7 @@ const KEYLESS_STATES: ReadonlySet<SupervisorState> = new Set([
   "usage_limit_wait",
   "shell_prompt",
   "paused",
+  "released",
 ]);
 const USER_MUST_RESUME = "user must resume";
 const MODE_CHARACTERS = new Set(["!", "/", "#", "&", "@"]);
@@ -276,13 +284,18 @@ export async function resumeLoop(
  * @remarks Memory is checked here, before `beginResume`, so the refusal is `memory-low` and not
  * `memory-pressure`. The cap gates only a card that holds a loop slot, the set `runningLoops` counts,
  * and runs with the live guards again inside `withCapLock`. The resumed session gets no kickoff, so
- * the caller sends a continue line once it is live.
+ * the caller sends a continue line once it is live. A live tmux session whose active session is `released`
+ * gets Claude relaunched through `runClaude` instead, with no cap check since the card holds no slot.
  */
 export async function resumeLostSession(
   caller: OrchestratorIdentity,
   card: Card,
 ): Promise<void> {
-  if (card.tmuxSession) throw new ConflictError("session-live");
+  if (card.tmuxSession) {
+    const active = card.sessions?.find((s) => s.id === card.activeSessionId);
+    if (active?.state !== "released") throw new ConflictError("session-live");
+    return reviveReleased(card);
+  }
   const hasRecord = card.sessions?.some((s) => s.id === card.activeSessionId);
   if (
     !card.workspacePath ||
@@ -313,6 +326,18 @@ export async function resumeLostSession(
     sessionTools.resume(current);
     return Promise.resolve();
   });
+}
+
+async function reviveReleased(card: Card): Promise<void> {
+  if (store.isStarting(card.id)) throw new ConflictError("start-in-flight");
+  const memory = memoryCheck(card.boardKey ?? DEFAULT_BOARD_KEY);
+  if (!memory.ok) {
+    throw new ConflictError("memory-low", { reason: memory.reason });
+  }
+  const outcome = await sessionTools.runClaude(card.id);
+  if (outcome !== "launched") {
+    throw new ConflictError("revive-failed", { reason: outcome });
+  }
 }
 
 /**

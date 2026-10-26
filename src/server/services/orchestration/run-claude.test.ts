@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -230,6 +230,84 @@ void test(
         readArgv(argvFile),
         null,
         "an unresolved account types nothing",
+      );
+    } finally {
+      await tmux.killSession(`=${tmuxSession}`);
+      await env.killServer();
+    }
+  },
+);
+
+void test(
+  "runClaude into a session stored released writes the state working, and a busy refusal leaves it released",
+  { skip: !env.canRunRealTmux },
+  async () => {
+    writeFakeRepl(env, path.join(env.root, "claude-argv-released.txt"));
+    await store.load();
+    const card = await store.createLocalCard(
+      DEFAULT_BOARD_KEY,
+      "released run",
+      "",
+    );
+    const tmuxSession = `dsp-released-${process.pid}`;
+    const target = `=${tmuxSession}:`;
+    const cwd = path.join(env.root, "released-worktree");
+    fs.mkdirSync(cwd, { recursive: true });
+    try {
+      await launchClaude({
+        cardId: card.id,
+        tmuxSession,
+        cwd,
+        leadingArgs: [],
+        account: { id: "default" },
+      });
+      await store.completeStart(card.id, undefined, {
+        workspacePath: cwd,
+        tmuxSession,
+        branch: "released-run",
+      });
+      const sessionId = store.getCard(card.id)!.activeSessionId!;
+      const stored = () =>
+        store.getCard(card.id)!.sessions!.find((s) => s.id === sessionId)
+          ?.state;
+      await store.setSessionStateIfSession(card.id, sessionId, "released");
+
+      assert.equal(await runClaude(card.id), "busy", "claude is running");
+      assert.equal(stored(), "released");
+
+      await tmux.sendKeys(target, ["C-c"]);
+      await waitFor(() => tmux.paneAtPrompt(target), 5000, "shell prompt");
+      assert.equal(await runClaude(card.id), "launched");
+      assert.equal(stored(), "working");
+
+      await tmux.sendKeys(target, ["C-c"]);
+      await waitFor(() => tmux.paneAtPrompt(target), 5000, "shell prompt");
+      await store.setSessionStateIfSession(card.id, sessionId, "released");
+      const getCard = store.getCard.bind(store);
+      const spy = mock.method(
+        store,
+        "getCard",
+        (id: string) => {
+          const first = getCard(id)!;
+          return {
+            ...first,
+            sessions: first.sessions!.map((s) => ({
+              ...s,
+              state: "working" as const,
+            })),
+          };
+        },
+        { times: 1 },
+      );
+      try {
+        assert.equal(await runClaude(card.id), "launched");
+      } finally {
+        spy.mock.restore();
+      }
+      assert.equal(
+        stored(),
+        "working",
+        "the state is read live, not from the first read",
       );
     } finally {
       await tmux.killSession(`=${tmuxSession}`);

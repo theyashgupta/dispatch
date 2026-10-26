@@ -302,7 +302,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "resume_session",
     description:
-      "Resume a card whose session is lost after a restart or a reboot, the way the Resume button does. The resumed session gets no kickoff prompt; send a continue line with send_input after it is live. Refused with session-live, no-lost-session, start-in-flight, invalid-identifier, memory-low, or the cap refusal of resume_loop.",
+      "Resume a card whose session is lost after a restart or a reboot, the way the Resume button does; it also brings Claude back in a released session. The resumed session gets no kickoff prompt; send a continue line with send_input after it is live. Refused with session-live, no-lost-session, start-in-flight, invalid-identifier, memory-low, revive-failed, or the cap refusal of resume_loop.",
     input: cardIdParam,
     method: "POST",
     path: "/sessions/:cardId/resume-lost",
