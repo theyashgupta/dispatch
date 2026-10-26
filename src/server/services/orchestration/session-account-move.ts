@@ -93,7 +93,7 @@ async function awaitPane(
  *
  * @remarks Text higher up can be stale scrollback, so readiness is read from the footer only.
  */
-function footer(pane: string, lines = FOOTER_LINES): string {
+export function footer(pane: string, lines = FOOTER_LINES): string {
   return pane
     .split("\n")
     .filter((line) => line.trim() !== "")
@@ -330,6 +330,10 @@ export async function moveSessionAccount(
       card,
     );
     await typeLaunchLine(tmuxSession, argv);
+    const live = sessionOf(card.id, session.id);
+    if (live?.state === "released") {
+      await store.setSessionStateIfSession(card.id, live.id, "working");
+    }
     forgetTurnState(card.id, session.id);
     try {
       await awaitReplReady(tmuxSession);

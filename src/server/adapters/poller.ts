@@ -15,10 +15,12 @@ interface Loop {
   source: TicketSource;
   generation: number;
   timer: ReturnType<typeof setTimeout> | null;
+  wakeCheck: ReturnType<typeof setInterval> | null;
   backoffMs: number;
   inFlight: boolean;
   rerun: boolean;
   catchUpUsed: boolean;
+  lastRunAt: number;
   stopped: boolean;
 }
 
@@ -76,6 +78,7 @@ async function pollOnce(loop: Loop): Promise<void> {
     return;
   }
   loop.inFlight = true;
+  clearTimers(loop);
   const gen = loop.generation;
   const source = loop.source;
   try {
@@ -138,6 +141,7 @@ async function pollOnce(loop: Loop): Promise<void> {
     }
   } finally {
     loop.inFlight = false;
+    loop.lastRunAt = Date.now();
     const rerun = loop.rerun;
     loop.rerun = false;
     if (rerun && !loop.stopped) void pollOnce(loop);
@@ -145,18 +149,25 @@ async function pollOnce(loop: Loop): Promise<void> {
 }
 
 /**
- * Arm a loop's next tick, stamped with its current generation.
+ * Arm a loop's next tick and its wake check, both stamped with its current generation.
  *
- * @remarks The stamp covers the window clearTimeout cannot: a tick already queued when pollNow
- * bumps the generation aborts itself here instead of starting a second chain. `unref` keeps the
- * timer from holding the process open.
+ * @remarks A Node timer does not count time while the Mac sleeps, so every `CATCH_UP_MS` the wake
+ * check compares the wall clock with the time the last run settled and runs the source at once when
+ * the gap is more than two intervals (the backoff while rate-limited). LOCAL-207 limits: at most one
+ * fetch in flight per source, as a starting run clears both timers, and at most one catch-up per gap,
+ * as the settled run restamps the time. The stamp aborts a tick queued before pollNow bumps it.
  */
 function scheduleNext(loop: Loop, delayMs: number): void {
   const gen = loop.generation;
-  loop.timer = setTimeout(() => {
+  const tick = () => {
     if (gen === loop.generation) void pollOnce(loop);
-  }, delayMs);
+  };
+  loop.timer = setTimeout(tick, delayMs);
+  loop.wakeCheck = setInterval(() => {
+    if (Date.now() - loop.lastRunAt > 2 * loop.backoffMs) tick();
+  }, CATCH_UP_MS);
   loop.timer.unref?.();
+  loop.wakeCheck.unref?.();
 }
 
 /**
@@ -176,12 +187,16 @@ function scheduleRetry(loop: Loop): void {
   scheduleNext(loop, Math.min(CATCH_UP_MS, interval));
 }
 
+function clearTimers(loop: Loop): void {
+  if (loop.timer) clearTimeout(loop.timer);
+  if (loop.wakeCheck) clearInterval(loop.wakeCheck);
+  loop.timer = null;
+  loop.wakeCheck = null;
+}
+
 function stopLoop(loop: Loop): void {
   loop.generation += 1;
-  if (loop.timer) {
-    clearTimeout(loop.timer);
-    loop.timer = null;
-  }
+  clearTimers(loop);
 }
 
 /**
@@ -225,10 +240,12 @@ export function startPollers(sources: readonly TicketSource[]): void {
       source,
       generation: 0,
       timer: null,
+      wakeCheck: null,
       backoffMs: baseInterval(source),
       inFlight: false,
       rerun: false,
       catchUpUsed: false,
+      lastRunAt: Date.now(),
       stopped: false,
     };
     loops.set(source.id, loop);
