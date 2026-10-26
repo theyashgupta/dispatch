@@ -5810,6 +5810,23 @@ question; none of them read prose for truth.
   lets the stop continue. Each gated step has its own wait limit. If the steps before a waiting
   step take more than 30 seconds, the timeout occurs first, and the hook lets the stop continue
   with no report.
+
+  Waiters take a slot in queue order (LOCAL-210). Each waiting gate writes the entry
+  `check-queue/<pid>.json` in the lock directory, with `pid`, `class`, `card` and `arrivedAt`, and
+  writes it again on each poll. The class is `ship` when `DISPATCH_CHECK_CLASS=ship`, else `loop`;
+  the ship flow check sets it. The card is `DISPATCH_CARD_ID`, or null. The order is ship before
+  loop, then arrival time, then pid. A gate takes a slot only when the open slots are more than the
+  live waiters ahead of it. A gate removes the entry of a dead pid, and an entry of a waiter that
+  holds no slot and is older than 15 seconds, so a stopped waiter, a zombie or a reused pid does not
+  block the queue. A stopped waiter that polls again writes its entry back with its first arrival
+  time. A gate removes its own entry at exit. An error in the queue folder costs the order and never
+  fails the gate. Ship checks that arrive one after the other can keep loop gates waiting until
+  their wait limit. The gate writes `check-queue.json` in the lock directory when it registers,
+  takes a slot, removes an entry and exits: `updatedAt`, `holders` (`slot`, `pid`, `class`, `card`)
+  and `queue` (`pid`, `class`, `card`, `arrivedAt`) in take order. The file is a snapshot, so a pid
+  in it can be gone. The slot file keeps its name and its content, so a gate that runs an older copy
+  of the script still works, but it ignores the queue and can take a free slot first.
+
 - **`npm run check:changed`** (`scripts/check-changed.mjs`): the fast check for one agent session.
   It holds one slot for the full run. It selects the files changed since `origin/main`, plus staged,
   unstaged and untracked files, and removes deleted files. It runs `prettier --check` on these
