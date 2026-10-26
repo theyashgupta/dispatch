@@ -288,7 +288,7 @@ A server restart or a reboot marks the live sessions lost. At boot the superviso
 
 For a card that is still lost, call `resume_session`. Do not raise a decision item that asks the user to press Restart or Resume. Call it only below the cap. For a card in Agent done or a later column, call it only when that card needs more work. For a card that `stop_session`, a usage stop or the budget stopped, follow the rules for that stop.
 
-A resumed session gets no kickoff prompt and sits at its prompt, so send_input a continue line after the session is live. Use `list_sessions` or `read_pane_tail` to see that it is live.
+On a board with the supervisor on, the supervisor types the resume prompt once the session is live and confirms it in the transcript. With the supervisor off the resumed session gets no prompt and sits at its prompt, so send_input a continue line after the session is live. Use `list_sessions` or `read_pane_tail` to see that it is live.
 
 `resume_session` refuses in these cases:
 

@@ -196,6 +196,22 @@ async function pickRoadmap(
 interface ReadOptions {
   single?: boolean;
   previous?: LoopProgress;
+  identifier?: string;
+}
+
+/**
+ * Lists the unit file paths under the card identifier slug, index for index with the roadmap slug list, or null when the two slugs match.
+ *
+ * @remarks A roadmap loop can pass `<identifier>-unit-<N>` to ralph-gate.sh instead of `<roadmap slug>-unit-<N>`, so the gate lines land in that folder (GROUP-27).
+ */
+function cardSlugPaths(
+  roadmapText: string,
+  slug: string,
+  identifier: string | undefined,
+): string[] | null {
+  const alias = identifier?.toLowerCase();
+  if (alias === undefined || alias === slug) return null;
+  return unitFilePaths(roadmapText, alias).paths;
 }
 
 interface GuardedReader {
@@ -229,9 +245,45 @@ async function readEngineText(
   return { text, closed };
 }
 
+/**
+ * Finds the newest `.planning/prds/<slug>.md` or `<slug>-*.md` under the root or one folder below it, trying each slug in order.
+ *
+ * @remarks A single loop with no PRD path in its engine file still has its PRD and state folder named by the slug, often inside a repo worktree under the workspace root.
+ */
+async function prdBySlug(
+  root: string,
+  slugs: (string | undefined)[],
+): Promise<{ prdFile: string; slug: string } | null> {
+  let names: string[];
+  try {
+    names = await readdir(root);
+  } catch {
+    return null;
+  }
+  const bases = ["", ...names.filter((name) => !name.startsWith("."))];
+  for (const slug of new Set(slugs)) {
+    if (slug === undefined || prdSlugOf(slug) !== slug) continue;
+    const matches: Named[] = [];
+    for (const base of bases) {
+      const dir = path.join(base, ".planning", "prds");
+      for (const file of await listFiles(path.join(root, dir), null, "")) {
+        if (
+          file.name === `${slug}.md` ||
+          (file.name.startsWith(`${slug}-`) && file.name.endsWith(".md"))
+        ) {
+          matches.push({ ...file, name: path.join(dir, file.name) });
+        }
+      }
+    }
+    if (matches.length > 0) return { prdFile: newestOf(matches).name, slug };
+  }
+  return null;
+}
+
 async function readPrdModel(
   root: string,
   previous: LoopProgress | undefined,
+  identifier?: string,
 ): Promise<LoopProgress | null> {
   let reader: GuardedReader;
   try {
@@ -245,7 +297,16 @@ async function readPrdModel(
   const parsed = parsePrdEngine(engineText ?? "");
   const sameLoop = parsed.slug === null || parsed.slug === previous?.slug;
   const known = sameLoop ? previous?.prdFile : undefined;
-  const prdFile = parsed.prdPath ?? known ?? null;
+  const found =
+    parsed.prdPath === null && known === undefined
+      ? await prdBySlug(
+          root,
+          parsed.slug === null
+            ? [identifier?.toLowerCase(), identifier]
+            : [parsed.slug],
+        )
+      : null;
+  const prdFile = parsed.prdPath ?? known ?? found?.prdFile ?? null;
   const engine = engineText === null ? null : { text: engineText, closed };
   if (prdFile === null) {
     if (parsed.slug === null) return null;
@@ -270,6 +331,7 @@ async function readPrdModel(
   const outside = !isInside(root, path.resolve(root, prdRel));
   const slug =
     parsed.slug ??
+    found?.slug ??
     (parsed.prdPath === null ? previous?.slug : undefined) ??
     prdSlugOf(prdRel);
   if (slug === null || slug === undefined) return null;
@@ -323,7 +385,7 @@ async function readModel(
   );
   if (folders.length === 0) {
     return options.single === true
-      ? readPrdModel(root, options.previous)
+      ? readPrdModel(root, options.previous, options.identifier)
       : null;
   }
   const reader = await guardedReader(root);
@@ -339,7 +401,21 @@ async function readModel(
   const listed = unitFilePaths(roadmapText, slug);
   warnings.push(...listed.warnings);
   const files = new Map<string, string | null>();
-  for (const rel of new Set(listed.paths)) files.set(rel, await read(rel));
+  const alias = cardSlugPaths(roadmapText, slug, options.identifier);
+  for (const [index, rel] of listed.paths.entries()) {
+    if (files.has(rel)) continue;
+    let text = await read(rel);
+    const other = alias?.[index];
+    if (
+      text === null &&
+      other !== undefined &&
+      other !== rel &&
+      !refused.has(rel)
+    ) {
+      text = await read(other);
+    }
+    files.set(rel, text);
+  }
 
   return buildLoopProgress({
     slug,
@@ -423,6 +499,7 @@ async function refreshOnce(cardId: string): Promise<void> {
     const progress = await readLoopProgress(root, {
       single: card.source !== "group",
       previous: card.loopProgress,
+      identifier: card.identifier,
     });
     if (progress !== null) await store.setLoopProgress(cardId, progress, force);
   } catch (error) {

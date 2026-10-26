@@ -4,24 +4,35 @@ import path from "node:path";
 import { createHash } from "node:crypto";
 import { run } from "./exec.js";
 
+const HOME_DATA_DIR = path.join(os.homedir(), ".dispatch");
+
+const DATA_DIR = ((): string => {
+  const override = process.env.DISPATCH_DIR;
+  if (override && override.trim() !== "") return path.resolve(override);
+  if (process.env.NODE_TEST_CONTEXT) {
+    return path.join(os.tmpdir(), `dispatch-unisolated-${process.pid}`);
+  }
+  return HOME_DATA_DIR;
+})();
+
 /**
  * Leading tmux argv that pins this instance to its own tmux server.
  *
  * @remarks Empty for the home instance (`~/.dispatch`), so its existing sessions on the default
- * server survive an upgrade. Every `DISPATCH_DIR` override instance gets `-L dsp-<id>`, a private
+ * server survive an upgrade. Every other data directory (a `DISPATCH_DIR` override, or the
+ * throwaway folder of a Node test process with no override) gets `-L dsp-<id>`, a private
  * server, so a test instance can never capture, attach to, or kill the real instance's sessions
  * even when both name a session `dsp-LOCAL-9`. The id is the same 12-hex sha256 of the resolved
  * data directory the ttyd instance key uses; re-derived here because this adapter may import
  * nothing but itself and shared.
  */
-export const TMUX_SERVER_ARGS: readonly string[] = (() => {
-  const home = path.join(os.homedir(), ".dispatch");
-  const override = process.env.DISPATCH_DIR?.trim();
-  const dir = override ? path.resolve(override) : home;
-  if (dir === home) return [];
-  const id = createHash("sha256").update(dir).digest("hex").slice(0, 12);
-  return ["-L", `dsp-${id}`];
-})();
+export const TMUX_SERVER_ARGS: readonly string[] =
+  DATA_DIR === HOME_DATA_DIR
+    ? []
+    : [
+        "-L",
+        `dsp-${createHash("sha256").update(DATA_DIR).digest("hex").slice(0, 12)}`,
+      ];
 
 const END_OF_OPTIONS = "-".repeat(2);
 
@@ -173,15 +184,9 @@ export async function ensureNoAltScreenOverride(): Promise<void> {
 
 /**
  * `<data dir>/pty-shim.py`, derived locally: the subprocess adapters may only import themselves
- * and shared, so this mirrors `store/data-dir.ts` (the `DISPATCH_DIR` override, else `~/.dispatch`)
- * instead of importing it.
+ * and shared, so this mirrors `store/data-dir.ts` instead of importing it.
  */
-const PTY_SHIM_PATH = path.join(
-  process.env.DISPATCH_DIR && process.env.DISPATCH_DIR.trim() !== ""
-    ? path.resolve(process.env.DISPATCH_DIR)
-    : path.join(os.homedir(), ".dispatch"),
-  "pty-shim.py",
-);
+const PTY_SHIM_PATH = path.join(DATA_DIR, "pty-shim.py");
 
 /**
  * Wraps the pane command in the ?2026-stripping pty shim boot installed under the data dir.

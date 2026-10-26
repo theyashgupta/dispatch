@@ -22,18 +22,18 @@ import {
 import { assertMemoryHeadroom, memoryCheck } from "./memory-governor.js";
 import { waitForMemory } from "./memory-wait.js";
 import { pauseCard, unpauseCard } from "./pause-card.js";
-import { beginResume } from "./resume-session.js";
 import { runClaude } from "./run-claude.js";
+import { resumeLostCard } from "./supervisor-actions.js";
 
 export const sessionTools: {
   send: typeof sendConfirmed;
   keys: typeof sendKeys;
-  resume: typeof beginResume;
+  resume: (card: Card) => Promise<void>;
   runClaude: typeof runClaude;
 } = {
   send: sendConfirmed,
   keys: sendKeys,
-  resume: beginResume,
+  resume: resumeLostCard,
   runClaude,
 };
 
@@ -281,11 +281,11 @@ export async function resumeLoop(
 /**
  * Resume a card whose session is lost, through the same saga as the Resume button.
  *
- * @remarks Memory is checked here, before `beginResume`, so the refusal is `memory-low` and not
+ * @remarks Memory is checked here, before the resume starts, so the refusal is `memory-low` and not
  * `memory-pressure`. The cap gates only a card that holds a loop slot, the set `runningLoops` counts,
- * and runs with the live guards again inside `withCapLock`. The resumed session gets no kickoff, so
- * the caller sends a continue line once it is live. A live tmux session whose active session is `released`
- * gets Claude relaunched through `runClaude` instead, with no cap check since the card holds no slot.
+ * and runs with the live guards again inside `withCapLock`. On a board with the supervisor on, the
+ * supervisor types the resume prompt once claude is up. A live tmux session whose active session is
+ * `released` gets Claude relaunched through `runClaude` instead, with no cap check since the card holds no slot.
  */
 export async function resumeLostSession(
   caller: OrchestratorIdentity,
@@ -323,7 +323,11 @@ export async function resumeLostSession(
         }),
       );
     }
-    sessionTools.resume(current);
+    void sessionTools.resume(current).catch((err: unknown) => {
+      console.warn(
+        `[resume] resume_session prompt failed: ${(err as Error).message}`,
+      );
+    });
     return Promise.resolve();
   });
 }

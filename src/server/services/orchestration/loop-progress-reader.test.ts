@@ -925,3 +925,35 @@ void test("a gate line in a single PRD loop updates the phase gate and readAt", 
     stop();
   }
 });
+
+void test("a unit state folder under the card identifier slug reads its gate lines", async () => {
+  const root = partialRoot();
+  const expected = await readLoopProgress(root);
+  assert.ok(expected);
+  assert.ok(gates(expected, 2).includes("pass"));
+  renameSync(
+    join(root, UNIT_2_DIR),
+    join(root, "dispatch/.planning/group-1-unit-2"),
+  );
+  const missing = await readLoopProgress(root);
+  assert.ok(missing?.warnings.includes(`${UNIT_2_STATE}: missing`));
+  const progress = await readLoopProgress(root, { identifier: "GROUP-1" });
+  assert.ok(progress);
+  assert.deepEqual(gates(progress, 2), gates(expected, 2));
+  assert.ok(!progress.warnings.includes(`${UNIT_2_STATE}: missing`));
+});
+
+void test("a refresh of a group card reads the unit state under its identifier slug", async () => {
+  const root = partialRoot();
+  renameSync(
+    join(root, UNIT_2_DIR),
+    join(root, "dispatch/.planning/group-1-unit-2"),
+  );
+  const recorded: Recorded[] = [];
+  installRepo(() => groupCard(root, "in_progress"), recorded);
+  await refreshLoopProgress("card-1");
+  const progress = recorded.at(-1)?.progress;
+  assert.ok(progress);
+  assert.ok(gates(progress, 2).includes("pass"));
+  assert.ok(!progress.warnings.includes(`${UNIT_2_STATE}: missing`));
+});

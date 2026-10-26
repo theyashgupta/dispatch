@@ -165,7 +165,7 @@ Mount prefix: `/api/orchestrator`.
 | POST   | `/api/orchestrator/sessions/:cardId/resume-lost`   | Orchestrator token | Tool `resume_session`: resume a lost session through the Resume saga, refused while memory is low.  |
 | POST   | `/api/orchestrator/sessions/:cardId/stop`          | Orchestrator token | Tool `stop_session`: press Escape in a session pane and park it at Needs input.                     |
 | POST   | `/api/orchestrator/sessions/:cardId/pause`         | Orchestrator token | Tool `pause_card`: stop the processes of a loop in place with a user pause mark.                    |
-| POST   | `/api/orchestrator/sessions/:cardId/unpause`       | Orchestrator token | Tool `resume_card`: continue a paused loop, refused while memory is low.                            |
+| POST   | `/api/orchestrator/sessions/:cardId/unpause`       | Orchestrator token | Tool `resume_card`: continue a paused loop, waits up to 30 minutes while memory is low.             |
 | POST   | `/api/orchestrator/decisions`                      | Orchestrator token | Tool `create_decision_item`: raise a decision item for the user to answer.                          |
 | POST   | `/api/orchestrator/events/wait`                    | Orchestrator token | Tool `wait_for_event`: hold the call until a board event matches or the time limit passes.          |
 | POST   | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `start_ship`: start the ship flow of a finished group card or a finished single card.          |
@@ -2779,8 +2779,9 @@ unless `paneAtPrompt` says the pane's root shell owns the foreground and no star
 same card is in flight (a running claude, a pager, a rc prompt, or a second `send-keys -l`
 interleaving on one shell line is never typed into), `no-session` (400) when the tmux server no
 longer has the session (the seconds before the watcher marks it lost), `legacy` (409) when the
-session lacks the `DISPATCH_SHELL_SESSION` marker, and `account` (409) when the session's recorded
-Claude account no longer resolves, so the handler never falls through to Express's HTML 500.
+session lacks the `DISPATCH_SHELL_SESSION` marker, `account` (409) when the session's recorded
+Claude account no longer resolves, and `workspace-missing` (409) when the card's workspace folder is
+missing, so the handler never falls through to Express's HTML 500.
 Otherwise it types the same launch line a first start would, through `steps.ts#typeLaunchLine`, with
 `--resume <claudeSessionId>` when the hooks channel recorded the conversation id and a NEW
 conversation otherwise (never a guessed `--continue`: measured to refuse with "No conversation found
@@ -4484,15 +4485,16 @@ since LOCAL-99) goes to `store.startClaudeSession` instead and sets the start th
 "session_id mismatch" log any more: a differing id is a new node, not an error. Nodes are never
 deleted; a conversation Claude refuses on `--resume` is stamped `missingAt` and skipped.
 
-**Messages from other sessions (LOCAL-98).** The boot writes four settings files through
+**Messages from other sessions (LOCAL-98).** The boot writes seven settings files through
 `services/infra/hook-settings.ts`: `hook-settings-accept.json`, `hook-settings-hold.json` and
-`hook-settings-refuse.json`, plus `hook-settings.json` with `Config.crossSessionInbound` (default
-`accept`). The files differ only in `crossSessionInbound`. `buildLaunch` in `steps.ts` is the one
-launch chokepoint: it calls the pure `resolveCrossSessionInbound`
+`hook-settings-refuse.json` for loops, the same three with the `-orchestrator` suffix, plus
+`hook-settings.json` with `Config.crossSessionInbound` (default `accept`). The three files of one
+kind differ only in `crossSessionInbound`. `buildLaunch` in `steps.ts` is the one launch chokepoint:
+it calls the pure `resolveCrossSessionInbound`
 (`services/domain/cross-session-inbound.ts`) and passes the file of the result to `--settings`. The
 start intent value wins. A guarded launch (an orchestrator card, or a start intent playbook whose
 name starts with "Roadmap Loop") then takes the board policy value, or `refuse`. Every other launch
-takes the config value. `PUT /api/config/cross-session-inbound` writes `config.json` and the four
+takes the config value. `PUT /api/config/cross-session-inbound` writes `config.json` and the seven
 files. The next launch reads the new config value from memory, so no restart is needed. The file
 rewrite keeps `hook-settings.json` in step with the config. A running session keeps its file.
 
@@ -5767,7 +5769,7 @@ question; none of them read prose for truth.
   `deadcode` (knip), `replay-gate`, `doc-drift`, `invariants`, `check-hooks` and `test:timing` (all below), run in sequence.
 - **`npm run lint`** and **`npm run lint:typed`**: two ESLint modes. `lint` runs every rule that does not
   need type information, which includes all custom rules, and does not build a TypeScript program.
-  It is the local default and a step of `npm run check`. `lint:typed` sets `DISPATCH_LINT_TYPED=1`,
+  It is the local default and a step of `npm run check`. `lint:typed` runs with a 4 GB Node heap and sets `DISPATCH_LINT_TYPED=1`,
   which adds `recommendedTypeChecked`, the project service and the two type-aware rule overrides.
   The CI check job runs `lint:typed` after `npm run check`. Only `lint:typed` reports unused
   `eslint-disable` directives, because a directive for a type-aware rule looks unused to `lint`, and
@@ -6183,7 +6185,9 @@ Run `node scripts/scenario-names.mjs` after you add or rename a scenario file, b
 - tests/e2e/scenario-LOCAL-170-frozen-relaunch.e2e.ts (LOCAL-170)
 - tests/e2e/scenario-LOCAL-171-ship-retry.e2e.ts (LOCAL-171)
 - tests/e2e/scenario-LOCAL-172-promise-close.e2e.ts (LOCAL-172)
+- tests/e2e/scenario-LOCAL-197-live-isolation.e2e.ts (LOCAL-197)
 - tests/e2e/scenario-LOCAL-201-session-release.e2e.ts (LOCAL-201)
+- tests/e2e/scenario-LOCAL-209-worktree-node-modules.e2e.ts (LOCAL-209)
 
 [//]: # "scenario-list:end"
 
@@ -6218,6 +6222,8 @@ The scenario in tests/e2e/scenario-LOCAL-166-live-missing-workspace.e2e.ts prove
 The scenario in tests/e2e/scenario-LOCAL-168-pushover-attention.e2e.ts proves that an empty Pushover value gives one attention item and one start log line, and that filled values give neither (LOCAL-168). The test starts one server with `PUSHOVER_USER_KEY` and `PUSHOVER_APP_TOKEN` set to empty strings. The server log must have exactly one `[notify] loop phase notifications are on` line that names both variables. The board snapshot must carry `pushoverMissing` with both names in that order, and `GET /api/boards/counts` must show `attention` 1 for the default board. The test then starts a second server with fake non-empty values. That server log must have no `[notify]` line, the snapshot must have no `pushoverMissing`, and `attention` must be 0. The fake values must appear in neither log, snapshot nor counts.
 
 The scenario in tests/e2e/scenario-LOCAL-170-frozen-relaunch.e2e.ts proves that a session frozen after an idle compaction is relaunched once with resume (LOCAL-170). The sandbox sets `DISPATCH_FROZEN_RELAUNCH_MS` to 20 s through the `env` option of `startSandbox` and a memory sample file with low swap. The board has the supervisor on. The test starts one card with the fake `claude` and posts a `UserPromptSubmit` hook so the card holds the conversation id `conv-frozen`. It then rewrites the scenario file: the pane shows "Compacted while idle", the status line shows context 0 percent, and a `freezeFile` makes the fake hold every `Enter`. `POST /api/sessions/FRZ-1/input` must answer `unconfirmed`, and a `send` row must carry the reason `held in prompt box`. The card must reach the state `frozen` with no new launch and no `relaunch_frozen` row. Then one `relaunch_frozen` row with `result: "stopped"` must appear at least 20 s after `stateSince`. The freeze file must be gone, because the signal ended the fake, and the newest launch line must hold `--resume conv-frozen`. A confirmed `resume` row must follow, and the transcript must hold the resume prompt as a user entry. The card must have exactly one `session_relaunch` event. After a 60 s pause of the server, there must still be one `relaunch_frozen` row and one `session_relaunch` event.
+
+The scenario in tests/e2e/scenario-LOCAL-197-live-isolation.e2e.ts proves that a test process cannot write to the live board (LOCAL-197). A Node test process (`NODE_TEST_CONTEXT` is set) with no `DISPATCH_DIR` uses the data folder `<tmpdir>/dispatch-unisolated-<pid>` and not `~/.dispatch`. The tmux adapter uses the same rule, so that process also gets its own tmux server label. The process deletes the folder when it exits. The first test starts two sandboxes, each with card LIS-1 under the same tmux session name and the supervisor on. It stops the session of one sandbox. That supervisor must record `lost`, and in the other sandbox the card must stay live with no new orchestration event and no `session_lost`, `session_resume`, `resume_failed` or `status_needs_input` event. The second test runs a probe under the Node test runner that imports the store before it calls `isolateEnv()`. Its `HOME/.dispatch` is a link to the data folder of a running sandbox. The probe must open a database under `<tmpdir>/dispatch-unisolated-`, and the sandbox board must get no probe card and no `local_created` event.
 
 The two account scenarios (tests/e2e/scenario-LOCAL-159-account-login-decision.e2e.ts and tests/e2e/scenario-LOCAL-159-managed-default.e2e.ts) have one npm script. Run `npm run build` first, then run `npm run test:e2e:accounts`. The script runs the two files one after the other. The script is not part of `npm run check`.
 
@@ -6295,7 +6301,9 @@ format.
 for each inbound value, which the orchestrator session gets, and every other session gets
 `hook-settings-<value>.json`, which also sets `idleCompaction` and `promptSuggestionEnabled` to
 `false` so that a loop session does not compact while idle and its prompt box never shows a
-suggested `/ship` line (LOCAL-184).
+suggested `/ship` line (LOCAL-184). Each session start also merges both keys into the
+`settings.json` of the config dir it launches on, which for an added account is the link to the home
+file, so a new account dir has them too (LOCAL-198).
 
 ### Session Supervisor
 
@@ -6479,6 +6487,15 @@ and `swapCeilingMb` (256 to 65536, default 8192, else 400 `invalid-swapCeilingMb
 (whole number, 1 to 99, default 80, else 400 `invalid-budgetWarnPercent`) is optional the same way. The store reads each stored policy as the defaults of `defaultBoardPolicy` with
 the stored values over them, so a board saved before a new field gets its default. A stored policy
 that is JSON `null` or an array reads as the defaults alone.
+
+**Handoff clear and relaunch prompt.** At a handoff the supervisor sends Enter on the typed
+`/clear` when the pane is ready or shows the Claude Code command menu with `/clear` selected, and
+never on another dialog (LOCAL-202). It confirms the clear from the transcript: a new `.jsonl` in
+the same project folder that holds the `/clear` command entry within 10 s. It types `/clear` one more
+time when no confirmation comes, then gives up with step `clear`. The `resume_session` tool relaunches a
+lost card through the `resume` action on a board with the supervisor on, so the supervisor types and
+confirms the resume prompt after claude starts; with the supervisor off the relaunch types nothing. A
+loop whose engine is `handoff-pending` gets the handoff resume prompt instead of the continue line.
 
 **Running count and session release.** LOCAL-201 changes the running count (`runningLoops`). It skips a card in Agent done or Done, and it skips a card whose loop engine is closed. A card with no engine yet still counts. The `get_policy` read and every cap check read this count. The supervisor releases a finished launched card to free memory. The release is due 10 minutes (`RELEASE_AFTER_MS`, or `DISPATCH_RELEASE_AFTER_MS` for the sandbox) after the later of the move to Agent done and the last session state change. These conditions must also hold: the last marker is a DONE marker, the engine is closed or absent, the pane is idle, and no ship flow is running or stopped. The supervisor then types `/exit`, and the session state becomes `released`. The tmux session, the pane, the column and the marker stay. The supervisor kills nothing. A stored `released` holds against every detection until Run Claude or `resume_session` relaunches Claude, a lost tmux session does not resume it, and account moves and pause skip it. `send_prompt` refuses a released session. `resume_session` brings Claude back through `runClaude`, as Run Claude does.
 
@@ -6825,3 +6842,5 @@ The settings sheet on the centre has two tabs:
   `shared/orchestrator-models.ts`, and the route refuses any other model with 400.
 - Orchestrators: the main and the extras, with the form to add an extra, edit its override and move
   groups.
+
+When the engine file of a single PRD loop names no PRD path, the reader finds the PRD by its slug in `.planning/prds/` at the session root or in a repo folder one level below it: the engine slug, or, when the engine names no slug, the card identifier in lowercase and then as written (LOCAL-200).

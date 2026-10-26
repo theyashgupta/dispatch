@@ -125,11 +125,23 @@ echo "security: SecKeychainSearchCopyNext: The specified item could not be found
 exit 44
 `;
 
+const CLEARED_SHELL_VARS = [
+  "DISPATCH_GITHUB_API_URL",
+  "DISPATCH_SLACK_API_URL",
+  "CLAUDE_CONFIG_DIR",
+  "DISPATCH_ACCOUNT_DIRS",
+  "DISPATCH_CARD_ID",
+  "DISPATCH_HOOK_PORT",
+  "DISPATCH_HOOK_TOKEN",
+];
+
 /**
  * Point every path constant at a throwaway tree and put a fake `claude` first on PATH. Must run
  * before the module under test is imported, since `paths.ts` reads the environment once.
  * The provider API overrides a QA shell exports are cleared, so fetch mocks keyed on the real
- * provider hosts still match.
+ * provider hosts still match. The account and hook variables a loop shell exports are cleared,
+ * because every spawned fake `claude` inherits them and would read the live account folder or
+ * post to the live board.
  */
 export function isolateEnv(): IsolatedEnv {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "dispatch-test-"));
@@ -166,22 +178,20 @@ export function isolateEnv(): IsolatedEnv {
   fs.writeFileSync(path.join(binDir, "security"), FAKE_SECURITY, {
     mode: 0o755,
   });
-  const previous = {
+  const previous: Record<string, string | undefined> = {
     HOME: process.env.HOME,
     DISPATCH_DIR: process.env.DISPATCH_DIR,
     PATH: process.env.PATH,
     FAKE_KEYCHAIN_DIR: process.env.FAKE_KEYCHAIN_DIR,
-    DISPATCH_GITHUB_API_URL: process.env.DISPATCH_GITHUB_API_URL,
-    DISPATCH_SLACK_API_URL: process.env.DISPATCH_SLACK_API_URL,
-    CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,
   };
+  for (const key of CLEARED_SHELL_VARS) {
+    previous[key] = process.env[key];
+    delete process.env[key];
+  }
   process.env.FAKE_KEYCHAIN_DIR = keychainDir;
   process.env.HOME = home;
   process.env.DISPATCH_DIR = dispatchDir;
   process.env.PATH = `${binDir}:${process.env.PATH ?? ""}`;
-  delete process.env.DISPATCH_GITHUB_API_URL;
-  delete process.env.DISPATCH_SLACK_API_URL;
-  delete process.env.CLAUDE_CONFIG_DIR;
   const cleanup = (): void => {
     for (const [key, value] of Object.entries(previous)) {
       if (value === undefined) delete process.env[key];

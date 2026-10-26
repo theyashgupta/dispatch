@@ -8,6 +8,7 @@ import { DEFAULT_TERMINAL_APPEARANCE } from "../../shared/terminal-appearance.js
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "dispatch-route-test-"));
 process.env.HOME = home;
+process.env.DISPATCH_DIR = path.join(home, ".dispatch");
 const { CONFIG_PATH } = await import("../services/infra/paths.js");
 assert.ok(CONFIG_PATH.startsWith(home), "CONFIG_PATH escaped the temp HOME");
 fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });

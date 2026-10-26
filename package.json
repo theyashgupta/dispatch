@@ -48,7 +48,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "node scripts/with-check-slot.mjs eslint . --cache --cache-location node_modules/.cache/eslint/",
-    "lint:typed": "DISPATCH_LINT_TYPED=1 node scripts/with-check-slot.mjs eslint . --cache --cache-location node_modules/.cache/eslint-typed/",
+    "lint:typed": "DISPATCH_LINT_TYPED=1 NODE_OPTIONS=--max-old-space-size=4096 node scripts/with-check-slot.mjs eslint . --cache --cache-location node_modules/.cache/eslint-typed/",
     "depcruise": "depcruise src",
     "lint:fix": "node scripts/with-check-slot.mjs eslint . --fix --cache --cache-location node_modules/.cache/eslint/",
     "deadcode": "node scripts/with-check-slot.mjs npm run deadcode:knip",
