@@ -6188,6 +6188,7 @@ Run `node scripts/scenario-names.mjs` after you add or rename a scenario file, b
 - tests/e2e/scenario-LOCAL-171-ship-retry.e2e.ts (LOCAL-171)
 - tests/e2e/scenario-LOCAL-172-promise-close.e2e.ts (LOCAL-172)
 - tests/e2e/scenario-LOCAL-197-live-isolation.e2e.ts (LOCAL-197)
+- tests/e2e/scenario-LOCAL-209-worktree-node-modules.e2e.ts (LOCAL-209)
 
 [//]: # "scenario-list:end"
 

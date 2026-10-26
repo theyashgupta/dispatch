@@ -255,7 +255,12 @@ function submit() {
     wasCleared = true;
     return clearConversation();
   }
-  if (text === "/exit" && scenario.exitOnExit) process.exit(0);
+  if (text === "/exit") {
+    shown.push("> /exit", "  ⎿  Goodbye!");
+    input = "";
+    setImmediate(() => leave(0, "\n"));
+    return;
+  }
   const limit = scenario.limitStop;
   const reply = limit ?? scenario.reply ?? "ok";
   const file = transcriptFile ?? scenario.transcriptPath;
