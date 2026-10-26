@@ -188,7 +188,7 @@ These invariants stay unchanged:
 - NEW-24: the palette hex values are only in `tokens.css`. Each accent map has one source.
 - PANEL-03: the ttyd iframe is one always-rendered element. Never give it a `key`.
 
-These invariant checks retired on 2026-10-07 (LOCAL-77). A lint rule in `eslint.config.ts` replaces each one:
+These invariant checks retired on 2026-10-07 (LOCAL-77). A lint rule in `oxlint.config.ts` replaces each one:
 
 - NEW-15 (accent box-shadow focus): `components/ui/focus-outline.test.ts`, the style ban, the shadow class ban in `designLiteralBan` and the focus shadow value in `retiredLiteralBan`.
 - NEW-16 (raw float shadow): the shadow class ban in `designLiteralBan` and the float shadow value in `retiredLiteralBan`.
@@ -225,7 +225,7 @@ The design contract values stay: the density scale, source colors, contrast floo
 4. `.claude/settings.json` holds only hook entries. Put personal settings, for example `env` values, in `.claude/settings.local.json`.
 5. `.gitignore` also ignores a `.claude/` folder below the repo root, with the line `*/**/.claude/`.
 6. The `PreToolUse` hook `.claude/hooks/pretooluse-rules.mjs` denies an edit that breaks one of six rules: inline style, hex colour, Radix import, new `.tsx` file location, server data outside a query file, module folder shape. The deny reason names the fix and the section of this standard. `scripts/check-hooks.mjs` checks these decisions in `npm run check`.
-7. The `PostToolUse` hook `.claude/hooks/format-edited-file.mjs` runs prettier on each edited file. It skips config files and `.claude/`.
+7. The `PostToolUse` hook `.claude/hooks/format-edited-file.mjs` runs oxfmt on each edited file. It skips config files and `.claude/`.
 8. The `Stop` hook `.claude/hooks/stop-static-check.mjs` runs `format:check`, `lint`, `typecheck` and `depcruise` when the working tree has changes. If a step fails, the session cannot stop. Set `DISPATCH_SKIP_STOP_CHECK=1` in `.claude/settings.local.json` to turn off this check.
 
 ## Supersede records index
