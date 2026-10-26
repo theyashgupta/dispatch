@@ -113,7 +113,13 @@ export function sessionSection(row: SessionRow): SessionSection {
 }
 
 type StatusLabel =
-  "Lost" | "Working" | "To Do" | "Needs you" | "Review" | "Parked" | "Done";
+  | "Lost"
+  | "Working"
+  | "To Do"
+  | "Needs you"
+  | "Review"
+  | "Parked"
+  | "Done";
 
 const COLUMN_STATUS: Record<Column, StatusLabel> = {
   todo: "To Do",

@@ -625,7 +625,8 @@ function checkedName(raw: string): string {
 }
 
 type SessionsFolder =
-  { kind: "given"; path: string } | { kind: "default"; root: string };
+  | { kind: "given"; path: string }
+  | { kind: "default"; root: string };
 
 type BoardWrite = Promise<
   | Awaited<ReturnType<typeof store.createBoard>>

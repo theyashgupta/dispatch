@@ -1153,7 +1153,8 @@ export interface UpdateStatus {
 
 /** Outcome of a `runUpdate()` attempt: the freshly-confirmed on-disk version, or the manual fallback command. */
 export type UpdateRunResult =
-  { ok: true; version: string } | { ok: false; command: string };
+  | { ok: true; version: string }
+  | { ok: false; command: string };
 
 export type SourceKind = "snapshot" | "append";
 
@@ -1261,7 +1262,9 @@ export type GranolaCheckResult =
   | { state: Exclude<GranolaCheckState, "connected">; server?: string };
 
 export type GranolaError =
-  Exclude<GranolaCheckState, "connected"> | "timeout" | "unreadable";
+  | Exclude<GranolaCheckState, "connected">
+  | "timeout"
+  | "unreadable";
 
 export interface GranolaStatus {
   enabled: boolean;
@@ -1448,7 +1451,11 @@ export interface ClaudeUsageWindow {
 }
 
 export type ClaudeUsageStatus =
-  "ok" | "stale" | "unavailable" | "rate-limited" | "error";
+  | "ok"
+  | "stale"
+  | "unavailable"
+  | "rate-limited"
+  | "error";
 
 export interface ClaudeUsageSnapshot {
   status: ClaudeUsageStatus;
@@ -2233,7 +2240,9 @@ export type SlackMode = "mcp" | "token";
 export type SlackConnectorState = GranolaCheckState;
 
 export type SlackRoundError =
-  Exclude<SlackConnectorState, "connected"> | "timeout" | "invalid-output";
+  | Exclude<SlackConnectorState, "connected">
+  | "timeout"
+  | "invalid-output";
 
 export interface SlackMcpStatus {
   mode: SlackMode;

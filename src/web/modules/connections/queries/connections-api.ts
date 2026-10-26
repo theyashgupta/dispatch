@@ -261,7 +261,8 @@ export async function saveLinearStateMap(
 }
 
 type CalendarResult<T> =
-  { ok: true; value: T } | { ok: false; error: CalendarErrorCode };
+  | { ok: true; value: T }
+  | { ok: false; error: CalendarErrorCode };
 
 function calendarResult<T>(
   result: ApiResult<unknown>,

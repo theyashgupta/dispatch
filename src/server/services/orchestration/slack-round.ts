@@ -44,7 +44,10 @@ const FORBID_LINE =
   "Read only with the Slack tools. Never send, post, reply, react, edit, delete, schedule, draft or upload anything in Slack.";
 
 export type SlackRunResult =
-  "started" | "running" | "disabled" | "not-connected";
+  | "started"
+  | "running"
+  | "disabled"
+  | "not-connected";
 
 type SlackConnectorRead =
   | ConnectorCheck

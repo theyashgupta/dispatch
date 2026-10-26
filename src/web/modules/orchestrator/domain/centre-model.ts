@@ -20,7 +20,12 @@ export interface CentreControl {
 }
 
 export type TerminalMode =
-  "empty" | "not-running" | "resume" | "connecting" | "live" | "unavailable";
+  | "empty"
+  | "not-running"
+  | "resume"
+  | "connecting"
+  | "live"
+  | "unavailable";
 
 export const STALE_REASON =
   "Reconnecting. Actions are off until the board stream is back.";

@@ -9,7 +9,11 @@ import { hasLoopProgress } from "../../../../shared/running-group.js";
 import { clock } from "./usage-meters.js";
 
 export type TileState =
-  "stuck" | "needs_input" | "current" | "not_started" | "done";
+  | "stuck"
+  | "needs_input"
+  | "current"
+  | "not_started"
+  | "done";
 
 export const TILE_STATE_ORDER: readonly TileState[] = [
   "stuck",

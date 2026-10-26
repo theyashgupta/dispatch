@@ -22,7 +22,8 @@ export interface TodayModel {
 }
 
 export type EntryTarget =
-  { kind: "card"; cardId: string } | { kind: "page"; page: Page; id?: string };
+  | { kind: "card"; cardId: string }
+  | { kind: "page"; page: Page; id?: string };
 
 export const TODAY_PAGE_SIZE = 10;
 

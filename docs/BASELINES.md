@@ -165,7 +165,7 @@ per-distinct-window cost in the common single-window case — it remains sub-per
 - **Git SHA measured:** `e6adc16`
 - **Machine:** Apple Silicon, local (Chrome headless via `--headless=new`)
 - **Serve mode:** `prod` — the production build (`NODE_ENV=production node dist/server/
-bootstrap/index.js`) registered with the DevTools-hook shim on the FIRST attempt (commits > 0
+  bootstrap/index.js`) registered with the DevTools-hook shim on the FIRST attempt (commits > 0
   after the first interaction), so no `--dev` fallback was needed. **PERF-04's spike must reuse
   this exact `prod` mode** for its with/without comparison to stay like-for-like.
 - **Command:** `npm run build && node scripts/perf-rerender.mjs` (run 3 times)
@@ -543,7 +543,7 @@ true total of 500 via `doneCounts` (BOARD-08).
 **Verdict:**
 
 - **`initialBytes`:** `124260` → `16129` — a **7.7x reduction (−87.0%)**, and `16129/124260 =
-13.0%` of the before value, comfortably under this plan's 25% bound. This is the direct
+  13.0%` of the before value, comfortably under this plan's 25% bound. This is the direct
   SCALE-01/SCALE-05 result: `/api/board`'s payload no longer scales with total card count, only
   with the loaded window (`DONE_PAGE_SIZE=50` regardless of how many Done cards exist).
 - **`sseFrameBytes`:** `124268` → `16374` — a **7.6x reduction (−86.8%)**, `16374/124268 = 13.2%`
@@ -614,7 +614,7 @@ initialCards=50 sseFrameBytes=16374 loadCommits=8 commits=7`):
 - **`initialBytes`:** `16129` → `15029`, a **−1100 byte (−6.8%) decrease**. Phase 86's own diff is
   `borderRadius` token substitutions in `src/web/features/board/` only — zero files under
   `src/server/` were touched by 86-01 through 86-04 (confirmed: `git diff 02af014 HEAD --stat --
-src/server/` names only pre-existing Phase-82-era commits already merged before this
+  src/server/` names only pre-existing Phase-82-era commits already merged before this
   re-measurement, none of them touching `Card`/`BoardSnapshot`'s type shape, `redactCard`,
   `snapshot()`'s windowing/sort, or `hydrateFromParsed` — all four confirmed **byte-identical** via
   `git diff 02af014 HEAD` on `src/shared/types.ts` and `src/server/store/board.store.ts`'s relevant
@@ -1021,7 +1021,7 @@ cards inside the `done=500` fixture, all of which fall inside the `DONE_PAGE_SIZ
 1. **The `1240`-byte recovery IS the canary's own cost, confirmed by direct measurement of the
    real wire card, not inferred.** A temporary debug dump of one session-bearing card's exact JSON
    on the pre-removal tree showed the deleted field serialized as `"activeSession":{"id":"<36-char
-uuid>"}` only, `ttydPort` absent (`undefined`, dropped by `JSON.stringify`) because this
+   uuid>"}` only, `ttydPort` absent (`undefined`, dropped by `JSON.stringify`) because this
    fixture's single-session leg never spawns a real ttyd process, so no port is ever assigned to
    the seeded session record. That field's own byte length is `61` content bytes plus a `1`-byte
    comma separator, `62` bytes per card. `62 * 20 = 1240`, exactly the measured recovery. (`96-11`'s
@@ -1034,9 +1034,9 @@ uuid>"}` only, `ttydPort` absent (`undefined`, dropped by `JSON.stringify`) beca
 2. **The remaining `1141`-byte residual is `Card.activeSessionId`, a field with no v2.9
    equivalent, confirmed by direct measurement, not inferred.** The same debug dump, run again on
    the POST-removal tree, showed the session-bearing card's wire shape as `{id, issueId,
-identifier, title, description, priority, column, updatedAt, tmuxSession, workspacePath,
-activeSessionId, terminalError}` against a same-fixture non-session card's `{id, issueId,
-identifier, title, description, priority, column, updatedAt, terminalError}` — a `200`-byte
+   identifier, title, description, priority, column, updatedAt, tmuxSession, workspacePath,
+   activeSessionId, terminalError}` against a same-fixture non-session card's `{id, issueId,
+   identifier, title, description, priority, column, updatedAt, terminalError}` — a `200`-byte
    total delta across three fields (`tmuxSession`, `workspacePath`, `activeSessionId`). Of those
    three, `tmuxSession` and `workspacePath` are TWO of the original six flat fields the `6d2549f`
    baseline already carried for a session-bearing card (present in v2.9 too, not new). Only

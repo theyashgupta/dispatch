@@ -2,7 +2,11 @@ import { isWebUrl } from "../../../../shared/web-url.js";
 import type { SlackRow } from "../../../../shared/slack-rows.js";
 
 export type SlackActionId =
-  "draftReply" | "promote" | "snooze" | "done" | "copyLink";
+  | "draftReply"
+  | "promote"
+  | "snooze"
+  | "done"
+  | "copyLink";
 
 const SLACK_ACTIONS: { id: SlackActionId; label: string }[] = [
   { id: "draftReply", label: "Draft reply" },

@@ -52,7 +52,11 @@ const MAX_WAIT_MS = 2 ** 31 - 1;
 const FALLBACK_MS = 5 * 60 * 60_000;
 
 type LimitWaitReason =
-  "pinned" | "recent_move" | "no_headroom" | SessionMoveOutcome | "error";
+  | "pinned"
+  | "recent_move"
+  | "no_headroom"
+  | SessionMoveOutcome
+  | "error";
 
 const accountOf = (session: Session): string =>
   canonicalAccountId(session.claudeAccountId);

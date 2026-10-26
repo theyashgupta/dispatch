@@ -140,7 +140,8 @@ export async function ensureOrchestratorTerminal(
 }
 
 export type SaveOutcome =
-  { ok: true; board: Board } | { ok: false; reason: string; code?: string };
+  | { ok: true; board: Board }
+  | { ok: false; reason: string; code?: string };
 
 export interface ExtraInput {
   id: string;

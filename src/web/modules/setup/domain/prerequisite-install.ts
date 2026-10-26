@@ -1,7 +1,8 @@
 import type { PrerequisiteStatus } from "../../../../shared/types.js";
 
 export type RowInstall =
-  { phase: "installing" } | { phase: "failed"; command: string };
+  | { phase: "installing" }
+  | { phase: "failed"; command: string };
 
 export type RowInstalls = Record<string, RowInstall>;
 

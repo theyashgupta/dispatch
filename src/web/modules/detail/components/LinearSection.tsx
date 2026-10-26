@@ -22,7 +22,8 @@ import { moveErrorCopy } from "@/modules/detail/domain/move-error-copy";
 import { PanelAlert } from "./PanelNotice";
 
 type LinearResult =
-  { ok: true } | { ok: false; status: number; error: string | null };
+  | { ok: true }
+  | { ok: false; status: number; error: string | null };
 
 interface LinearSectionProps {
   card: CardModel;

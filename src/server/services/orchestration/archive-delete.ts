@@ -7,7 +7,12 @@ import {
 } from "./cleanup.js";
 
 export type ArchiveDeleteOutcome =
-  "deleted" | "blocked" | "failed" | "missing" | "restored" | "busy";
+  | "deleted"
+  | "blocked"
+  | "failed"
+  | "missing"
+  | "restored"
+  | "busy";
 
 /**
  * Hard-delete an archived group's worktrees and folders (LOCAL-17); branches always survive.
