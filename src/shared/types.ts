@@ -2144,7 +2144,8 @@ export type SupervisorState =
   | "frozen"
   | "lost"
   | "shell_prompt"
-  | "paused";
+  | "paused"
+  | "released";
 
 export type SupervisorStateReason =
   | "usage_stop"

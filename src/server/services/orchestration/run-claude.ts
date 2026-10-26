@@ -106,5 +106,11 @@ async function relaunch(
     }
     console.warn(`[run-claude] claude did not reach READY for card ${card.id}`);
   });
+  const live = store
+    .getCard(card.id)
+    ?.sessions?.find((s) => s.id === card.activeSessionId);
+  if (live?.state === "released") {
+    await store.setSessionStateIfSession(card.id, live.id, "working");
+  }
   return "launched";
 }

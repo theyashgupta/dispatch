@@ -24,6 +24,7 @@ const NO_TYPING_STATES: ReadonlySet<SupervisorState> = new Set([
   "stale",
   "frozen",
   "shell_prompt",
+  "released",
 ]);
 
 const MAX_REASONS = 5;
