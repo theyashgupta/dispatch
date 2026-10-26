@@ -1261,3 +1261,20 @@ void test(
     }
   },
 );
+
+void test("a typed /exit prints the goodbye line and ends the fake with code 0", async () => {
+  const dir = fs.mkdtempSync(path.join(env.root, "exit-"));
+  const bin = writeFakeClaudeTui(dir);
+  const child = spawnPiped(bin, []);
+  let out = "";
+  child.stdout?.on("data", (chunk: Buffer) => {
+    out += chunk.toString();
+  });
+  const exited = new Promise<number | null>((resolve) =>
+    child.once("exit", resolve),
+  );
+  await until(() => out.includes("❯ "));
+  child.stdin?.write("/exit\r");
+  assert.equal(await exited, 0);
+  assert.ok(out.includes("> /exit\n  ⎿  Goodbye!"));
+});
