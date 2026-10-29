@@ -3,8 +3,6 @@ import {
   COMMENT_BOX_ID,
 } from "@/modules/orchestrator/domain/centre-page-state";
 
-export const ENTRY_BUTTON_ID = "orchestrator-entry";
-
 /** Move focus to the comment box of the command centre, on the next frame. */
 export function focusCommentBox(): void {
   requestAnimationFrame(() => {
