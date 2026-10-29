@@ -638,3 +638,12 @@ This entry changes the text of Screen 3 and of the sections that cite it. It cha
 This entry adds to the screens above. It does not change the text of an earlier section.
 
 - **Cross-screen rules, Notice policy.** A new section gives the four suppression rules for notices: no notice for a session start or success, none for a failure older than 5 minutes, none for a reconnect replay, and no backlog replay when a hidden tab becomes visible.
+
+### 2026-10-30 (LOCAL-140)
+
+This entry changes the entry point of Screen 6. It replaces the "Entry point" line of the LOCAL-104 entry of 2026-10-13, the "Add orchestrator" button rows of Screen 5, and the line in "Navigation rules" (section "Information architecture") that names the board header button.
+
+- **Board header.** The board page header has no orchestrator button.
+- **Sidebar row.** In the expanded sidebar, one row shows directly under the selected board on every page. When the board has an orchestrator, the row reads "Orchestrator" with a state glyph and the needs-you count. The glyph shows "Running", "Starting", "Stopping" or "Stopped" to a screen reader. With no orchestrator, the row reads "Add orchestrator" in the muted tone. Both rows open Screen 6 of the selected board.
+- **Collapsed sidebar.** An Orchestrator icon follows the Boards icon. Its label is "Orchestrator" or "Add orchestrator". It opens Screen 6.
+- **Command palette.** "Open orchestrator" opens Screen 6 of the selected board. "Start orchestrator" shows only when the main orchestrator has no record or is stopped, and the board supervisor is on. It adds the main orchestrator when the board has none, starts it, shows "Orchestrator started." and opens Screen 6. A refusal shows its reason and keeps the page.
