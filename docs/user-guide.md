@@ -191,6 +191,7 @@ The orchestrator node of the command centre shows the state of the session as a 
 - **Needs input**, **Permission prompt**, **Usage limit dialog** and **Waiting for usage reset**. The session waits. Open the **Terminal** tab.
 - **Session lost** and **Claude exited**. The session ended. **Resume** shows.
 - **Frozen after compaction**. Claude stopped after an idle compaction. See [A frozen session](#a-frozen-session).
+- **Released**. Claude exited on purpose after the loop finished, to free memory. The card keeps its column, its marker and its terminal text. **Run Claude** starts Claude again.
 
 When the orchestrator waits at its prompt, Dispatch wakes it. Dispatch types one line that starts with "Dispatch wake:" when you answer its decision item, when one of its groups reaches Agent done, needs input, fails to start, ships, stops its ship flow, hits a loop error or a usage limit, and when the **Wake timer (minutes)** of the policy runs out. Dispatch never types while the orchestrator works, types at most one line in 20 seconds, and never wakes a stopped orchestrator.
 
