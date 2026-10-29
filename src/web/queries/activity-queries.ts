@@ -41,7 +41,7 @@ export function activityFeedQueryOptions(board: BoardKey) {
 /**
  * Read the activity feed of a board.
  *
- * @remarks A reader that mounts beside the always-mounted shell reader passes `refetchOnMount: false`, so it adds no request.
+ * @remarks The detail panel is the reader of the feed. `refetchOnMount: false` keeps a remount from refetching a cache the stream already keeps current.
  */
 export function useActivityFeedQuery(
   board: BoardKey,

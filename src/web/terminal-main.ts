@@ -919,7 +919,7 @@ const ZOOM = {
 
 /**
  * Zoom is per-device, not per-session: one origin-scoped key serves every
- * `/sessions/:id/terminal/` page, matching the established `dsp.*` convention (`dsp.view`,
+ * `/sessions/:id/terminal/` page, matching the established `dsp.*` convention (`dsp.route`,
  * `dsp.panel.width`, `dsp.board.columnWidths`).
  */
 const ZOOM_KEY = "dsp.terminal.zoom";

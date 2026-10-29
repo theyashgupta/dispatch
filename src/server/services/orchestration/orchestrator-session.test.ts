@@ -1065,3 +1065,63 @@ void test("the kickoff of an extra carries the feature scope block", async () =>
   assert.match(direction, /Act only on the cards that are assigned to you/);
   assert.doesNotMatch(direction, /Scope: board/);
 });
+
+void test("boot relaunches an open orchestrator session that runs on a revoked token and records one event", async () => {
+  await setRecord("lead", { state: "stopped" });
+  const cardId = record("lead").cardId as string;
+  const tmux = `dsp-${cardId}`;
+  await store.completeStart(cardId, undefined, {
+    workspacePath: `/sbx/sessions/${cardId}`,
+    branch: cardId,
+    tmuxSession: tmux,
+  });
+  const card = store.getCard(cardId)!;
+  const identity = { boardKey: SBX, orchestratorId: "lead" };
+  const stale = tokens.mintOrchestratorToken(identity);
+  tokens.revokeOrchestratorToken(identity);
+  let held = stale;
+  const relaunches = () =>
+    store
+      .listOrchestrationEvents(SBX, 0, 10_000)
+      .filter((e) => e.data.action === "orchestrator_relaunch");
+  svc.orchestratorTools.hasSession = (target) =>
+    Promise.resolve(target === `=${tmux}`);
+  svc.orchestratorTools.sessionEnv = () => Promise.resolve(held);
+  svc.orchestratorTools.atPrompt = () =>
+    Promise.resolve(calls.includes("send /exit"));
+  try {
+    calls.length = 0;
+    await svc.relaunchStaleTokenSessions();
+    assert.deepEqual(calls, [
+      `keys =${tmux}: Escape`,
+      "send /exit",
+      `relaunch ${card.id}`,
+    ]);
+    assert.equal(record("lead").state, "running");
+    const events = relaunches();
+    assert.equal(events.length, 1);
+    assert.equal(events[0]?.cardId, card.id);
+    assert.deepEqual(events[0]?.data, {
+      action: "orchestrator_relaunch",
+      orchestratorId: "lead",
+      reason: "revoked token",
+      result: "launched",
+    });
+
+    held = tokens.mintOrchestratorToken(identity);
+    calls.length = 0;
+    await svc.relaunchStaleTokenSessions();
+    assert.deepEqual(calls, []);
+    assert.equal(relaunches().length, 1);
+  } finally {
+    svc.orchestratorTools.hasSession = () => Promise.resolve(true);
+    svc.orchestratorTools.atPrompt = () => Promise.resolve(true);
+  }
+});
+
+void test("boot leaves an orchestrator session at its shell prompt alone", async () => {
+  svc.orchestratorTools.sessionEnv = () => Promise.resolve(undefined);
+  calls.length = 0;
+  await svc.relaunchStaleTokenSessions();
+  assert.deepEqual(calls, []);
+});
