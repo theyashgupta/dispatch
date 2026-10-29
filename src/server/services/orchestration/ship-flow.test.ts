@@ -672,6 +672,49 @@ void test("with merge rights a two unit stack and its specs branch ship in order
   ]);
 });
 
+void test("startShip starts a flow for a card in Agent done with a closed engine and a released session", async () => {
+  const stack = await newStack();
+  const id = stack.card.id;
+  await store.setLoopProgress(
+    id,
+    progress(["built, awaiting /ship"], {
+      active: true,
+      iteration: 3,
+      sessionId: null,
+      handoffPending: false,
+      startedAt: null,
+      closed: true,
+    }),
+  );
+  await store.applyMarker(
+    id,
+    undefined,
+    "agent_done",
+    undefined,
+    "marker-released",
+    "status_agent_done",
+  );
+  const sessionId = store.getCard(id)?.activeSessionId ?? "";
+  assert.equal(
+    await store.setSessionStateIfSession(id, sessionId, "released"),
+    true,
+  );
+  const released = store.getCard(id)!;
+  assert.equal(released.column, "agent_done");
+  assert.equal(
+    released.sessions?.find((s) => s.id === sessionId)?.state,
+    "released",
+  );
+  const started = await startShip(stack, ["unit-1"]);
+  assert.equal(started.state, "running");
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.deepEqual(
+    flow.branches.map((b) => [b.name, b.state]),
+    [["unit-1", "merged"]],
+  );
+});
+
 void test("startShip ships loop unit branches that only the unit Status line names", async () => {
   const stack = await newStack();
   const names = [
