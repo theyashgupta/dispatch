@@ -177,7 +177,7 @@ bootstrap/index.js`) registered with the DevTools-hook shim on the FIRST attempt
   increments a page-global counter via `onCommitFiberRoot`. A fixed interaction script runs
   against one real (read-only) Linear-synced card in an isolated-HOME sandbox (`apiKey`/`filters`
   lifted from `~/.dispatch/config.json`; `board.db` never copied): (a) view toggle
-  Board→Orca→Board, (b) inbox open/close, (c) card select + re-select in Orca/docked mode
+  Board→Orca→Board, (b) inbox open/close, (c) card select + re-select in Orca/docked mode (a page since removed)
   (avoiding the DetailPanel overlay-backdrop trap — 55-02 lesson), (d) one SSE-driven board
   mutation via REST (`todo`→`done`→`todo`) while idle on the board. Interactions are dispatched via
   a real DOM `.click()` (React treats a native `click` Event identically regardless of dispatch
@@ -216,7 +216,7 @@ reduction on this exact fixed interaction script, at a real build-time and bundl
 so the compiler is not this path's optimization; per the REJECT branch, manual memoization is
 the only remaining lever, gated on a specific interaction showing excessive commits. None does:
 `toggle=6` (2 full view-mode swaps), `inbox=4` (2 open/close cycles), `select=4` (select +
-re-select in Orca), and `sse=6` (2 card moves, each requiring a `Board`-column re-render by
+re-select in Orca, a page since removed), and `sse=6` (2 card moves, each requiring a `Board`-column re-render by
 design) are each proportionate to the distinct state transitions they exercise — no single
 interaction stands out as disproportionate against the others, and the baseline's own finding
 already noted no "this number is bad" claim could be made without a comparison point. Baseline

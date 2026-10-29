@@ -49,12 +49,7 @@ import {
 import { hideDisabledSlack } from "../../../../shared/hide-disabled-slack.js";
 import { slackRows } from "../../../../shared/slack-rows.js";
 import { startTarget } from "../../../../shared/start-request.js";
-import type {
-  ActivityEvent,
-  BoardKey,
-  BoardSnapshot,
-} from "../../../../shared/types.js";
-import { isUnseen } from "../../../../shared/unseen-activity.js";
+import type { BoardKey, BoardSnapshot } from "../../../../shared/types.js";
 import { BootScreen } from "@/components/BootScreen";
 import { PageErrorBoundary } from "@/components/PageErrorBoundary";
 import { useThemeState } from "@/components/ThemeProvider";
@@ -64,14 +59,9 @@ import {
 } from "@/components/ui/hooks/overlay-return";
 import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { useItems } from "@/components/ui/hooks/use-items";
-import {
-  stampLastOpened,
-  useLastOpened,
-} from "@/components/ui/hooks/use-last-opened";
 import { useShortcuts } from "@/components/ui/hooks/use-shortcuts";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { Toaster } from "@/components/ui/sonner";
-import { ActivityDrawer } from "@/modules/shell/components/ActivityDrawer";
 import { CheatSheet } from "@/modules/shell/components/CheatSheet";
 import { ShellFrame } from "@/modules/shell/components/ShellFrame";
 import {
@@ -95,7 +85,6 @@ import {
   useBoardListQuery,
 } from "@/queries/board-list-queries";
 import { actionApi } from "@/queries/action-services";
-import { useActivityFeedQuery } from "@/queries/activity-queries";
 import {
   latestBoard,
   useBoardLiveUpdates,
@@ -107,7 +96,6 @@ import { refreshPushSubscription } from "@/queries/push-api";
 export interface ShellContainerProps {
   headerViews: Partial<Record<Page, ComponentType>>;
   accountSlot: ReactNode;
-  activityList: ReactNode;
   content: ReactNode;
   detail: ReactNode;
   children?: ReactNode;
@@ -141,9 +129,7 @@ const PAGE_TITLES: Record<Page, string> = {
   board: "Board",
   inbox: "Inbox",
   tickets: "Tickets",
-  workspace: "Workspace",
   settings: "Settings",
-  activity: "Activity",
   accounts: "Accounts and Usage",
   playbooks: "Playbooks",
   vault: "Vault",
@@ -163,8 +149,6 @@ const PAGE_TITLES: Record<Page, string> = {
   "board-settings": "Board settings",
 };
 
-const NO_EVENTS: ActivityEvent[] = [];
-
 function useCommittedRoute(): Route {
   const leaf = useRouterState({ select: (s) => s.matches.at(-1) });
   const pathname = useLocation({ select: (l) => l.pathname });
@@ -174,7 +158,6 @@ function useCommittedRoute(): Route {
 export function ShellContainer({
   headerViews,
   accountSlot,
-  activityList,
   content,
   detail,
   children,
@@ -189,11 +172,9 @@ export function ShellContainer({
   const boardKey = useAppStore(appStore, (s) => s.board);
   const doneLimit = useAppStore(appStore, (s) => s.doneLimit);
   const soundEnabled = useAppStore(appStore, (s) => s.soundEnabled);
-  const activityOpen = useAppStore(appStore, (s) => s.activityOpen);
   const setupWizardOpen = useAppStore(appStore, (s) => s.setupWizard != null);
   const selectedCardId = useAppStore(appStore, (s) => s.selectedCardId);
   const pinned = useAppStore(appStore, (s) => s.pinned);
-  const { data: events = NO_EVENTS } = useActivityFeedQuery(boardKey);
   const decisions = useOpenDecisionsQuery(boardKey);
   const list = useBoardListQuery();
   const boardList = list.data;
@@ -356,7 +337,6 @@ export function ShellContainer({
       navigator.serviceWorker.removeEventListener("message", onMessage);
   }, [appStore]);
 
-  const lastOpened = useLastOpened();
   const pageRef = useRef<Page | null>(null);
   useLayoutEffect(() => {
     const previous = pageRef.current;
@@ -398,7 +378,7 @@ export function ShellContainer({
         }),
     }),
     {
-      menuOpen: activityOpen || sheetOpen || board === null || setupWizardOpen,
+      menuOpen: sheetOpen || board === null || setupWizardOpen,
       scopeId: "root",
     },
   );
@@ -432,7 +412,6 @@ export function ShellContainer({
     board: board.cards.length,
     inbox: inboxCount,
     tickets: ticketsCount,
-    activity: events.length,
     "pull-requests": githubEnabled ? buildPrRows(items, board.cards).length : 0,
     errors: errorCount,
     slack: slack.length,
@@ -504,12 +483,6 @@ export function ShellContainer({
         onOpenCreateTicket={() =>
           openOverlay(appStore, appStore.openCreateTicket)
         }
-        onOpenActivity={() => {
-          appStore.setActivityOpen(true);
-          stampLastOpened("__feed__");
-        }}
-        activityUnseen={isUnseen(events[0]?.ts, lastOpened["__feed__"])}
-        activityOpen={activityOpen}
         carousel={carousel}
         boards={{
           items: boardItems,
@@ -544,12 +517,6 @@ export function ShellContainer({
         detail={detail}
         needsYouCount={needsYouCount}
       >
-        <ActivityDrawer
-          open={activityOpen}
-          onClose={() => appStore.setActivityOpen(false)}
-        >
-          {activityList}
-        </ActivityDrawer>
         {children}
         {shortcutsOpen && (
           <CheatSheet

@@ -22,9 +22,6 @@ interface ShellFrameProps {
   sync: SyncSnapshot;
   accountSlot?: ReactNode;
   onOpenCreateTicket: () => void;
-  onOpenActivity: () => void;
-  activityUnseen: boolean;
-  activityOpen: boolean;
   carousel: boolean;
   boards: SidebarBoardsData;
   dashboards: SidebarDashboardsData;
@@ -47,8 +44,6 @@ export function ShellFrame({
   counts,
   sync,
   accountSlot,
-  activityUnseen,
-  activityOpen,
   carousel,
   boards,
   dashboards,
@@ -62,7 +57,6 @@ export function ShellFrame({
   children,
   onMobileOpenChange,
   onOpenCreateTicket,
-  onOpenActivity,
   needsYouCount,
 }: ShellFrameProps) {
   const { isMobile, openMobile, setOpenMobile, state } = useSidebar();
@@ -99,8 +93,6 @@ export function ShellFrame({
         counts={counts}
         sync={sync}
         accountSlot={accountSlot}
-        activityUnseen={activityUnseen}
-        activityOpen={activityOpen}
         carousel={carousel}
         boards={{
           ...boards,
@@ -127,11 +119,6 @@ export function ShellFrame({
         }}
         onOpenCreateTicket={() => {
           onOpenCreateTicket();
-          skipFocusReturn();
-          setOpenMobile(false);
-        }}
-        onOpenActivity={() => {
-          onOpenActivity();
           skipFocusReturn();
           setOpenMobile(false);
         }}

@@ -3,7 +3,7 @@ import type { Card, Item } from "./types.js";
 /**
  * Whether a card is a ticket waiting in the Inbox: in the Inbox, not dismissed, not a group member.
  *
- * @remarks Exported so the strip badge, the To Do empty state and the Inbox list cannot drift onto two definitions of the same number. A member is excluded because `/move` 409s it via `groupedMemberError`, and this matches `buildWorkspaceGroups` and `StatusPillSwitcher`.
+ * @remarks Exported so the strip badge, the To Do empty state and the Inbox list cannot drift onto two definitions of the same number. A member is excluded because `/move` 409s it via `groupedMemberError`, and this matches `StatusPillSwitcher`.
  */
 export function isInboxWaiting(card: Card): boolean {
   return (

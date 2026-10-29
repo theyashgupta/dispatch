@@ -26,7 +26,16 @@ test("a settings hash keeps its tab as the id", () => {
 });
 
 test("empty, bare and unknown hashes map to the board with no id", () => {
-  for (const hash of ["", "#", "#/", "#/nope", "#nope", "#/nope/123"]) {
+  for (const hash of [
+    "",
+    "#",
+    "#/",
+    "#/nope",
+    "#nope",
+    "#/nope/123",
+    "#/activity",
+    "#/activity/123",
+  ]) {
     assert.deepEqual(parseRoute(hash), { page: "board" });
   }
 });
@@ -34,7 +43,6 @@ test("empty, bare and unknown hashes map to the board with no id", () => {
 test("the route table holds exactly the shell and source pages", () => {
   assert.deepEqual([...PAGES].sort(), [
     "accounts",
-    "activity",
     "archive",
     "ask",
     "board",
@@ -54,7 +62,6 @@ test("the route table holds exactly the shell and source pages", () => {
     "tickets",
     "today",
     "vault",
-    "workspace",
     "workspaces",
   ]);
   assert.equal(parseRoute("#/workspaces").page, "workspaces");
@@ -65,6 +72,11 @@ test("the route table holds exactly the shell and source pages", () => {
   });
 });
 
+test("the removed workspace page parses to the board", () => {
+  assert.deepEqual(parseRoute("#/workspace"), { page: "board" });
+  assert.deepEqual(parseRoute("#/workspace/X"), { page: "board" });
+});
+
 test("a hash without the slash still parses", () => {
   assert.deepEqual(parseRoute("#inbox"), { page: "inbox" });
 });
@@ -73,10 +85,8 @@ test("routeHash round-trips every valid hash", () => {
   for (const hash of [
     "#/board",
     "#/inbox",
-    "#/workspace",
     "#/settings",
     "#/settings/vault",
-    "#/activity",
     "#/accounts",
     "#/playbooks",
     "#/vault",
