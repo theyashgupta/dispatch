@@ -39,8 +39,8 @@ test("the keyed kanban index leaf yields the board page and the board", () => {
   );
 });
 
-test("a keyed dashboard, inbox and sessions leaf yield the page, board and id", () => {
-  for (const page of ["dashboard", "inbox", "sessions"] as const) {
+test("a keyed dashboard and inbox leaf yield the page, board and id", () => {
+  for (const page of ["dashboard", "inbox"] as const) {
     assert.deepEqual(
       routeFromMatch(
         {

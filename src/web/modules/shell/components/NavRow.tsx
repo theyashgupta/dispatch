@@ -1,7 +1,6 @@
 import type { Page } from "../../../../shared/route.js";
 import { Badge } from "@/components/ui/badge";
 import { SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
-import { Spinner } from "@/components/ui/spinner";
 import { NavIcon } from "@/modules/shell/components/NavIcon";
 
 const ROW_CLASS =
@@ -13,7 +12,6 @@ interface NavRowProps {
   brand?: string;
   active: boolean;
   collapsed: boolean;
-  live?: boolean;
   count?: number;
   neutral?: boolean;
   onNavigate: (page: Page) => void;
@@ -25,7 +23,6 @@ export function NavRow({
   brand,
   active,
   collapsed,
-  live = false,
   count = 0,
   neutral = false,
   onNavigate,
@@ -41,11 +38,7 @@ export function NavRow({
         className={ROW_CLASS}
         onClick={() => onNavigate(page)}
       >
-        {live ? (
-          <Spinner aria-hidden="true" />
-        ) : (
-          <NavIcon page={page} brand={brand} />
-        )}
+        <NavIcon page={page} brand={brand} />
         {collapsed ? null : (
           <span className="min-w-0 flex-1 truncate" title={label}>
             {label}

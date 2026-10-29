@@ -18,6 +18,10 @@ import {
   SidebarBoards,
   type SidebarBoardsData,
 } from "@/modules/shell/components/SidebarBoards";
+import {
+  SidebarDashboards,
+  type SidebarDashboardsData,
+} from "./SidebarDashboards";
 import { SidebarFooterActions } from "@/modules/shell/components/SidebarFooterActions";
 import {
   navGroups,
@@ -32,13 +36,12 @@ export interface AppSidebarProps {
   counts: NavCounts;
   sync: SyncSnapshot;
   accountSlot?: ReactNode;
-  activityUnseen: boolean;
-  activityOpen: boolean;
   carousel: boolean;
   boards: SidebarBoardsData;
+  dashboards: SidebarDashboardsData;
+  hasMainOrchestrator: boolean;
   onNavigate: (page: Page) => void;
   onOpenCreateTicket: () => void;
-  onOpenActivity: () => void;
 }
 
 export function AppSidebar({
@@ -47,13 +50,12 @@ export function AppSidebar({
   counts,
   sync,
   accountSlot,
-  activityUnseen,
-  activityOpen,
   carousel,
   boards,
+  dashboards,
+  hasMainOrchestrator,
   onNavigate,
   onOpenCreateTicket,
-  onOpenActivity,
 }: AppSidebarProps) {
   const { state, isMobile } = useSidebar();
   const collapsed = state === "collapsed" && !isMobile;
@@ -101,9 +103,6 @@ export function AppSidebar({
                     brand={item.brand}
                     active={current === item.page}
                     collapsed={collapsed}
-                    live={
-                      item.page === "sessions" && (counts.sessions ?? 0) > 0
-                    }
                     count={counts[item.page]}
                     neutral={item.page === "tickets"}
                     onNavigate={onNavigate}
@@ -124,11 +123,23 @@ export function AppSidebar({
                     collapsed
                     onNavigate={onNavigate}
                   />
+                  {hasMainOrchestrator ? (
+                    <NavRow
+                      page="dashboard"
+                      label="Dashboards"
+                      active={current === "dashboard"}
+                      collapsed
+                      onNavigate={onNavigate}
+                    />
+                  ) : null}
                 </SidebarMenu>
               </SidebarGroup>
             </>
           ) : (
-            <SidebarBoards {...boards} />
+            <>
+              <SidebarBoards {...boards} />
+              <SidebarDashboards {...dashboards} />
+            </>
           )}
         </SidebarContent>
 
@@ -138,11 +149,8 @@ export function AppSidebar({
           accountSlot={accountSlot}
           collapsed={collapsed}
           canToggle={canToggle}
-          activityUnseen={activityUnseen}
-          activityOpen={activityOpen}
           onNavigate={onNavigate}
           onOpenCreateTicket={onOpenCreateTicket}
-          onOpenActivity={onOpenActivity}
         />
       </nav>
     </Sidebar>

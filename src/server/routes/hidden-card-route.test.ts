@@ -82,7 +82,6 @@ void test("no user or orchestrator list route lists or counts a hidden orchestra
     ["/boards", undefined],
     ["/search?board=HID&q=zebra", undefined],
     ["/cards?board=HID", undefined],
-    ["/sessions?board=HID", undefined],
     ["/orchestrator/cards", token],
     ["/orchestrator/sessions", token],
   ] as const) {

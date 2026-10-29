@@ -1,7 +1,7 @@
 import type { ItemSourceId } from "./types.js";
 import type { Page } from "./route.js";
 
-export type NavGroup = "Home" | "Work" | "Sources" | "System";
+export type NavGroup = "Home" | "Sources" | "System";
 
 export interface NavItem {
   page: Page;
@@ -9,32 +9,16 @@ export interface NavItem {
   group: NavGroup;
   source?: ItemSourceId;
   brand?: string;
-  needsMainOrchestrator?: true;
 }
 
 export type NavCounts = Partial<Record<Page, number>>;
 
-export const NAV_GROUPS: readonly NavGroup[] = [
-  "Home",
-  "Work",
-  "Sources",
-  "System",
-];
+export const NAV_GROUPS: readonly NavGroup[] = ["Home", "Sources", "System"];
 
 export const NAV_ITEMS: readonly NavItem[] = [
   { page: "today", label: "Today", group: "Home" },
   { page: "inbox", label: "Inbox", group: "Home" },
   { page: "ask", label: "Ask", group: "Home" },
-  { page: "board", label: "Board", group: "Work" },
-  {
-    page: "dashboard",
-    label: "Dashboard",
-    group: "Work",
-    needsMainOrchestrator: true,
-  },
-  { page: "sessions", label: "Sessions", group: "Work" },
-  { page: "workspace", label: "Workspace", group: "Work" },
-  { page: "activity", label: "Activity", group: "Work" },
   {
     page: "tickets",
     label: "Tickets",
@@ -110,11 +94,8 @@ export function navGroups(
 export function visibleNavItems(
   items: readonly NavItem[],
   enabledSources: readonly string[],
-  hasMainOrchestrator = false,
 ): NavItem[] {
   return items.filter(
-    (item) =>
-      (item.source === undefined || enabledSources.includes(item.source)) &&
-      (item.needsMainOrchestrator !== true || hasMainOrchestrator),
+    (item) => item.source === undefined || enabledSources.includes(item.source),
   );
 }

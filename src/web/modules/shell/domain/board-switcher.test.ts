@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import type { BoardKey } from "../../../../shared/types.js";
-import { attentionLabel, loopsLabel, switcherItems } from "./board-switcher.js";
+import type { BoardKey, OrchestratorRecord } from "../../../../shared/types.js";
+import {
+  attentionLabel,
+  dashboardItems,
+  loopsLabel,
+  switcherItems,
+} from "./board-switcher.js";
 
 const LOCAL = "LOCAL" as BoardKey;
 const ACME = "ACME" as BoardKey;
@@ -63,4 +68,100 @@ test("attentionLabel names the count", () => {
 test("loopsLabel names the count", () => {
   assert.equal(loopsLabel(1), "1 running loop");
   assert.equal(loopsLabel(2), "2 running loops");
+});
+
+const record = (role: OrchestratorRecord["role"]): OrchestratorRecord => ({
+  id: `o-${role}`,
+  name: role,
+  role,
+  scope: { groupIds: [], ticketIds: [] },
+  policyOverride: {},
+  cardId: null,
+  state: "stopped",
+  createdAt: "2026-01-01T00:00:00.000Z",
+});
+
+const withOrchestrators = [
+  { ...boards[0], orchestrators: [record("main")] },
+  { ...boards[1], orchestrators: [record("main")] },
+  { ...boards[2], orchestrators: [record("extra")] },
+  { key: "ZED" as BoardKey, name: "Zed", archived: false, orchestrators: [] },
+  {
+    key: "BEE" as BoardKey,
+    name: "Bee",
+    archived: false,
+    orchestrators: [record("extra"), record("main")],
+  },
+];
+
+const BEE = "BEE" as BoardKey;
+const ZED = "ZED" as BoardKey;
+
+test("dashboardItems lists active boards with a main record in input order", () => {
+  assert.deepEqual(
+    dashboardItems(withOrchestrators, undefined, {
+      page: "board",
+      board: LOCAL,
+    }).map((item) => item.key),
+    [LOCAL, BEE],
+  );
+});
+
+test("dashboardItems skips a board with only extra records, none, or an archived main", () => {
+  const keys = dashboardItems(withOrchestrators, undefined, {
+    page: "board",
+    board: LOCAL,
+  }).map((item) => item.key);
+  assert.equal(keys.includes(ACME), false);
+  assert.equal(keys.includes(ZED), false);
+  assert.equal(keys.includes(OLD), false);
+});
+
+test("dashboardItems takes attention from counts", () => {
+  const counts = [
+    { key: BEE, running: 0, openGroups: 0, attention: 4, loops: [] },
+  ];
+  assert.deepEqual(
+    dashboardItems(withOrchestrators, counts, {
+      page: "board",
+      board: LOCAL,
+    }).map((item) => [item.key, item.attention]),
+    [
+      [LOCAL, 0],
+      [BEE, 4],
+    ],
+  );
+});
+
+test("dashboardItems selects only the route board row on the dashboard page", () => {
+  assert.deepEqual(
+    dashboardItems(withOrchestrators, undefined, {
+      page: "dashboard",
+      board: BEE,
+    }).map((item) => [item.key, item.selected]),
+    [
+      [LOCAL, false],
+      [BEE, true],
+    ],
+  );
+});
+
+test("dashboardItems selects no row on the board page", () => {
+  assert.equal(
+    dashboardItems(withOrchestrators, undefined, {
+      page: "board",
+      board: BEE,
+    }).some((item) => item.selected),
+    false,
+  );
+});
+
+test("dashboardItems selects no row on the dashboard page of a board without a main orchestrator", () => {
+  assert.equal(
+    dashboardItems(withOrchestrators, undefined, {
+      page: "dashboard",
+      board: ZED,
+    }).some((item) => item.selected),
+    false,
+  );
 });

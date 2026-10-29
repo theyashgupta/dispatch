@@ -1,4 +1,5 @@
 import { formatCount } from "../../../../shared/format-count.js";
+import type { Page } from "../../../../shared/route.js";
 import type { Board, BoardCount, BoardKey } from "../../../../shared/types.js";
 
 export interface SwitcherItem {
@@ -13,7 +14,7 @@ export interface SwitcherItem {
 export function switcherItems(
   boards: readonly Pick<Board, "key" | "name" | "archived">[],
   counts: readonly BoardCount[] | undefined,
-  selected: BoardKey,
+  selected: BoardKey | null,
 ): SwitcherItem[] {
   return boards
     .filter((board) => !board.archived)
@@ -27,6 +28,24 @@ export function switcherItems(
         selected: board.key === selected,
       };
     });
+}
+
+/** Whether the board has an orchestrator with the role main. */
+function hasMainOrchestrator(board: Pick<Board, "orchestrators">): boolean {
+  return board.orchestrators.some((o) => o.role === "main");
+}
+
+/** The active boards that have a main orchestrator, as Dashboards rows; the row of the route board is selected only on the dashboard page. */
+export function dashboardItems(
+  boards: readonly Pick<Board, "key" | "name" | "archived" | "orchestrators">[],
+  counts: readonly BoardCount[] | undefined,
+  route: { page: Page; board: BoardKey },
+): SwitcherItem[] {
+  return switcherItems(
+    boards.filter(hasMainOrchestrator),
+    counts,
+    route.page === "dashboard" ? route.board : null,
+  );
 }
 
 /** The accessible name of an attention badge. */

@@ -64,13 +64,15 @@ test("a start error needs attention and its heading is the title", () => {
   assert.equal(attentionTitle(withError), "Start failed: git");
 });
 
-test("a lost session needs attention outside Done and not inside it", () => {
+test("a lost session needs attention outside In Review, Parked and Done and not inside them", () => {
   const lost = card({ sessionLost: true });
   assert.equal(needsAttention(lost), true);
   assert.equal(attentionTitle(lost), "Session lost");
-  const done = card({ sessionLost: true, column: "done" });
-  assert.equal(needsAttention(done), false);
-  assert.equal(attentionTitle(done), null);
+  for (const column of ["in_review", "parked", "done"] as const) {
+    const parked = card({ sessionLost: true, column });
+    assert.equal(needsAttention(parked), false, column);
+    assert.equal(attentionTitle(parked), null, column);
+  }
 });
 
 test("blocked cleanup needs attention", () => {

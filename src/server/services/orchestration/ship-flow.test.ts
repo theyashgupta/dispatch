@@ -666,9 +666,53 @@ void test("with merge rights a two unit stack and its specs branch ship in order
     "-u",
     "NODE_ENV",
     "DISPATCH_CHECK_WAIT_SECONDS=5400",
+    "DISPATCH_CHECK_CLASS=ship",
     "git",
     "status",
   ]);
+});
+
+void test("startShip starts a flow for a card in Agent done with a closed engine and a released session", async () => {
+  const stack = await newStack();
+  const id = stack.card.id;
+  await store.setLoopProgress(
+    id,
+    progress(["built, awaiting /ship"], {
+      active: true,
+      iteration: 3,
+      sessionId: null,
+      handoffPending: false,
+      startedAt: null,
+      closed: true,
+    }),
+  );
+  await store.applyMarker(
+    id,
+    undefined,
+    "agent_done",
+    undefined,
+    "marker-released",
+    "status_agent_done",
+  );
+  const sessionId = store.getCard(id)?.activeSessionId ?? "";
+  assert.equal(
+    await store.setSessionStateIfSession(id, sessionId, "released"),
+    true,
+  );
+  const released = store.getCard(id)!;
+  assert.equal(released.column, "agent_done");
+  assert.equal(
+    released.sessions?.find((s) => s.id === sessionId)?.state,
+    "released",
+  );
+  const started = await startShip(stack, ["unit-1"]);
+  assert.equal(started.state, "running");
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.deepEqual(
+    flow.branches.map((b) => [b.name, b.state]),
+    [["unit-1", "merged"]],
+  );
 });
 
 void test("startShip ships loop unit branches that only the unit Status line names", async () => {
@@ -1332,6 +1376,7 @@ void test("a LOCAL group finds the default check command of a workspace folder r
       "-u",
       "NODE_ENV",
       "DISPATCH_CHECK_WAIT_SECONDS=5400",
+      "DISPATCH_CHECK_CLASS=ship",
       ...DEFAULT_CHECK_COMMAND.split(" "),
     ]);
   } finally {
@@ -2202,6 +2247,23 @@ void test("a check that waits 40 minutes for the slot and runs 5 minutes passes"
     await done;
     assert.equal(check.opts().signal?.aborted, false);
     assert.equal(check.opts().timeout, 5400_000 + 30 * 60_000);
+  } finally {
+    check.restore();
+  }
+});
+
+void test("a check that waits 25 minutes for the slot and runs 20 minutes passes", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const check = heldCheck();
+  try {
+    const done = runCheck("/sbx", ["npm", "run", "check"]);
+    check.opts().onStderr?.(WAITING);
+    t.mock.timers.tick(25 * 60_000);
+    check.opts().onStderr?.("with-check-slot: acquired\n");
+    t.mock.timers.tick(20 * 60_000);
+    check.finish();
+    await done;
+    assert.equal(check.opts().signal?.aborted, false);
   } finally {
     check.restore();
   }

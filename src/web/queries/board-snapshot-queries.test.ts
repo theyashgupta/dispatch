@@ -8,7 +8,7 @@ import type {
   BoardSnapshot,
   TunnelState,
 } from "../../shared/types.js";
-import { activityKeys } from "./activity-queries.js";
+import { activityFeedQueryOptions, activityKeys } from "./activity-queries.js";
 import { systemMemoryKeys } from "./system-memory-queries.js";
 import { fetchBoardSnapshot } from "./board-snapshot-api.js";
 import {
@@ -222,14 +222,37 @@ test("applyActivityEvent merges into an existing feed, newest id first", () => {
   ]);
 });
 
-test("applyActivityEvent creates the feed entry when missing", () => {
+test("an activity frame does not create a feed cache", () => {
   const client = newClient();
   applyActivityEvent(client, LOCAL, ev(7));
-  assert.deepEqual(client.getQueryData(activityKeys.feed(LOCAL)), [ev(7)]);
+  assert.equal(client.getQueryData(activityKeys.feed(LOCAL)), undefined);
+  const h = start();
+  h.source().emitNamed("activity", ev(8));
+  assert.equal(h.queryClient.getQueryData(activityKeys.feed(LOCAL)), undefined);
+  h.dispose();
+});
+
+test("an activity frame during an in-flight feed fetch is kept", async () => {
+  const client = newClient();
+  let resolveGet: (response: Response) => void = () => undefined;
+  globalThis.fetch = () =>
+    new Promise<Response>((resolve) => {
+      resolveGet = resolve;
+    });
+  const pending = client.fetchQuery(activityFeedQueryOptions(LOCAL));
+  applyActivityEvent(client, LOCAL, ev(5));
+  resolveGet(new Response(JSON.stringify({ events: [ev(4), ev(2)] })));
+  await pending;
+  assert.deepEqual(client.getQueryData(activityKeys.feed(LOCAL)), [
+    ev(5),
+    ev(4),
+    ev(2),
+  ]);
 });
 
 test("applyActivityEvent drops the oldest event at the 201st", () => {
   const client = newClient();
+  client.setQueryData(activityKeys.feed(LOCAL), [ev(1)]);
   for (let id = 1; id <= 201; id++) applyActivityEvent(client, LOCAL, ev(id));
   const feed =
     client.getQueryData<ActivityEvent[]>(activityKeys.feed(LOCAL)) ?? [];
@@ -266,18 +289,18 @@ test("a default message reaches onBoardUpdate before the cache, then the cache",
 });
 
 test("activity and tunnel frames route to their callbacks and cache keys", () => {
-  const activity: ActivityEvent[] = [];
   const tunnels: TunnelState[] = [];
   const h = start({
-    onActivity: (event) => activity.push(event),
     onTunnelState: (state) => tunnels.push(state),
   });
+  h.queryClient.setQueryData(activityKeys.feed(LOCAL), [ev(3), ev(1)]);
   h.source().emitNamed("activity", ev(4));
   h.source().emitNamed("tunnel", { status: "off" });
-  assert.deepEqual(activity, [ev(4)]);
   assert.deepEqual(tunnels, [{ status: "off" }]);
   assert.deepEqual(h.queryClient.getQueryData(activityKeys.feed(LOCAL)), [
     ev(4),
+    ev(3),
+    ev(1),
   ]);
   assert.deepEqual(h.queryClient.getQueryData(tunnelKeys.state), {
     status: "off",
@@ -821,11 +844,16 @@ test("a stream frame for ACME is written under the ACME key", () => {
 
 test("an activity frame of an ACME stream lands in the ACME feed only", () => {
   const h = start({ board: ACME });
+  h.queryClient.setQueryData(activityKeys.feed(ACME), [ev(2)]);
+  h.queryClient.setQueryData(activityKeys.feed(LOCAL), [ev(3)]);
   h.source().emitNamed("activity", { ...ev(5), boardKey: ACME });
   assert.deepEqual(h.queryClient.getQueryData(activityKeys.feed(ACME)), [
     { ...ev(5), boardKey: ACME },
+    ev(2),
   ]);
-  assert.equal(h.queryClient.getQueryData(activityKeys.feed(LOCAL)), undefined);
+  assert.deepEqual(h.queryClient.getQueryData(activityKeys.feed(LOCAL)), [
+    ev(3),
+  ]);
   h.dispose();
 });
 
@@ -891,30 +919,42 @@ test("a polled snapshot of the selected board still reaches the cache and onBoar
   h.dispose();
 });
 
-test("an activity frame of another board changes no feed and calls no callback", () => {
-  const seen: number[] = [];
-  const h = start({ board: ACME, onActivity: (e) => seen.push(e.id) });
+test("an activity frame of another board changes no feed", () => {
+  const h = start({ board: ACME });
+  h.queryClient.setQueryData(activityKeys.feed(ACME), [ev(2)]);
+  h.queryClient.setQueryData(activityKeys.feed(LOCAL), [ev(3)]);
   h.source().emitNamed("activity", ev(5));
   h.source().emitNamed("activity", { ...ev(6), boardKey: LOCAL });
-  assert.deepEqual(seen, []);
-  assert.equal(h.queryClient.getQueryData(activityKeys.feed(ACME)), undefined);
+  assert.deepEqual(h.queryClient.getQueryData(activityKeys.feed(ACME)), [
+    ev(2),
+  ]);
+  assert.deepEqual(h.queryClient.getQueryData(activityKeys.feed(LOCAL)), [
+    ev(3),
+  ]);
   h.dispose();
 });
 
 test("a LOCAL stream accepts an activity frame with no boardKey", () => {
   const h = start();
+  h.queryClient.setQueryData(activityKeys.feed(LOCAL), [ev(2)]);
   h.source().emitNamed("activity", ev(5));
   assert.deepEqual(h.queryClient.getQueryData(activityKeys.feed(LOCAL)), [
     ev(5),
+    ev(2),
   ]);
   h.dispose();
 });
 
 test("applyActivityEvent writes into the feed of the board it is given", () => {
   const client = newClient();
+  client.setQueryData(activityKeys.feed(ACME), [ev(2)]);
+  client.setQueryData(activityKeys.feed(LOCAL), [ev(3)]);
   applyActivityEvent(client, ACME, ev(1));
-  assert.deepEqual(client.getQueryData(activityKeys.feed(ACME)), [ev(1)]);
-  assert.equal(client.getQueryData(activityKeys.feed(LOCAL)), undefined);
+  assert.deepEqual(client.getQueryData(activityKeys.feed(ACME)), [
+    ev(2),
+    ev(1),
+  ]);
+  assert.deepEqual(client.getQueryData(activityKeys.feed(LOCAL)), [ev(3)]);
 });
 
 test("newestBoardSnapshot ignores a newer snapshot of another board", () => {

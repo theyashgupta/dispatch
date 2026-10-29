@@ -1,6 +1,6 @@
 import type { Card } from "./types.js";
 
-/** Map each card id to its identifier, for the activity rows and filter. */
+/** Map each card id to its identifier, for the card timeline rows. */
 export function cardIdentifiers(
   cards: readonly Card[],
 ): Record<string, string> {

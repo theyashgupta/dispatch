@@ -1,6 +1,6 @@
-import test, { after, afterEach } from "node:test";
+import test, { after, afterEach, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import {
+import fs, {
   appendFileSync,
   chmodSync,
   cpSync,
@@ -14,6 +14,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { EventEmitter } from "node:events";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
@@ -956,4 +957,91 @@ void test("a refresh of a group card reads the unit state under its identifier s
   assert.ok(progress);
   assert.ok(gates(progress, 2).includes("pass"));
   assert.ok(!progress.warnings.includes(`${UNIT_2_STATE}: missing`));
+});
+
+interface FakeWatch {
+  dir: string;
+  fire: () => void;
+}
+
+/**
+ * Replaces `fs.watch` with a fake that records each watched folder, and returns the records and the restore function.
+ *
+ * @remarks The reader imports `watch` as a named binding, so `syncBuiltinESMExports` must push the mock into that binding and back.
+ */
+function fakeWatcher(t: TestContext): {
+  watches: FakeWatch[];
+  restore: () => void;
+} {
+  const watches: FakeWatch[] = [];
+  const watchMock = t.mock.method(
+    fs,
+    "watch",
+    (dir: string, _options: unknown, listener: () => void) => {
+      watches.push({ dir, fire: listener });
+      return Object.assign(new EventEmitter(), { close: () => undefined });
+    },
+  );
+  syncBuiltinESMExports();
+  return {
+    watches,
+    restore: () => {
+      watchMock.mock.restore();
+      syncBuiltinESMExports();
+    },
+  };
+}
+
+async function fireAndWaitForRead(
+  watches: FakeWatch[],
+  dir: string,
+  recorded: Recorded[],
+): Promise<void> {
+  const watch = watches.find((candidate) => candidate.dir === dir);
+  assert.ok(watch, `no watch on ${dir}`);
+  const before = recorded.length;
+  watch.fire();
+  await waitFor(() => recorded.length > before, 1000);
+}
+
+void test("a write in the identifier unit folder and in the roadmap slug folder each trigger a refresh", async (t) => {
+  const root = partialRoot();
+  const aliasDir = join(root, "dispatch/.planning/group-1-unit-2");
+  cpSync(join(root, UNIT_2_DIR), aliasDir, { recursive: true });
+  const fake = fakeWatcher(t);
+  const recorded: Recorded[] = [];
+  installRepo(() => groupCard(root, "in_progress"), recorded);
+  const stop = startLoopProgressReader({ intervalMs: 60_000, debounceMs: 20 });
+  try {
+    await waitFor(() =>
+      fake.watches.some((candidate) => candidate.dir === aliasDir),
+    );
+    await fireAndWaitForRead(fake.watches, aliasDir, recorded);
+    await fireAndWaitForRead(fake.watches, join(root, UNIT_2_DIR), recorded);
+  } finally {
+    stop();
+    fake.restore();
+  }
+});
+
+void test("a single PRD card adds no identifier folder watch", async (t) => {
+  const root = singleRoot();
+  mkdirSync(join(root, "repo/.planning/group-1-unit-1"), { recursive: true });
+  const fake = fakeWatcher(t);
+  const recorded: Recorded[] = [];
+  installRepo(() => launchedCard(root, true), recorded);
+  const stop = startLoopProgressReader({ intervalMs: 60_000, debounceMs: 20 });
+  try {
+    const stateDir = join(root, SINGLE_DIR);
+    await waitFor(() =>
+      fake.watches.some((candidate) => candidate.dir === stateDir),
+    );
+    assert.ok(
+      !fake.watches.some((candidate) => candidate.dir.includes("group-1")),
+    );
+    await fireAndWaitForRead(fake.watches, stateDir, recorded);
+  } finally {
+    stop();
+    fake.restore();
+  }
 });

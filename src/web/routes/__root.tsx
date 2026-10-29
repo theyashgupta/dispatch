@@ -20,7 +20,6 @@ import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import type { AppStore } from "@/lib/app-store";
 import type { BoardKey } from "../../shared/types.js";
 import { AccountChipView, AccountsHeaderView } from "@/modules/accounts";
-import { ActivityFilterView, ActivityListView } from "@/modules/activity";
 import { AskHeaderView } from "@/modules/ask";
 import {
   CleanupView,
@@ -64,7 +63,6 @@ const MeetingNotesView = lazy(() =>
 
 const PAGE_HEADER_VIEWS: Partial<Record<Page, ComponentType>> = {
   accounts: AccountsHeaderView,
-  activity: ActivityFilterView,
   archive: lazy(() =>
     import("@/modules/archive").then((m) => ({ default: m.ArchiveHeaderView })),
   ),
@@ -272,7 +270,6 @@ function RootComponent() {
     <ShellView
       headerViews={PAGE_HEADER_VIEWS}
       accountSlot={<AccountChipView />}
-      activityList={<ActivityListView />}
       content={<Outlet />}
       detail={<DetailPanelView />}
     >

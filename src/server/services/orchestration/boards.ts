@@ -210,11 +210,18 @@ export function isRunningCard(card: Card): boolean {
   );
 }
 
+/** True when the card has a loop engine that is not open, and false when it has no engine yet. */
+export function engineClosed(card: Card): boolean {
+  const engine = card.loopProgress?.engine;
+  return engine != null && (!engine.active || engine.closed);
+}
+
 /**
  * The number of loops that hold a cap slot on a board, without the card `exceptId` when given.
  *
  * @remarks A loop is a running group, or a running ticket card that an orchestrator launched, so it
- * carries `launch`. A card in Agent done is waiting on the user and holds no slot.
+ * carries `launch`. A card in Agent done is waiting on the user and holds no slot, and neither does a
+ * card whose loop engine is closed, whatever its column.
  */
 export function runningLoops(board: BoardKey, exceptId?: string): number {
   return store
@@ -224,6 +231,7 @@ export function runningLoops(board: BoardKey, exceptId?: string): number {
         (c.source === "group" || c.launch !== undefined) &&
         c.id !== exceptId &&
         c.column !== "agent_done" &&
+        !engineClosed(c) &&
         isRunningCard(c),
     ).length;
 }

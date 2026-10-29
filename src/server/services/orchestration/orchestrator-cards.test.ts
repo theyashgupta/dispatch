@@ -35,6 +35,8 @@ const { runningLoops } = await import("./boards.js");
 const { sessionStarter, startSession } = await import("./start-session.js");
 const { startOrchestratorCard } = await import("./orchestrator-cards.js");
 const { accountDir, upsertAccount } = await import("./claude-accounts.js");
+const { LOOP_PROGRESS } =
+  await import("../../test-support/supervised-session.js");
 
 const SBX = parseBoardKey("SBX") as BoardKey;
 const NOB = parseBoardKey("NOB") as BoardKey;
@@ -601,4 +603,46 @@ void test("a card whose blockers are all done starts", async () => {
     playbook: PLAYBOOK,
   });
   assert.equal(starts.at(-1)?.id, card.id);
+});
+
+void test("a finished card in Needs input frees its slot for start_card, and a third open loop fills the cap", async () => {
+  const engine = {
+    active: true,
+    iteration: 1,
+    sessionId: "conv",
+    handoffPending: false,
+    startedAt: null,
+    closed: false,
+  };
+  const loop = async (closed: boolean) => {
+    const { g } = await startedGroup(store, { board: SBX });
+    await store.setLoopProgress(g.id, {
+      ...LOOP_PROGRESS,
+      engine: closed ? { ...engine, active: false, closed } : engine,
+    });
+    return g;
+  };
+  const base = runningLoops(SBX);
+  await loop(false);
+  await loop(false);
+  const finished = await loop(true);
+  await store.moveCardManual(finished.id, "needs_input");
+  assert.equal(runningLoops(SBX), base + 2);
+  await setPolicy({ concurrencyCap: base + 3 });
+  try {
+    const card = await ticket();
+    const startsBefore = starts.length;
+    await startOrchestratorCard(CALLER, card, { playbook: PLAYBOOK });
+    assert.equal(starts.length, startsBefore + 1);
+    await loop(false);
+    const refusedCard = await ticket();
+    await refused(
+      refusedCard,
+      { playbook: PLAYBOOK },
+      PolicyError,
+      "policy-refused",
+    );
+  } finally {
+    await setPolicy({ concurrencyCap: 10 });
+  }
 });

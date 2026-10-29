@@ -5,10 +5,7 @@ import {
   INBOX_ACTIONS,
   actionsFor,
   markDone,
-  bulkOutcomeCopy,
   runAction,
-  runBulkCleanup,
-  runBulkResume,
   snoozeRow,
   snoozeWithUndo,
   syncSources,
@@ -57,18 +54,6 @@ function ctx() {
       setCardInboxDismissed: async (id, dismissed) => {
         calls.push(`card-dismissed ${id} ${dismissed}`);
         await Promise.resolve();
-      },
-      cleanupCard: async (id) => {
-        calls.push(`cleanup ${id}`);
-        await Promise.resolve();
-      },
-      switchSession: async (id, sessionId) => {
-        calls.push(`switch ${id} ${sessionId}`);
-        await Promise.resolve();
-      },
-      resumeCard: async (id) => {
-        calls.push(`resume ${id}`);
-        return await Promise.resolve({ ok: true as const });
       },
       pollSource: async (id) => {
         calls.push(`poll ${id}`);
@@ -304,113 +289,6 @@ test("a preset that resolves to the past becomes a notice, never an unhandled th
   await snoozeRow(c.context, row(), "bogus" as never, new Date());
   assert.equal(c.calls.length, 1);
   assert.match(c.calls[0] ?? "", /^notice /);
-});
-
-const target = (cardId: string, sessionId: string) => ({
-  cardId,
-  identifier: cardId,
-  sessionId,
-});
-
-test("bulk cleanup calls each distinct card once, in order, and keeps going past a failure", async () => {
-  const c = ctx();
-  const outcome = await runBulkCleanup(c.context.api, [
-    target("LOCAL-1", "a"),
-    target("LOCAL-1", "b"),
-    target("LOCAL-2", "c"),
-  ]);
-  assert.deepEqual(c.calls, ["cleanup LOCAL-1", "cleanup LOCAL-2"]);
-  assert.deepEqual(outcome, { done: ["LOCAL-1", "LOCAL-2"], failed: [] });
-  const failing = ctx();
-  failing.context.api.cleanupCard = async (id) => {
-    failing.calls.push(`cleanup ${id}`);
-    if (id === "LOCAL-1") throw new Error("cleanupCard failed: 409");
-    await Promise.resolve();
-  };
-  const mixed = await runBulkCleanup(failing.context.api, [
-    target("LOCAL-1", "a"),
-    target("LOCAL-2", "c"),
-  ]);
-  assert.deepEqual(failing.calls, ["cleanup LOCAL-1", "cleanup LOCAL-2"]);
-  assert.deepEqual(mixed, {
-    done: ["LOCAL-2"],
-    failed: [{ identifier: "LOCAL-1", error: "cleanupCard failed: 409" }],
-  });
-  assert.equal(
-    bulkOutcomeCopy("Cleaned up", mixed),
-    "Cleaned up 1 of 2. Failed: LOCAL-1 (cleanupCard failed: 409)",
-  );
-});
-
-test("bulk resume switches then resumes per card and reports a refused resume by identifier", async () => {
-  const c = ctx();
-  c.context.api.resumeCard = async (id) => {
-    c.calls.push(`resume ${id}`);
-    return await Promise.resolve(
-      id === "LOCAL-2"
-        ? { ok: false as const, status: 400 }
-        : { ok: true as const },
-    );
-  };
-  const outcome = await runBulkResume(c.context.api, [
-    target("LOCAL-1", "s1"),
-    target("LOCAL-2", "s2"),
-  ]);
-  assert.deepEqual(c.calls, [
-    "switch LOCAL-1 s1",
-    "resume LOCAL-1",
-    "switch LOCAL-2 s2",
-    "resume LOCAL-2",
-  ]);
-  assert.deepEqual(outcome, {
-    done: ["LOCAL-1"],
-    failed: [{ identifier: "LOCAL-2", error: "resume refused (400)" }],
-  });
-  assert.equal(
-    bulkOutcomeCopy("Resumed", { done: ["a"], failed: [] }),
-    "Resumed 1 of 1",
-  );
-});
-
-test("bulk resume names the memory reason of a memory-pressure refusal", async () => {
-  const c = ctx();
-  c.context.api.resumeCard = async () =>
-    await Promise.resolve({
-      ok: false as const,
-      status: 409,
-      error: "memory-pressure",
-      reason: "swap is full",
-    });
-  const outcome = await runBulkResume(c.context.api, [target("LOCAL-1", "s1")]);
-  assert.deepEqual(outcome.failed, [
-    { identifier: "LOCAL-1", error: "swap is full" },
-  ]);
-  assert.equal(
-    bulkOutcomeCopy("Resumed", outcome),
-    "Resumed 0 of 1. Failed: LOCAL-1 (swap is full)",
-  );
-});
-
-test("bulk resume skips the switch for an active row and switches back after a refused resume", async () => {
-  const c = ctx();
-  c.context.api.resumeCard = async (id) => {
-    c.calls.push(`resume ${id}`);
-    return await Promise.resolve(
-      id === "LOCAL-2"
-        ? { ok: false as const, status: 409 }
-        : { ok: true as const },
-    );
-  };
-  await runBulkResume(c.context.api, [
-    { ...target("LOCAL-1", "s1"), active: true },
-    { ...target("LOCAL-2", "lost"), active: false, restoreSessionId: "live" },
-  ]);
-  assert.deepEqual(c.calls, [
-    "resume LOCAL-1",
-    "switch LOCAL-2 lost",
-    "resume LOCAL-2",
-    "switch LOCAL-2 live",
-  ]);
 });
 
 test("Sync now posts nothing with no enabled source and names a refused source", async () => {

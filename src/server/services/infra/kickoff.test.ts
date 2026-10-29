@@ -76,7 +76,7 @@ test("the status protocol block is unchanged by the section", () => {
   assert.ok(withImages.includes("DISPATCH_STATUS: NEEDS_INPUT"));
   assert.ok(
     withImages.includes(
-      "- NEEDS_INPUT is only for a blocking question that stops the work, never for a progress note; a progress note uses WORKING.",
+      "- NEEDS_INPUT is only for a blocking question that a person must answer, never for a progress note, a slot wait or a running check; WORKING is the line for those.",
     ),
   );
 });

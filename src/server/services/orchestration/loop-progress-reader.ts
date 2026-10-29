@@ -486,6 +486,22 @@ function phaseDirOf(progress: LoopProgress, root: string): string | null {
   return isInside(root, dir) ? dir : null;
 }
 
+/**
+ * Returns the current unit state folder under the card identifier slug, or null when the reader has no fallback to it.
+ *
+ * @remarks Mirrors the `cardSlugPaths` fallback of the roadmap read, so a gate pass in `<identifier>-unit-<N>` shows within the watch delay.
+ */
+function identifierDirOf(
+  progress: LoopProgress,
+  root: string,
+  identifier: string | undefined,
+): string | null {
+  const alias = identifier?.toLowerCase();
+  if (alias === undefined || alias === progress.slug) return null;
+  if (progress.prdFile !== undefined) return null;
+  return phaseDirOf({ ...progress, slug: alias }, root);
+}
+
 const inFlight = new Map<string, Promise<void>>();
 const rerun = new Set<string>();
 const forced = new Set<string>();
@@ -617,6 +633,8 @@ export function startLoopProgressReader(
     dirs.push(path.join(root, ".roadmap", progress.slug));
     const phaseFolder = phaseDirOf(progress, root);
     if (phaseFolder !== null) dirs.push(phaseFolder);
+    const aliasFolder = identifierDirOf(progress, root, card.identifier);
+    if (aliasFolder !== null) dirs.push(aliasFolder);
     return dirs;
   };
 

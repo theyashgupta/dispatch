@@ -19,7 +19,6 @@ import { initialHash, rememberedHash } from "../shared/route.js";
 
 const ROUTE_KEY = "dsp.route";
 const BOARD_STORAGE_KEY = "dsp.board";
-const LEGACY_VIEW_KEY = "dsp.view";
 const SOUND_KEY = "dsp.sound";
 
 const leavingProtocolRelativePath = window.location.pathname.startsWith("//");
@@ -36,11 +35,7 @@ function readStorage(key: string): string | null {
 }
 
 const bareEntry = ["", "#", "#/"].includes(window.location.hash);
-const start = initialHash(
-  window.location.hash,
-  readStorage(ROUTE_KEY),
-  readStorage(LEGACY_VIEW_KEY),
-);
+const start = initialHash(window.location.hash, readStorage(ROUTE_KEY));
 if (!leavingProtocolRelativePath && start !== window.location.hash) {
   history.replaceState(history.state, "", start);
 }

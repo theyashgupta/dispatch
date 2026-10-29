@@ -1,8 +1,9 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { isolateEnv } from "../../test-support/fixtures.js";
+import { installFakeTmux } from "../../test-support/fake-tmux.js";
 import { DEFAULT_BOARD_KEY, parseBoardKey } from "../../../shared/board-key.js";
 import type { BoardKey } from "../../../shared/types.js";
 import type { ActionDeps } from "./supervisor-actions.js";
@@ -547,4 +548,105 @@ void test("a server restart keeps a frozen session frozen with the same stateSin
   assert.equal(kept?.state, "frozen");
   assert.equal(kept?.stateSince, before?.stateSince);
   assert.equal(stateEvents(SBX, ids.cardId).length, events);
+});
+
+void test("a released session that samples a shell prompt keeps its state, records no event and plans no resume", async () => {
+  const fake = installFakeTmux(env);
+  const calls = { resume: 0, relaunch: 0 };
+  Object.assign(actionTools, {
+    resume: () => {
+      calls.resume++;
+      return Promise.resolve();
+    },
+    relaunch: () => {
+      calls.relaunch++;
+      return Promise.resolve("launched" as const);
+    },
+  });
+  writeFileSync(path.join(fake.state, "at-prompt"), "");
+  const shell = (title: string) => startedCard(SBX, title);
+
+  const control = await shell("exited-idle");
+  await store.setSessionStateIfSession(
+    control.cardId,
+    control.sessionId,
+    "idle",
+  );
+  await supervisePane({ ...control, pane: pane("working.txt") });
+  assert.ok(
+    stateEvents(SBX, control.cardId).some((e) => e.data.to === "shell_prompt"),
+    "without the hold, the same sample records shell_prompt",
+  );
+  calls.resume = 0;
+  calls.relaunch = 0;
+
+  const ids = await shell("released-shell");
+  await store.setSessionStateIfSession(ids.cardId, ids.sessionId, "released");
+  const events = stateEvents(SBX, ids.cardId).length;
+  await supervisePane({ ...ids, pane: pane("working.txt") });
+  await supervisePane({ ...ids, pane: pane("working.txt") });
+  assert.equal(sessionOf(ids.cardId)?.state, "released");
+  assert.equal(stateEvents(SBX, ids.cardId).length, events);
+  assert.deepEqual(calls, { resume: 0, relaunch: 0 });
+  assert.equal(
+    store
+      .listOrchestrationEvents(SBX, 0, 500)
+      .filter((e) => e.cardId === ids.cardId && e.kind === "group_state")
+      .length,
+    0,
+  );
+});
+
+void test("a released session whose pane shows another foreground command writes no supervisor_state event and stays released", async () => {
+  rmSync(path.join(env.root, "fake-tmux", "at-prompt"), { force: true });
+  const control = await startedCard(SBX, "idle-working");
+  await store.setSessionStateIfSession(
+    control.cardId,
+    control.sessionId,
+    "idle",
+  );
+  await supervisePane({ ...control, pane: pane("working.txt") });
+  assert.ok(
+    stateEvents(SBX, control.cardId).some((e) => e.data.to === "working"),
+    "without the hold, the same sample records working",
+  );
+
+  const ids = await startedCard(SBX, "released-working");
+  await store.setSessionStateIfSession(ids.cardId, ids.sessionId, "released");
+  const git = "$ git log\ncommit 1a2b3c\nAuthor: someone\n:";
+  await supervisePane({ ...ids, pane: git });
+  await supervisePane({ ...ids, pane: git });
+  assert.equal(stateEvents(SBX, ids.cardId).length, 0);
+  assert.equal(sessionOf(ids.cardId)?.state, "released");
+});
+
+void test("a released session whose pane shows an idle Claude with the ready footer ends the hold and writes a state event", async () => {
+  rmSync(path.join(env.root, "fake-tmux", "at-prompt"), { force: true });
+  const ids = await startedCard(SBX, "released-claude");
+  await store.setSessionStateIfSession(ids.cardId, ids.sessionId, "released");
+  await supervisePane({ ...ids, pane: pane("idle.txt") });
+  assert.notEqual(sessionOf(ids.cardId)?.state, "released");
+  assert.equal(
+    stateEvents(SBX, ids.cardId).filter((e) => e.data.from === "released")
+      .length,
+    1,
+  );
+});
+
+void test("superviseLost on a card whose active session is released plans no resume and keeps released", async () => {
+  const calls = { resume: 0 };
+  Object.assign(actionTools, {
+    resume: () => {
+      calls.resume++;
+      return Promise.resolve();
+    },
+  });
+  const ids = await startedCard(SBX, "released-lost");
+  await store.setSessionStateIfSession(ids.cardId, ids.sessionId, "released");
+  await store.markSessionLost(ids.cardId, ids.sessionId);
+  assert.equal(store.getCard(ids.cardId)?.sessionLost, true);
+  await superviseLost(ids.cardId);
+  assert.equal(calls.resume, 0);
+  assert.equal(supervisorEvents(SBX, ids.cardId).length, 0);
+  assert.equal(sessionOf(ids.cardId)?.state, "released");
 });

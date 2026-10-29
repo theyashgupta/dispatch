@@ -117,6 +117,7 @@ const KEYLESS: SupervisorState[] = [
   "usage_limit_wait",
   "shell_prompt",
   "paused",
+  "released",
 ];
 
 void test(

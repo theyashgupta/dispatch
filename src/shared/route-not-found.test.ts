@@ -24,3 +24,13 @@ test("the root and an empty path redirect to the board", () => {
 test("an unknown child under a board redirects to that board", () => {
   assert.equal(notFoundTarget("/boards/NIMBUS/xyz"), "/boards/NIMBUS");
 });
+
+test("the removed Sessions page redirects to the boards list", () => {
+  assert.equal(notFoundTarget("/sessions"), "/boards");
+  assert.equal(notFoundTarget("/sessions/abc"), "/boards");
+});
+
+test("the removed board Sessions page redirects to that board", () => {
+  assert.equal(notFoundTarget("/boards/K/sessions"), "/boards/K");
+  assert.equal(notFoundTarget("/boards/K/sessions/abc"), "/boards/K");
+});

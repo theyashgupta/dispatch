@@ -7,6 +7,7 @@ import { BottomBar } from "@/modules/shell/components/BottomBar";
 import { PageHeader } from "@/modules/shell/components/PageHeader";
 import { TopBar } from "@/modules/shell/components/TopBar";
 import type { SidebarBoardsData } from "./SidebarBoards";
+import type { SidebarDashboardsData } from "./SidebarDashboards";
 import type { NavCounts, NavItem } from "../../../../shared/nav-items.js";
 import type { SyncSnapshot } from "@/modules/shell/domain/sync-status";
 import { useBarVisible } from "@/modules/shell/hooks/use-bar-visible";
@@ -21,11 +22,10 @@ interface ShellFrameProps {
   sync: SyncSnapshot;
   accountSlot?: ReactNode;
   onOpenCreateTicket: () => void;
-  onOpenActivity: () => void;
-  activityUnseen: boolean;
-  activityOpen: boolean;
   carousel: boolean;
   boards: SidebarBoardsData;
+  dashboards: SidebarDashboardsData;
+  hasMainOrchestrator: boolean;
   pageTitle: string;
   pageCount?: number;
   headerView?: ReactNode;
@@ -44,10 +44,10 @@ export function ShellFrame({
   counts,
   sync,
   accountSlot,
-  activityUnseen,
-  activityOpen,
   carousel,
   boards,
+  dashboards,
+  hasMainOrchestrator,
   pageTitle,
   pageCount,
   headerView,
@@ -57,7 +57,6 @@ export function ShellFrame({
   children,
   onMobileOpenChange,
   onOpenCreateTicket,
-  onOpenActivity,
   needsYouCount,
 }: ShellFrameProps) {
   const { isMobile, openMobile, setOpenMobile, state } = useSidebar();
@@ -94,8 +93,6 @@ export function ShellFrame({
         counts={counts}
         sync={sync}
         accountSlot={accountSlot}
-        activityUnseen={activityUnseen}
-        activityOpen={activityOpen}
         carousel={carousel}
         boards={{
           ...boards,
@@ -108,17 +105,20 @@ export function ShellFrame({
             setOpenMobile(false);
           },
         }}
+        dashboards={{
+          ...dashboards,
+          onOpenDashboard: (key) => {
+            dashboards.onOpenDashboard(key);
+            setOpenMobile(false);
+          },
+        }}
+        hasMainOrchestrator={hasMainOrchestrator}
         onNavigate={(page) => {
           onNavigate(page);
           setOpenMobile(false);
         }}
         onOpenCreateTicket={() => {
           onOpenCreateTicket();
-          skipFocusReturn();
-          setOpenMobile(false);
-        }}
-        onOpenActivity={() => {
-          onOpenActivity();
           skipFocusReturn();
           setOpenMobile(false);
         }}

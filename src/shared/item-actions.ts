@@ -5,7 +5,6 @@ import type {
   SettableItemState,
   SlackThread,
 } from "./types.js";
-import type { ActionRefusal } from "./memory-refusal.js";
 import type { StartRequest } from "./start-request.js";
 import { isWebUrl } from "./web-url.js";
 import { draftReplyPrompt } from "./slack-prompt.js";
@@ -47,11 +46,6 @@ export interface ActionApi {
   snoozeItem: (id: string, until: string) => Promise<void>;
   moveCard: (id: string, column: Column) => Promise<void>;
   setCardInboxDismissed: (id: string, dismissed: boolean) => Promise<void>;
-  cleanupCard: (id: string, force?: boolean) => Promise<void>;
-  switchSession: (cardId: string, sessionId: string) => Promise<void>;
-  resumeCard: (
-    id: string,
-  ) => Promise<{ ok: true } | ({ ok: false } & ActionRefusal)>;
   pollSource: (id: string) => Promise<void>;
   getSlackThread: (
     itemId: string,
@@ -308,86 +302,6 @@ export function snoozeRow(
       ctx.notice(err instanceof Error ? err.message : "Snooze failed");
       return false;
     });
-}
-
-export interface BulkTarget {
-  cardId: string;
-  identifier: string;
-  sessionId: string;
-  active?: boolean;
-  restoreSessionId?: string;
-}
-
-export interface BulkOutcome {
-  done: string[];
-  failed: { identifier: string; error: string }[];
-}
-
-function distinctCards(rows: readonly BulkTarget[]): BulkTarget[] {
-  const seen = new Set<string>();
-  return rows.filter((r) => !seen.has(r.cardId) && seen.add(r.cardId));
-}
-
-async function runPerCard(
-  rows: readonly BulkTarget[],
-  step: (row: BulkTarget) => Promise<void>,
-): Promise<BulkOutcome> {
-  const outcome: BulkOutcome = { done: [], failed: [] };
-  for (const row of distinctCards(rows)) {
-    try {
-      await step(row);
-      outcome.done.push(row.identifier);
-    } catch (err: unknown) {
-      outcome.failed.push({
-        identifier: row.identifier,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-  return outcome;
-}
-
-/** Clean up each selected card once, in order; a failure is recorded and the rest still run. */
-export function runBulkCleanup(
-  api: Pick<ActionApi, "cleanupCard">,
-  rows: readonly BulkTarget[],
-): Promise<BulkOutcome> {
-  return runPerCard(rows, (row) => api.cleanupCard(row.cardId, false));
-}
-
-/**
- * Switch each selected card to its row's session when needed, then resume it.
- *
- * @remarks A refused resume switches the card back to the session that was active before, so a
- * failed resume never leaves the card pointed at a dead session; failures are recorded per card.
- */
-export function runBulkResume(
-  api: Pick<ActionApi, "switchSession" | "resumeCard">,
-  rows: readonly BulkTarget[],
-): Promise<BulkOutcome> {
-  return runPerCard(rows, async (row) => {
-    const switched = row.active !== true;
-    if (switched) await api.switchSession(row.cardId, row.sessionId);
-    const result = await api.resumeCard(row.cardId);
-    if (result.ok) return;
-    const restore = row.restoreSessionId;
-    if (switched && restore != null && restore !== row.sessionId) {
-      await api.switchSession(row.cardId, restore).catch(() => undefined);
-    }
-    throw new Error(
-      result.error === "memory-pressure" && result.reason
-        ? result.reason
-        : `resume refused (${result.status ?? "network"})`,
-    );
-  });
-}
-
-/** One line of toast copy for a bulk outcome. */
-export function bulkOutcomeCopy(verb: string, outcome: BulkOutcome): string {
-  const total = outcome.done.length + outcome.failed.length;
-  const head = `${verb} ${outcome.done.length} of ${total}`;
-  if (outcome.failed.length === 0) return head;
-  return `${head}. Failed: ${outcome.failed.map((f) => `${f.identifier} (${f.error})`).join(", ")}`;
 }
 
 /**

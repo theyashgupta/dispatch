@@ -1,7 +1,5 @@
 import { ChevronDownIcon, PlusIcon } from "lucide-react";
-import { formatCount } from "../../../../shared/format-count.js";
 import type { BoardKey } from "../../../../shared/types.js";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Collapsible,
@@ -16,14 +14,8 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  attentionLabel,
-  loopsLabel,
-  type SwitcherItem,
-} from "@/modules/shell/domain/board-switcher";
-
-const ROW_CLASS =
-  "font-medium text-base text-muted-foreground hover:text-muted-foreground data-[active=true]:hover:text-(--accent-text)";
+import type { SwitcherItem } from "@/modules/shell/domain/board-switcher";
+import { BOARD_ROW_CLASS, SidebarBoardRow } from "./SidebarBoardRow";
 
 export interface SidebarBoardsData {
   items: readonly SwitcherItem[] | null;
@@ -76,40 +68,17 @@ export function SidebarBoards({
           ) : (
             <SidebarMenu className="gap-0">
               {items.map((item) => (
-                <SidebarMenuItem key={item.key}>
-                  <SidebarMenuButton
-                    type="button"
-                    isActive={item.selected}
-                    aria-current={item.selected ? "true" : undefined}
-                    className={ROW_CLASS}
-                    onClick={() => onOpenBoard(item.key)}
-                  >
-                    <span className="min-w-0 flex-1 truncate" title={item.name}>
-                      {item.name}
-                    </span>
-                    {item.attention > 0 ? (
-                      <Badge
-                        tone="accent"
-                        aria-label={attentionLabel(item.attention)}
-                      >
-                        {formatCount(item.attention)}
-                      </Badge>
-                    ) : null}
-                    {item.loops > 0 ? (
-                      <span
-                        aria-label={loopsLabel(item.loops)}
-                        className="shrink-0 text-xs text-muted-foreground"
-                      >
-                        {formatCount(item.loops)}
-                      </span>
-                    ) : null}
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
+                <SidebarBoardRow
+                  key={item.key}
+                  item={item}
+                  showLoops
+                  onOpen={onOpenBoard}
+                />
               ))}
               <SidebarMenuItem>
                 <SidebarMenuButton
                   type="button"
-                  className={ROW_CLASS}
+                  className={BOARD_ROW_CLASS}
                   onClick={onCreate}
                 >
                   <PlusIcon aria-hidden="true" />

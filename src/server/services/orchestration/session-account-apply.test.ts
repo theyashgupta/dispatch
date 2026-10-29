@@ -629,3 +629,25 @@ void test("the sweep timer runs no further sweep after it is stopped", async () 
     spy.mock.restore();
   }
 });
+
+void test("a released session is not planned for a move, while an idle one is", async () => {
+  const idle = await sessionCard("ap-rel-idle");
+  const released = await sessionCard("ap-rel-released");
+  await store.setSessionStateIfSession(
+    released.cardId,
+    released.sessionId,
+    "released",
+  );
+  const result = await applyAccountChoice("all", ACCOUNT_B);
+  assert.deepEqual(result.moved, [idle]);
+  assert.deepEqual(result.queued, []);
+  assert.deepEqual(result.skipped, []);
+  assert.equal(
+    sessionOf(released.cardId, released.sessionId)?.claudeAccountId,
+    "default",
+  );
+  assert.equal(
+    sessionOf(released.cardId, released.sessionId)?.pendingClaudeAccountId,
+    undefined,
+  );
+});
