@@ -163,13 +163,24 @@ export function applyBoardSnapshot(
   );
 }
 
+/**
+ * Merge an activity event into the cached feed of a board.
+ *
+ * @remarks A frame never creates the cache on its own, so a reader that mounts later fetches the full feed. During an in-flight fetch the frame is kept and merged into the fetch result.
+ */
 export function applyActivityEvent(
   queryClient: QueryClient,
   board: BoardKey,
   event: ActivityEvent,
 ): void {
+  const fetching =
+    queryClient.isFetching({ queryKey: activityKeys.feed(board) }) > 0;
   queryClient.setQueryData<ActivityEvent[]>(activityKeys.feed(board), (prev) =>
-    mergeActivity([event], prev ?? []),
+    prev === undefined
+      ? fetching
+        ? [event]
+        : undefined
+      : mergeActivity([event], prev),
   );
 }
 
@@ -202,7 +213,6 @@ interface StreamSource {
 
 export interface BoardStreamCallbacks {
   onBoardUpdate?: (snapshot: BoardSnapshot, fresh: boolean) => void;
-  onActivity?: (event: ActivityEvent) => void;
   onTunnelState?: (state: TunnelState) => void;
 }
 
@@ -371,7 +381,6 @@ export function connectBoardStream(
       lastEventAt = Date.now();
       const event = JSON.parse(e.data as string) as ActivityEvent;
       if ((event.boardKey ?? DEFAULT_BOARD_KEY) !== board) return;
-      options.onActivity?.(event);
       applyActivityEvent(queryClient, board, event);
     });
     src.addEventListener("tunnel", (e) => {
@@ -451,7 +460,6 @@ export function useBoardLiveUpdates(
         onConnection: setConnection,
         onBoardUpdate: (snapshot, fresh) =>
           callbacksRef.current.onBoardUpdate?.(snapshot, fresh),
-        onActivity: (event) => callbacksRef.current.onActivity?.(event),
         onTunnelState: (state) => callbacksRef.current.onTunnelState?.(state),
       }),
     [board, doneLimit, queryClient],
