@@ -1036,7 +1036,7 @@ cards inside the `done=500` fixture, all of which fall inside the `DONE_PAGE_SIZ
    the POST-removal tree, showed the session-bearing card's wire shape as `{id, issueId,
    identifier, title, description, priority, column, updatedAt, tmuxSession, workspacePath,
    activeSessionId, terminalError}` against a same-fixture non-session card's `{id, issueId,
-   identifier, title, description, priority, column, updatedAt, terminalError}` — a `200`-byte
+   identifier, title, description, priority, column, updatedAt, terminalError}`, a `200`-byte
    total delta across three fields (`tmuxSession`, `workspacePath`, `activeSessionId`). Of those
    three, `tmuxSession` and `workspacePath` are TWO of the original six flat fields the `6d2549f`
    baseline already carried for a session-bearing card (present in v2.9 too, not new). Only

@@ -1522,15 +1522,16 @@ async function main() {
       );
       portsHeld = true; // fold into the same non-zero-exit signal
     }
+    let ttydHeld = false;
     for (const key of Object.keys(ttyd)) {
       if (await isPortListening(ttyd[key].port)) {
         console.error(
           `ASSERTION: ttyd port ${ttyd[key].port} (${key}) still LISTENING after teardown`,
         );
-        // eslint-disable-next-line no-useless-assignment -- portsHeld is read after the loop, oxlint misses the read across the await
-        portsHeld = true;
+        ttydHeld = true;
       }
     }
+    if (ttydHeld) portsHeld = true;
   }
 
   const realAfter = statRealBoardDb();

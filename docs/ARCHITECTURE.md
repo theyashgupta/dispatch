@@ -5895,8 +5895,8 @@ question; none of them read prose for truth.
   `after current-build install: changed: config.json`), `plist-staleness` (renders both builds'
   plists, corrupts one, and drives the current build's `healServicePlist` through two calls
   expecting `"rewritten"` then `"unchanged"`, proven able to fail with
-  `--break stale-plist-uncorrected`, reported as `second healServicePlist call reported
-  "rewritten", expected "unchanged"`), and `uninstall-keeps` (proves a bare `uninstall --yes` keeps
+  `--break stale-plist-uncorrected`, reported as
+  `second healServicePlist call reported "rewritten", expected "unchanged"`), and `uninstall-keeps` (proves a bare `uninstall --yes` keeps
   `config.json`, board data, and playbooks, removing only `hook.sh`/`hook-settings.json`, proven
   able to fail by the real `v3.0.0` release's own shipped bug, whose `--dry-run Remove:` section
   lists `config.json` before the current build's fix runs). Two hard safety rules hold everywhere
