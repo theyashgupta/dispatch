@@ -55,7 +55,7 @@ export function attentionLabel(n: number): string {
     : `${formatCount(n)} items need attention`;
 }
 
-/** The accessible name of a running loops count. */
-export function loopsLabel(n: number): string {
-  return n === 1 ? "1 running loop" : `${formatCount(n)} running loops`;
+/** The running loop count text of a board row, or null with no loops. */
+export function liveText(loops: number): string | null {
+  return loops > 0 ? `${formatCount(loops)} live` : null;
 }

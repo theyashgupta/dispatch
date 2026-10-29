@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 import {
   attentionLabel,
-  loopsLabel,
+  liveText,
   type SwitcherItem,
 } from "@/modules/shell/domain/board-switcher";
 
@@ -23,6 +23,7 @@ export function SidebarBoardRow({
   onOpen: (key: BoardKey) => void;
   children?: ReactNode;
 }) {
+  const live = showLoops ? liveText(item.loops) : null;
   return (
     <SidebarMenuItem>
       <SidebarMenuButton
@@ -40,13 +41,8 @@ export function SidebarBoardRow({
             {formatCount(item.attention)}
           </Badge>
         ) : null}
-        {showLoops && item.loops > 0 ? (
-          <span
-            aria-label={loopsLabel(item.loops)}
-            className="shrink-0 text-xs text-muted-foreground"
-          >
-            {formatCount(item.loops)}
-          </span>
+        {live !== null ? (
+          <span className="shrink-0 text-xs text-muted-foreground">{live}</span>
         ) : null}
       </SidebarMenuButton>
       {children}
