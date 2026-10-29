@@ -878,7 +878,7 @@ Every seeded playbook has one input: the extra direction. It is the optional tex
 - **File:** `prd-ralph-loop.md`
 - **When to use:** a ticket whose scope is not settled and that needs a phased PRD and a loop.
 - **Inputs:** the extra direction.
-- **What it does:** it tells Claude to use the grill-me skill to test the scope until the requirements stop changing. Then it tells Claude to use the write-prd skill to write a phased `PRD.md`. Then it tells Claude to use the ralph-loop skill to run the PRD phase by phase. Claude uses the QA subagent mode unless the PRD is trivial. Claude passes the path of the PRD from the write-prd step to the ralph-loop step.
+- **What it does:** it tells Claude to use the grill-me skill to test the scope until the requirements stop changing. Then it tells Claude to use the write-prd skill to write a phased `PRD.md`. Then it tells Claude to use the ralph-loop skill to run the PRD phase by phase. Claude uses the QA subagent mode unless the PRD is trivial. Claude passes the path of the PRD from the write-prd step to the ralph-loop step. Each phase, also a review phase or a fix phase, must have its own `## Phase <N>` section in `analogues.md`. If the section is missing, the gate stops before it runs other checks.
 
 ### Superpowers
 
