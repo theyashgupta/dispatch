@@ -67,7 +67,6 @@ test("the initial state has the defaults and an initial value overrides one fiel
   assert.equal(state.soundEnabled, true);
   assert.deepEqual(state.tunnelState, { status: "off" });
   assert.equal(state.connection, "connecting");
-  assert.equal(state.activityOpen, false);
   assert.equal(state.toast, IDLE_TOAST);
   assert.equal(state.toastSeq, 0);
 
@@ -81,11 +80,11 @@ test("subscribe returns an unsubscribe and every listener gets one call per chan
   let second = 0;
   const off = store.subscribe(() => first++);
   store.subscribe(() => second++);
-  store.setActivityOpen(true);
+  store.setSoundEnabled(false);
   assert.equal(first, 1);
   assert.equal(second, 1);
   off();
-  store.setActivityOpen(false);
+  store.setSoundEnabled(true);
   assert.equal(first, 1);
   assert.equal(second, 2);
 });
@@ -96,7 +95,6 @@ test("a same-value action changes nothing and notifies no listener", () => {
   store.selectCard(null, null);
   store.setSoundEnabled(true);
   store.closeCleanup();
-  store.setActivityOpen(false);
   assert.equal(counter.calls, 0);
   assert.equal(store.getState(), before);
 });
@@ -251,7 +249,7 @@ test("closePanel clears the selection, the pin and hydrating; deselect clears on
   assert.equal(store.getState().pinnedHydrating, false);
 });
 
-test("pageChanged closes the panel off Workspace and the group start off Board", () => {
+test("pageChanged closes the panel on every page and the group start off Board", () => {
   const members = [card("a"), card("b")];
   const store = createAppStore({
     selectedCardId: "c1",
@@ -264,11 +262,6 @@ test("pageChanged closes the panel off Workspace and the group start off Board",
   assert.equal(store.getState().pinned, null);
   assert.equal(store.getState().pinnedHydrating, false);
   assert.equal(store.getState().groupStart, null);
-
-  const docked = createAppStore({ selectedCardId: "c1", groupStart: members });
-  docked.pageChanged("workspace");
-  assert.equal(docked.getState().selectedCardId, "c1");
-  assert.equal(docked.getState().groupStart, null);
 
   const board = createAppStore({ selectedCardId: "c1", groupStart: members });
   board.pageChanged("board");
@@ -443,9 +436,6 @@ test("the preference and live state setters set their field and notify once", ()
   assert.equal(counter.calls, 3);
   store.setConnection("disconnected");
   assert.equal(counter.calls, 3);
-  store.setActivityOpen(true);
-  assert.equal(store.getState().activityOpen, true);
-  assert.equal(counter.calls, 4);
 });
 
 test("the toast shows, undoes, fails, dismisses and ignores a stale id", () => {

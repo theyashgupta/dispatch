@@ -117,7 +117,7 @@ export function DetailPanelContainer() {
   const leaf = useRouterState({ select: (s) => s.matches.at(-1) });
   const pathname = useLocation({ select: (l) => l.pathname });
   const routePage = routeFromMatch(leaf, pathname).page;
-  const docked = routePage === "workspace";
+  const docked = false;
   const storeBoard = useAppStore(appStore, (s) => s.board);
   const splitBoard = useAppStore(appStore, (s) => s.splitBoard);
   const board = useBoardSnapshot(

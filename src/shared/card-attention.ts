@@ -22,8 +22,8 @@ const ATTENTION_TITLES: ReadonlyArray<(card: CardModel) => string | null> = [
  * Whether a card needs attention: a start failure, a lost session outside In Review, Parked and Done, or blocked cleanup.
  *
  * @remarks
- * Derives from the same ordered list as `attentionTitle`, so the board and the Orca sidebar cannot
- * disagree. `checkAttentionSingleSource` (NEW-22) fails any other `src/web` or `src/shared` file
+ * Derives from the same ordered list as `attentionTitle`, so the board card and the dashboard ticket
+ * tiles cannot disagree. `checkAttentionSingleSource` (NEW-22) fails any other `src/web` or `src/shared` file
  * that exports a rival predicate.
  */
 export function needsAttention(card: CardModel): boolean {
@@ -31,7 +31,7 @@ export function needsAttention(card: CardModel): boolean {
 }
 
 /**
- * Maps a `startError` variant to the heading/detail copy for the board Notice and Orca tooltip.
+ * Maps a `startError` variant to the heading/detail copy for the board card Notice.
  *
  * @remarks
  * Takes the `StartError` itself, not the card, so the "error exists" precondition lives in the
@@ -58,7 +58,7 @@ export function errorCopy(
 }
 
 /**
- * Returns the Orca attention-badge tooltip, or `null` when the card needs no attention.
+ * Returns the attention title shown on the dashboard ticket tiles, or `null` when the card needs no attention.
  *
  * @remarks
  * The first matching entry in `ATTENTION_TITLES` wins, so the list order is the render priority.
