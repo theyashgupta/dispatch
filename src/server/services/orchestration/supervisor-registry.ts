@@ -43,6 +43,7 @@ import {
 import { sessionTranscriptPath } from "./supervisor-transcript.js";
 import { releaseIfDue } from "./session-release.js";
 import { refreshLoopProgress } from "./loop-progress-reader.js";
+import { floorExiting } from "./floor-release.js";
 import { footer } from "./session-account-move.js";
 import { READY, SHELL_SESSION_ENV } from "./steps.js";
 
@@ -341,7 +342,10 @@ export async function supervisePane(
     const claudeShown = !shellPrompt && READY.test(footer(sample.pane));
     const changed =
       detection.state !== (session.state ?? null) &&
-      !holdsReleased(session.state ?? null, claudeShown) &&
+      !holdsReleased(
+        session.state ?? null,
+        claudeShown && !floorExiting(session.id),
+      ) &&
       !holdsNeedsInput(
         session.state ?? null,
         session.stateReason,

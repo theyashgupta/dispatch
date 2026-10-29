@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { afterEach, test, type TestContext } from "node:test";
 import { isolateEnv } from "../test-support/fixtures.js";
 import { makeFakeSource } from "../test-support/fake-source.js";
 import type { SourceIssue } from "../../shared/types.js";
@@ -16,10 +16,10 @@ const CATCH_UP = 30_000;
 const flush = () => new Promise((r) => setImmediate(r));
 const ok = { issues: [] as SourceIssue[], truncated: false };
 
-function calendarLike(fetch: () => Promise<typeof ok>) {
+function calendarLike(fetch: () => Promise<typeof ok>, id = "calendar-like") {
   let fetches = 0;
   const source = makeFakeSource({
-    id: "calendar-like",
+    id,
     itemsOnly: true,
     pollIntervalMs: INTERVAL,
     fetch: () => {
@@ -87,4 +87,68 @@ test("a run in progress is not started again by later ticks", async (t) => {
   await flush();
   t.mock.timers.tick(CATCH_UP);
   assert.equal(c.fetches(), 2, "the overrun run reruns once after it settles");
+});
+
+/**
+ * Mock the timers and skew `Date.now` apart from them, the way a Mac sleep moves the wall clock.
+ *
+ * @returns A function that jumps the wall clock forward without firing any timer.
+ */
+function sleepClock(t: TestContext): (ms: number) => void {
+  t.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const realNow = Date.now.bind(Date);
+  let skew = 0;
+  t.mock.method(Date, "now", () => realNow() + skew);
+  return (ms) => {
+    skew += ms;
+  };
+}
+
+test("a wall clock jump of three intervals runs once at the next check, then the loop keeps its interval", async (t) => {
+  const sleep = sleepClock(t);
+  const c = calendarLike(() => Promise.resolve(ok), "slept");
+  startPollers([c.source]);
+  await flush();
+  t.mock.timers.tick(CATCH_UP);
+  assert.equal(c.fetches(), 1, "no catch-up while the wall clock keeps pace");
+  sleep(INTERVAL * 3);
+  t.mock.timers.tick(CATCH_UP);
+  assert.equal(c.fetches(), 2, "the slept gap runs once at the next check");
+  await flush();
+  t.mock.timers.tick(INTERVAL - 1);
+  assert.equal(c.fetches(), 2, "the catch-up returns to the regular interval");
+  t.mock.timers.tick(1);
+  assert.equal(c.fetches(), 3);
+});
+
+test("a wake catch-up in progress is not started again by a second jump", async (t) => {
+  const sleep = sleepClock(t);
+  let resolve: (r: typeof ok) => void = () => {};
+  let calls = 0;
+  const c = calendarLike(() => {
+    calls += 1;
+    return calls === 1
+      ? Promise.resolve(ok)
+      : new Promise((res) => {
+          resolve = res;
+        });
+  }, "slept-in-flight");
+  startPollers([c.source]);
+  await flush();
+  sleep(INTERVAL * 3);
+  t.mock.timers.tick(CATCH_UP);
+  assert.equal(c.fetches(), 2, "the catch-up starts");
+  sleep(INTERVAL * 3);
+  t.mock.timers.tick(INTERVAL * 3);
+  assert.equal(
+    c.fetches(),
+    2,
+    "no second fetch while the catch-up is in flight",
+  );
+  resolve(ok);
+  await flush();
+  t.mock.timers.tick(INTERVAL - 1);
+  assert.equal(c.fetches(), 2, "a settled run waits a full interval");
+  t.mock.timers.tick(1);
+  assert.equal(c.fetches(), 3);
 });

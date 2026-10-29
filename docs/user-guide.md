@@ -334,6 +334,8 @@ Dispatch reads the memory of a Mac every 15 seconds. The reading shows as the me
 
 The two limits are **Free memory floor (MB)** (0 to 65536, where 0 turns the floor off) and **Swap ceiling (MB)** (256 to 65536). Set them on the **Policy** tab (see "Board policy"). When a group start is refused for memory, or a card start or a resume still has no memory after 30 minutes, Dispatch shows the reason, for example "free memory 812 MB is below the 1024 MB floor".
 
+When free memory is below the floor and a start or a resume must wait or be refused, Dispatch first stops Claude in each finished session on the board. A finished session is a card in **Agent done** or **Done**, or a card whose loop has closed. Dispatch does not stop a loop that still runs, a card that waits for a ship fix, or a paused card. The card keeps its terminal text and its column, its session badge shows **Released**, and you can still ship it or choose **Run Claude**. Dispatch then waits up to 30 seconds for memory to come back before it waits longer or refuses.
+
 To stop a loop by hand:
 
 1. Open the card of a loop that has a live session. The card panel header shows **Pause** next to **Reset**.

@@ -7,6 +7,27 @@ import {
   type ReleaseFacts,
 } from "./session-release.js";
 
+void test("a stored released holds while the pane does not show Claude", () => {
+  assert.equal(holdsReleased("released", false), true);
+});
+
+void test("a stored released ends its hold when the pane shows Claude", () => {
+  assert.equal(holdsReleased("released", true), false);
+});
+
+void test("a stored state other than released holds nothing", () => {
+  for (const stored of [
+    "working",
+    "idle",
+    "shell_prompt",
+    "lost",
+    "paused",
+  ] as const) {
+    assert.equal(holdsReleased(stored, false), false, stored);
+  }
+  assert.equal(holdsReleased(null, false), false);
+});
+
 const NOW = Date.parse("2026-10-23T12:00:00.000Z");
 const iso = (agoMs: number) => new Date(NOW - agoMs).toISOString();
 
@@ -83,27 +104,6 @@ void test("the clock starts at the later of columnSince and stateSince", () => {
     releaseDue({ ...due, columnSince: old, stateSince: old }).due,
     true,
   );
-});
-
-void test("a stored released holds while the pane does not show Claude", () => {
-  assert.equal(holdsReleased("released", false), true);
-});
-
-void test("a stored released ends its hold when the pane shows Claude", () => {
-  assert.equal(holdsReleased("released", true), false);
-});
-
-void test("a stored state other than released holds nothing", () => {
-  for (const stored of [
-    "working",
-    "idle",
-    "shell_prompt",
-    "lost",
-    "paused",
-  ] as const) {
-    assert.equal(holdsReleased(stored, false), false, stored);
-  }
-  assert.equal(holdsReleased(null, false), false);
 });
 
 void test("releaseDue names the already released reason", () => {

@@ -19,8 +19,8 @@ import {
   typedLine,
   type SendResult,
 } from "./supervisor-send.js";
-import { assertMemoryHeadroom, memoryCheck } from "./memory-governor.js";
-import { waitForMemory } from "./memory-wait.js";
+import { memoryCheck } from "./memory-governor.js";
+import { releaseForMemory, waitForMemory } from "./memory-wait.js";
 import { pauseCard, unpauseCard } from "./pause-card.js";
 import { runClaude } from "./run-claude.js";
 import { resumeLostCard } from "./supervisor-actions.js";
@@ -225,7 +225,8 @@ export async function requestHandoff(
  * Continue a loop stopped by `stop_session` or a supervisor give-up, under the cap and budget.
  *
  * @remarks The stopped session still counts as running, and resuming adds no loop, so the cap
- * counts the running groups without this card.
+ * counts the running groups without this card. Low memory first releases the finished sessions of
+ * the board, and refuses with `memory-pressure` only when memory is still low after 30 seconds.
  */
 export async function resumeLoop(
   caller: OrchestratorIdentity,
@@ -245,7 +246,10 @@ export async function resumeLoop(
           "session is not stopped by stop_session or a supervisor give-up",
       });
     }
-    assertMemoryHeadroom(caller.boardKey);
+    const memory = await releaseForMemory(caller.boardKey);
+    if (!memory.ok) {
+      throw new ConflictError("memory-pressure", { reason: memory.reason });
+    }
     const policy = callerPolicy(caller);
     enforce(
       checkCap({
