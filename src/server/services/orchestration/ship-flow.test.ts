@@ -111,6 +111,7 @@ beforeEach(() => {
 function progress(
   statuses: LoopUnitStatus[],
   engine: LoopProgress["engine"] = null,
+  completion: LoopProgress["completion"] = "complete",
 ): LoopProgress {
   return {
     slug: "ship",
@@ -128,7 +129,7 @@ function progress(
       phases: [],
     })),
     engine,
-    completion: "complete",
+    completion,
     summary: {
       unitsDone: statuses.length,
       unitsTotal: statuses.length,
@@ -2468,6 +2469,79 @@ void test("startShip treats a ticket card with no launch and a session branch as
     "not-group-card",
   );
   assert.deepEqual(calls, []);
+});
+
+const closedEngine = {
+  active: true,
+  iteration: 3,
+  sessionId: null,
+  handoffPending: false,
+  startedAt: null,
+  closed: true,
+};
+
+function needsInputTicket(stack: Stack, loopProgress?: LoopProgress): Card {
+  const base = { ...store.getCard(stack.card.id)! };
+  delete base.loopProgress;
+  return {
+    ...base,
+    source: "local",
+    launch: undefined,
+    branch: "unit-1",
+    column: "needs_input",
+    ...(loopProgress ? { loopProgress } : {}),
+  };
+}
+
+void test("startShip ships a ticket card in Needs input whose engine is closed and loop is complete", async () => {
+  const stack = await newStack();
+  const card = needsInputTicket(stack, progress(["shipped"], closedEngine));
+  const started = await startShipFlow(CALLER, card, {
+    repository: stack.repo,
+    branches: [branchInput("unit-1")],
+  });
+  assert.equal(started.state, "running");
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+});
+
+void test("startShip refuses a ticket card in Needs input with an open engine as engine-not-closed", async () => {
+  const stack = await newStack();
+  const card = needsInputTicket(
+    stack,
+    progress(["shipped"], { ...closedEngine, closed: false }),
+  );
+  await refusedCard(card, stack, "unit-1", 409, "engine-not-closed");
+  assert.deepEqual(calls, []);
+});
+
+void test("startShip refuses a ticket card in Needs input as card-not-done when its loop is still running or has no progress", async () => {
+  const stack = await newStack();
+  const running = needsInputTicket(
+    stack,
+    progress(["shipped"], closedEngine, "running"),
+  );
+  await refusedCard(running, stack, "unit-1", 409, "card-not-done");
+  await refusedCard(
+    needsInputTicket(stack),
+    stack,
+    "unit-1",
+    409,
+    "card-not-done",
+  );
+  assert.deepEqual(calls, []);
+});
+
+void test("startShip keeps the worktree check for a ticket card in Needs input with a closed engine and complete loop", async () => {
+  const stack = await newStack();
+  const card = needsInputTicket(stack, progress(["shipped"], closedEngine));
+  const untracked = path.join(stack.worktree, "stray.txt");
+  fs.writeFileSync(untracked, "x\n");
+  try {
+    await refusedCard(card, stack, "unit-1", 409, "worktree-dirty");
+  } finally {
+    fs.rmSync(untracked, { force: true });
+  }
 });
 
 type RunOptions = Parameters<typeof shipTools.run>[2];

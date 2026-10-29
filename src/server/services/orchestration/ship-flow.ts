@@ -332,6 +332,20 @@ function isGroupLoop(
 }
 
 /**
+ * True for a card in Agent done, or in Needs input with a closed and complete loop.
+ *
+ * @remarks A lost or frozen session moves a finished card to Needs input after its DONE.
+ */
+function finishedColumn(card: Card): boolean {
+  return (
+    card.column === "agent_done" ||
+    (card.column === "needs_input" &&
+      card.loopProgress?.engine?.closed === true &&
+      card.loopProgress.completion === "complete")
+  );
+}
+
+/**
  * Get the `pr` detail of an already-shipped refusal of a Done card, or no detail when the card carries no PR number.
  *
  * @remarks The ship flow is read first, because Done cleanup clears the detected `prs` of the card.
@@ -359,9 +373,10 @@ function assertNoRunningFlow(boardKey: BoardKey): void {
  * Check the ship preconditions of a group card or a single ticket card in their fixed order, with no git call and no write.
  *
  * @remarks A card whose engine is active and not closed is refused whatever its unit count. A group
- * with no loop progress and every single ticket card need the Agent done column, and a refusal is
- * a typed error, so a refused call stores no flow. A ticket card with no launch passes only with a
- * session branch, and never as a group member or a review card, whose branch is not its own work.
+ * with no loop progress and every single ticket card need the Agent done column, or Needs input
+ * with a closed engine and complete loop. A refusal is a typed error, so a refused call stores no
+ * flow. A ticket card with no launch passes only with a session branch, and never as a group
+ * member or a review card, whose branch is not its own work.
  */
 function assertShippable(
   caller: OrchestratorIdentity,
@@ -394,7 +409,7 @@ function assertShippable(
   if (!isGroupLoop(card) && card.column === "done") {
     throw new ConflictError("already-shipped", donePr(card));
   }
-  if (!isGroupLoop(card) && card.column !== "agent_done") {
+  if (!isGroupLoop(card) && !finishedColumn(card)) {
     throw new ConflictError("card-not-done");
   }
   assertShipBranches(
