@@ -1042,8 +1042,8 @@ void test("a retry on a new merge commit with the same tree skips the check comm
   setGhScenario(stack.ghScenario, { checks: "pass" });
   await startShip(stack, ["unit-1"]);
   const flow = await finished(stack.card);
-  const before = first.branches[0]!.checked!;
-  const after = flow.branches[0]!.checked!;
+  const before = first.branches[0].checked!;
+  const after = flow.branches[0].checked!;
   assert.notEqual(after, before);
   const treeOf = (c: string) =>
     gitOutput(stack.worktree, "rev-parse", `${c}^{tree}`);
