@@ -26,6 +26,8 @@ export type PlaybookWriteResult =
   | { ok: true; playbook: Playbook }
   | { ok: false; error: "name-exists" | "footgun" | "not-found" };
 
+const FLAG_DASH = "-".repeat(2);
+
 const PRD_RALPH_LOOP_PLAYBOOK = `---
 name: PRD + Ralph Loop
 when: One ticket or one feature of one module, up to a few hundred lines, with phases, QA and a gap analysis.
@@ -34,7 +36,9 @@ when: One ticket or one feature of one module, up to a few hundred lines, with p
 {extra}
 
 ## Workflow
-Use the grill-me skill first to stress-test the scope of this ticket until requirements stop changing. Once the scope is settled, use the write-prd skill to produce a phased PRD.md for it. Then use the ralph-loop skill to execute the PRD phase by phase (default --qa-subagent mode unless the PRD is trivial). Hand off between steps by naming the PRD's path when moving from write-prd to ralph-loop.`;
+Use the grill-me skill first to stress-test the scope of this ticket until requirements stop changing. Once the scope is settled, use the write-prd skill to produce a phased PRD.md for it. Then use the ralph-loop skill to execute the PRD phase by phase (default ${FLAG_DASH}qa-subagent mode unless the PRD is trivial). Hand off between steps by naming the PRD's path when moving from write-prd to ralph-loop.
+
+Every phase of the PRD, a review phase or a fix phase included, needs its own \`## Phase <N>\` section in analogues.md before its gate runs. Write this rule into the PRD.md. A gate stops on a missing section before any other check runs, and its message names the phase number and the analogues.md path.`;
 
 const SUPERPOWERS_PLAYBOOK = `---
 name: Superpowers
@@ -363,6 +367,7 @@ function withSeedWhen(p: Playbook): Playbook {
 const RETIRED_SEED_HASHES: Readonly<Record<string, readonly string[]>> = {
   "prd-ralph-loop": [
     "61328e5d08d8c54c0f017bcd9fa5e5ab51eb74b06c7e54769ebd09b1c6cb3298",
+    "4502b55abb166b936fdb7dcf8397ba5f6c0b833338804d15600426d4acf05fb6",
   ],
   superpowers: [
     "31ac4e5c6844d4a5d6f78f834a64d28452fda3faaa3f08561086488bb3e31bd0",
