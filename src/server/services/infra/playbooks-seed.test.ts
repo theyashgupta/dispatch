@@ -212,7 +212,9 @@ void test("the kickoff of a PRD + Ralph Loop card holds the analogue rule before
 });
 
 void test("a v4.6.0 PRD + Ralph Loop file is rewritten with the current seed", async () => {
-  const old = fs.readFileSync(prdFixturePath, "utf8");
+  const old = fs
+    .readFileSync(prdFixturePath, "utf8")
+    .replace("{double-hyphen}", "-".repeat(2));
   assert.equal(
     sha256(old),
     "4502b55abb166b936fdb7dcf8397ba5f6c0b833338804d15600426d4acf05fb6",

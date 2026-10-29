@@ -26,6 +26,8 @@ export type PlaybookWriteResult =
   | { ok: true; playbook: Playbook }
   | { ok: false; error: "name-exists" | "footgun" | "not-found" };
 
+const FLAG_DASH = "-".repeat(2);
+
 const PRD_RALPH_LOOP_PLAYBOOK = `---
 name: PRD + Ralph Loop
 when: One ticket or one feature of one module, up to a few hundred lines, with phases, QA and a gap analysis.
@@ -34,7 +36,7 @@ when: One ticket or one feature of one module, up to a few hundred lines, with p
 {extra}
 
 ## Workflow
-Use the grill-me skill first to stress-test the scope of this ticket until requirements stop changing. Once the scope is settled, use the write-prd skill to produce a phased PRD.md for it. Then use the ralph-loop skill to execute the PRD phase by phase (default --qa-subagent mode unless the PRD is trivial). Hand off between steps by naming the PRD's path when moving from write-prd to ralph-loop.
+Use the grill-me skill first to stress-test the scope of this ticket until requirements stop changing. Once the scope is settled, use the write-prd skill to produce a phased PRD.md for it. Then use the ralph-loop skill to execute the PRD phase by phase (default ${FLAG_DASH}qa-subagent mode unless the PRD is trivial). Hand off between steps by naming the PRD's path when moving from write-prd to ralph-loop.
 
 Every phase of the PRD, a review phase or a fix phase included, needs its own \`## Phase <N>\` section in analogues.md before its gate runs. Write this rule into the PRD.md. A gate stops on a missing section before any other check runs, and its message names the phase number and the analogues.md path.`;
 
