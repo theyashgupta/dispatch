@@ -23,7 +23,6 @@ const BRANCH: CentreBranch = {
   planSize: null,
   memberCount: null,
   stateSince: null,
-  shippedAt: null,
   slot: 0,
 };
 
