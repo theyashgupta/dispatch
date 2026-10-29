@@ -24,6 +24,7 @@ fs.writeFileSync(
     "cat > /dev/null",
     'case "$(cat "$STUB_DIR/mode")" in',
     "none) echo NO_ACTION_ITEMS ;;",
+    `loaded) echo '{"type":"system","subtype":"init","tools":["mcp__claude_ai_Granola__get_account_info"],"mcp_servers":[{"name":"claude.ai Granola","status":"connected"}]}' ;;`,
     "slow) exec sleep 400 ;;",
     "esac",
   ].join("\n"),
@@ -162,9 +163,14 @@ test("re-enabling with the same window and no cursor is already running when the
 });
 
 test("check connection answers each mcp list state, through the service and the route", async () => {
-  stub("connected", "none");
+  stub("connected", "loaded");
   assert.deepEqual(await checkGranolaConnection(), {
     state: "connected",
+    server: "claude.ai Granola",
+  });
+  stub("connected", "none");
+  assert.deepEqual(await checkGranolaConnection(), {
+    state: "connector-unavailable",
     server: "claude.ai Granola",
   });
   stub("needs-auth", "none");

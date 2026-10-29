@@ -10,16 +10,23 @@ import {
   type PointerEvent,
 } from "react";
 import {
-  PANEL_MAX_WIDTH_RATIO,
   clampPanelWidth,
   isTapGesture,
   keyboardStepWidth,
+  panelMaxWidth,
   persistedWidthCss,
   startsResizeDrag,
 } from "@/modules/detail/domain/panel-width";
 
 const STORAGE_KEY = "dsp.panel.width";
 const WIDTH_VAR = "--panel-live-width";
+
+function navWidthPx(node: HTMLElement | null): number {
+  if (node == null) return 0;
+  return (
+    parseFloat(getComputedStyle(node).getPropertyValue("--nav-current")) || 0
+  );
+}
 
 function loadWidth(): number | null {
   try {
@@ -88,6 +95,7 @@ export function usePanelResize() {
   const [resizing, setResizing] = useState(false);
   const [measuredWidth, setMeasuredWidth] = useState<number | null>(null);
   const [, setViewportWidth] = useState<number>(() => window.innerWidth);
+  const [navWidth, setNavWidth] = useState(0);
 
   useEffect(() => {
     return () => cleanupDragRef.current?.();
@@ -100,9 +108,12 @@ export function usePanelResize() {
     const observer = new ResizeObserver(() => {
       setMeasuredWidth(node.getBoundingClientRect().width);
       setViewportWidth(window.innerWidth);
+      setNavWidth(navWidthPx(node));
     });
     observer.observe(node);
     observer.observe(document.documentElement);
+    const sidebarGap = document.querySelector('[data-slot="sidebar-gap"]');
+    if (sidebarGap != null) observer.observe(sidebarGap);
     return () => observer.disconnect();
   }, [resizing]);
 
@@ -116,10 +127,12 @@ export function usePanelResize() {
     }
   }, [persistedWidth]);
 
-  const maxWidthPx = window.innerWidth * PANEL_MAX_WIDTH_RATIO;
+  const maxWidthPx = panelMaxWidth(window.innerWidth, navWidth);
   const rawWidthPx = persistedWidth ?? measuredWidth;
   const currentWidthPx =
-    rawWidthPx != null ? clampPanelWidth(rawWidthPx, window.innerWidth) : null;
+    rawWidthPx != null
+      ? clampPanelWidth(rawWidthPx, window.innerWidth, navWidth)
+      : null;
 
   const isDragging = useCallback(() => cleanupDragRef.current != null, []);
   const cancelDrag = useCallback(() => cleanupDragRef.current?.(), []);
@@ -134,6 +147,7 @@ export function usePanelResize() {
         e.key,
         currentWidthPx ?? node.getBoundingClientRect().width,
         window.innerWidth,
+        navWidthPx(node),
       ),
     );
   }
@@ -150,6 +164,7 @@ export function usePanelResize() {
     const startWidth = node.getBoundingClientRect().width;
     const preDragWidth = node.style.getPropertyValue(WIDTH_VAR);
     const viewportWidth = window.innerWidth;
+    const dragNavWidth = navWidthPx(node);
     const pointerType = e.pointerType;
     setResizing(true);
     document.body.style.cursor = "col-resize";
@@ -179,6 +194,7 @@ export function usePanelResize() {
       const next = clampPanelWidth(
         startWidth + (startX - ev.clientX),
         viewportWidth,
+        dragNavWidth,
       );
       node.style.setProperty(WIDTH_VAR, `${next}px`);
     }
@@ -191,7 +207,11 @@ export function usePanelResize() {
         restoreWidth();
         return;
       }
-      const finalWidth = clampPanelWidth(startWidth + delta, viewportWidth);
+      const finalWidth = clampPanelWidth(
+        startWidth + delta,
+        viewportWidth,
+        dragNavWidth,
+      );
       node.style.setProperty(WIDTH_VAR, persistedWidthCss(finalWidth));
       setPanelWidth(finalWidth);
     }

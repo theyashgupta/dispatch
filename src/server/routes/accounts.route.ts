@@ -12,6 +12,8 @@ import {
 } from "../services/orchestration/claude-accounts.js";
 import {
   listAccountSessions,
+  managedDefaultOffered,
+  manualSwitchRefusal,
   listAccountSummaries,
   readChainView,
   removeAccountAndLogout,
@@ -63,6 +65,7 @@ accountsRouter.get("/accounts", async (_req, res) => {
     accounts: await listAccountSummaries(),
     sessions: await listAccountSessions(),
     chain: await readChainView(),
+    managedDefaultOffer: await managedDefaultOffered(),
   }));
   res.status(200).json(body);
 });
@@ -70,18 +73,26 @@ accountsRouter.get("/accounts", async (_req, res) => {
 accountsRouter.put("/accounts/active", async (req, res) => {
   const { id, applyToRunning } = parseOrThrow(activeBodySchema, req.body);
   const outcome = await runInChainQueue(async () => {
+    const refusal = await orFail("accounts-read-failed", () =>
+      manualSwitchRefusal(id),
+    );
+    if (refusal !== null) return { ok: false as const, error: refusal };
     const result = await orFail("accounts-write-failed", () =>
       setActiveAccount(id),
     );
     if (!result.ok) return result;
     await noteManualSwitch();
-    void refreshUsageManually(id).catch(() => undefined);
+    void refreshUsageManually(getActiveAccountId()).catch(() => undefined);
     const applied = await orFail("accounts-apply-failed", () =>
       applyAccountChoice(applyToRunning, id),
     );
     return { ok: true as const, applied };
   });
-  if (!outcome.ok) throw new NotFoundError(outcome.error);
+  if (!outcome.ok) {
+    throw outcome.error === "not-found"
+      ? new NotFoundError(outcome.error)
+      : new ConflictError(outcome.error);
+  }
   const body: AccountSwitchResponse = {
     activeId: getActiveAccountId(),
     ...outcome.applied,
@@ -121,12 +132,12 @@ accountsRouter.get("/accounts/login", (_req, res) => {
 });
 
 accountsRouter.post("/accounts/login", async (req, res) => {
-  const { accountId } = parseOrThrow(loginBodySchema, req.body);
+  const { accountId, managedDefault } = parseOrThrow(loginBodySchema, req.body);
   const result = await orFail("login-start-failed", () =>
-    startLogin(accountId),
+    startLogin(accountId, { managedDefault }),
   );
   if (!result.ok) {
-    throw new HttpError(result.error === "in-flight" ? 409 : 404, result.error);
+    throw new HttpError(result.error === "not-found" ? 404 : 409, result.error);
   }
   res.status(202).json(getLoginView());
 });

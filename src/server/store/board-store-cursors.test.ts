@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 import { isolateEnv } from "../test-support/fixtures.js";
 
 isolateEnv();
@@ -76,4 +77,26 @@ test("a change in the enabled sources is broadcast once; the same set is not", (
   store.setEnabledSources([]);
   store.off("change", count);
   assert.equal(changes, 2);
+});
+
+test("the Pushover gap broadcasts on a changed list only and leaves the snapshot when cleared", () => {
+  let changes = 0;
+  const count = () => {
+    changes += 1;
+  };
+  store.on("change", count);
+  const first = new Date("2026-10-21T10:00:00Z");
+  store.setPushoverMissing(["PUSHOVER_USER_KEY"], first);
+  store.setPushoverMissing(["PUSHOVER_USER_KEY"], new Date());
+  assert.equal(changes, 1);
+  assert.equal(store.pushoverMissing()?.since, first.toISOString());
+  store.setPushoverMissing(["PUSHOVER_USER_KEY", "PUSHOVER_APP_TOKEN"]);
+  assert.equal(changes, 2);
+  assert.equal(store.pushoverMissing()?.since, first.toISOString());
+  store.setPushoverMissing([]);
+  store.setPushoverMissing([]);
+  store.off("change", count);
+  assert.equal(changes, 3);
+  assert.equal(store.pushoverMissing(), null);
+  assert.equal("pushoverMissing" in store.snapshot(DEFAULT_BOARD_KEY), false);
 });

@@ -14,9 +14,11 @@ import {
 } from "../services/domain/orchestrator-scope.js";
 import {
   createBoardForOrchestrator,
+  isFeatureCaller,
   listBoardCards,
   listBoardSessions,
   repositoryEntry,
+  scopeRefusalCode,
   scopeTargetOf,
 } from "../services/orchestration/boards.js";
 import {
@@ -47,6 +49,7 @@ import {
 } from "../services/orchestration/orchestrator-groups.js";
 import { startOrchestratorCard } from "../services/orchestration/orchestrator-cards.js";
 import {
+  assignCard,
   readState,
   writeState,
 } from "../services/orchestration/orchestrator-session.js";
@@ -56,6 +59,7 @@ import {
   orchestratorResumeCard,
   requestHandoff,
   resumeLoop,
+  resumeLostSession,
   sendInput,
   stopSession,
 } from "../services/orchestration/orchestrator-sessions.js";
@@ -110,7 +114,8 @@ function assertInScope(
   target: ScopeTarget,
 ): void {
   const scope = checkScope(caller, target);
-  if (!scope.ok) throw new ForbiddenError(scope.reason);
+  if (!scope.ok)
+    throw new ForbiddenError(scopeRefusalCode(caller, scope.reason));
 }
 
 /**
@@ -132,7 +137,9 @@ function scopedCard(
   if (!card || isHiddenCard(card)) throw new NotFoundError("unknown-card");
   assertInScope(
     caller,
-    ownerCheck ? scopeTargetOf(card) : { boardKey: card.boardKey },
+    ownerCheck || isFeatureCaller(caller)
+      ? scopeTargetOf(card)
+      : { boardKey: card.boardKey },
   );
   return card;
 }
@@ -140,7 +147,11 @@ function scopedCard(
 /** List the cards of the caller board, filtered by column, source or text. */
 export const listCardsHandler: ToolHandler = (req, res, caller, call) => {
   const filters = parseOrThrow(listCardsQuerySchema, req.query);
-  const listed = listBoardCards(caller.boardKey, filters);
+  const listed = listBoardCards(
+    caller.boardKey,
+    filters,
+    isFeatureCaller(caller) ? caller.orchestratorId : undefined,
+  );
   call.result = `${listed.total} cards`;
   res.status(200).json(listed);
 };
@@ -427,6 +438,19 @@ export const resumeLoopHandler: ToolHandler = async (
   res.status(200).json({ result });
 };
 
+/** Resume a card whose session is lost, the way the Resume button does. */
+export const resumeSessionHandler: ToolHandler = async (
+  req,
+  res,
+  caller,
+  call,
+) => {
+  const { cardId } = parseOrThrow(sessionCardParamsSchema, req.params);
+  await resumeLostSession(caller, scopedCard(caller, call, cardId));
+  call.result = "resuming";
+  res.status(202).json({ result: "resuming" });
+};
+
 /** Press Escape in a session pane and park it at `needs_input`. */
 export const stopSessionHandler: ToolHandler = async (
   req,
@@ -448,7 +472,7 @@ export const pauseCardHandler: ToolHandler = async (req, res, caller, call) => {
   res.status(200).json({ paused: true });
 };
 
-/** Resume a paused loop, refused while memory is low. */
+/** Resume a paused loop, or answer 202 while the resume waits for memory. */
 export const resumeCardHandler: ToolHandler = async (
   req,
   res,
@@ -456,9 +480,12 @@ export const resumeCardHandler: ToolHandler = async (
   call,
 ) => {
   const { cardId } = parseOrThrow(sessionCardParamsSchema, req.params);
-  await orchestratorResumeCard(caller, scopedCard(caller, call, cardId));
-  call.result = "resumed";
-  res.status(200).json({ resumed: true });
+  const outcome = await orchestratorResumeCard(
+    caller,
+    scopedCard(caller, call, cardId),
+  );
+  call.result = outcome.resumed ? "resumed" : "waiting for memory";
+  res.status(outcome.resumed ? 200 : 202).json(outcome);
 };
 
 /** Raise a decision item for the user to answer. */
@@ -487,7 +514,7 @@ export const waitForEventHandler: ToolHandler = async (
   res.on("close", () => gone.abort());
   const outcome = await waitForEvent(
     caller.boardKey,
-    filter,
+    { ...filter, orchestratorId: caller.orchestratorId },
     timeoutSeconds * 1000,
     gone.signal,
   );
@@ -591,4 +618,23 @@ export const startCardHandler: ToolHandler = async (req, res, caller, call) => {
   );
   call.result = `started ${outcome.playbook}`;
   res.status(202).json(outcome);
+};
+
+/** Assign one To Do card that the main owns to the calling feature orchestrator. */
+export const assignCardHandler: ToolHandler = async (
+  req,
+  res,
+  caller,
+  call,
+) => {
+  const { cardId } = parseOrThrow(sessionCardParamsSchema, req.params);
+  call.cardId = cardId;
+  const outcome = await assignCard(
+    caller.boardKey,
+    cardId,
+    caller.orchestratorId,
+    "orchestrator",
+  );
+  call.result = outcome.changed ? "assigned" : "already assigned";
+  res.status(200).json(outcome);
 };

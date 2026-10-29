@@ -17,6 +17,7 @@ import { conversationView } from "@/modules/orchestrator/domain/conversation-vie
 import type { OrchestratorView } from "@/modules/orchestrator/domain/centre-model";
 import { focusCommentBox } from "@/modules/orchestrator/hooks/focus-entry";
 import { useCentrePane } from "@/modules/orchestrator/hooks/use-centre-pane";
+import { usePinnedToEnd } from "@/modules/orchestrator/hooks/use-pinned-to-end";
 import { useConversationQuery } from "@/modules/orchestrator/queries/orchestrator-queries";
 import { useCentreSelection } from "./use-centre-selection";
 import { useConversationActions } from "./use-conversation-actions";
@@ -53,6 +54,7 @@ function ConversationBody({
     () => void conversation.refetch(),
   );
   const scrollRef = useRef<HTMLDivElement>(null);
+  usePinnedToEnd(scrollRef);
 
   const entries = useMemo(
     () =>

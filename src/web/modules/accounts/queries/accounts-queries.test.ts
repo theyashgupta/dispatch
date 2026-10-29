@@ -103,6 +103,31 @@ test("setActiveAccount reads a 404 as an unregistered account", async () => {
   });
 });
 
+test("setActiveAccount reads a needs-login 409 as a re-login prompt", async () => {
+  reply(409, { error: "account-needs-login" });
+  assert.deepEqual(await setActiveAccount("a", "idle"), {
+    ok: false,
+    error: "This account needs a new login. Log in again, then switch.",
+  });
+});
+
+test("setActiveAccount reads a shadowed-by-home 409 as a duplicate login", async () => {
+  reply(409, { error: "account-shadowed-by-home" });
+  assert.deepEqual(await setActiveAccount("a", "idle"), {
+    ok: false,
+    error:
+      "This account is the same login as Default. Switch to Default or remove the duplicate.",
+  });
+});
+
+test("setActiveAccount keeps the generic message for an unknown 409 code", async () => {
+  reply(409, { error: "something-else" });
+  assert.deepEqual(await setActiveAccount("a", "idle"), {
+    ok: false,
+    error: "Couldn't switch the Claude account.",
+  });
+});
+
 test("setActiveAccount reads any other status as a switch failure", async () => {
   reply(500, {});
   assert.deepEqual(await setActiveAccount("a", "none"), {
@@ -145,9 +170,30 @@ test("startLogin resolves the account id of the returned view on a 200", async (
   assert.equal(calls[0]?.init?.body, "{}");
 });
 
+test("startLogin posts the managed default flag", async () => {
+  reply(200, { state: "waiting" });
+  await startLogin({ managedDefault: true });
+  assert.equal(calls[0]?.init?.body, '{"managedDefault":true}');
+});
+
+test("startLogin posts the account id", async () => {
+  reply(200, { state: "waiting" });
+  await startLogin({ accountId: "a" });
+  assert.equal(calls[0]?.init?.body, '{"accountId":"a"}');
+});
+
+test("startLogin posts an empty body without a target", async () => {
+  reply(200, { state: "waiting" });
+  await startLogin();
+  assert.equal(calls[0]?.init?.body, "{}");
+});
+
 test("startLogin falls back to the requested account when the view has none", async () => {
   reply(200, { state: "waiting" });
-  assert.deepEqual(await startLogin("acc-2"), { ok: true, accountId: "acc-2" });
+  assert.deepEqual(await startLogin({ accountId: "acc-2" }), {
+    ok: true,
+    accountId: "acc-2",
+  });
   assert.equal(calls[0]?.init?.body, JSON.stringify({ accountId: "acc-2" }));
 });
 
@@ -173,9 +219,17 @@ test("startLogin reads a 409 as a login already in progress", async () => {
   });
 });
 
+test("startLogin reads a 409 managed-exists as a refusal, not a login in progress", async () => {
+  reply(409, { error: "managed-exists" });
+  assert.deepEqual(await startLogin({ managedDefault: true }), {
+    ok: false,
+    error: "The Default account already uses a Dispatch login.",
+  });
+});
+
 test("startLogin reads a 404 as an unregistered account", async () => {
   reply(404, {});
-  assert.deepEqual(await startLogin("x"), {
+  assert.deepEqual(await startLogin({ accountId: "x" }), {
     ok: false,
     error: "That account is no longer registered.",
   });

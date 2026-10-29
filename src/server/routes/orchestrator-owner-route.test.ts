@@ -35,18 +35,29 @@ const minted = await store.createGroupCard(SBX, "infra group", [a.id, b.id]);
 if (!minted.ok) throw new Error("group not created");
 const group = minted.card;
 const loose = await store.createLocalCard(SBX, "loose ticket", "");
+const claimable = await store.createLocalCard(SBX, "claimable ticket", "");
+const owned = await store.createLocalCard(SBX, "owned by other", "");
+const m1 = await store.createLocalCard(SBX, "main member 1", "");
+const m2 = await store.createLocalCard(SBX, "main member 2", "");
+const mainGroupMinted = await store.createGroupCard(SBX, "main group", [
+  m1.id,
+  m2.id,
+]);
+if (!mainGroupMinted.ok) throw new Error("main group not created");
+const mainGroup = mainGroupMinted.card;
 
 function record(
   id: string,
   role: "main" | "extra",
   groupIds: string[] = [],
   policyOverride: OrchestratorRecord["policyOverride"] = {},
+  ticketIds: string[] = [],
 ): OrchestratorRecord {
   return {
     id,
     name: id,
     role,
-    scope: { groupIds, ticketIds: [] },
+    scope: { groupIds, ticketIds },
     policyOverride,
     cardId: null,
     state: "stopped",
@@ -65,10 +76,13 @@ await store.setBoardOrchestrators(SBX, [
     concurrencyCap: 1,
     shipRights: "none",
   }),
+  record("feat", "extra"),
+  record("other", "extra", [], {}, [owned.id]),
 ]);
 
 const MAIN = mintOrchestratorToken({ boardKey: SBX, orchestratorId: "main" });
 const INFRA = mintOrchestratorToken({ boardKey: SBX, orchestratorId: "infra" });
+const FEAT = mintOrchestratorToken({ boardKey: SBX, orchestratorId: "feat" });
 const STRANGER = mintOrchestratorToken({
   boardKey: SBX,
   orchestratorId: "stranger",
@@ -124,10 +138,10 @@ void test("the main gets 403 other-owner on a group an extra owns and on its mem
   assert.equal(start.body.error, "other-owner");
 });
 
-void test("an extra gets 403 other-owner on a loose ticket the main owns", async () => {
+void test("an extra gets 403 out-of-scope on a loose ticket the main owns", async () => {
   const reply = await call("GET", `/cards/${loose.id}`, INFRA);
   assert.equal(reply.status, 403);
-  assert.equal(reply.body.error, "other-owner");
+  assert.equal(reply.body.error, "out-of-scope");
   assert.equal((await call("GET", `/cards/${loose.id}`, MAIN)).status, 200);
 });
 
@@ -144,11 +158,23 @@ const shipBody = {
   ],
 };
 
-void test("only the main may start a ship flow; an extra gets 403 main-only", async () => {
+void test("a feature extra on a card it owns passes main-only and is stopped by its ship rights", async () => {
   const reply = await call("POST", `/groups/${group.id}/ship`, INFRA, shipBody);
   assert.equal(reply.status, 403);
-  assert.equal(reply.body.error, "main-only");
+  assert.equal(reply.body.error, "policy-refused");
   assert.equal(store.getCard(group.id)?.shipFlow, undefined);
+});
+
+void test("a feature extra on a card it does not own gets 403 out-of-scope from ship", async () => {
+  const reply = await call(
+    "POST",
+    `/groups/${mainGroup.id}/ship`,
+    INFRA,
+    shipBody,
+  );
+  assert.equal(reply.status, 403);
+  assert.equal(reply.body.error, "out-of-scope");
+  assert.equal(store.getCard(mainGroup.id)?.shipFlow, undefined);
 });
 
 void test("the main passes the owner and role checks of ship on an extra's group", async () => {
@@ -197,4 +223,79 @@ void test("every card tool answers 404 unknown-card on an orchestrator session c
   }
   assert.equal(store.getCard(hidden.id)?.column, "todo");
   assert.equal(store.getCard(hidden.id)?.title, "Orchestrator: infra");
+});
+
+function listed(reply: { body: Record<string, unknown> }): string[] {
+  return (reply.body.cards as { id: string }[]).map((c) => c.id).sort();
+}
+
+void test("a feature extra with an empty scope lists no card and cannot read or start a To Do ticket", async () => {
+  assert.ok(store.listCards(SBX).some((c) => c.column === "todo"));
+  const list = await call("GET", "/cards", FEAT);
+  assert.equal(list.status, 200);
+  assert.equal(list.body.total, 0);
+  assert.deepEqual(list.body.cards, []);
+  const start = await call("POST", `/cards/${claimable.id}/start`, FEAT, {
+    playbook: "Write code directly",
+  });
+  assert.equal(start.status, 403);
+  assert.equal(start.body.error, "out-of-scope");
+  const stored = store.getCard(claimable.id);
+  assert.equal(stored?.launch, undefined);
+  assert.equal(stored?.sessions?.length ?? 0, 0);
+  const read = await call("GET", `/cards/${claimable.id}`, FEAT);
+  assert.equal(read.status, 403);
+  assert.equal(read.body.error, "out-of-scope");
+});
+
+void test("assign_card moves a ticket into the scope of a feature extra and unlocks it", async () => {
+  const reply = await call("POST", `/cards/${claimable.id}/assign`, FEAT);
+  assert.equal(reply.status, 200);
+  assert.equal(reply.body.changed, true);
+  assert.deepEqual(
+    store.getBoard(SBX)?.orchestrators.find((r) => r.id === "feat")?.scope
+      .ticketIds,
+    [claimable.id],
+  );
+  assert.deepEqual(listed(await call("GET", "/cards", FEAT)), [claimable.id]);
+  const again = await call("POST", `/cards/${claimable.id}/assign`, FEAT);
+  assert.equal(again.status, 200);
+  assert.equal(again.body.changed, false);
+  const start = await call("POST", `/cards/${claimable.id}/start`, FEAT, {
+    playbook: "no such playbook",
+  });
+  assert.equal(start.status, 400);
+  assert.equal(start.body.error, "unknown-playbook");
+});
+
+void test("a feature extra lists the group it owns and the members of it", async () => {
+  const ids = listed(await call("GET", "/cards", INFRA));
+  assert.deepEqual(ids, [group.id, a.id, b.id].sort());
+});
+
+void test("the main lists every card of the board", async () => {
+  const reply = await call("GET", "/cards", MAIN);
+  assert.equal(reply.status, 200);
+  assert.equal(reply.body.total, store.listCards(SBX).length);
+});
+
+void test("assign_card refuses the main, a card of another extra and a group member", async () => {
+  const byMain = await call("POST", `/cards/${loose.id}/assign`, MAIN);
+  assert.equal(byMain.status, 400);
+  assert.equal(byMain.body.error, "not-feature-orchestrator");
+  const taken = await call("POST", `/cards/${owned.id}/assign`, FEAT);
+  assert.equal(taken.status, 403);
+  assert.equal(taken.body.error, "other-owner");
+  const member = await call("POST", `/cards/${m1.id}/assign`, FEAT);
+  assert.equal(member.status, 400);
+  assert.equal(member.body.error, "group-member");
+});
+
+void test("a feature extra gets 403 out-of-scope on the ship state of a group it does not own, the main passes", async () => {
+  const refused = await call("GET", `/groups/${mainGroup.id}/ship`, INFRA);
+  assert.equal(refused.status, 403);
+  assert.equal(refused.body.error, "out-of-scope");
+  const ofExtra = await call("GET", `/groups/${group.id}/ship`, MAIN);
+  assert.equal(ofExtra.status, 404);
+  assert.equal(ofExtra.body.error, "no-ship-flow");
 });

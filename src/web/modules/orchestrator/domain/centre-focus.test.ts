@@ -33,19 +33,12 @@ function branch(id: string, band: BandKey, slot: number): CentreBranch {
     planSize: null,
     memberCount: null,
     stateSince: null,
-    shippedAt: null,
     slot,
   };
 }
 
 function graphOf(branches: CentreBranch[]): CentreGraph {
-  const keys: BandKey[] = [
-    "needs_you",
-    "running",
-    "planned",
-    "done",
-    "shipped",
-  ];
+  const keys: BandKey[] = ["needs_you", "running", "planned", "done"];
   return {
     centre: null,
     branches,
@@ -54,7 +47,6 @@ function graphOf(branches: CentreBranch[]): CentreGraph {
       return { key, label: key, branches: own, count: own.length };
     }),
     edges: [],
-    hiddenShipped: 0,
   };
 }
 
@@ -102,12 +94,12 @@ test("a current id that is not in the order goes to the node", () => {
 
 test("the focus order lists the node, then the branches in band order", () => {
   const graph = graphOf([
-    branch("S1", "shipped", 0),
+    branch("D1", "done", 0),
     branch("R1", "running", 1),
     branch("N1", "needs_you", 2),
     branch("R2", "running", 3),
   ]);
-  assert.deepEqual(focusOrder(graph), ["centre", "N1", "R1", "R2", "S1"]);
+  assert.deepEqual(focusOrder(graph), ["centre", "N1", "R1", "R2", "D1"]);
 });
 
 test("a graph with no branch has only the node in its focus order", () => {
@@ -120,7 +112,7 @@ test("only the four navigation keys are focus keys", () => {
   assert.equal(isFocusKey("ArrowLeft"), false);
 });
 
-test("a shipped branch older than a day is not in the focus order until it is shown", () => {
+test("a shipped branch is not in the focus order", () => {
   const NOW = Date.parse("2026-10-08T12:00:00.000Z");
   const group = (id: string, patch: Partial<Card>): Card => ({
     id,
@@ -141,7 +133,7 @@ test("a shipped branch older than a day is not in the focus order until it is sh
       group("G-1", {}),
       group("G-2", {
         column: "done",
-        columnSince: "2026-10-06T12:00:00.000Z",
+        columnSince: "2026-10-08T11:00:00.000Z",
       }),
     ],
     records: [
@@ -161,14 +153,7 @@ test("a shipped branch older than a day is not in the focus order until it is sh
     decisions: [],
     now: NOW,
   };
-  assert.deepEqual(
-    focusOrder(centreGraph({ ...input, showOlderShipped: false })),
-    ["centre", "G-1"],
-  );
-  assert.deepEqual(
-    focusOrder(centreGraph({ ...input, showOlderShipped: true })),
-    ["centre", "G-1", "G-2"],
-  );
+  assert.deepEqual(focusOrder(centreGraph(input)), ["centre", "G-1"]);
 });
 
 test("only Enter with no modifier is a plain Enter", () => {

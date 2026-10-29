@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import type { Card } from "../../../../shared/types.js";
 import {
+  frozenNote,
   pauseAction,
   pauseFailureCopy,
   pausedNote,
@@ -85,6 +86,23 @@ test("a paused card shows the note of who paused it and a running card none", ()
   );
   assert.equal(pausedNote(card({})), null);
   assert.equal(pausedNote(card({ paused: null })), null);
+});
+
+test("a frozen card with a start time shows the frozen note and any other card none", () => {
+  const stateSince = "2026-10-21T13:25:00.000Z";
+  assert.equal(frozenNote(card({})), null);
+  assert.equal(frozenNote(card({ state: "working", stateSince })), null);
+  assert.equal(frozenNote(card({ state: "frozen" })), null);
+  assert.equal(frozenNote(card({ state: "frozen", stateSince: "x" })), null);
+  const start = "Frozen after an idle compaction since ";
+  const end = " Dispatch relaunches Claude with resume 15 minutes after that.";
+  const note = frozenNote(card({ state: "frozen", stateSince })) ?? "";
+  assert.ok(note.startsWith(start));
+  assert.ok(note.endsWith(end));
+  assert.match(
+    note.slice(start.length, note.length - end.length),
+    /^\d{1,2}:\d{2}/,
+  );
 });
 
 test("Pause shows for a loop card with a live session, Resume for a paused card, else neither", () => {

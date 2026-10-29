@@ -38,6 +38,7 @@ import { Card, cardVariants } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { isMultiSelectable } from "@/modules/board/domain/drag-selection";
 import { showsSessionRecovery } from "@/modules/board/domain/session-recovery";
+import { BlockedByChip } from "./BlockedByChip";
 import { GroupPrRow } from "./GroupPrRow";
 import { MoveToPicker } from "./MoveToPicker";
 
@@ -61,6 +62,7 @@ interface CardViewProps {
   resumeFailed?: boolean;
   watchdogFired?: boolean;
   resumeFailureCopy?: string;
+  blocker?: { label: string; title: string } | null;
   onSelect?: (id: string) => void;
   onMoveTo?: (cardId: string, column: ColumnId) => void;
   onRetryStart?: (card: CardModel) => void;
@@ -114,6 +116,7 @@ export function CardView({
   resumeFailed = false,
   watchdogFired = false,
   resumeFailureCopy,
+  blocker,
   onSelect,
   onMoveTo,
   onRetryStart,
@@ -233,6 +236,9 @@ export function CardView({
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-(--space-xs)">
           <SourceBadge source={card.source ?? "linear"} />
           <LinearStateChip card={card} />
+          {blocker != null && (
+            <BlockedByChip label={blocker.label} title={blocker.title} />
+          )}
           {!isGroup &&
             prs
               .slice(0, PR_CHIP_CAP)

@@ -4,11 +4,14 @@ import { readFileSync } from "node:fs";
 import {
   detectState,
   initialMemory,
+  inputBoxText,
   limitSurfaceOf,
   paneReady,
   type DetectInput,
   type Detection,
   paneBusy,
+  paneDialog,
+  unsentBoxText,
 } from "./supervisor-state.js";
 import type { SupervisorState } from "../../../shared/types.js";
 
@@ -26,8 +29,10 @@ function input(over: Partial<DetectInput>): DetectInput {
     atShellPrompt: false,
     paused: null,
     pane: "",
+    contextPercent: null,
     engineSessionId: "3f0c2a7e-5d1b-4c3e-9a2f-1b2c3d4e5f60",
     completion: "running",
+    engineOpen: true,
     transcript: null,
     memory: initialMemory(),
     ...over,
@@ -70,6 +75,11 @@ function last(ds: Detection[]): SupervisorState {
   return ds[ds.length - 1].state;
 }
 
+const FROZEN_OVER = {
+  contextPercent: 0,
+  transcript: { size: 100, lastAssistantText: null },
+};
+
 const FIXTURE_STATES: [
   string,
   number,
@@ -98,6 +108,8 @@ const FIXTURE_STATES: [
   ["limit-cancelled.txt", 3, {}, "idle"],
   ["api-error.txt", 1, {}, "api_error"],
   ["api-error-2.txt", 1, {}, "api_error"],
+  ["frozen-compacted.txt", 2, FROZEN_OVER, "frozen"],
+  ["frozen-compacted-2.txt", 2, FROZEN_OVER, "frozen"],
   ["shell-prompt.txt", 1, { atShellPrompt: true }, "shell_prompt"],
   ["idle.txt", 1, { tmuxAlive: false }, "lost"],
 ];
@@ -108,10 +120,163 @@ for (const [file, count, over, state] of FIXTURE_STATES) {
   });
 }
 
-void test("every one of the 12 states comes from a recorded pane", () => {
+void test("every one of the 13 states comes from a recorded pane", () => {
   const seen = new Set(FIXTURE_STATES.map(([, , , s]) => s));
   seen.add(last(feed(pane("working.txt"), 16, {}, () => 100)));
-  assert.equal(seen.size, 12);
+  assert.equal(seen.size, 13);
+});
+
+const FROZEN_FIXTURES = ["frozen-compacted.txt", "frozen-compacted-2.txt"];
+
+void test("a compacted idle pane with queued input at 0 percent context is frozen on the second sample 60 s later", () => {
+  for (const file of FROZEN_FIXTURES) {
+    const ds = feed(pane(file), 2, FROZEN_OVER, () => 100);
+    assert.notEqual(ds[0].state, "frozen", file);
+    assert.equal(ds[1].state, "frozen", file);
+    assert.match(ds[1].evidence, /Compacted while idle/, file);
+  }
+});
+
+void test("one frozen looking sample is not frozen", () => {
+  for (const file of FROZEN_FIXTURES)
+    assert.notEqual(feed(pane(file), 1, FROZEN_OVER)[0].state, "frozen", file);
+});
+
+void test("a compacted idle pane with context above 0 percent is never frozen", () => {
+  for (const file of FROZEN_FIXTURES) {
+    const states = feed(pane(file), 4, { contextPercent: 5 }).map(
+      (d) => d.state,
+    );
+    assert.ok(!states.includes("frozen"), file);
+  }
+});
+
+void test("a compacted idle pane with an empty input line is idle, not frozen", () => {
+  const text = pane("frozen-compacted-2.txt").replace(
+    "❯ Dispatch wake: Agent done for LOCAL-159",
+    "❯ ",
+  );
+  const states = feed(text, 3, FROZEN_OVER).map((d) => d.state);
+  assert.deepEqual(states, ["working", "working", "idle"]);
+});
+
+void test("queued input at 0 percent context without a compaction line is not frozen", () => {
+  for (const file of FROZEN_FIXTURES) {
+    const text = pane(file).replace("✻ Compacted while idle", "✻ Crunched 4s");
+    assert.notEqual(text, pane(file));
+    const states = feed(text, 4, FROZEN_OVER).map((d) => d.state);
+    assert.ok(!states.includes("frozen"), file);
+  }
+});
+
+void test("a growing transcript on a frozen looking pane is working and keeps frozenSince null", () => {
+  const ds = feed(
+    pane("frozen-compacted.txt"),
+    4,
+    FROZEN_OVER,
+    (i) => 100 + i * 10,
+  );
+  assert.ok(ds.every((d) => d.state === "working"));
+  assert.ok(ds.slice(1).every((d) => d.memory.frozenSince === null));
+});
+
+void test("transcript growth after frozen resets to working and clears frozenSince", () => {
+  const ds = feed(pane("frozen-compacted.txt"), 3, FROZEN_OVER, (i) =>
+    i < 2 ? 100 : 200,
+  );
+  assert.equal(ds[1].state, "frozen");
+  assert.equal(ds[2].state, "working");
+  assert.equal(ds[2].memory.frozenSince, null);
+});
+
+void test("a paused card on a frozen pane is paused", () => {
+  const paused: DetectInput["paused"] = {
+    at: "2026-10-21T00:00:00.000Z",
+    by: "user",
+    sessionId: "session-1",
+    pids: [101],
+  };
+  const ds = feed(pane("frozen-compacted.txt"), 2, { ...FROZEN_OVER, paused });
+  assert.equal(last(ds), "paused");
+});
+
+void test("a frozen looking pane with no transcript is never frozen", () => {
+  for (const file of FROZEN_FIXTURES) {
+    const states = feed(pane(file), 4, { contextPercent: 0 }).map(
+      (d) => d.state,
+    );
+    assert.ok(!states.includes("frozen"), file);
+  }
+});
+
+void test("a frozen looking pane with a running spinner line is working, not frozen", () => {
+  const text = pane("frozen-compacted.txt").replace(
+    "❯ Dispatch wake: decision answered for LOCAL-161",
+    "✻ Thinking… (esc to interrupt)\n\n❯ Dispatch wake: decision answered for LOCAL-161",
+  );
+  const ds = feed(text, 3, FROZEN_OVER);
+  assert.ok(ds.every((d) => d.state === "working"));
+  assert.ok(ds.every((d) => d.memory.frozenSince === null));
+});
+
+void test("a box text that changes on each sample is never frozen", () => {
+  let memory = initialMemory();
+  const states: SupervisorState[] = [];
+  for (let i = 0; i < 4; i++) {
+    const d = detectState(
+      input({
+        ...FROZEN_OVER,
+        now: i * MINUTE,
+        pane: pane("frozen-compacted.txt").replace(
+          "no action is needed",
+          `no action ${i} is needed`,
+        ),
+        memory,
+      }),
+    );
+    states.push(d.state);
+    memory = d.memory;
+  }
+  assert.ok(!states.includes("frozen"));
+});
+
+void test("a stored frozen state is kept on the first sample while the frozen pane is unchanged", () => {
+  const [first] = feed(pane("frozen-compacted.txt"), 1, {
+    ...FROZEN_OVER,
+    memory: initialMemory("frozen"),
+  });
+  assert.equal(first.state, "frozen");
+  assert.equal(first.memory.frozenSince, 0);
+});
+
+void test("a stored frozen state is released when the pane no longer shows the freeze", () => {
+  const text = pane("frozen-compacted-2.txt").replace(
+    "❯ Dispatch wake: Agent done for LOCAL-159",
+    "❯ ",
+  );
+  const [first] = feed(text, 1, {
+    ...FROZEN_OVER,
+    memory: initialMemory("frozen"),
+  });
+  assert.equal(first.state, "working");
+});
+
+void test("inputBoxText joins the queued box text and is empty for an idle prompt", () => {
+  assert.equal(
+    inputBoxText(pane("frozen-compacted.txt")),
+    "Dispatch wake: decision answered for LOCAL-161 Dispatch wake: decision answered for LOCAL-161 Orchestrator: the wake lines above are already satisfied Orchestrator: no action is needed until the next event",
+  );
+  assert.equal(inputBoxText(pane("idle.txt")), "");
+});
+
+void test("unsentBoxText is null for an empty box and for a box text the transcript shows", () => {
+  const box = inputBoxText(pane("frozen-compacted.txt"));
+  assert.equal(unsentBoxText(pane("idle.txt"), ["hello"]), null);
+  assert.equal(unsentBoxText(pane("frozen-compacted.txt"), []), box);
+  assert.equal(
+    unsentBoxText(pane("frozen-compacted.txt"), [box.replace(/ /g, "\n")]),
+    null,
+  );
 });
 
 void test("the shortly notice is the usage limit wait evidence", () => {
@@ -169,6 +334,112 @@ void test("the RALPH COMPLETE promise of a single PRD loop is roadmap_complete o
   assert.ok(done.includes("roadmap_complete"));
   const running = feed(text, 3, { completion: "running" }).map((d) => d.state);
   assert.ok(!running.includes("roadmap_complete"));
+});
+
+void test("a completion signal in the pane or the transcript tail gives roadmap_complete only with completion complete", () => {
+  const promisePane = pane("roadmap-complete.txt");
+  const jobPane = pane("after-pause-job-lines.txt");
+  const tail = (text: string) => ({
+    size: 100,
+    lastAssistantText: text,
+    userTexts: [],
+  });
+  const sources: [string, string, DetectInput["transcript"], string | null][] =
+    [
+      ["pane promise", promisePane, null, "pane:"],
+      [
+        "transcript promise",
+        jobPane,
+        tail("All green.\n<promise>RALPH COMPLETE demo</promise>"),
+        "transcript:",
+      ],
+      [
+        "transcript DONE line",
+        jobPane,
+        tail("Built.\nDISPATCH_STATUS: DONE - demo built"),
+        "transcript:",
+      ],
+      ["none", jobPane, tail("Still working on phase 2."), null],
+    ];
+  for (const [name, text, transcript, prefix] of sources) {
+    for (const completion of ["complete", "running"] as const) {
+      const d = detectState(input({ pane: text, transcript, completion }));
+      const wanted = prefix !== null && completion === "complete";
+      assert.equal(
+        d.state === "roadmap_complete",
+        wanted,
+        `${name} ${completion}`,
+      );
+      if (wanted) assert.ok(d.evidence.startsWith(prefix), d.evidence);
+    }
+  }
+});
+
+void test("with the engine closed a transcript tail signal is not roadmap_complete, a pane promise still is", () => {
+  const jobPane = pane("after-pause-job-lines.txt");
+  for (const lastAssistantText of [
+    "All green.\n<promise>RALPH COMPLETE demo</promise>",
+    "Built.\nDISPATCH_STATUS: DONE - demo built",
+  ]) {
+    const d = detectState(
+      input({
+        pane: jobPane,
+        completion: "complete",
+        engineOpen: false,
+        transcript: { size: 100, lastAssistantText },
+      }),
+    );
+    assert.notEqual(d.state, "roadmap_complete", lastAssistantText);
+  }
+  const closed = detectState(
+    input({
+      pane: pane("roadmap-complete.txt"),
+      completion: "complete",
+      engineOpen: false,
+    }),
+  );
+  assert.equal(closed.state, "roadmap_complete");
+  assert.ok(closed.evidence.startsWith("pane:"), closed.evidence);
+});
+
+void test("a DISPATCH_STATUS DONE line typed inside a pane user prompt block is not a completion signal", () => {
+  const text =
+    "❯ Finish up. When all phases are green print\n" +
+    "  DISPATCH_STATUS: DONE - demo built\n" +
+    "❯ \n" +
+    "  Opus 5.5 · high  │  ██░░░░░░░░   17%  174k/1.0M\n";
+  const states = feed(text, 3, { completion: "complete" }).map((d) => d.state);
+  assert.ok(!states.includes("roadmap_complete"));
+});
+
+void test("a DONE line counts only in the marker parser's shape", () => {
+  const jobPane = pane("after-pause-job-lines.txt");
+  const stateOf = (text: string) =>
+    detectState(
+      input({
+        pane: jobPane,
+        completion: "complete",
+        transcript: { size: 100, lastAssistantText: text },
+      }),
+    ).state;
+  assert.equal(stateOf("DISPATCH_STATUS: DONE - built"), "roadmap_complete");
+  assert.equal(stateOf("DISPATCH_STATUS: DONE"), "roadmap_complete");
+  assert.notEqual(stateOf("DISPATCH_STATUS: DONE."), "roadmap_complete");
+});
+
+void test("a pane DONE line counts only in the newest agent block", () => {
+  const head = "⏺ Phase 2 is green.\n  DISPATCH_STATUS: DONE - demo built\n";
+  const newer = "⏺ Which branch should I rebase on?\n";
+  const footer = "❯ \n  Opus 5.5 · high  │  ██░░░░░░░░   17%  174k/1.0M\n";
+  const newest = detectState(
+    input({ pane: head + footer, completion: "complete" }),
+  );
+  assert.equal(newest.state, "roadmap_complete");
+  assert.ok(newest.evidence.startsWith("pane:"), newest.evidence);
+  const states = feed(head + newer + footer, 3, {
+    completion: "complete",
+  }).map((d) => d.state);
+  assert.ok(!states.includes("roadmap_complete"));
 });
 
 void test("one idle sample is not idle; three equal samples 60 s apart are", () => {
@@ -566,4 +837,136 @@ void test("a background agent wait reads as busy for the handoff quiet check", (
     true,
   );
   assert.equal(paneBusy(pane("idle.txt")), false);
+});
+
+const PERMISSION_DIALOG =
+  "Do you want to proceed?\n ❯ 1. Yes\n   2. No\n Esc to cancel";
+
+void test("paneDialog sees a dialog below the input line", () => {
+  assert.equal(paneDialog(`output\n────\n❯ \n${PERMISSION_DIALOG}`), true);
+});
+
+void test("paneDialog sees a dialog in a pane with no input line", () => {
+  assert.equal(paneDialog(PERMISSION_DIALOG), true);
+});
+
+void test("paneDialog is false for a plain idle pane", () => {
+  assert.equal(paneDialog("output\n────\n❯ \n────\n  ? for shortcuts"), false);
+});
+
+const LIMIT_TAIL =
+  "You've hit your weekly limit · resets Oct 20 at 8:30am (Asia/Calcutta)";
+
+function tailStates(
+  text: string,
+  lastAssistantText: string | null,
+  sizes: number[] = [100, 100, 100],
+): Detection[] {
+  const out: Detection[] = [];
+  let memory = initialMemory();
+  sizes.forEach((size, i) => {
+    const d = detectState(
+      input({
+        now: i * MINUTE,
+        pane: text,
+        memory,
+        transcript: { size, lastAssistantText },
+      }),
+    );
+    out.push(d);
+    memory = d.memory;
+  });
+  return out;
+}
+
+void test("a usage limit message at the transcript tail gives usage_limit_wait on the second agreeing sample", () => {
+  const states = tailStates(pane("after-pause-job-lines.txt"), LIMIT_TAIL);
+  assert.notEqual(states[0].state, "usage_limit_wait");
+  assert.equal(states[1].state, "usage_limit_wait");
+  assert.equal(states[2].state, "usage_limit_wait");
+  assert.equal(states[1].evidence, `transcript: ${LIMIT_TAIL}`);
+});
+
+void test("a usage limit message is read in a quiet pane, with a curly apostrophe and after a first line", () => {
+  for (const text of [
+    LIMIT_TAIL.replaceAll("'", "\u2019"),
+    `${LIMIT_TAIL}\nsecond line`,
+    "You've hit your session limit",
+    "You've hit your limit · resets 8:30am (Asia/Calcutta)",
+    "You've hit your Opus weekly limit · resets Oct 20 at 8:30am",
+  ]) {
+    const states = tailStates(pane("idle.txt"), text, [100, 100]);
+    assert.equal(states[1].state, "usage_limit_wait", text);
+  }
+});
+
+void test("the weekly footer warning at the transcript tail never gives usage_limit_wait", () => {
+  for (const text of [
+    "You've used 90% of your weekly limit",
+    "You\u2019ve used 90% of your weekly limit · resets Oct 20 at 8:30am",
+    "I hit the weekly limit of the API earlier",
+  ]) {
+    const states = tailStates(
+      pane("after-pause-job-lines.txt"),
+      text,
+      [100, 100, 100, 100],
+    );
+    assert.ok(
+      states.every((d) => d.state !== "usage_limit_wait"),
+      text,
+    );
+  }
+});
+
+void test("a busy pane with a usage limit message at the transcript tail never gives usage_limit_wait", () => {
+  const states = tailStates(pane("working.txt"), LIMIT_TAIL, [100, 100, 100]);
+  assert.ok(states.every((d) => d.state !== "usage_limit_wait"));
+});
+
+void test("a growing transcript with a usage limit message at the tail never gives usage_limit_wait", () => {
+  const states = tailStates(
+    pane("after-pause-job-lines.txt"),
+    LIMIT_TAIL,
+    [100, 200, 300, 400],
+  );
+  assert.ok(states.every((d) => d.state !== "usage_limit_wait"));
+});
+
+void test("a transcript that grows after two agreeing samples leaves usage_limit_wait", () => {
+  const states = tailStates(
+    pane("after-pause-job-lines.txt"),
+    LIMIT_TAIL,
+    [100, 100, 100, 200],
+  );
+  assert.equal(states[2].state, "usage_limit_wait");
+  assert.equal(states[3].state, "working");
+});
+
+void test("an open limit menu wins over a usage limit message at the transcript tail", () => {
+  const states = tailStates(pane("limit-menu.txt"), LIMIT_TAIL, [100, 100]);
+  assert.equal(states[1].state, "usage_limit_dialog");
+});
+
+void test("a changed limit message restarts the two sample rule", () => {
+  let memory = initialMemory();
+  const sample = (text: string) => {
+    const d = detectState(
+      input({
+        pane: pane("idle.txt"),
+        memory,
+        transcript: { size: 100, lastAssistantText: text },
+      }),
+    );
+    memory = d.memory;
+    return d.state;
+  };
+  assert.notEqual(sample(LIMIT_TAIL), "usage_limit_wait");
+  assert.notEqual(
+    sample("You've hit your session limit · resets 3pm"),
+    "usage_limit_wait",
+  );
+  assert.equal(
+    sample("You've hit your session limit · resets 3pm"),
+    "usage_limit_wait",
+  );
 });

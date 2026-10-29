@@ -8,7 +8,9 @@ import {
   MessageCircleQuestionMark,
   Pause,
   Play,
+  PowerOff,
   ShieldQuestionMark,
+  Snowflake,
   SquareTerminal,
   TriangleAlert,
   Unplug,
@@ -29,9 +31,11 @@ const GLYPHS: Record<SupervisorState, LucideIcon> = {
   usage_limit_wait: Hourglass,
   api_error: TriangleAlert,
   stale: Clock,
+  frozen: Snowflake,
   lost: Unplug,
   shell_prompt: SquareTerminal,
   paused: CirclePause,
+  released: PowerOff,
 };
 
 interface SessionStateBadgeProps {

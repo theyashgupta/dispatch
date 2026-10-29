@@ -1,12 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import type { SupervisorState } from "../../../shared/types.js";
+import type {
+  SupervisorState,
+  SupervisorStateReason,
+} from "../../../shared/types.js";
 import {
   declineKeys,
   holdsNeedsInput,
   initialPlanMemory,
   planActions,
+  planFrozenRelaunch,
   parseResetAt,
   readMenu,
   type PlanInput,
@@ -69,6 +73,13 @@ void test("each transition maps to its action list", () => {
       },
       [],
     ],
+    [
+      {
+        to: "roadmap_complete",
+        loop: { ...LOOP, orchestrator: true },
+      },
+      [],
+    ],
     [{ to: "lost" }, [{ kind: "resume" }]],
     [{ to: "shell_prompt", loop: null }, [{ kind: "resume" }]],
     [{ to: "needs_input" }, []],
@@ -79,7 +90,8 @@ void test("each transition maps to its action list", () => {
       { to: "usage_limit_dialog", usageLimit: "stop" },
       [{ kind: "answer_limit" }],
     ],
-    [{ to: "usage_limit_wait" }, []],
+    [{ to: "usage_limit_wait" }, [{ kind: "limit_move" }]],
+    [{ to: "usage_limit_wait", loop: null }, [{ kind: "limit_move" }]],
     [
       {
         to: "usage_limit_wait",
@@ -88,10 +100,23 @@ void test("each transition maps to its action list", () => {
       [{ kind: "escape_limit" }],
     ],
     [
+      { to: "usage_limit_wait", usageLimit: "stop" },
+      [{ kind: "needs_input", reason: "usage_stop" }],
+    ],
+    [
       {
         to: "usage_limit_wait",
         usageLimit: "stop",
         loop: { engineActive: true, handoffPending: true, unitPhase: "2/3" },
+      },
+      [{ kind: "needs_input", reason: "usage_stop" }],
+    ],
+    [{ to: "usage_limit_wait", from: "usage_limit_dialog" }, []],
+    [
+      {
+        to: "usage_limit_wait",
+        from: "usage_limit_dialog",
+        usageLimit: "stop",
       },
       [],
     ],
@@ -127,6 +152,21 @@ void test("a second API error in the same phase gives up, and a sleep cut shares
   assert.deepEqual(cut.actions, [
     { kind: "needs_input", reason: "supervisor_gave_up" },
   ]);
+});
+
+void test("a frozen detection releases only a supervisor_gave_up hold", () => {
+  const frozen = { state: "frozen" } as const;
+  assert.equal(
+    holdsNeedsInput("needs_input", "supervisor_gave_up", frozen),
+    false,
+  );
+  for (const reason of [
+    "usage_stop",
+    "budget",
+    "stop_session",
+    "resume_failed",
+  ] as const)
+    assert.equal(holdsNeedsInput("needs_input", reason, frozen), true, reason);
 });
 
 void test("a supervisor set needs_input holds until a busy sign, a permission prompt or a lost pane", () => {
@@ -193,6 +233,34 @@ void test("a supervisor set needs_input holds until a busy sign, a permission pr
     holdsNeedsInput("idle", "supervisor_gave_up", { state: "idle" }),
     false,
   );
+});
+
+void test("a roadmap_complete detection releases every hold reason only while the engine is open", () => {
+  const reasons: SupervisorStateReason[] = [
+    "usage_stop",
+    "budget",
+    "stop_session",
+    "supervisor_gave_up",
+    "resume_failed",
+  ];
+  const detected = { state: "roadmap_complete" } as const;
+  for (const reason of reasons) {
+    assert.equal(
+      holdsNeedsInput("needs_input", reason, detected, true),
+      false,
+      `open ${reason}`,
+    );
+    assert.equal(
+      holdsNeedsInput("needs_input", reason, detected, false),
+      true,
+      `closed ${reason}`,
+    );
+    assert.equal(
+      holdsNeedsInput("needs_input", reason, detected),
+      true,
+      `absent ${reason}`,
+    );
+  }
 });
 
 void test("the decline keys reach the No row of a dangerous delete prompt", () => {
@@ -263,4 +331,29 @@ void test("an idle orchestrator gets no restart nudge, but its handoff still run
   assert.deepEqual(plan({ to: "handoff_ready", loop: orchestrator }).actions, [
     { kind: "handoff" },
   ]);
+});
+
+void test("a frozen relaunch is planned once per unit and phase, then the session gives up", () => {
+  const since = "2026-10-21T10:00:00.000Z";
+  const first = planFrozenRelaunch(LOOP, initialPlanMemory(), since);
+  assert.deepEqual(first.actions, [
+    { kind: "relaunch_frozen", frozenSince: since },
+  ]);
+  const second = planFrozenRelaunch(LOOP, first.memory, since);
+  assert.deepEqual(second.actions, [
+    { kind: "needs_input", reason: "resume_failed" },
+  ]);
+  const nextPhase = planFrozenRelaunch(
+    { ...LOOP, unitPhase: "2/4" },
+    second.memory,
+    since,
+  );
+  assert.deepEqual(nextPhase.actions, [
+    { kind: "relaunch_frozen", frozenSince: since },
+  ]);
+});
+
+void test("a frozen relaunch without a loop is keyed frozen:none", () => {
+  const planned = planFrozenRelaunch(null, initialPlanMemory(), "t");
+  assert.deepEqual(planned.memory.prompts, { "frozen:none": 1 });
 });

@@ -28,18 +28,23 @@ export const MOVE_FAILED_NOTE: SessionNote = {
 };
 
 /**
- * Name an account for display: "Default" for the home login, else its email.
+ * Name an account for display: "Default" for the home or managed Default login, else its email.
  *
  * @remarks
  * An id missing from the list (a removed account) shows as the id itself so the row never blanks,
  * except the Default id, which reads "Default" even when the list has not loaded.
  */
 export function accountName(
-  accounts: readonly Pick<ClaudeAccountSummary, "id" | "email" | "isDefault">[],
+  accounts: readonly Pick<
+    ClaudeAccountSummary,
+    "id" | "email" | "isDefault" | "managedDefault"
+  >[],
   id: string,
 ): string {
   const account = accounts.find((a) => a.id === id);
-  if (account?.isDefault === true) return "Default";
+  if (account?.isDefault === true || account?.managedDefault === true) {
+    return "Default";
+  }
   if (account === undefined && id === DEFAULT_CLAUDE_ACCOUNT_ID) {
     return "Default";
   }

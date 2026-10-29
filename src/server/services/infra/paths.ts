@@ -53,9 +53,13 @@ export const HOOK_SCRIPT_PATH = path.join(DISPATCH_DIR, "hook.sh");
  */
 export const HOOK_SETTINGS_PATH = path.join(DISPATCH_DIR, "hook-settings.json");
 
-/** The settings layer a launch passes for one resolved cross-session inbound value. */
-export function hookSettingsPath(value: CrossSessionInbound): string {
-  return path.join(DISPATCH_DIR, `hook-settings-${value}.json`);
+/** The settings layer a launch passes for one resolved inbound value, loop or orchestrator. */
+export function hookSettingsPath(
+  value: CrossSessionInbound,
+  orchestrator = false,
+): string {
+  const suffix = orchestrator ? "-orchestrator" : "";
+  return path.join(DISPATCH_DIR, `hook-settings-${value}${suffix}.json`);
 }
 
 /**

@@ -8,7 +8,8 @@ import {
   waitFor,
   writeFakeRepl,
 } from "../../test-support/fixtures.js";
-import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
+import { DEFAULT_BOARD_KEY, parseBoardKey } from "../../../shared/board-key.js";
+import type { BoardKey } from "../../../shared/types.js";
 
 const env = await isolateTmuxEnv();
 const { projectsDirOf } = await import("../../adapters/transcript.js");
@@ -16,8 +17,10 @@ const { killTtyd } = await import("../../adapters/ttyd.js");
 const { store } = await import("../../store/board.store.js");
 const { reconnectTerminal, resumeSession } =
   await import("./resume-session.js");
-const { recordMemory } = await import("../../test-support/memory-fixtures.js");
+const { withMemoryFakes } =
+  await import("../../test-support/memory-fixtures.js");
 const { applyHookEvent } = await import("./hook-events.js");
+const { resumeLostAtBoot } = await import("./supervisor-boot.js");
 const tmux = await import("../../adapters/tmux.js");
 const { pauseTools } = await import("./pause-card.js");
 const { setHooksRuntime } = await import("../infra/config-holder.js");
@@ -165,8 +168,12 @@ void test(
   },
 );
 
-async function lostCard(title: string, branch: string) {
-  const card = await store.createLocalCard(DEFAULT_BOARD_KEY, title, "");
+async function lostCard(
+  title: string,
+  branch: string,
+  board: BoardKey = DEFAULT_BOARD_KEY,
+) {
+  const card = await store.createLocalCard(board, title, "");
   const cwd = path.join(env.root, `worktree-${branch}`);
   fs.mkdirSync(cwd, { recursive: true });
   await store.completeStart(card.id, undefined, {
@@ -421,7 +428,7 @@ void test(
 );
 
 void test(
-  "a reconnect whose pane is gone does not relaunch under memory pressure and shows the reason",
+  "a reconnect whose pane is gone waits 30 minutes under memory pressure, then refuses and shows the reason",
   { skip: !env.canRunRealTmux },
   async () => {
     const argvFile = path.join(env.root, "claude-argv-memory.txt");
@@ -440,21 +447,140 @@ void test(
       tmuxSession: `dsp-${branch}`,
       branch,
     });
-    recordMemory(812, 1000);
-    try {
+    await withMemoryFakes([812], async () => {
       await reconnectTerminal(card.id);
-    } finally {
-      recordMemory(2048, 1000);
-    }
+    });
     assert.equal(
       store.getCard(card.id)?.resumeError,
-      "Resume failed: free memory 812 MB is below the 1024 MB floor",
+      "Resume failed: free memory 812 MB is below the 1024 MB floor after 30 minutes of retries",
     );
+    assert.equal(store.getCard(card.id)?.statusReason, undefined);
     assert.equal(store.getCard(card.id)?.sessionLost, true);
     assert.equal(store.getCard(card.id)?.tmuxSession, undefined);
     assert.equal(store.isStarting(card.id), false);
     assert.equal(readArgv(argvFile), null, "claude was not launched");
   },
 );
+
+void test(
+  "a lost-session resume under memory pressure waits, then relaunches claude when memory frees",
+  { skip: !env.canRunRealTmux },
+  async () => {
+    const argvFile = path.join(env.root, "claude-argv-wait.txt");
+    writeFakeRepl(env, argvFile);
+    await store.load();
+    const lost = await lostCard("resume wait", `waittest-${process.pid}`);
+    const seen: { reason?: string | null; starting: boolean }[] = [];
+    try {
+      await withMemoryFakes([812, 2048], async ({ slept, onSleep }) => {
+        onSleep(() => {
+          seen.push({
+            reason: store.getCard(lost.cardId)?.statusReason,
+            starting: store.isStarting(lost.cardId),
+          });
+        });
+        await resumeSession(lost.cardId);
+        assert.equal(slept.length, 1);
+      });
+      assert.deepEqual(seen, [
+        { reason: "Waiting for memory…", starting: true },
+      ]);
+      assert.deepEqual((await launched(argvFile)).slice(0, 1), ["--continue"]);
+    } finally {
+      killTtyd(lost.tmuxSession);
+      await env.killServer();
+    }
+  },
+);
+
+/** Make a lost card whose workspace folder is renamed away, so its stored path is missing. */
+async function lostCardWithoutWorkspace(
+  title: string,
+  branch: string,
+  board: BoardKey = DEFAULT_BOARD_KEY,
+) {
+  const lost = await lostCard(title, branch, board);
+  const cwd = store.getCard(lost.cardId)!.workspacePath!;
+  fs.renameSync(cwd, `${cwd}-gone`);
+  const resumeFailures = () =>
+    store
+      .listEvents(board, lost.cardId, 50)
+      .filter((e) => e.type === "resume_failed").length;
+  const session = () =>
+    store.getCard(lost.cardId)?.sessions?.find((s) => s.id === lost.sessionId);
+  return { ...lost, cwd, resumeFailures, session };
+}
+
+void test("resumeSession refuses a lost session whose workspace folder is missing and launches no claude", async () => {
+  const argvFile = path.join(env.root, "claude-argv-missing.txt");
+  writeFakeRepl(env, argvFile);
+  await store.load();
+  const lost = await lostCardWithoutWorkspace(
+    "resume missing",
+    `missingtest-${process.pid}`,
+  );
+
+  await resumeSession(lost.cardId);
+
+  assert.equal(readArgv(argvFile), null, "claude was not launched");
+  assert.equal(await tmux.hasSession(`=${lost.tmuxSession}`), false);
+  const card = store.getCard(lost.cardId);
+  assert.equal(
+    card?.resumeError,
+    `Resume failed: workspace-missing: ${lost.cwd}`,
+  );
+  assert.equal(card?.sessionLost, true);
+  assert.equal(lost.session()?.state, "needs_input");
+  assert.equal(lost.session()?.stateReason, "resume_failed");
+  assert.equal(lost.resumeFailures(), 1);
+  assert.equal(store.isStarting(lost.cardId), false);
+});
+
+void test("the boot resume sweep refuses a lost session whose workspace folder is missing and moves the card to Needs input", async () => {
+  const argvFile = path.join(env.root, "claude-argv-boot-missing.txt");
+  writeFakeRepl(env, argvFile);
+  await store.load();
+  const board = parseBoardKey("BOOTWS")!;
+  const created = await store.createBoard({
+    key: board,
+    name: "boot missing",
+    workspaceRoot: env.root,
+    repositories: [],
+    linearTeamKeys: [],
+  });
+  assert.ok(created.ok);
+  await store.setBoardPolicy(board, {
+    ...created.board.policy,
+    supervisor: "on",
+  });
+  const lost = await lostCardWithoutWorkspace(
+    "boot missing",
+    `bootmissing-${process.pid}`,
+    board,
+  );
+  const lines: string[] = [];
+
+  try {
+    await resumeLostAtBoot({
+      sample: () => Promise.resolve(),
+      log: (line) => lines.push(line),
+    });
+  } finally {
+    await store.setBoardPolicy(board, {
+      ...created.board.policy,
+      supervisor: "off",
+    });
+  }
+
+  assert.equal(readArgv(argvFile), null, "claude was not launched");
+  const card = store.getCard(lost.cardId);
+  assert.deepEqual(lines, [
+    `[supervisor] boot resume ${card?.identifier}: failed: Resume failed: workspace-missing: ${lost.cwd}`,
+  ]);
+  assert.equal(card?.column, "needs_input");
+  assert.equal(lost.session()?.state, "needs_input");
+  assert.equal(lost.session()?.stateReason, "resume_failed");
+  assert.equal(lost.resumeFailures(), 1);
+});
 
 void test.after(() => env.cleanup());

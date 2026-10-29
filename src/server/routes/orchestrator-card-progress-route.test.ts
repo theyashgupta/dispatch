@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test, { after } from "node:test";
 import { parseBoardKey } from "../../shared/board-key.js";
 import type {
@@ -17,6 +20,8 @@ const express = (await import("express")).default;
 const { orchestratorRouter } = await import("./orchestrator.route.js");
 const { boardsRouter } = await import("./boards.route.js");
 const { startedGroup } = await import("../test-support/group-fixtures.js");
+const { refreshLoopProgress } =
+  await import("../services/orchestration/loop-progress-reader.js");
 
 const SBX = parseBoardKey("SBX") as BoardKey;
 const OTH = parseBoardKey("OTH") as BoardKey;
@@ -116,10 +121,14 @@ const PROGRESS: LoopProgress = {
   ],
 };
 
-async function launchedTicket(board: BoardKey, title: string): Promise<Card> {
+async function launchedTicket(
+  board: BoardKey,
+  title: string,
+  workspacePath?: string,
+): Promise<Card> {
   const card = await store.createLocalCard(board, title, "");
   await store.completeStart(card.id, undefined, {
-    workspacePath: `/tmp/ws-${card.id}`,
+    workspacePath: workspacePath ?? `/tmp/ws-${card.id}`,
     tmuxSession: `dsp-${card.id}`,
     branch: card.id,
   });
@@ -256,4 +265,58 @@ void test("get_card_progress answers 401 with a revoked token", async () => {
   );
   assert.equal(reply.status, 401);
   assert.equal(reply.body.error, "orchestrator-token-invalid");
+});
+
+/** Start a ticket card on a temp workspace whose repo folder holds a PRD and state named by `slugOf(card.id)`, with no engine file. */
+async function prdOnDisk(
+  slugOf: (id: string) => string,
+  prdName: (slug: string) => string,
+): Promise<{ card: Card; slug: string }> {
+  const root = mkdtempSync(join(tmpdir(), "card-progress-"));
+  after(() => rmSync(root, { recursive: true, force: true }));
+  const card = await launchedTicket(SBX, "prd by slug", root);
+  const slug = slugOf(card.id);
+  mkdirSync(join(root, "dispatch/.planning/prds"), { recursive: true });
+  mkdirSync(join(root, `dispatch/.planning/${slug}`), { recursive: true });
+  writeFileSync(
+    join(root, `dispatch/.planning/prds/${prdName(slug)}`),
+    "# Demo\n\n### Phase 1: One\n\n### Phase 2: Two\n",
+  );
+  writeFileSync(
+    join(root, `dispatch/.planning/${slug}/state.md`),
+    "phase 1 One GREEN 2026-10-23T04:00:00Z gate=pass\n",
+  );
+  await refreshLoopProgress(card.id);
+  return { card, slug };
+}
+
+void test("get_card_progress shows the phases of a PRD whose slug differs from the card id", async () => {
+  const { card, slug } = await prdOnDisk(
+    (id) => id.toLowerCase(),
+    (s) => `${s}-demo.md`,
+  );
+  assert.notEqual(slug, card.id);
+  const { reply } = await read(card.id);
+  const progress = reply.body.loopProgress as LoopProgress;
+  assert.equal(progress.slug, slug);
+  assert.equal(progress.prdFile, `dispatch/.planning/prds/${slug}-demo.md`);
+  assert.deepEqual(
+    progress.units[0]?.phases.map((phase) => phase.gate),
+    ["pass", "pending"],
+  );
+});
+
+void test("get_card_progress shows the phases of a PRD whose slug equals the card id", async () => {
+  const { card, slug } = await prdOnDisk(
+    (id) => id,
+    (s) => `${s}.md`,
+  );
+  assert.equal(slug, card.id);
+  const { reply } = await read(card.id);
+  const progress = reply.body.loopProgress as LoopProgress;
+  assert.equal(progress.slug, card.id);
+  assert.deepEqual(
+    progress.units[0]?.phases.map((phase) => phase.gate),
+    ["pass", "pending"],
+  );
 });

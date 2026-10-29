@@ -25,13 +25,16 @@ const {
   requestHandoff,
   resumeLoop,
   sendInput,
+  resumeLostSession,
   sessionTools,
   stopSession,
 } = await import("./orchestrator-sessions.js");
+const { recordMemory } = await import("../../test-support/memory-fixtures.js");
 
 const SBX = parseBoardKey("SBX") as BoardKey;
 const CALLER = { boardKey: SBX, orchestratorId: "orc-sbx" };
 const sent: { text: string; kind: string }[] = [];
+const revived: string[] = [];
 const keys: string[][] = [];
 sessionTools.send = (_card, _session, text, kind) => {
   sent.push({ text, kind });
@@ -40,6 +43,11 @@ sessionTools.send = (_card, _session, text, kind) => {
 sessionTools.keys = (_target, pressed) => {
   keys.push([...pressed]);
   return Promise.resolve();
+};
+
+sessionTools.runClaude = (cardId) => {
+  revived.push(cardId);
+  return Promise.resolve("launched");
 };
 
 await store.load();
@@ -282,4 +290,61 @@ void test("stopSession refuses a shell prompt and a running ship flow, and press
     (err) => err instanceof ConflictError && err.code === "ship-running",
   );
   assert.deepEqual(keys, []);
+});
+
+void test("sendInput refuses a released session with session-state-refused and sends nothing", async () => {
+  sent.length = 0;
+  const card = await liveGroup("released");
+  await assert.rejects(
+    sendInput(CALLER, card, "fix it"),
+    (err) =>
+      err instanceof ConflictError && err.code === "session-state-refused",
+  );
+  assert.deepEqual(sent, []);
+});
+
+void test("resumeLostSession on a released session with a live tmux relaunches claude once through runClaude", async () => {
+  recordMemory(2048, 1000);
+  revived.length = 0;
+  const card = await liveGroup("released");
+  await resumeLostSession(CALLER, card);
+  assert.deepEqual(revived, [card.id]);
+});
+
+void test("resumeLostSession on a live session that is not released keeps the 409 session-live and relaunches nothing", async () => {
+  recordMemory(2048, 1000);
+  revived.length = 0;
+  for (const state of ["idle", "working", undefined] as const) {
+    const card = await liveGroup(state);
+    await assert.rejects(
+      resumeLostSession(CALLER, card),
+      (err) => err instanceof ConflictError && err.code === "session-live",
+    );
+  }
+  assert.deepEqual(revived, []);
+});
+
+void test("resumeLostSession on a released session refuses under low memory and when runClaude does not launch", async () => {
+  revived.length = 0;
+  const card = await liveGroup("released");
+  recordMemory(100, 1000);
+  await assert.rejects(
+    resumeLostSession(CALLER, card),
+    (err) => err instanceof ConflictError && err.code === "memory-low",
+  );
+  assert.deepEqual(revived, []);
+  recordMemory(2048, 1000);
+  const original = sessionTools.runClaude;
+  sessionTools.runClaude = () => Promise.resolve("busy");
+  try {
+    await assert.rejects(
+      resumeLostSession(CALLER, card),
+      (err) =>
+        err instanceof ConflictError &&
+        err.code === "revive-failed" &&
+        err.details?.reason === "busy",
+    );
+  } finally {
+    sessionTools.runClaude = original;
+  }
 });

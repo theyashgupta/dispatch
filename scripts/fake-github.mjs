@@ -10,11 +10,13 @@
  *   { auth: boolean, token?: string, login: string, ssoOrgs?: string[], rateLimited?: boolean,
  *     totals?: { review?: number, mention?: number, assigned?: number },
  *     prs: [{ owner, repo, number, title, body?, author, draft?, state?: "open" | "closed",
- *             merged?: boolean, updatedAt?, base?, head?, headSha?, additions?, deletions?,
+ *             merged?: boolean, createdAt?, updatedAt?, base?, head?, headSha?, additions?, deletions?,
  *             categories: ("review" | "mention" | "assigned")[],
  *             files?: [{ filename, status?, additions?, deletions?, patch? }],
  *             checks?: [{ name, status?, conclusion?, url? }],
- *             statuses?: [{ context, state, url? }], mergeable?: boolean }] }
+ *             statuses?: [{ context, state, url? }], mergeable?: boolean,
+ *             reviewDecision?: "APPROVED" | "CHANGES_REQUESTED" | "REVIEW_REQUIRED",
+ *             rollup?: "SUCCESS" | "FAILURE" | "PENDING" }] }
  * A token is valid when auth is true and, if state.token is set, the bearer equals it. Reviews and
  * merges are recorded; a merge sets the PR merged and closed. It binds 127.0.0.1 only and refuses
  * ports 4700 and 4710.
@@ -67,10 +69,54 @@ function searchItem(pr) {
     body: pr.body ?? "",
     html_url: `https://github.com/${pr.owner}/${pr.repo}/pull/${pr.number}`,
     repository_url: `https://api.github.com/repos/${pr.owner}/${pr.repo}`,
-    user: { login: pr.author },
+    user: {
+      login: pr.author,
+      avatar_url: `https://avatars.githubusercontent.com/u/${pr.number}?v=4`,
+    },
     draft: pr.draft === true,
     updated_at: pr.updatedAt ?? "2026-09-25T09:00:00Z",
     pull_request: {},
+  };
+}
+
+/** A PR as a node of the open pull request GraphQL search. */
+function graphqlNode(state, pr) {
+  const requested = pr.categories.includes("review") ? [state.login] : [];
+  return {
+    number: pr.number,
+    title: pr.title,
+    body: pr.body ?? "",
+    url: `https://github.com/${pr.owner}/${pr.repo}/pull/${pr.number}`,
+    createdAt: pr.createdAt ?? pr.updatedAt ?? "2026-09-25T09:00:00Z",
+    updatedAt: pr.updatedAt ?? "2026-09-25T09:00:00Z",
+    isDraft: pr.draft === true,
+    reviewDecision: pr.reviewDecision ?? null,
+    headRefName: pr.head ?? `feature-${pr.number}`,
+    baseRefName: pr.base ?? "main",
+    changedFiles: pr.changedFiles ?? (pr.files ?? []).length,
+    mergeable:
+      pr.mergeable === false
+        ? "CONFLICTING"
+        : pr.mergeable === true
+          ? "MERGEABLE"
+          : "UNKNOWN",
+    author: {
+      login: pr.author,
+      avatarUrl: `https://avatars.githubusercontent.com/u/${pr.number}?v=4`,
+    },
+    repository: { nameWithOwner: `${pr.owner}/${pr.repo}` },
+    reviewRequests: {
+      nodes: requested.map((login) => ({ requestedReviewer: { login } })),
+    },
+    commits: {
+      nodes: [
+        {
+          commit: {
+            statusCheckRollup: pr.rollup ? { state: pr.rollup } : null,
+          },
+        },
+      ],
+    },
   };
 }
 
@@ -94,6 +140,19 @@ function answer(state, method, url, body, bearer) {
     ];
   }
   const path = url.pathname;
+  if (method === "POST" && path === "/graphql") {
+    const q = String(body?.variables?.q ?? "");
+    const repos = new Set(
+      [...q.matchAll(/repo:(\S+)/g)].map((match) => match[1]),
+    );
+    const nodes = state.prs
+      .filter(
+        (p) =>
+          (p.state ?? "open") === "open" && repos.has(`${p.owner}/${p.repo}`),
+      )
+      .map((p) => graphqlNode(state, p));
+    return [200, { data: { search: { issueCount: nodes.length, nodes } } }, {}];
+  }
   if (method === "GET" && path === "/user") {
     return [200, { login: state.login }, {}];
   }
@@ -249,7 +308,7 @@ const server = createServer((req, res) => {
   });
   req.on("end", () => {
     const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
-    let body = null;
+    let body;
     try {
       body = raw ? JSON.parse(raw) : null;
     } catch {

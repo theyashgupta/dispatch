@@ -34,19 +34,27 @@ export const activeBodySchema = z.object(
 /**
  * The `POST /accounts/login` body, where a missing or array body means a fresh account.
  *
- * @remarks A present `accountId` must be a registry id, so `default` is refused here.
+ * @remarks A present `accountId` must be a registry id, so `default` is refused here, and
+ * `managedDefault` only takes `true` and never comes with an `accountId`.
  */
 export const loginBodySchema = z.preprocess(
   fieldsOf,
-  z.object(
-    {
-      accountId: z
-        .string("invalid-id")
-        .refine((id) => isAccountId(id), "invalid-id")
-        .optional(),
-    },
-    "invalid-id",
-  ),
+  z
+    .object(
+      {
+        accountId: z
+          .string("invalid-id")
+          .refine((id) => isAccountId(id), "invalid-id")
+          .optional(),
+        managedDefault: z.literal(true, "invalid-id").optional(),
+      },
+      "invalid-id",
+    )
+    .refine(
+      (body) =>
+        body.accountId === undefined || body.managedDefault === undefined,
+      "invalid-id",
+    ),
 );
 
 /** The `POST /accounts/login/code` body; the code comes out trimmed, one line and at most 512 characters. */

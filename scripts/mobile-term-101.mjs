@@ -380,6 +380,7 @@ function assertBuilt() {
       .trim();
     throw new Error(
       `refusing to run, \`npm run ${BUILD_SCRIPT}\` failed, so dist/ does not reflect src/:\n${detail || err.message}`,
+      { cause: err },
     );
   }
   if (!existsSync(DIST_ENTRY)) {
@@ -3954,7 +3955,7 @@ function redactTunnelHost(url) {
  * the sentinel argv is a live, unauthenticated public ingress, never acceptable to leave running,
  * checked as a second line of defence on top of this file's own `disable` + poll teardown. */
 async function assertNoStrayCloudflared() {
-  let out = "";
+  let out;
   try {
     ({ stdout: out } = await execFileP("ps", ["-axww", "-o", "pid=,command="]));
   } catch {

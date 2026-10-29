@@ -1,4 +1,8 @@
 import path from "node:path";
+import {
+  blockerIdentifiers,
+  openBlockers,
+} from "../../../shared/blocked-by.js";
 import type { Card } from "../../../shared/types.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import { ConflictError, ValidationError } from "../domain/errors.js";
@@ -8,6 +12,7 @@ import { playbookExists } from "../infra/playbooks.js";
 import { isLaunchableAccount } from "./claude-accounts.js";
 import {
   callerPolicy,
+  dependencyDone,
   getBoard,
   isLiveSessionCard,
   isRunningCard,
@@ -21,7 +26,7 @@ import {
 } from "./orchestrator-groups.js";
 import { ORCHESTRATOR_PLAYBOOK } from "./orchestrator-session.js";
 import { commitCardStart, prepareCardStart } from "./start-session.js";
-import { assertMemoryHeadroom } from "./memory-governor.js";
+import { memoryCheck } from "./memory-governor.js";
 
 interface CardStartRequest {
   playbook: string;
@@ -38,14 +43,26 @@ interface CardStartRequest {
  * Inside the cap lock the card is re-read, prepared, cap-checked, given its workspace and `launch`,
  * then started, in that order, so a refusal or a failed workspace write leaves no `launch` and no
  * session. The re-read refuses a parallel start of the same card, and the card is already in the
- * scope of the caller.
+ * scope of the caller. Low memory does not refuse: the start saga waits for it, and the reply names
+ * the reason in `waitingForMemory`.
  */
 export async function startOrchestratorCard(
   caller: OrchestratorIdentity,
   card: Card,
   input: CardStartRequest,
-): Promise<{ started: true; cardId: string; playbook: string }> {
+): Promise<{
+  started: true;
+  cardId: string;
+  playbook: string;
+  waitingForMemory?: string;
+}> {
   if (card.source === "group") throw new ValidationError("not-ticket-card");
+  const open = openBlockers(card, dependencyDone);
+  if (open.length > 0) {
+    throw new ConflictError("blocked", {
+      reason: blockerIdentifiers(open, (id) => store.getCard(id)).join(", "),
+    });
+  }
   if (isRunningCard(card) || isLiveSessionCard(card)) {
     throw new ConflictError("already-started");
   }
@@ -78,12 +95,11 @@ export async function startOrchestratorCard(
     workspace,
     account: input.account,
   };
-  await withCapLock(async () => {
+  const memory = await withCapLock(async () => {
     const current = store.getCard(card.id);
     if (!current || isRunningCard(current) || isLiveSessionCard(current)) {
       throw new ConflictError("already-started");
     }
-    assertMemoryHeadroom(caller.boardKey);
     const config = await prepareCardStart(card.id, start);
     enforce(
       checkCap({
@@ -99,6 +115,12 @@ export async function startOrchestratorCard(
           : { ownerOrchestrator: caller.orchestratorId }),
       }),
     );
+    return memoryCheck(caller.boardKey);
   });
-  return { started: true, cardId: card.id, playbook: input.playbook };
+  return {
+    started: true,
+    cardId: card.id,
+    playbook: input.playbook,
+    ...(memory.ok ? {} : { waitingForMemory: memory.reason }),
+  };
 }

@@ -19,6 +19,7 @@ const {
   paneTail,
   policySummary,
 } = await import("./orchestrator-read.js");
+const { runningLoops } = await import("./boards.js");
 
 const SBX = parseBoardKey("SBX") as BoardKey;
 await store.load();
@@ -164,4 +165,34 @@ void test("policySummary carries crossSessionInbound as null by default and as t
     (await policySummary(caller)).policy?.crossSessionInbound,
     "accept",
   );
+});
+
+void test("policySummary reports runningLoops without a finished card in Needs input with a closed engine", async () => {
+  const RLP = parseBoardKey("RLP") as BoardKey;
+  await store.createBoard({
+    key: RLP,
+    name: "Running loops",
+    workspaceRoot: "/rlp/sessions",
+    repositories: [],
+    linearTeamKeys: [],
+  });
+  const engine = {
+    active: true,
+    iteration: 1,
+    sessionId: "conv",
+    handoffPending: false,
+    startedAt: null,
+    closed: false,
+  };
+  for (const closed of [false, false, true]) {
+    const { g } = await startedGroup(store, { board: RLP });
+    await store.setLoopProgress(g.id, {
+      ...LOOP_PROGRESS,
+      engine: closed ? { ...engine, active: false, closed } : engine,
+    });
+    if (closed) await store.moveCardManual(g.id, "needs_input");
+  }
+  const summary = await policySummary({ boardKey: RLP, orchestratorId: "orc" });
+  assert.equal(summary.runningLoops, runningLoops(RLP));
+  assert.equal(summary.runningLoops, 2);
 });

@@ -464,6 +464,7 @@ function assertBuilt() {
       .trim();
     throw new Error(
       `refusing to run, \`npm run ${BUILD_SCRIPT}\` failed, so dist/ does not reflect src/:\n${detail || err.message}`,
+      { cause: err },
     );
   }
   if (!existsSync(DIST_ENTRY)) {
@@ -624,15 +625,6 @@ async function evalValue(cdp, sessionId, expression) {
     );
   }
   return result.value;
-}
-
-async function evalReport(cdp, sessionId, violations, label, expr) {
-  try {
-    return await evalValue(cdp, sessionId, expr);
-  } catch (err) {
-    violations.push(`${label}: ${err.message}`);
-    return null;
-  }
 }
 
 async function isPortListening(port) {
@@ -3603,7 +3595,7 @@ async function runBreakKeyboardUnchanged(cdp, sessionId) {
     "\n--break keyboard-unchanged: detaching the Done entry from MSD-B's MoveToPicker portal before the click",
   );
   const tripViolations = [];
-  let restoreOutcome = "not-run";
+  let restoreOutcome;
   await cdp.send(
     "Emulation.setDeviceMetricsOverride",
     { width: 900, height: 1000, deviceScaleFactor: 1, mobile: false },
@@ -4074,7 +4066,7 @@ async function main() {
   let server = null;
   let chromeChild = null;
   let cdp = null;
-  let portsHeld = false;
+  let portsHeld;
   let breakResult = null;
 
   try {

@@ -364,6 +364,7 @@ function assertBuilt() {
       .trim();
     throw new Error(
       `refusing to run, \`npm run ${BUILD_SCRIPT}\` failed, so dist/ does not reflect src/:\n${detail || err.message}`,
+      { cause: err },
     );
   }
   if (!existsSync(DIST_ENTRY)) {
@@ -2978,7 +2979,7 @@ async function runBreakDensity() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(CARD_VIEW_PATH, original);
   try {
     writeFileSync(
@@ -3216,7 +3217,7 @@ async function closeDetailPanelIfOpen(cdp, sessionId) {
  */
 async function checkBoardStates(violations) {
   const MAX_ATTEMPTS = 3;
-  let lastErr = null;
+  let lastErr;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     // A fresh array per attempt: a THROWN mid-run infra failure must never leak partial
     // violations from a discarded attempt into the final, real result.
@@ -3838,7 +3839,7 @@ async function runBreakBoardStates() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(BOARD_STATES_CARD_VIEW_PATH, original);
   try {
     writeFileSync(
@@ -3909,7 +3910,7 @@ async function typeIntoControlStates(cdp, sessionId, elExpr, text) {
  * live desktop session. */
 async function checkControlStates(violations) {
   const MAX_ATTEMPTS = 3;
-  let lastErr = null;
+  let lastErr;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const attemptViolations = [];
     try {
@@ -4504,7 +4505,7 @@ async function runBreakControlStates() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(BUTTON_TSX_PATH, original);
   try {
     writeFileSync(
@@ -4713,7 +4714,7 @@ async function measureAndAssertCountChip(
  * discarded attempt's partial result from leaking into the final one. */
 async function checkMotion(violations) {
   const MAX_ATTEMPTS = 3;
-  let lastErr = null;
+  let lastErr;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const attemptViolations = [];
     try {
@@ -4933,7 +4934,7 @@ async function runBreakMotion() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(CARD_MOVE_FLIP_PATH, original);
   try {
     writeFileSync(
@@ -5089,7 +5090,7 @@ function assertPanelMotionLeg(
  */
 async function checkPanelMotion(violations) {
   const MAX_ATTEMPTS = 3;
-  let lastErr = null;
+  let lastErr;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const attemptViolations = [];
     try {
@@ -5342,7 +5343,7 @@ async function runBreakPanelMotion() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(DETAIL_PANEL_PATH, original);
   try {
     writeFileSync(
@@ -5491,7 +5492,7 @@ async function runWaapiPositiveControl(cdp, sessionId) {
  * check already leans on for ordinary contention. */
 async function checkReducedMotion(violations) {
   const MAX_ATTEMPTS = 15;
-  let lastErr = null;
+  let lastErr;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const attemptViolations = [];
     try {
@@ -6027,7 +6028,7 @@ async function runBreakReducedMotion() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(TOKENS_CSS_PATH, original);
   try {
     writeFileSync(

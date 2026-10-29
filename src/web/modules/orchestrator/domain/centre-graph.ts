@@ -7,6 +7,7 @@ import { loopView } from "../../../../shared/loop-view.js";
 import {
   cardOwner,
   mainOrchestrator,
+  scopeLabel,
 } from "../../../../shared/orchestrator-owner.js";
 import { hasLoopProgress } from "../../../../shared/running-group.js";
 import {
@@ -21,20 +22,14 @@ import type {
 } from "../../../../shared/types.js";
 
 export type BranchState =
-  | "planned"
-  | "running"
-  | "needs_input"
-  | "usage_limit"
-  | "done"
-  | "shipped"
-  | "attention";
+  "planned" | "running" | "needs_input" | "usage_limit" | "done" | "attention";
 
 export type BranchTone = SessionTone;
 
 export type BranchAction =
   "open" | "reply" | "open_terminal" | "resume" | "retry_resume";
 
-export type BandKey = "needs_you" | "running" | "planned" | "done" | "shipped";
+export type BandKey = "needs_you" | "running" | "planned" | "done";
 
 export interface CentreBranch {
   id: string;
@@ -54,8 +49,8 @@ export interface CentreBranch {
   planSize: PlanEntry["size"] | null;
   memberCount: number | null;
   stateSince: string | null;
-  shippedAt: string | null;
   slot: number;
+  budget?: number | null;
 }
 
 export interface CentreNode {
@@ -68,6 +63,7 @@ export interface CentreNode {
   cost: number | null;
   branchCount: number;
   needYouCount: number;
+  scope: string;
 }
 
 export interface CentreBand {
@@ -89,7 +85,6 @@ export interface CentreGraph {
   branches: CentreBranch[];
   bands: CentreBand[];
   edges: CentreEdge[];
-  hiddenShipped: number;
 }
 
 export interface CentreGraphInput {
@@ -98,7 +93,6 @@ export interface CentreGraphInput {
   selectedId: string | null;
   decisions: readonly DecisionItem[];
   now: number;
-  showOlderShipped: boolean;
   timeZone?: string;
 }
 
@@ -107,20 +101,18 @@ interface Clock {
   timeZone: string | undefined;
 }
 
-const OLDER_SHIPPED_MS = 86_400_000;
-
 const BANDS: readonly { key: BandKey; label: string }[] = [
   { key: "needs_you", label: "Needs you" },
   { key: "running", label: "Running" },
   { key: "planned", label: "Planned" },
   { key: "done", label: "Done" },
-  { key: "shipped", label: "Shipped" },
 ];
 
 type Status = Pick<CentreBranch, "state" | "label" | "tone" | "band">;
 
 const ATTENTION_STATES = [
   "stale",
+  "frozen",
   "permission_prompt",
   "api_error",
   "lost",
@@ -213,9 +205,6 @@ function isRunByOrchestrator(card: Card, entry: PlanEntry | undefined) {
 function statusOf(card: Card, session: ActiveSessionView | null): Status {
   const state = session?.state;
   const reason = session?.stateReason;
-  if (card.column === "done" || card.shipFlow?.state === "done") {
-    return status("shipped", "Shipped", "muted", "shipped");
-  }
   if (card.column === "agent_done" || state === "roadmap_complete") {
     return status("done", "Agent done", "success", "done");
   }
@@ -298,12 +287,8 @@ function timeText(iso: string, clock: Clock): string | null {
   return `${date} ${time}`;
 }
 
-function prNumberOf(card: Card): number | null {
-  const fromShip = card.shipFlow?.branches.find((b) => b.pr !== null)?.pr;
-  if (fromShip != null) return fromShip;
-  const prs = card.prs ?? [];
-  return (prs.find((pr) => pr.state === "merged") ?? prs[0])?.number ?? null;
-}
+const isShipped = (card: Card): boolean =>
+  card.column === "done" || card.shipFlow?.state === "done";
 
 function detailOf(
   card: Card,
@@ -330,15 +315,6 @@ function detailOf(
       clock,
     );
     return time === null ? "Awaiting ship" : `Done ${time}, awaiting ship`;
-  }
-  if (status.state === "shipped") {
-    const time = timeText(
-      card.shipFlow?.finishedAt ?? card.columnSince ?? card.updatedAt,
-      clock,
-    );
-    if (time === null) return null;
-    const pr = prNumberOf(card);
-    return pr === null ? `Shipped ${time}` : `Shipped ${time}, PR ${pr}`;
   }
   if (status.state === "usage_limit") return "Stopped at the usage limit";
   if (status.state === "attention" && reason === "budget") {
@@ -374,10 +350,6 @@ function branchOf(
     planSize: entry?.size ?? null,
     memberCount: card.source === "group" ? (card.memberIds?.length ?? 0) : null,
     stateSince: session?.stateSince ?? null,
-    shippedAt:
-      status.state === "shipped"
-        ? (card.shipFlow?.finishedAt ?? card.columnSince ?? card.updatedAt)
-        : null,
     slot: 0,
   };
 }
@@ -401,7 +373,6 @@ function plannedBranch(entry: PlanEntry): CentreBranch {
     planSize: entry.size,
     memberCount: null,
     stateSince: null,
-    shippedAt: null,
     slot: 0,
   };
 }
@@ -427,7 +398,7 @@ const STARTING = { label: "Starting", tone: "neutral" } as const;
 function centreNode(
   record: OrchestratorView,
   branches: readonly CentreBranch[],
-  visible: readonly CentreBranch[],
+  cards: readonly Card[],
 ): CentreNode {
   const state = record.session?.state ?? null;
   const known =
@@ -442,7 +413,8 @@ function centreNode(
     contextPercent: record.session?.contextPercent ?? null,
     cost: record.session?.cost ?? null,
     branchCount: branches.length,
-    needYouCount: visible.filter((b) => b.band === "needs_you").length,
+    needYouCount: branches.filter((b) => b.band === "needs_you").length,
+    scope: scopeLabel(record, cards),
   };
 }
 
@@ -451,7 +423,8 @@ function centreNode(
  *
  * @remarks
  * The slot of a branch comes from the plan order and the ticket number only, never from
- * its state, so a branch that changes state keeps its place.
+ * its state, so a branch that changes state keeps its place. A shipped card gets no branch:
+ * shipped work lives in the activity feed and the board Done column.
  */
 export function centreGraph(input: CentreGraphInput): CentreGraph {
   const selected =
@@ -464,7 +437,6 @@ export function centreGraph(input: CentreGraphInput): CentreGraph {
       branches: [],
       bands: emptyBands,
       edges: [],
-      hiddenShipped: 0,
     };
   }
   const clock = { now: input.now, timeZone: input.timeZone };
@@ -480,7 +452,7 @@ export function centreGraph(input: CentreGraphInput): CentreGraph {
       continue;
     }
     const entry = entryOf(entries, card);
-    if (!isRunByOrchestrator(card, entry)) continue;
+    if (!isRunByOrchestrator(card, entry) || isShipped(card)) continue;
     if (entry !== undefined) matched.add(entry);
     all.push(branchOf(card, entry, clock));
   }
@@ -501,24 +473,18 @@ export function centreGraph(input: CentreGraphInput): CentreGraph {
     .forEach((branch, index) => {
       branch.slot = index;
     });
-  const hidden = (b: CentreBranch) =>
-    !input.showOlderShipped &&
-    b.shippedAt !== null &&
-    input.now - Date.parse(b.shippedAt) > OLDER_SHIPPED_MS;
-  const visible = all.filter((b) => !hidden(b));
   return {
-    centre: centreNode(selected, all, visible),
-    branches: visible,
+    centre: centreNode(selected, all, input.cards),
+    branches: all,
     bands: BANDS.map((band) => {
-      const branches = visible.filter((b) => b.band === band.key);
+      const branches = all.filter((b) => b.band === band.key);
       return { ...band, branches, count: branches.length };
     }),
-    edges: visible.map((b) => ({
+    edges: all.map((b) => ({
       from: "centre",
       to: b.id,
       band: b.band,
       dashed: b.state === "planned",
     })),
-    hiddenShipped: all.length - visible.length,
   };
 }

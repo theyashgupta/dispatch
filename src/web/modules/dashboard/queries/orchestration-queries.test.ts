@@ -3,10 +3,8 @@ import { afterEach, test } from "node:test";
 import { QueryClient } from "@tanstack/react-query";
 import type { BoardKey } from "../../../../shared/types.js";
 import { openDecisionsQueryOptions } from "@/queries/attention-actions-queries";
-import {
-  orchestrationEventsQueryOptions,
-  orchestrationSummaryQueryOptions,
-} from "./orchestration-queries.js";
+import { orchestrationSummaryQueryOptions } from "@/queries/orchestration-summary-queries";
+import { orchestrationEventsQueryOptions } from "./orchestration-queries.js";
 
 const BOARD = "LOCAL" as BoardKey;
 const realFetch = globalThis.fetch;
@@ -36,13 +34,6 @@ test("summary, events and decisions keys share the orchestration board prefix", 
   }
 });
 
-test("the keys of two boards share no prefix", () => {
-  assert.notDeepEqual(
-    orchestrationSummaryQueryOptions(BOARD).queryKey.slice(0, 2),
-    orchestrationSummaryQueryOptions("OTHR" as BoardKey).queryKey.slice(0, 2),
-  );
-});
-
 test("invalidating the board prefix marks all three queries stale", async () => {
   const client = new QueryClient();
   reply({ concurrencyCap: null, runningLoops: 0, groups: [] });
@@ -62,16 +53,6 @@ test("invalidating the board prefix marks all three queries stale", async () => 
   assert.deepEqual(states, [true, true, true]);
 });
 
-test("the summary query reads GET /api/boards/:key/orchestration", async () => {
-  const summary = { concurrencyCap: 2, runningLoops: 1, groups: [] };
-  reply(summary);
-  const got = await new QueryClient().fetchQuery(
-    orchestrationSummaryQueryOptions(BOARD),
-  );
-  assert.deepEqual(got, summary);
-  assert.deepEqual(urls, ["/api/boards/LOCAL/orchestration"]);
-});
-
 test("the events query sends since and limit when set and answers the events array", async () => {
   reply({ events: [{ id: 3 }] });
   const got = await new QueryClient().fetchQuery(
@@ -84,14 +65,4 @@ test("the events query sends since and limit when set and answers the events arr
   reply({ events: [] });
   await new QueryClient().fetchQuery(orchestrationEventsQueryOptions(BOARD));
   assert.equal(urls[1], "/api/boards/LOCAL/orchestration/events");
-});
-
-test("a failure status rejects the query", async () => {
-  reply({}, 500);
-  await assert.rejects(
-    new QueryClient().fetchQuery({
-      ...orchestrationSummaryQueryOptions(BOARD),
-      retry: false,
-    }),
-  );
 });

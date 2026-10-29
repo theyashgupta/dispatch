@@ -108,6 +108,7 @@ void test("add runs the ownership rules and maps each refusal to its status", as
   });
   assert.equal(record("lead").state, "stopped");
   assert.equal(record("lead").cardId, null);
+  assert.equal(record("lead").kind, "board");
   await refused(
     svc.addOrchestrator(board(), {
       ...main,
@@ -133,11 +134,12 @@ void test("add runs the ownership rules and maps each refusal to its status", as
       id: "infra",
       name: "Infra",
       role: "extra",
+      kind: "board",
       scope: empty,
       policyOverride: {},
     }),
     400,
-    "extra-needs-scope",
+    "kind-mismatch",
   );
   await refused(
     svc.addOrchestrator(board(), {
@@ -170,7 +172,7 @@ void test("add runs the ownership rules and maps each refusal to its status", as
       policyOverride: { concurrencyCap: 99 },
     }),
     400,
-    "extra-needs-scope",
+    "wider-override",
   );
 });
 
@@ -256,6 +258,8 @@ void test("start makes the hidden card, writes the mcp config and ends running",
   assert.equal(card?.title, "Orchestrator: Lead");
   assert.equal(card?.workspace, undefined);
   assert.match(started[0]?.direction ?? "", /"Lead" \(id lead\) of board SBX/);
+  assert.match(started[0]?.direction ?? "", /Scope: board\./);
+  assert.doesNotMatch(started[0]?.direction ?? "", /Scope: feature/);
   assert.equal(started[0]?.playbook, "Board Orchestrator");
 
   const file = orchestratorMcpConfigPath(DISPATCH_DATA_DIR, "SBX", "lead");
@@ -452,7 +456,7 @@ void test("remove refuses the main while an extra exists and removes a stopped e
   );
 });
 
-void test("the launch of an orchestrator card carries the policy flags and never a bypass flag", async () => {
+void test("the launch of an orchestrator card carries the policy flags with one bypass flag and no permission mode", async () => {
   const card = store.getCard(record("lead").cardId as string)!;
   const { argv } = await buildLaunch(
     { id: "default", label: "Default" } as never,
@@ -461,7 +465,7 @@ void test("the launch of an orchestrator card carries the policy flags and never
     card,
   );
   const mcp = orchestratorMcpConfigPath(DISPATCH_DATA_DIR, "SBX", "lead");
-  assert.deepEqual(argv.slice(1, 20), [
+  assert.deepEqual(argv.slice(1, 19), [
     "--model",
     "opus",
     "--mcp-config",
@@ -473,8 +477,7 @@ void test("the launch of an orchestrator card carries the policy flags and never
     "Grep",
     "--allowedTools",
     "mcp__dispatch",
-    "--permission-mode",
-    "manual",
+    "--dangerously-skip-permissions",
     "--disallowedTools",
     "Bash",
     "Write",
@@ -482,8 +485,12 @@ void test("the launch of an orchestrator card carries the policy flags and never
     "NotebookEdit",
     "--resume",
   ]);
+  assert.deepEqual(
+    argv.filter((a) => a.includes("dangerously")),
+    ["--dangerously-skip-permissions"],
+  );
   assert.equal(
-    argv.some((a) => a.includes("dangerously")),
+    argv.some((a) => a.startsWith("--permission-mode")),
     false,
   );
   const plain = await buildLaunch(
@@ -878,4 +885,183 @@ void test("a start whose mcp config write fails leaves the record stopped with t
   }
   assert.equal(record("lockedout").state, "running");
   assert.equal(store.listAllCards(SBX).length, cards + 1);
+});
+
+void test("add stores an empty extra with the kind feature", async () => {
+  await svc.addOrchestrator(board(), {
+    id: "empty-feature",
+    name: "Empty feature",
+    role: "extra",
+    scope: empty,
+    policyOverride: {},
+  });
+  assert.equal(record("empty-feature").kind, "feature");
+  assert.deepEqual(record("empty-feature").scope, empty);
+});
+
+void test("assign by an orchestrator targets only a feature orchestrator and never takes a card another extra owns", async () => {
+  const ORD = parseBoardKey("ORD") as BoardKey;
+  await store.createBoard({
+    key: ORD,
+    name: "Orders",
+    workspaceRoot: "/ord/sessions",
+    repositories: [],
+    linearTeamKeys: [],
+  });
+  const ordBoard = () => store.getBoard(ORD) as Board;
+  for (const [id, role] of [
+    ["lead", "main"],
+    ["feata", "extra"],
+    ["featb", "extra"],
+  ] as const) {
+    await svc.addOrchestrator(ordBoard(), {
+      id,
+      name: id,
+      role,
+      scope: empty,
+      policyOverride: {},
+    });
+  }
+  const ticket = await store.createLocalCard(ORD, "loose", "");
+  const owned = await store.createLocalCard(ORD, "owned", "");
+  await svc.assignCard(ORD, owned.id, "featb", "user");
+  const events = () =>
+    store
+      .listOrchestrationEvents(ORD, 0, 100)
+      .filter((e) => e.kind === "intake_submitted").length;
+  const ticketIds = (id: string) =>
+    ordBoard().orchestrators.find((r) => r.id === id)?.scope.ticketIds;
+  const sent = events();
+
+  await refused(
+    svc.assignCard(ORD, ticket.id, "lead", "orchestrator"),
+    400,
+    "not-feature-orchestrator",
+  );
+  await refused(
+    svc.assignCard(ORD, owned.id, "feata", "orchestrator"),
+    403,
+    "other-owner",
+  );
+  assert.deepEqual(ticketIds("featb"), [owned.id]);
+
+  const result = await svc.assignCard(ORD, ticket.id, "feata", "orchestrator");
+  assert.deepEqual(result, {
+    cardId: ticket.id,
+    orchestratorId: "feata",
+    changed: true,
+  });
+  assert.deepEqual(ticketIds("feata"), [ticket.id]);
+  assert.equal(events(), sent);
+});
+
+void test("assign by an orchestrator refuses a card that is not in To Do with 409 not-todo and changes no record", async () => {
+  const ORD2 = parseBoardKey("ORX") as BoardKey;
+  await store.createBoard({
+    key: ORD2,
+    name: "Orders two",
+    workspaceRoot: "/orx/sessions",
+    repositories: [],
+    linearTeamKeys: [],
+  });
+  const ordBoard = () => store.getBoard(ORD2) as Board;
+  for (const [id, role] of [
+    ["lead", "main"],
+    ["feat", "extra"],
+  ] as const) {
+    await svc.addOrchestrator(ordBoard(), {
+      id,
+      name: id,
+      role,
+      scope: empty,
+      policyOverride: {},
+    });
+  }
+  const running = await store.createLocalCard(ORD2, "running", "");
+  await store.moveCardManual(running.id, "parked");
+  assert.equal(store.getCard(running.id)?.column, "parked");
+  const before = JSON.stringify(ordBoard().orchestrators);
+  await refused(
+    svc.assignCard(ORD2, running.id, "feat", "orchestrator"),
+    409,
+    "not-todo",
+  );
+  assert.equal(JSON.stringify(ordBoard().orchestrators), before);
+  const byUser = await svc.assignCard(ORD2, running.id, "feat", "user");
+  assert.equal(byUser.changed, true);
+});
+
+void test("assign refuses a card that joined a group between the pre-check and the record write", async () => {
+  const board2 = parseBoardKey("ORY") as BoardKey;
+  await store.createBoard({
+    key: board2,
+    name: "Orders three",
+    workspaceRoot: "/ory/sessions",
+    repositories: [],
+    linearTeamKeys: [],
+  });
+  await svc.addOrchestrator(store.getBoard(board2) as Board, {
+    id: "lead",
+    name: "lead",
+    role: "main",
+    scope: empty,
+    policyOverride: {},
+  });
+  await svc.addOrchestrator(store.getBoard(board2) as Board, {
+    id: "feat",
+    name: "feat",
+    role: "extra",
+    scope: empty,
+    policyOverride: {},
+  });
+  const m1 = await store.createLocalCard(board2, "m1", "");
+  const m2 = await store.createLocalCard(board2, "m2", "");
+  let open = (): void => undefined;
+  const opened = new Promise<void>((resolve) => {
+    open = resolve;
+  });
+  const write = store.setBoardOrchestrators.bind(store);
+  store.setBoardOrchestrators = async (key, records) => {
+    await opened;
+    return write(key, records);
+  };
+  let pending: Promise<unknown>;
+  try {
+    const blocker = svc.writeState(
+      { boardKey: board2, orchestratorId: "lead" },
+      "hold",
+      false,
+    );
+    pending = svc.assignCard(board2, m1.id, "feat", "user");
+    const minted = await store.createGroupCard(board2, "grp", [m1.id, m2.id]);
+    assert.ok(minted.ok);
+    open();
+    await blocker;
+  } finally {
+    store.setBoardOrchestrators = write;
+  }
+  await refused(pending, 400, "group-member");
+  assert.deepEqual(
+    (store.getBoard(board2) as Board).orchestrators.find((r) => r.id === "feat")
+      ?.scope.ticketIds,
+    [],
+  );
+});
+
+void test("the kickoff of an extra carries the feature scope block", async () => {
+  await svc.addOrchestrator(board(), {
+    id: "kick",
+    name: "Kick",
+    role: "extra",
+    scope: { groupIds: [], ticketIds: [] },
+    policyOverride: {},
+  });
+  const before = started.length;
+  const { settled } = await svc.startOrchestrator(board(), "kick");
+  await settled;
+  const direction = started[before]?.direction ?? "";
+  assert.match(direction, /"Kick" \(id kick\) of board SBX/);
+  assert.match(direction, /Scope: feature\./);
+  assert.match(direction, /Act only on the cards that are assigned to you/);
+  assert.doesNotMatch(direction, /Scope: board/);
 });

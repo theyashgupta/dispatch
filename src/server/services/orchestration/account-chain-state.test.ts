@@ -58,10 +58,40 @@ void test("chain state round trips every field", async () => {
     },
     moves: [move(1)],
     loginExpiryNotified: { [ID]: "2026-10-04T00:00:00.000Z" },
+    decisions: { [`needs-login:${ID}`]: "decision-1" },
   };
   await chain.writeChainState(state);
   assert.deepEqual(await chain.readChainState(), state);
   assert.equal(fs.statSync(chain.CHAIN_STATE_PATH).mode & 0o777, 0o600);
+});
+
+void test("an entry keeps its fetchedAt through a write and a read, and an entry without it still reads", async () => {
+  const state: ChainStateFile = {
+    ...chain.emptyChainState(),
+    accounts: {
+      default: {
+        state: "available",
+        buckets: [],
+        limitedUntil: null,
+        fetchedAt: "2026-10-01T00:00:00.000Z",
+      },
+      [ID]: {
+        state: "unknown",
+        buckets: [],
+        limitedUntil: null,
+        fetchedAt: null,
+      },
+    },
+  };
+  await chain.writeChainState(state);
+  assert.deepEqual(await chain.readChainState(), state);
+
+  const old = { state: "limited", buckets: [], limitedUntil: null };
+  fs.writeFileSync(
+    chain.CHAIN_STATE_PATH,
+    JSON.stringify({ accounts: { default: old } }),
+  );
+  assert.deepEqual((await chain.readChainState()).accounts, { default: old });
 });
 
 void test("corrupt or wrong-shaped chain state reads as empty and does not throw", async () => {
@@ -136,4 +166,34 @@ void test("a file without loginExpiryNotified reads it as empty, and a non-strin
   assert.deepEqual((await chain.readChainState()).loginExpiryNotified, {
     a: "2026-10-04T00:00:00.000Z",
   });
+});
+
+void test("decisions and rejectedReads round trip, and a needs-login entry survives the reader", async () => {
+  const state: ChainStateFile = {
+    ...chain.emptyChainState(),
+    accounts: {
+      [ID]: {
+        state: "needs-login",
+        buckets: [],
+        limitedUntil: null,
+        rejectedReads: 2,
+      },
+    },
+    decisions: { [`needs-login:${ID}`]: "decision-1" },
+  };
+  await chain.writeChainState(state);
+  assert.deepEqual(await chain.readChainState(), state);
+});
+
+void test("a file without decisions reads an empty record, and a non-string decision id is dropped", async () => {
+  fs.writeFileSync(
+    chain.CHAIN_STATE_PATH,
+    JSON.stringify({ accounts: {}, loginExpiryNotified: {} }),
+  );
+  assert.deepEqual((await chain.readChainState()).decisions, {});
+  fs.writeFileSync(
+    chain.CHAIN_STATE_PATH,
+    JSON.stringify({ accounts: {}, decisions: { a: "x", b: 3, c: null } }),
+  );
+  assert.deepEqual((await chain.readChainState()).decisions, { a: "x" });
 });

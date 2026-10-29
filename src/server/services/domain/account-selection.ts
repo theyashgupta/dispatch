@@ -9,6 +9,9 @@ export type ChainCandidate = { id: string } & Pick<
   "state" | "limitedUntil"
 >;
 
+export type BucketedCandidate = ChainCandidate &
+  Pick<ChainAccountEntry, "buckets">;
+
 export type ChainSelection =
   | { exhausted: false; id: string }
   | { exhausted: true; earliestReset: string | null };
@@ -79,4 +82,33 @@ export function filterByHysteresis<
   return chain.filter((a) =>
     passesHysteresis(a.buckets, a.state, thresholdPercent, hysteresisPercent),
   );
+}
+
+/**
+ * Pick the account with the most weekly headroom to take a session that stopped on the usage limit.
+ *
+ * @remarks Only `available` and `near-limit` accounts count, so `limited`, `login-expired` and
+ * `unknown` never win. The weekly percent is the highest bucket whose kind starts with `weekly`,
+ * and it must sit below the hysteresis line. The lowest percent wins and a tie keeps chain order.
+ */
+export function pickHeadroomAccount(
+  chain: readonly BucketedCandidate[],
+  fromId: string,
+  thresholdPercent: number,
+  hysteresisPercent: number,
+): string | null {
+  let best: { id: string; percent: number } | null = null;
+  for (const a of chain) {
+    if (
+      a.id === fromId ||
+      (a.state !== "available" && a.state !== "near-limit")
+    )
+      continue;
+    const weekly = a.buckets.filter((b) => b.kind.startsWith("weekly"));
+    const percent = bindingPercent(weekly);
+    if (percent === null) continue;
+    if (percent >= thresholdPercent - hysteresisPercent) continue;
+    if (best === null || percent < best.percent) best = { id: a.id, percent };
+  }
+  return best?.id ?? null;
 }

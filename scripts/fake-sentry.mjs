@@ -149,7 +149,7 @@ const server = createServer((req, res) => {
   req.on("data", (c) => chunks.push(c));
   req.on("end", () => {
     const url = new URL(req.url ?? "/", origin);
-    let body = null;
+    let body;
     try {
       body = chunks.length
         ? JSON.parse(Buffer.concat(chunks).toString("utf8"))

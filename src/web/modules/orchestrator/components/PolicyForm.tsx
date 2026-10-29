@@ -190,6 +190,14 @@ export function PolicyForm({
         error={errors.budgetPerGroup}
         onChange={(budgetPerGroup) => onChange({ budgetPerGroup })}
       />
+      <TextField
+        id="policy-budget-warn-percent"
+        label="Budget warning (%)"
+        value={values.budgetWarnPercent}
+        description="Warn when a group reaches this percent of its budget."
+        error={errors.budgetWarnPercent}
+        onChange={(budgetWarnPercent) => onChange({ budgetWarnPercent })}
+      />
       <Field>
         <Label htmlFor="policy-supervisor">Supervisor</Label>
         <div className="flex items-center gap-(--space-sm)">

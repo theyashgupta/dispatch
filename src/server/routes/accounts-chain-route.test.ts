@@ -141,6 +141,34 @@ void test("GET /accounts lists the accounts in chain order with chain fields, se
   assert.ok(Array.isArray(body.sessions));
 });
 
+void test("GET /accounts reads a stored limited entry whose limitedUntil passed as unknown with no limitedUntil", async (t) => {
+  t.after(async () => {
+    await chainState.writeChainState(chainState.emptyChainState());
+  });
+  const future = new Date(Date.now() + 3_600_000).toISOString();
+  await chainState.writeChainState({
+    ...chainState.emptyChainState(),
+    accounts: {
+      [ID_A]: {
+        state: "limited",
+        limitedUntil: new Date(Date.now() - 60_000).toISOString(),
+        buckets: [],
+      },
+      [ID_B]: { state: "limited", limitedUntil: future, buckets: [] },
+    },
+  });
+  const { body } = await call("GET", "/accounts");
+  const list = body.accounts as Record<string, unknown>[];
+  assert.deepEqual(
+    list.map((a) => [a.id, a.state, a.limitedUntil]),
+    [
+      ["default", "unknown", null],
+      [ID_A, "unknown", null],
+      [ID_B, "limited", future],
+    ],
+  );
+});
+
 void test("PUT /accounts/chain/order with every id writes positions, Default included", async (t) => {
   t.after(async () => {
     await call("PUT", "/accounts/chain/order", {

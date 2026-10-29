@@ -3,14 +3,12 @@ import type { OrchestratorRecord } from "../../../../shared/types.js";
 import { useRouteContext } from "@tanstack/react-router";
 import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { readClock, subscribeClock } from "@/components/ui/hooks/wake-clock";
-import {
-  useOrchestrationEventsQuery,
-  useOrchestrationSummaryQuery,
-} from "@/modules/dashboard/queries/orchestration-queries";
+import { useOrchestrationEventsQuery } from "@/modules/dashboard/queries/orchestration-queries";
 import { useAccountsQuery } from "@/queries/accounts-queries";
 import { useOpenDecisionsQuery } from "@/queries/attention-actions-queries";
 import { useBoardListQuery } from "@/queries/board-list-queries";
 import { useBoardSnapshotQuery } from "@/queries/board-snapshot-queries";
+import { useOrchestrationSummaryQuery } from "@/queries/orchestration-summary-queries";
 
 const EVENTS_PAGE = { limit: 200 };
 const NO_ORCHESTRATORS: OrchestratorRecord[] = [];
@@ -46,6 +44,7 @@ export function useDashboardData() {
     accounts,
     orchestrators,
     boardName: board?.name ?? null,
+    budgetWarnPercent: board?.policy.budgetWarnPercent,
     now,
     connection,
   };

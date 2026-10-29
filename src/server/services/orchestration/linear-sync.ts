@@ -13,6 +13,7 @@ import {
   withoutSyncTokens,
 } from "../../../shared/sync-token.js";
 import type { Card } from "../../../shared/types.js";
+import { managedClaudeEnv } from "./claude-accounts.js";
 
 /**
  * A run of line breaks plus the whitespace hugging it, as one flattenable unit. Kept wider than a
@@ -326,6 +327,7 @@ export async function syncCardToLinear(card: {
       timeout: 240_000,
       maxBuffer: 10 * 1024 * 1024,
       killEscalationMs: 5_000,
+      env: managedClaudeEnv(),
     },
   );
 

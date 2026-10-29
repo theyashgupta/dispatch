@@ -18,24 +18,27 @@ export function PreviewRow({ preview }: { preview: PreviewInfo }) {
         className="size-3.5 flex-none text-(--status-ok)"
         aria-hidden="true"
       />
-      <div className="flex min-w-0 flex-auto flex-col">
-        <span className="truncate text-base font-semibold text-foreground">
+      <div className="flex min-w-0 flex-auto items-baseline gap-(--space-sm)">
+        <span className="flex-none text-sm font-semibold text-foreground">
           {`localhost:${preview.port}`}
         </span>
-        <span className="text-sm font-normal text-(--status-ok)">
-          Dev server
-        </span>
+        <span className="flex-none text-sm text-(--status-ok)">Dev server</span>
         {preview.evidence != null && (
-          <div className="flex items-center gap-(--space-xs)">
-            <span className={`${MONO_LABEL_CLASS} text-muted-foreground`}>
+          <>
+            <span
+              title={previewEvidenceLine(preview.evidence)}
+              className={`min-w-0 truncate ${MONO_LABEL_CLASS} text-muted-foreground`}
+            >
               {previewEvidenceLine(preview.evidence)}
             </span>
             {preview.evidence.cwdMismatch === true && (
-              <span className={`${MONO_LABEL_CLASS} text-(--status-stale)`}>
+              <span
+                className={`flex-none ${MONO_LABEL_CLASS} text-(--status-stale)`}
+              >
                 cwd mismatch
               </span>
             )}
-          </div>
+          </>
         )}
       </div>
       <Button
