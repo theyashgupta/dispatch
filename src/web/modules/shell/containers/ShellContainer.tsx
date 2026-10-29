@@ -70,6 +70,7 @@ import {
 } from "@/modules/shell/domain/board-switcher";
 import { boardPageTitle } from "@/modules/shell/domain/board-title";
 import { BOARDS_GROUP, buildCommands } from "@/modules/shell/domain/commands";
+import { sidebarOrchestrator } from "@/modules/shell/domain/sidebar-orchestrator";
 import { NAV_ITEMS, visibleNavItems } from "../../../../shared/nav-items.js";
 import { sidebarOpen } from "@/modules/shell/domain/nav-open";
 import { useNavPreference } from "@/modules/shell/hooks/use-nav-preference";
@@ -91,6 +92,7 @@ import {
   useBoardSnapshotQuery,
 } from "@/queries/board-snapshot-queries";
 import { moveCard } from "@/queries/cards-api";
+import { useStartOrchestratorMutation } from "@/queries/orchestrator-start-queries";
 import { refreshPushSubscription } from "@/queries/push-api";
 
 export interface ShellContainerProps {
@@ -253,6 +255,23 @@ export function ShellContainer({
     openBoard(result.board.key);
   };
 
+  const boardRecord = boardList?.boards.find((b) => b.key === boardKey) ?? null;
+  const startMutation = useStartOrchestratorMutation();
+  const startOrchestrator = async () => {
+    if (startMutation.isPending) return;
+    const key = boardKey;
+    const result = await startMutation.mutateAsync({
+      board: key,
+      hasMainRecord: orchestrator?.hasMain ?? false,
+    });
+    if (!result.ok) {
+      toast.error(result.error);
+      return;
+    }
+    toast.success("Orchestrator started.");
+    if (appStore.getState().board === key) navigate("orchestrator");
+  };
+
   const [liveBoard, setLiveBoard] = useState<BoardSnapshot | null>(null);
   const { connection } = useBoardLiveUpdates(boardKey, doneLimit, {
     onTunnelState: appStore.setTunnelState,
@@ -397,6 +416,7 @@ export function ShellContainer({
           pushoverMissing: board.pushoverMissing ?? null,
           now: new Date(nowMs()),
         }).length;
+  const orchestrator = sidebarOrchestrator(boardRecord, needsYouCount);
   const meetingItems = items.filter((item) => item.source === "meeting");
   const inboxCount = inboxWaitingCount(board.cards, inboxItems);
   const githubEnabled = board.enabledSources?.includes("github") === true;
@@ -445,11 +465,13 @@ export function ShellContainer({
         ),
       switchBoard,
       createBoard,
+      startOrchestrator: () => void startOrchestrator(),
     },
     navItems,
     selectedCardOf(board.cards, selectedCardId, pinned),
     boardItems,
     boardHasMain,
+    orchestrator?.canStart ?? false,
   );
   return (
     <SidebarProvider
@@ -491,6 +513,9 @@ export function ShellContainer({
           onOpenBoard: openBoard,
           onCreate: openCreateBoard,
           onRetry: () => void list.refetch(),
+          orchestrator,
+          orchestratorActive: routePage === "orchestrator",
+          onOpenOrchestrator: () => navigate("orchestrator"),
         }}
         dashboards={{ items: dashboardRows, onOpenDashboard: openDashboard }}
         hasMainOrchestrator={boardHasMain}

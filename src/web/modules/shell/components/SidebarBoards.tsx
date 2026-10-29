@@ -15,7 +15,9 @@ import {
 } from "@/components/ui/sidebar";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { SwitcherItem } from "@/modules/shell/domain/board-switcher";
+import type { SidebarOrchestrator } from "@/modules/shell/domain/sidebar-orchestrator";
 import { BOARD_ROW_CLASS, SidebarBoardRow } from "./SidebarBoardRow";
+import { SidebarOrchestratorRow } from "./SidebarOrchestratorRow";
 
 export interface SidebarBoardsData {
   items: readonly SwitcherItem[] | null;
@@ -24,6 +26,9 @@ export interface SidebarBoardsData {
   onOpenBoard: (key: BoardKey) => void;
   onCreate: () => void;
   onRetry: () => void;
+  orchestrator: SidebarOrchestrator | null;
+  orchestratorActive: boolean;
+  onOpenOrchestrator: () => void;
 }
 
 export function SidebarBoards({
@@ -33,6 +38,9 @@ export function SidebarBoards({
   onOpenBoard,
   onCreate,
   onRetry,
+  orchestrator,
+  orchestratorActive,
+  onOpenOrchestrator,
 }: SidebarBoardsData) {
   return (
     <Collapsible defaultOpen asChild>
@@ -73,7 +81,15 @@ export function SidebarBoards({
                   item={item}
                   showLoops
                   onOpen={onOpenBoard}
-                />
+                >
+                  {item.selected && orchestrator !== null ? (
+                    <SidebarOrchestratorRow
+                      entry={orchestrator}
+                      active={orchestratorActive}
+                      onOpen={onOpenOrchestrator}
+                    />
+                  ) : null}
+                </SidebarBoardRow>
               ))}
               <SidebarMenuItem>
                 <SidebarMenuButton

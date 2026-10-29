@@ -35,13 +35,14 @@ export interface CommandContext {
   syncNow: () => void;
   switchBoard: (key: BoardKey) => void;
   createBoard: (name: string) => Promise<void>;
+  startOrchestrator: () => void;
 }
 
 const hasLiveSession = (card: Card) =>
   card.tmuxSession != null && card.sessionLost !== true;
 
 /**
- * The palette's commands for the selected card, then every page, New ticket, Sync now and the boards.
+ * The palette commands: card actions, pages, general actions, the orchestrator, then the boards.
  *
  * @remarks Card commands come first, only for a selected card and only where it can take them. "Go to Board" always shows; "Go to Dashboard" shows only when the current board has a main orchestrator. The "Boards" group comes last.
  */
@@ -51,6 +52,7 @@ export function buildCommands(
   card: Card | null,
   switcher: readonly SwitcherItem[] | null = null,
   hasMainOrchestrator = false,
+  canStartOrchestrator = false,
 ): Command[] {
   const boards: Command[] = [
     ...(switcher ?? [])
@@ -99,6 +101,20 @@ export function buildCommands(
       run: ctx.meetingNotes,
     },
     { id: "sync-now", label: "Sync now", run: ctx.syncNow },
+    {
+      id: "open-orchestrator",
+      label: "Open orchestrator",
+      run: () => ctx.navigate("orchestrator"),
+    },
+    ...(canStartOrchestrator
+      ? [
+          {
+            id: "start-orchestrator",
+            label: "Start orchestrator",
+            run: ctx.startOrchestrator,
+          },
+        ]
+      : []),
   ];
   if (card == null || card.groupId != null) return [...general, ...boards];
   const commands: Command[] = [];
