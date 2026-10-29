@@ -172,6 +172,44 @@ test("switching opens the confirmation for the chosen account", async ({
   expect((await put).postDataJSON()).toMatchObject({ id: "a2" });
 });
 
+for (const [code, message] of [
+  [
+    "account-needs-login",
+    "This account needs a new login. Log in again, then switch.",
+  ],
+  [
+    "account-shadowed-by-home",
+    "This account is the same login as Default. Switch to Default or remove the duplicate.",
+  ],
+]) {
+  test(`a ${code} refusal shows its message in the switch dialog`, async ({
+    page,
+  }) => {
+    await boot(page);
+    await page.route("**/api/accounts/active", (route) =>
+      route.request().method() === "PUT"
+        ? route.fulfill({ status: 409, json: { error: code } })
+        : route.fallback(),
+    );
+    await openPopover(page);
+    await page
+      .locator("#account-popover")
+      .getByRole("button", { name: "Switch account" })
+      .click();
+    await page
+      .getByRole("button", {
+        name: /^Switch to limited\.person@example\.com/,
+      })
+      .click();
+    const dialog = page.getByTestId("account-switch-dialog");
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole("button", { name: "Switch account" }).click();
+    await expect(dialog.getByRole("alert")).toHaveText(message);
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByTestId("switch-result")).toHaveCount(0);
+  });
+}
+
 test("the Switch account list starts closed on every open", async ({
   page,
 }) => {

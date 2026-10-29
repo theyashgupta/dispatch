@@ -35,6 +35,8 @@ function append(
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const listeners = () => store.listenerCount("orchestration");
+const lastId = (board: BoardKey) =>
+  store.listOrchestrationEvents(board, 0, 10_000).at(-1)?.id ?? 0;
 
 void test("a match appended after the wait starts resolves within 2 s of the append", async () => {
   const base = listeners();
@@ -189,5 +191,75 @@ void test("a wait on group_state returns that event, and a wait on other kinds d
   assert.deepEqual(await wait, { event });
   const timedOut = await other;
   assert.ok(timedOut !== null && "timedOut" in timedOut);
+  assert.equal(listeners(), base);
+});
+
+const WAK = parseBoardKey("WAK") as BoardKey;
+
+void test("wait_for_event returns on a machine_wake event even when the caller did not list that kind", async () => {
+  const base = listeners();
+  const since = lastId(WAK);
+  const wait = waitForEvent(
+    WAK,
+    { since, kinds: ["pr_state"], cardIds: ["c1"] },
+    10_000,
+  );
+  assert.equal(listeners(), base + 1);
+  const event = append(WAK, "machine_wake", null, { sleptSeconds: 600 });
+  assert.deepEqual(await wait, { event });
+  assert.equal(listeners(), base);
+});
+
+void test("a machine_wake row stored before the wait starts does not end a wait for other kinds", async () => {
+  const base = listeners();
+  const since = lastId(WAK);
+  append(WAK, "machine_wake", null, { sleptSeconds: 600 });
+  const result = await waitForEvent(
+    WAK,
+    { since, kinds: ["pr_state"], cardIds: ["c1"] },
+    300,
+  );
+  assert.ok(result !== null && "timedOut" in result);
+  assert.equal("machineWake" in result, false);
+  assert.equal(listeners(), base);
+});
+
+void test("a machine_wake row at or before since does not end the wait", async () => {
+  const base = listeners();
+  const since = append(WAK, "machine_wake").id;
+  assert.deepEqual(await waitForEvent(WAK, { since }, 300), {
+    timedOut: true,
+    cursor: since,
+  });
+  assert.equal(listeners(), base);
+});
+
+void test("a wait started before a sleep ends within one poll interval after the wake", async () => {
+  const base = listeners();
+  let offset = 0;
+  const clock = { now: () => Date.now() + offset, pollMs: 50 };
+  const since = lastId(WAK);
+  const wait = waitForEvent(WAK, { since }, 55_000, undefined, clock);
+  await sleep(120);
+  offset = 10 * 60_000;
+  const jumped = Date.now();
+  const result = await wait;
+  assert.ok(result !== null && "timedOut" in result);
+  assert.equal(result.timedOut, true);
+  assert.equal("machineWake" in result && result.machineWake, true);
+  assert.ok(Date.now() - jumped < 250);
+  assert.equal(listeners(), base);
+});
+
+void test("a wait with no clock jump does not end before its timeout", async () => {
+  const base = listeners();
+  const since = lastId(WAK);
+  const started = Date.now();
+  const result = await waitForEvent(WAK, { since }, 300, undefined, {
+    now: Date.now,
+    pollMs: 20,
+  });
+  assert.deepEqual(result, { timedOut: true, cursor: since });
+  assert.ok(Date.now() - started >= 280);
   assert.equal(listeners(), base);
 });

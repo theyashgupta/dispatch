@@ -1,6 +1,6 @@
 {
   "name": "@theyashgupta/dispatch",
-  "version": "4.5.4",
+  "version": "4.6.0",
   "description": "A local kanban board that turns Linear tickets into live Claude Code agent sessions - one git worktree per ticket, real terminals in the browser.",
   "keywords": [
     "kanban",
@@ -48,7 +48,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "lint": "node scripts/with-check-slot.mjs eslint . --cache --cache-location node_modules/.cache/eslint/",
-    "lint:typed": "DISPATCH_LINT_TYPED=1 node scripts/with-check-slot.mjs eslint . --cache --cache-location node_modules/.cache/eslint-typed/",
+    "lint:typed": "DISPATCH_LINT_TYPED=1 NODE_OPTIONS=--max-old-space-size=4096 node scripts/with-check-slot.mjs eslint . --cache --cache-location node_modules/.cache/eslint-typed/",
     "depcruise": "depcruise src",
     "lint:fix": "node scripts/with-check-slot.mjs eslint . --fix --cache --cache-location node_modules/.cache/eslint/",
     "deadcode": "node scripts/with-check-slot.mjs npm run deadcode:knip",
@@ -89,7 +89,7 @@
     "test:visual": "playwright test",
     "test:visual:update": "playwright test --update-snapshots",
     "prepublishOnly": "node scripts/build-calendar-helper.mjs --require",
-    "test:e2e:accounts": "env -u NODE_ENV -u CLAUDE_CONFIG_DIR node --import tsx --test --test-concurrency=1 tests/e2e/scenario-14-account-login-decision.e2e.ts tests/e2e/scenario-15-managed-default.e2e.ts"
+    "test:e2e:accounts": "env -u NODE_ENV -u CLAUDE_CONFIG_DIR node --import tsx --test --test-concurrency=1 tests/e2e/scenario-LOCAL-159-account-login-decision.e2e.ts tests/e2e/scenario-LOCAL-159-managed-default.e2e.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",

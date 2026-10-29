@@ -40,12 +40,10 @@ import {
   type Page,
   type Route,
 } from "../../../../shared/route.js";
-import { flattenSessions } from "../../../../shared/sessions.js";
 import {
   BOARD_SHORTCUTS,
   GLOBAL_SHORTCUTS,
   INBOX_SHORTCUTS,
-  SESSIONS_SHORTCUTS,
   bindShortcuts,
 } from "../../../../shared/shortcuts.js";
 import { hideDisabledSlack } from "../../../../shared/hide-disabled-slack.js";
@@ -76,7 +74,10 @@ import { Toaster } from "@/components/ui/sonner";
 import { ActivityDrawer } from "@/modules/shell/components/ActivityDrawer";
 import { CheatSheet } from "@/modules/shell/components/CheatSheet";
 import { ShellFrame } from "@/modules/shell/components/ShellFrame";
-import { switcherItems } from "@/modules/shell/domain/board-switcher";
+import {
+  dashboardItems,
+  switcherItems,
+} from "@/modules/shell/domain/board-switcher";
 import { boardPageTitle } from "@/modules/shell/domain/board-title";
 import { BOARDS_GROUP, buildCommands } from "@/modules/shell/domain/commands";
 import { NAV_ITEMS, visibleNavItems } from "../../../../shared/nav-items.js";
@@ -122,7 +123,6 @@ const TOAST_OFFSET = {
 const SHORTCUT_GROUPS_AFTER_GLOBAL = [
   { title: "Board", rows: BOARD_SHORTCUTS },
   { title: "Inbox", rows: INBOX_SHORTCUTS },
-  { title: "Sessions", rows: SESSIONS_SHORTCUTS },
 ];
 
 const PANEL_FREE_PAGES: ReadonlySet<Page> = new Set([
@@ -140,7 +140,6 @@ const PANEL_FREE_PAGES: ReadonlySet<Page> = new Set([
 const PAGE_TITLES: Record<Page, string> = {
   board: "Board",
   inbox: "Inbox",
-  sessions: "Sessions",
   tickets: "Tickets",
   workspace: "Workspace",
   settings: "Settings",
@@ -205,6 +204,15 @@ export function ShellContainer({
     boardList !== undefined
       ? switcherItems(boardList.boards, counts.data?.counts, boardKey)
       : null;
+  const dashboardRows =
+    boardList !== undefined
+      ? dashboardItems(boardList.boards, counts.data?.counts, {
+          page: routePage,
+          board: boardKey,
+        })
+      : null;
+  const boardHasMain =
+    dashboardRows?.some((row) => row.key === boardKey) ?? false;
   const boardName =
     boardItems !== null && boardItems.length > 1
       ? (boardItems.find((item) => item.selected)?.name ?? null)
@@ -227,6 +235,13 @@ export function ShellContainer({
   const openBoard = useCallback(
     (key: BoardKey) => {
       void router.navigate({ href: pageLocation({ page: "board" }, key) });
+    },
+    [router],
+  );
+
+  const openDashboard = useCallback(
+    (key: BoardKey) => {
+      void router.navigate({ href: pageLocation({ page: "dashboard" }, key) });
     },
     [router],
   );
@@ -362,13 +377,9 @@ export function ShellContainer({
     () => slackRows(hideDisabledSlack(items, enabledSources ?? [])),
     [items, enabledSources],
   );
-  const hasMainOrchestrator =
-    boardList?.boards
-      .find((b) => b.key === boardKey)
-      ?.orchestrators.some((r) => r.role === "main") ?? false;
   const navItems = useMemo(
-    () => visibleNavItems(NAV_ITEMS, enabledSources ?? [], hasMainOrchestrator),
-    [enabledSources, hasMainOrchestrator],
+    () => visibleNavItems(NAV_ITEMS, enabledSources ?? []),
+    [enabledSources],
   );
 
   useShortcuts(
@@ -403,13 +414,11 @@ export function ShellContainer({
           boardKey,
           cards: board.cards,
           decisions: decisions.data,
-          pushoverMissing: board.pushoverMissing,
+          pushoverMissing: board.pushoverMissing ?? null,
           now: new Date(nowMs()),
         }).length;
   const meetingItems = items.filter((item) => item.source === "meeting");
   const inboxCount = inboxWaitingCount(board.cards, inboxItems);
-  const sessionRows = flattenSessions(board.cards, nowMs());
-  const liveSessionCount = sessionRows.filter((row) => row.running).length;
   const githubEnabled = board.enabledSources?.includes("github") === true;
   const prCount = githubEnabled
     ? items.filter((item) => item.source === "github" && item.state !== "done")
@@ -422,7 +431,6 @@ export function ShellContainer({
   const pageCounts: Partial<Record<Page, number>> = {
     board: board.cards.length,
     inbox: inboxCount,
-    sessions: sessionRows.length,
     tickets: ticketsCount,
     activity: events.length,
     "pull-requests": githubEnabled ? buildPrRows(items, board.cards).length : 0,
@@ -462,6 +470,7 @@ export function ShellContainer({
     navItems,
     selectedCardOf(board.cards, selectedCardId, pinned),
     boardItems,
+    boardHasMain,
   );
   return (
     <SidebarProvider
@@ -478,7 +487,6 @@ export function ShellContainer({
         counts={{
           inbox: inboxCount,
           meetings: meetingItems.length,
-          sessions: liveSessionCount,
           "pull-requests": prCount,
           tickets: ticketsCount,
           errors: errorCount,
@@ -511,6 +519,8 @@ export function ShellContainer({
           onCreate: openCreateBoard,
           onRetry: () => void list.refetch(),
         }}
+        dashboards={{ items: dashboardRows, onOpenDashboard: openDashboard }}
+        hasMainOrchestrator={boardHasMain}
         pageTitle={boardPageTitle(
           route.page,
           PAGE_TITLES[route.page],

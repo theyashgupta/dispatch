@@ -17,7 +17,8 @@ const { killTtyd } = await import("../../adapters/ttyd.js");
 const { store } = await import("../../store/board.store.js");
 const { reconnectTerminal, resumeSession } =
   await import("./resume-session.js");
-const { recordMemory } = await import("../../test-support/memory-fixtures.js");
+const { withMemoryFakes } =
+  await import("../../test-support/memory-fixtures.js");
 const { applyHookEvent } = await import("./hook-events.js");
 const { resumeLostAtBoot } = await import("./supervisor-boot.js");
 const tmux = await import("../../adapters/tmux.js");
@@ -427,7 +428,7 @@ void test(
 );
 
 void test(
-  "a reconnect whose pane is gone does not relaunch under memory pressure and shows the reason",
+  "a reconnect whose pane is gone waits 30 minutes under memory pressure, then refuses and shows the reason",
   { skip: !env.canRunRealTmux },
   async () => {
     const argvFile = path.join(env.root, "claude-argv-memory.txt");
@@ -446,20 +447,49 @@ void test(
       tmuxSession: `dsp-${branch}`,
       branch,
     });
-    recordMemory(812, 1000);
-    try {
+    await withMemoryFakes([812], async () => {
       await reconnectTerminal(card.id);
-    } finally {
-      recordMemory(2048, 1000);
-    }
+    });
     assert.equal(
       store.getCard(card.id)?.resumeError,
-      "Resume failed: free memory 812 MB is below the 1024 MB floor",
+      "Resume failed: free memory 812 MB is below the 1024 MB floor after 30 minutes of retries",
     );
+    assert.equal(store.getCard(card.id)?.statusReason, undefined);
     assert.equal(store.getCard(card.id)?.sessionLost, true);
     assert.equal(store.getCard(card.id)?.tmuxSession, undefined);
     assert.equal(store.isStarting(card.id), false);
     assert.equal(readArgv(argvFile), null, "claude was not launched");
+  },
+);
+
+void test(
+  "a lost-session resume under memory pressure waits, then relaunches claude when memory frees",
+  { skip: !env.canRunRealTmux },
+  async () => {
+    const argvFile = path.join(env.root, "claude-argv-wait.txt");
+    writeFakeRepl(env, argvFile);
+    await store.load();
+    const lost = await lostCard("resume wait", `waittest-${process.pid}`);
+    const seen: { reason?: string | null; starting: boolean }[] = [];
+    try {
+      await withMemoryFakes([812, 2048], async ({ slept, onSleep }) => {
+        onSleep(() => {
+          seen.push({
+            reason: store.getCard(lost.cardId)?.statusReason,
+            starting: store.isStarting(lost.cardId),
+          });
+        });
+        await resumeSession(lost.cardId);
+        assert.equal(slept.length, 1);
+      });
+      assert.deepEqual(seen, [
+        { reason: "Waiting for memory…", starting: true },
+      ]);
+      assert.deepEqual((await launched(argvFile)).slice(0, 1), ["--continue"]);
+    } finally {
+      killTtyd(lost.tmuxSession);
+      await env.killServer();
+    }
   },
 );
 

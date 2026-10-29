@@ -18,8 +18,13 @@ import {
 } from "../domain/loop-progress.js";
 import {
   declineKeys,
+  type PlanMemory,
   type SupervisorAction,
 } from "../domain/supervisor-plan.js";
+import { isPrdModel } from "../domain/prd-progress.js";
+import { unsentBoxText } from "../domain/supervisor-state.js";
+import { readTranscriptTail } from "../../adapters/transcript.js";
+import { sessionTranscriptPath } from "./supervisor-transcript.js";
 import { withCardLock } from "./card-lock.js";
 import { endJob, type EndJobTools } from "./end-job.js";
 import { refreshLoopProgress } from "./loop-progress-reader.js";
@@ -29,7 +34,9 @@ import { runClaude, type RunClaudeOutcome } from "./run-claude.js";
 import { SHELL_SESSION_ENV } from "./steps.js";
 import { sendConfirmed, waitFor, type SendResult } from "./supervisor-send.js";
 import {
+  isHandoffPending,
   orchestratorResumePromptText,
+  resumePromptText,
   runHandoff,
 } from "./supervisor-handoff.js";
 import { answerLimit, escapeLimit, moveOrWait } from "./supervisor-limit.js";
@@ -47,6 +54,8 @@ export interface ActionDeps extends EndJobTools {
   shellRoot: (name: string) => Promise<boolean>;
   claudeUpMs: number;
   send?: typeof sendConfirmed;
+  capture?: (target: string) => Promise<string>;
+  userTexts?: (card: Card, session: Session) => Promise<string[]>;
 }
 
 export const actionTools: ActionDeps = {
@@ -179,10 +188,11 @@ function resumeBlocked(card: Card, withMemory = true): string | null {
  * Bring claude back in a lost or shell-prompt session, then send the resume prompt.
  *
  * @remarks A pane whose shell owns the foreground is relaunched with `runClaude`, since the resume
- * saga reattaches a live tmux session without starting claude. The prompt is typed only after
- * claude takes the foreground, so it never reaches the login shell. A pane whose workspace folder is
- * missing is not relaunched, because the launch would run claude outside the session workspace.
- * Resolves the send result, or null when the resume skipped or failed before the prompt send.
+ * saga reattaches a live tmux session without starting claude, and a pane whose workspace folder
+ * is missing is not relaunched. The prompt is typed only after claude takes the foreground, so it
+ * never reaches the login shell, and a loop whose engine waits for a handoff gets the handoff
+ * resume prompt; it resolves the send result, or null when the resume skipped or failed before
+ * the prompt send.
  */
 async function resume(
   card: Card,
@@ -225,6 +235,17 @@ async function resume(
   } else {
     await deps.resume(card.id);
   }
+  return promptAfterResume(card, session, owner, deps, failed);
+}
+
+/** Wait for claude to take the foreground of the relaunched session, then type its resume prompt. */
+async function promptAfterResume(
+  card: Card,
+  session: Session,
+  owner: ReturnType<typeof orchestratorOf>,
+  deps: ActionDeps,
+  failed: (why: string) => Promise<null>,
+): Promise<SendResult | null> {
   const live = store.getCard(card.id);
   const resumed = live?.sessions?.find((s) => s.id === session.id);
   if (!live || !resumed?.tmuxSession) {
@@ -237,15 +258,21 @@ async function resume(
     POLL_MS,
   );
   if (!up) return failed("claude did not start");
+  const slug = live.loopProgress?.slug;
+  const text = owner
+    ? orchestratorResumePromptText(owner.id, live.boardKey ?? DEFAULT_BOARD_KEY)
+    : isHandoffPending(live) && slug
+      ? resumePromptText(
+          slug,
+          rootOf(live, resumed),
+          live.loopProgress?.prdFile,
+          isPrdModel(live.loopProgress),
+        )
+      : continueText(live, resumed, "resume");
   const result = await (deps.send ?? sendConfirmed)(
     live,
     resumed,
-    owner
-      ? orchestratorResumePromptText(
-          owner.id,
-          live.boardKey ?? DEFAULT_BOARD_KEY,
-        )
-      : continueText(live, resumed, "resume"),
+    text,
     "resume",
   );
   record(card, session, { action: "resume", result });
@@ -320,11 +347,32 @@ async function relaunchFrozen(
     );
 }
 
+async function defaultUserTexts(
+  card: Card,
+  session: Session,
+): Promise<string[]> {
+  const file = await sessionTranscriptPath(card, session);
+  const tail = file === null ? null : await readTranscriptTail(file);
+  return tail?.userTexts ?? [];
+}
+
+async function unsentLine(
+  card: Card,
+  session: Session,
+  deps: ActionDeps,
+): Promise<string | null> {
+  const target = `=${session.tmuxSession}:`;
+  const pane = await (deps.capture ?? capturePane)(target).catch(() => "");
+  const texts = await (deps.userTexts ?? defaultUserTexts)(card, session);
+  return unsentBoxText(pane, texts);
+}
+
 /**
  * Run the planned actions of one state change in order and record each as one event.
  *
  * @remarks Runs inside the session's sampling turn, so a slow send holds later samples of that
- * session instead of letting them plan a second time.
+ * session instead of letting them plan a second time. Resolves true when every continue action
+ * was confirmed in the transcript, or when there is none.
  */
 export async function runActions(
   card: Card,
@@ -332,11 +380,30 @@ export async function runActions(
   actions: SupervisorAction[],
   evidence: string,
   deps: ActionDeps = actionTools,
-): Promise<void> {
+): Promise<boolean> {
+  let confirmed = true;
   for (const action of actions) {
     switch (action.kind) {
       case "continue": {
-        const result = await sendConfirmed(
+        const held = await unsentLine(card, session, deps);
+        if (held !== null) {
+          record(card, session, {
+            action: "continue",
+            duty: action.duty,
+            result: "skipped",
+            reason: "previous line unsent",
+            evidence: held.slice(0, 80),
+          });
+          await markNeedsInput(
+            card,
+            session,
+            "supervisor_gave_up",
+            `previous line unsent: ${held.slice(0, 80)}`,
+          );
+          confirmed = false;
+          break;
+        }
+        const result = await (deps.send ?? sendConfirmed)(
           card,
           session,
           continueText(card, session, action.duty),
@@ -348,6 +415,7 @@ export async function runActions(
           result,
           evidence,
         });
+        if (result !== "confirmed") confirmed = false;
         break;
       }
       case "needs_input":
@@ -383,4 +451,57 @@ export async function runActions(
         break;
     }
   }
+  return confirmed;
+}
+
+/**
+ * Run planned actions and return the plan memory to keep.
+ *
+ * @remarks A continue that the transcript does not show leaves its once-per-phase slot unspent, so
+ * the next stop can try again.
+ */
+export async function runPlanned(
+  card: Card,
+  session: Session,
+  planned: { actions: SupervisorAction[]; memory: PlanMemory },
+  before: PlanMemory,
+  evidence: string,
+  deps: ActionDeps = actionTools,
+): Promise<PlanMemory> {
+  const confirmed = await runActions(
+    card,
+    session,
+    planned.actions,
+    evidence,
+    deps,
+  );
+  return confirmed ? planned.memory : before;
+}
+
+/**
+ * Relaunch a lost card for the `resume_session` tool and type its resume prompt, as the lost-session duty does.
+ *
+ * @remarks The saga starts before any await, so the start latch is taken inside the caller's cap
+ * lock. With the supervisor off or no session record it types nothing.
+ */
+export async function resumeLostCard(
+  card: Card,
+  deps: ActionDeps = actionTools,
+): Promise<void> {
+  const session = card.sessions?.find((s) => s.id === card.activeSessionId);
+  const supervised =
+    store.getBoard(card.boardKey ?? DEFAULT_BOARD_KEY)?.policy.supervisor ===
+    "on";
+  await deps.resume(card.id);
+  if (!session || !supervised) return;
+  await promptAfterResume(
+    card,
+    session,
+    orchestratorOf(card),
+    deps,
+    async (why) => {
+      await markNeedsInput(card, session, "resume_failed", `resume: ${why}`);
+      return null;
+    },
+  );
 }

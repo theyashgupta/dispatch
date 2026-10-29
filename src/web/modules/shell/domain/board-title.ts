@@ -5,7 +5,6 @@ export const BOARD_PAGES: readonly Page[] = [
   "inbox",
   "today",
   "tickets",
-  "sessions",
   "workspace",
   "workspaces",
   "flow",

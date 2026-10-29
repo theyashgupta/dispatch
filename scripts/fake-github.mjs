@@ -308,7 +308,7 @@ const server = createServer((req, res) => {
   });
   req.on("end", () => {
     const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
-    let body = null;
+    let body;
     try {
       body = raw ? JSON.parse(raw) : null;
     } catch {

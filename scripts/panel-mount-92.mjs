@@ -283,6 +283,7 @@ function assertBuilt() {
       .trim();
     throw new Error(
       `refusing to run — \`npm run ${BUILD_SCRIPT}\` failed, so dist/ does not reflect src/:\n${detail || err.message}`,
+      { cause: err },
     );
   }
   if (!existsSync(DIST_ENTRY)) {
@@ -1057,7 +1058,7 @@ async function main() {
   let cdp = null;
   let readings = [];
   let violations = [];
-  let portsHeld = false;
+  let portsHeld;
 
   try {
     // Warmup boot against the still-cardless sandbox home to create the sqlite schema first —
