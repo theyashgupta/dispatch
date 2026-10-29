@@ -23,6 +23,7 @@ import {
   terminalProxyUpgrade,
 } from "../adapters/terminal-proxy.js";
 import { probePreflight } from "../services/infra/preflight.js";
+import { loadManagedDefault } from "../services/orchestration/claude-accounts.js";
 import {
   onDefaultUsageRefreshed,
   startUsagePollLoop,
@@ -33,6 +34,7 @@ import {
 } from "../services/orchestration/default-identity-watch.js";
 import { loadOrCreateVapidKeys } from "../services/infra/push-keys.js";
 import { VAPID_KEYS_PATH } from "../services/infra/paths.js";
+import { startPushoverWatch } from "../services/orchestration/pushover-watch.js";
 import {
   getCrossSessionInbound,
   setHooksRuntime,
@@ -373,6 +375,7 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   buildRegistry(config);
   loadOrCreateVapidKeys();
   console.log(`[push] VAPID keypair loaded from ${VAPID_KEYS_PATH}`);
+  await startPushoverWatch();
 
   const statusChannel = config.statusChannel ?? "auto";
   await installHookArtifacts(getCrossSessionInbound());
@@ -395,6 +398,12 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   await seedPlaybooks();
 
   await store.load();
+  await loadManagedDefault().catch((err) =>
+    console.warn(
+      "[accounts] managed default not loaded",
+      err instanceof Error ? err.message : err,
+    ),
+  );
 
   store.setPollInterval(config.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS);
   store.setCleanupDelayDays(

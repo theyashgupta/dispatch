@@ -60,6 +60,10 @@ test("the three LOCAL-82 labels are exact", () => {
     SLACK_CONNECTOR_LABEL["claude-missing"],
     "Claude Code not found",
   );
+  assert.equal(
+    SLACK_CONNECTOR_LABEL["connector-unavailable"],
+    "unavailable to background calls",
+  );
 });
 
 test("each connector problem is an error whose message holds its label", () => {
@@ -68,6 +72,7 @@ test("each connector problem is an error whose message holds its label", () => {
     "not-found",
     "failed",
     "claude-missing",
+    "connector-unavailable",
   ];
   for (const connector of problems) {
     const result = status(mcpStatus({ connector }));
@@ -77,6 +82,14 @@ test("each connector problem is an error whose message holds its label", () => {
         result.message.includes(SLACK_CONNECTOR_LABEL[connector]),
     );
   }
+});
+
+test("a connector-unavailable round error shows its exact copy and outlasts a connected connector", () => {
+  assert.deepEqual(status(mcpStatus({ lastError: "connector-unavailable" })), {
+    kind: "error",
+    message:
+      "Slack connector: unavailable to background calls. Claude Code lists the Slack connector, but the background call could not load it. Try again later.",
+  });
 });
 
 test("the connector line names the label and is empty before a read", () => {

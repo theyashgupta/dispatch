@@ -97,13 +97,7 @@ export function OrchestratorsTable({
                 <TableCell>
                   <Badge tone="neutral">{row.role}</Badge>
                 </TableCell>
-                <TableCell className="whitespace-normal">
-                  {row.role === "Main" ? (
-                    row.scope
-                  ) : (
-                    <IdList text={row.scope} />
-                  )}
-                </TableCell>
+                <TableCell className="whitespace-normal">{row.scope}</TableCell>
                 <TableCell className="whitespace-normal">
                   <IdList text={row.owns} />
                 </TableCell>

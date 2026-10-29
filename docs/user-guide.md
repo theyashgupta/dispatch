@@ -47,7 +47,7 @@ Select the label **Boards** to fold or unfold the section. Press `Enter` or `Spa
 
 Press `B` to open the command palette with the boards only. Type to filter the boards. The palette lists **Switch to board** for each active board except the current one, then **Manage boards** and **Create board**. `B` does nothing while you type in a text field or while a dialog is open. Select a board in the palette to show the same page on that board.
 
-The address of a board page holds the board key. The pages with a keyed address are the board (`/boards/<key>`), the dashboard (`/boards/<key>/dashboard`), the inbox (`/boards/<key>/inbox`), the sessions (`/boards/<key>/sessions`) and the board settings (`/boards/<key>/settings`). The other pages keep the `board` search parameter, for example `/tickets?board=<key>`. The old addresses, such as `/board`, `/inbox` and `/dashboard?board=<key>`, still open the same pages.
+The address of a board page holds the board key. The pages with a keyed address are the board (`/boards/<key>`), the dashboard (`/boards/<key>/dashboard`), the inbox (`/boards/<key>/inbox`) and the board settings (`/boards/<key>/settings`). The other pages keep the `board` search parameter, for example `/tickets?board=<key>`. The old addresses, such as `/board`, `/inbox` and `/dashboard?board=<key>`, still open the same pages.
 
 ### Create a board from the palette
 
@@ -127,12 +127,13 @@ Only you can change the policy. The orchestrator reads it. No tool can change it
 | **At a usage limit**                                      | **Wait for the reset**, **Stop and ask me**                                                      | **Wait for the reset**      |
 | **Ship rights**                                           | **None, I ship**, **Open PRs**, **Open and merge PRs**                                           | **None, I ship**            |
 | **Budget per group (USD)**                                | An amount above 0 and at most 100000, or empty for **No limit**                                  | Empty (**No limit**)        |
+| **Budget warning (%)**                                    | A whole number from 1 to 99                                                                      | 80                          |
 | **Supervisor**                                            | **On**, **Off**                                                                                  | **On** (**Off** on `LOCAL`) |
 
 Notes on the fields:
 
 - **Roadmap approval** controls how the orchestrator approves the plan of a loop. With **Ask me for each roadmap**, the `approve_roadmap` tool needs your approve answer on a decision item of that group. With the two other values, the tool call is allowed. With **Approve when the rules pass, else ask**, the playbook judges the rules.
-- **Memory floor and swap ceiling.** Dispatch reads the memory of this Mac every 15 seconds. When free memory is below the board's memory floor (default 1024 MB) or swap used is above its swap ceiling (default 8192 MB), Dispatch refuses a card start, a group start, a resume of a lost session and the orchestrator tools that start or resume a loop. The refusal names the reading and the limit, for example "free memory 812 MB is below the 1024 MB floor". A group that waits in the queue starts when memory recovers. On Linux there is no reading and nothing is refused. Set the two limits with **Free memory floor (MB)** and **Swap ceiling (MB)**, which are next to **Loops at once** on the **Policy** tab. A start, a group start or a resume that Dispatch refuses for memory shows the reason in the usual place for that action. See also "Memory and paused loops".
+- **Memory floor and swap ceiling.** Dispatch reads the memory of this Mac every 15 seconds. When free memory is below the board's memory floor (default 1024 MB) or swap used is above its swap ceiling (default 8192 MB), Dispatch refuses a group start and the orchestrator tools that start or resume a loop. A card start and a resume of a lost session wait instead: Dispatch reads the memory again every 30 seconds for up to 30 minutes, the card shows "Waiting for memory…", and the start or the resume continues when memory recovers. After 30 minutes it fails with the reason, for example "free memory 812 MB is below the 1024 MB floor after 30 minutes of retries". The refusal names the reading and the limit, for example "free memory 812 MB is below the 1024 MB floor". A group that waits in the queue starts when memory recovers. On Linux there is no reading and nothing is refused. Set the two limits with **Free memory floor (MB)** and **Swap ceiling (MB)**, which are next to **Loops at once** on the **Policy** tab. A start, a group start or a resume that Dispatch refuses for memory shows the reason in the usual place for that action. See also "Memory and paused loops".
 - **Loops at once** is the concurrency cap. It covers groups and the ticket cards that the orchestrator starts. Dispatch refuses the orchestrator tools that start a group or a card above the cap. A card or group in Agent done frees its slot. A group that waits for its dependencies stays queued. The supervisor starts it when the dependencies are done and a slot is free.
 - **Loop model**: The model and effort of the sessions of a group. When you choose a model, Dispatch starts each group session with that model and effort, and it ignores any model or effort in the Settings Claude arguments. When you choose **Session settings**, Dispatch uses the Settings.
 - **Group playbook**: the playbook of a group that the orchestrator creates without one. When the playbook no longer exists, the group starts with no playbook. When the stored name is not in the list of playbooks, the select shows it as "<name> (not found)", and **Save policy** keeps the name.
@@ -189,6 +190,8 @@ The orchestrator node of the command centre shows the state of the session as a 
 - **Idle**. The session runs and waits.
 - **Needs input**, **Permission prompt**, **Usage limit dialog** and **Waiting for usage reset**. The session waits. Open the **Terminal** tab.
 - **Session lost** and **Claude exited**. The session ended. **Resume** shows.
+- **Frozen after compaction**. Claude stopped after an idle compaction. See [A frozen session](#a-frozen-session).
+- **Released**. Claude exited on purpose after the loop finished, to free memory. The card keeps its column, its marker and its terminal text. **Run Claude** starts Claude again.
 
 When the orchestrator waits at its prompt, Dispatch wakes it. Dispatch types one line that starts with "Dispatch wake:" when you answer its decision item, when one of its groups reaches Agent done, needs input, fails to start, ships, stops its ship flow, hits a loop error or a usage limit, and when the **Wake timer (minutes)** of the policy runs out. Dispatch never types while the orchestrator works, types at most one line in 20 seconds, and never wakes a stopped orchestrator.
 
@@ -279,7 +282,7 @@ The loop also reports each phase gate and unit gate to Dispatch. The report uses
 
 ## The dashboard
 
-Open the dashboard from the sidebar row **Dashboard** (group **Work**), or from the palette command **Go to Dashboard**. The sidebar row and the palette command show only when the board has a main orchestrator. The dashboard shows the board that is selected in the **Boards** section.
+Open the dashboard from the row of the board in the **Dashboards** section of the sidebar, or from the palette command **Go to Dashboard**. The **Dashboards** section lists only boards that have a main orchestrator. In the collapsed sidebar, the **Dashboards** icon opens the dashboard of the current board. The icon and the palette command show only when the current board has a main orchestrator. The dashboard shows the board that is selected in the **Boards** section.
 
 The page has the title "Project map" on a dot-grid background. Each section shows its own loading state and its own error. A section error has the button **Try again**. The other sections stay.
 
@@ -296,9 +299,9 @@ At 1024 px and wider, the sections show in this order:
 1. The status line.
 2. **Progress per group**, full width.
 3. **Left on this board**, full width.
-4. Two columns. The main column holds **Tickets by column** and then **PRs and merge order**. The rail holds **Next step**, **Needs your call**, **Changed since** and **Cost and usage**.
+4. Two columns. The main column holds **Tickets by column**. The rail holds **Next step**, **Needs your call**, **Changed since** and **Cost and usage**.
 
-Below 1024 px, the sections show in this order: the status line, **Needs your call**, **Progress per group**, **Left on this board**, **Tickets by column**, **PRs and merge order**, **Next step**, **Changed since** and **Cost and usage**. Each section shows once in the page. The section headings are small uppercase labels. A screen reader still reads the names "Attention queue", "Progress per group", "Left on this board", "Tickets by column", "PRs and merge order", "Next step", "Activity log" and "Cost and usage".
+Below 1024 px, the sections show in this order: the status line, **Needs your call**, **Progress per group**, **Left on this board**, **Tickets by column**, **Next step**, **Changed since** and **Cost and usage**. Each section shows once in the page. The section headings are small uppercase labels. A screen reader still reads the names "Attention queue", "Progress per group", "Left on this board", "Tickets by column", "Next step", "Activity log" and "Cost and usage".
 
 - **Progress per group.** The first line of the section is the memory line, for example "Memory: 812 MB free, swap 2048 of 8192 MB". It adds ", <n> paused" when loops are paused. It updates every 15 seconds. It shows "(stale)" after 60 seconds without a reading, and it is hidden when the computer is not a Mac. Each loop is a milestone track with one node for each unit. With no units it shows "No loop progress". The session badges and the last gate text stay on the track header. A node has one of these states:
   - Done. The node has a check glyph and the state line "Done HH:MM" or "Done".
@@ -317,7 +320,6 @@ Below 1024 px, the sections show in this order: the status line, **Needs your ca
   - Amber is for needs input and a usage limit.
   - Green is for a passed gate, agent done and shipped.
   - Grey is for the other rows.
-- **PRs and merge order.** One block for each group in ship order. See the section "Ship flow". With no PR it shows "No PRs yet."
 - **Cost and usage.** The cost of each group against its budget, and the usage meters of the Claude account, as compact rows. With no cost it shows "No cost yet." See the section "Budgets and usage limits".
 
 **Changed since** shows one row for each recorded event, newest first. The orchestrator rows are tool calls and raised decisions. The supervisor rows are actions, session state changes, loop gates, PR changes and a wake of the machine. Your rows are the decisions that you answer and the goals that you submit. A policy save, a board change and a press of **Start orchestrator** write no row of their own. The filters **Actor** (**All**, **Orchestrator**, **Supervisor**, **You**) and **Group** limit the rows. The log shows 20 rows. Choose **Show more** for 20 more. With no match it shows "No activity matches." With no event it shows "No activity on this board yet."
@@ -330,7 +332,9 @@ When the connection to the server drops, the dashboard keeps the last data. The 
 
 Dispatch reads the memory of a Mac every 15 seconds. The reading shows as the memory line at the top of **Progress per group** on the dashboard (see "The dashboard"). Off macOS there is no reading, so the line is hidden. When 60 seconds pass without a new reading, the line adds "(stale)".
 
-The two limits are **Free memory floor (MB)** (0 to 65536, where 0 turns the floor off) and **Swap ceiling (MB)** (256 to 65536). Set them on the **Policy** tab (see "Board policy"). When a card start, a group start or a resume is refused for memory, Dispatch shows the reason, for example "free memory 812 MB is below the 1024 MB floor".
+The two limits are **Free memory floor (MB)** (0 to 65536, where 0 turns the floor off) and **Swap ceiling (MB)** (256 to 65536). Set them on the **Policy** tab (see "Board policy"). When a group start is refused for memory, or a card start or a resume still has no memory after 30 minutes, Dispatch shows the reason, for example "free memory 812 MB is below the 1024 MB floor".
+
+When free memory is below the floor and a start or a resume must wait or be refused, Dispatch first stops Claude in each finished session on the board. A finished session is a card in **Agent done** or **Done**, or a card whose loop has closed. Dispatch does not stop a loop that still runs, a card that waits for a ship fix, or a paused card. The card keeps its terminal text and its column, its session badge shows **Released**, and you can still ship it or choose **Run Claude**. Dispatch then waits up to 30 seconds for memory to come back before it waits longer or refuses.
 
 To stop a loop by hand:
 
@@ -362,17 +366,16 @@ The node is the card at the top left of the canvas. It shows these items:
 - "Context <n>%" and "$<cost> today". Each shows only when Dispatch has the value.
 - The count line "<n> branches, <m> need you". One branch reads "1 branch, 0 need you".
 
-The count <n> includes the older shipped branches that the page hides. The count <m> is the size of the band **Needs you**.
+The count <n> is the number of branches in the bands. A shipped branch is not counted. The count <m> is the size of the band **Needs you**.
 
 ### The bands and the tiles
 
-The branches stand in five bands, in this order: **Needs you**, **Running**, **Planned**, **Done** and **Shipped**. Each band heading shows its count. A band with no branch shows only the heading. A branch belongs to the orchestrator that owns its card. A hidden card and a group member are not branches.
+The branches stand in four bands, in this order: **Needs you**, **Running**, **Planned** and **Done**. Each band heading shows its count. A band with no branch shows only the heading. A branch belongs to the orchestrator that owns its card. A hidden card, a group member and a shipped card are not branches. Shipped work shows in the activity feed and in the board column Done.
 
 - **Needs you** holds a branch at Needs input, Usage limit, Budget reached or Resume failed. It also holds a branch in a stuck session state.
 - **Running** holds a branch with a session that works.
 - **Planned** holds a branch with no session. It comes from the plan, also when its card does not exist yet.
 - **Done** holds a branch at Agent done.
-- **Shipped** holds a shipped branch.
 
 The stuck session states are **No progress**, **Permission prompt**, **API error**, **Session lost** and **Claude exited**.
 
@@ -390,7 +393,6 @@ The detail line reads as follows:
 - Planned: "Plan order <n>, size <size>".
 - Needs input: "Needs your answer". Usage limit: "Stopped at the usage limit". Budget reached: "Budget reached".
 - Done: "Done <time>, awaiting ship".
-- Shipped: "Shipped <time>, PR <number>".
 
 A time reads "HH:MM" on the current day. On another day it reads "<day> <month> HH:MM". The clock has 24 hours.
 
@@ -414,7 +416,6 @@ How the actions work:
 - A failed action shows an alert, for example "Reply failed: <message>." The alert has the button **Try again**.
 - A result and an alert hide when the branch changes state. A reply draft stays when you change a tab.
 - **Open terminal** goes to the board page.
-- The page hides a branch that shipped more than 24 hours ago. Choose **Show <n> older shipped** under the bands to show it. The link then reads **Hide older shipped**.
 
 ### Orchestrator controls
 
@@ -533,16 +534,17 @@ The attention queue is the card **Needs your call** on the dashboard. Dispatch b
 
 Each item shows the group id, a badge, the wait time ("waiting 34 min", "waiting 5 h" or "waiting 3 d") and the actions of its kind.
 
-| Item                  | What it shows                                                                                                            | Actions                                                                                       |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
-| **Decision**          | The question, and who asked it and when. One button for each option. The recommended option has a **Recommended** badge. | Choose an option. Or type in "Or type an answer" and choose **Send answer**.                  |
-| **Needs input**       | The last question of the loop.                                                                                           | Reply in the field "Reply to <group id>". Choose **Send reply**. Or choose **Open terminal**. |
-| **No progress**       | "No progress for <n> min." The loop did not grow its transcript for 15 minutes while it worked.                          | Same as **Needs input**.                                                                      |
-| **Permission prompt** | The prompt text from the pane.                                                                                           | **Open terminal**. Answer the prompt in the terminal.                                         |
-| Usage limit stop      | "Stopped at the usage limit. The limit resets at <time>."                                                                | **Resume loop**, **Open terminal**.                                                           |
-| Budget stop           | "Budget reached: $<cost> of $<budget>."                                                                                  | **Resume loop**, **Change budget**, **Open terminal**.                                        |
-| **Failed gate**       | "Phase <n> gate failed, attempt <k> of <limit>."                                                                         | **Open terminal**.                                                                            |
-| Failed resume         | "The session was lost and the resume failed: <reason>." or "Claude exited and the resume failed: <reason>."              | **Try resume again**, **Open terminal**.                                                      |
+| Item                  | What it shows                                                                                                               | Actions                                                                                       |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| **Decision**          | The question, and who asked it and when. One button for each option. The recommended option has a **Recommended** badge.    | Choose an option. Or type in "Or type an answer" and choose **Send answer**.                  |
+| **Needs input**       | The last question of the loop.                                                                                              | Reply in the field "Reply to <group id>". Choose **Send reply**. Or choose **Open terminal**. |
+| **No progress**       | "No progress for <n> min." The loop did not grow its transcript for 15 minutes while it worked.                             | Same as **Needs input**.                                                                      |
+| **Permission prompt** | The prompt text from the pane.                                                                                              | **Open terminal**. Answer the prompt in the terminal.                                         |
+| Usage limit stop      | "Stopped at the usage limit. The limit resets at <time>."                                                                   | **Resume loop**, **Open terminal**.                                                           |
+| Budget stop           | "Budget reached: $<cost> of $<budget>."                                                                                     | **Resume loop**, **Change budget**, **Open terminal**.                                        |
+| **Failed gate**       | "Phase <n> gate failed, attempt <k> of <limit>."                                                                            | **Open terminal**.                                                                            |
+| Failed resume         | "The session was lost and the resume failed: <reason>." or "Claude exited and the resume failed: <reason>."                 | **Try resume again**, **Open terminal**.                                                      |
+| **Notifications**     | "Pushover <names> <is or are> empty or not set. Loop phase notifications are not sent. Fill the value(s) in the env vault." | None in Dispatch. Fill the value in the env vault.                                            |
 
 How each action works:
 
@@ -552,6 +554,8 @@ How each action works:
 - **Try resume again.** It starts the resume of the dead session again. This is the same resume that the supervisor tried.
 - **Open terminal.** It opens the detail panel of the group with its live terminal.
 - **Permission prompt.** The queue has no approve button and no deny button. Answer the prompt in the terminal. The supervisor itself declines only two prompts: a dangerous delete, and a held message from a peer session.
+
+The **Notifications** item shows when loop phase notifications are on and `PUSHOVER_USER_KEY` or `PUSHOVER_APP_TOKEN` is empty or not set. Notifications are on when a Pushover name is set in the server environment or in the env vault. When both have the same name, the env vault file wins over the server environment. Each board shows the item. Dispatch checks the values every 60 seconds. Dispatch removes the item a maximum of 60 seconds after you fill both values. Dispatch does not see the messages that the loop sends. Thus Dispatch removes the item when both values have text, also if a send fails. When no Pushover name is set, the item does not show. The start log has one line that names the variables that are empty or not set. Dispatch never shows a value and never writes a value to the log.
 
 A board with the supervisor **Off** still lists a card at **Needs input**, with a reply field when the card has a session.
 
@@ -704,7 +708,9 @@ The field **Budget per group (USD)** sets a cost limit for each group. The cost 
 - **Change budget** opens the **Policy** tab of the settings sheet on the command centre.
 - When you raise the budget above the cost, or remove it, the supervisor clears the budget reason within one minute. The item then becomes a normal **Needs input** item with a reply field.
 
-The section **Cost and usage** shows a bar for each group. The text reads "$12.40 of $20.00, 62%". At 80 percent or more it reads "$17.10 of $20.00, 86%, near budget" and shows a warning glyph. Above 100 percent it reads "$25.00 of $20.00, 125%, over budget". With no budget it reads "$12.40, no budget". When an orchestrator override sets the budget, the text ends with "budget set by <name>".
+When a group reaches the warning percent of its budget (80 by default), one "Budget warning" item shows in the attention queue. The sidebar count includes the item. The item goes away when you raise or remove the budget, when the group stops at its budget, or when the group is done.
+
+The section **Cost and usage** shows a bar for each group. The text reads "$12.40 of $20.00, 62%". At the budget warning percent of the board or more (default 80) it reads "$17.10 of $20.00, 86%, near budget" and shows a warning glyph. Above 100 percent it reads "$25.00 of $20.00, 125%, over budget". With no budget it reads "$12.40, no budget". When an orchestrator override sets the budget, the text ends with "budget set by <name>".
 
 The same section shows the usage meters of the Claude account that each live session uses: the current window and the current week. The text reads "Window 23%, resets 18:00" or "Week 85%, near limit, resets Mon 05:30". The meters come from the status line of the sessions. No control offers usage credits.
 
@@ -730,6 +736,46 @@ Claude shows a usage limit dialog when the account reaches its limit. The field 
 
 Only you resume a loop that stopped at a usage limit or a budget.
 
+### Claude accounts
+
+The **Accounts** page shows one state for each Claude account:
+
+- **Available**: the account has allowance.
+- **Near limit**: a usage window is at 80 percent or more.
+- **Limited**: a usage window is full. The row shows when the account resets.
+- **Needs login**: Claude rejected the saved login two times in a row. Log in again.
+- **Same login as Default**: the account uses the same login as your home login (**Default**). The chain does not use it.
+- **Login expired**: the saved login ran out. Log in again.
+- **Unknown**: Dispatch has no usable usage read for the account yet.
+
+A limited account returns by itself. When its usage shows a new period, Dispatch puts the account back in the chain before the old reset time. You do nothing.
+
+When an account needs a login, Dispatch raises the decision "Account <email> needs a login" on the default board:
+
+1. Choose **Start the login**.
+2. Open the link in the decision. It opens the login dialog of that account.
+3. Open the sign-in address and paste the code into the dialog.
+
+The account returns to the chain after the login. You do not restart Dispatch. Choose **Not now** to leave the account out of the chain. The decision closes by itself when the account works again, or when you remove the account. Dispatch refuses a switch to an account that needs a login. The switch dialog tells you to log in again first.
+
+When an account shows **Same login as Default**, choose **Remove duplicate**. The button removes the account and signs out only the folder of that account. Your home login stays signed in. Dispatch refuses a switch to an account that shows **Same login as Default**. The switch dialog tells you to switch to **Default** or remove the duplicate.
+
+When every account is at its limit, Dispatch raises the decision "Every Claude account is at its limit". The text shows when the first account resets. Work resumes at that time. To continue sooner, choose **Add an account** and add an account on the **Accounts** page. Choose **Wait for the reset** to do nothing. The decision closes by itself when an account is usable again.
+
+When the home login is signed in and you did not move Default, the **Accounts** page shows the panel **Move the Default account to a Dispatch login**. If an added account has the same login as Default, remove that duplicate first; the panel then shows. You cannot dismiss the panel. It goes away when you finish the move.
+
+After the move, Dispatch can track the usage of **Default** and can move its sessions, as it does for any other account. To do the move:
+
+1. Choose **Log in** in the panel.
+2. Open the sign-in address and paste the code into the dialog.
+3. Sign in with the same Claude account as your terminal login.
+
+If you sign in with another account, the login fails. The dialog shows "Sign in with the same Claude account as your terminal login (<email>)." Choose **Log in** again and use the account of your terminal login.
+
+Running sessions keep running. New starts, resumes and moves use the Dispatch login. Your terminal login stays signed in.
+
+To undo the move, remove the account with the meta **Default (Dispatch login)**. **Default** is then your home login again, and the panel shows again.
+
 ## Resume a lost session
 
 When the tmux session of a card ends, for example after a shutdown, the card shows **Resume**. Resume starts Claude again in the card workspace and opens the newest conversation of the card.
@@ -737,6 +783,26 @@ When the tmux session of a card ends, for example after a shutdown, the card sho
 - Dispatch reads the conversation folder of the card before each Resume. When a newer conversation is on disk than the stored one, Resume opens the newer conversation.
 - When the stored conversation has no file on disk, Resume continues the newest conversation of the workspace.
 - The detail panel shows the line "Resume: <id>, started <time>" beside **Resume**, or "Resume: newest conversation in the workspace". When Dispatch replaced the stored conversation, a tooltip on the line gives the stored id and the reason.
+
+## A frozen session
+
+Sometimes Claude compacts its conversation while it is idle and then stops reacting. The session is frozen. A frozen session shows these signs:
+
+- The pane shows the line "Compacted while idle" above the input line.
+- The status line shows context 0 percent.
+- A line that you type stays in the prompt box. Claude does not run it.
+- The transcript does not grow.
+
+When the supervisor is on, Dispatch finds the freeze and handles it:
+
+1. The card badge shows **Frozen after compaction**. The card detail shows "Frozen after an idle compaction since <time>. Dispatch relaunches Claude with resume 15 minutes after that."
+2. After 15 minutes, Dispatch stops Claude. It starts Claude again with `--resume` in the same tmux window, so the session keeps its conversation.
+3. Dispatch types the loop prompt one time.
+4. The dashboard **Changed since** log shows the relaunch.
+
+Dispatch relaunches a session one time for each freeze. When the session freezes a second time in the same unit and phase, Dispatch does not relaunch it again. The card moves to **Needs input** with a failed resume. When memory is low, Dispatch does not stop Claude. The card moves to **Needs input** and Claude keeps running.
+
+While a line stays in the prompt box, the `send_input` call answers `unconfirmed` with the reason "held in prompt box". Dispatch does not count the line as received.
 
 ## Handoff
 
@@ -780,7 +846,7 @@ A flow starts only when all of these are true:
 - No other flow runs on the board.
 - The branches are unit branches or the specs branch of the loop. The flow refuses `main`, `master`, `HEAD` and the base branch.
 
-For each branch, the flow goes through these states. The dashboard section **PRs and merge order** shows them.
+For each branch, the flow goes through these states.
 
 | State            | Label                  |
 | ---------------- | ---------------------- |
@@ -812,7 +878,7 @@ Every seeded playbook has one input: the extra direction. It is the optional tex
 - **File:** `prd-ralph-loop.md`
 - **When to use:** a ticket whose scope is not settled and that needs a phased PRD and a loop.
 - **Inputs:** the extra direction.
-- **What it does:** it tells Claude to use the grill-me skill to test the scope until the requirements stop changing. Then it tells Claude to use the write-prd skill to write a phased `PRD.md`. Then it tells Claude to use the ralph-loop skill to run the PRD phase by phase. Claude uses the QA subagent mode unless the PRD is trivial. Claude passes the path of the PRD from the write-prd step to the ralph-loop step.
+- **What it does:** it tells Claude to use the grill-me skill to test the scope until the requirements stop changing. Then it tells Claude to use the write-prd skill to write a phased `PRD.md`. Then it tells Claude to use the ralph-loop skill to run the PRD phase by phase. Claude uses the QA subagent mode unless the PRD is trivial. Claude passes the path of the PRD from the write-prd step to the ralph-loop step. Each phase, also a review phase or a fix phase, must have its own `## Phase <N>` section in `analogues.md`. If the section is missing, the gate stops before it runs other checks.
 
 ### Superpowers
 

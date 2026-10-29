@@ -1,8 +1,4 @@
-import {
-  DEFAULT_CLAUDE_ACCOUNT_ID,
-  type Card,
-  type Session,
-} from "../../../shared/types.js";
+import type { Card, Session } from "../../../shared/types.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import { sleep } from "../../adapters/exec.js";
 import { capturePane, sendKeys } from "../../adapters/tmux.js";
@@ -19,6 +15,7 @@ import { parseResetAt } from "../domain/supervisor-plan.js";
 import { limitSurfaceOf, paneReady } from "../domain/supervisor-state.js";
 import { getClaudeAccountsSettings } from "../infra/config-holder.js";
 import { limitMoveCandidates } from "./account-chain.js";
+import { canonicalAccountId } from "./claude-accounts.js";
 import { getUsage } from "./claude-usage.js";
 import {
   moveSessionAccount,
@@ -58,7 +55,7 @@ type LimitWaitReason =
   "pinned" | "recent_move" | "no_headroom" | SessionMoveOutcome | "error";
 
 const accountOf = (session: Session): string =>
-  session.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID;
+  canonicalAccountId(session.claudeAccountId);
 
 /** The five hour window reset of the session's account from the usage poll, if known. */
 function usageResetAt(session: Session): number | null {

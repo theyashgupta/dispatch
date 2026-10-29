@@ -157,3 +157,13 @@
     background-size: 16px 16px;
   }
 }
+
+/* Unlayered so it beats the text-sm utilities: iOS zooms the page when a focused field has text under 16px. */
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select,
+  [contenteditable]:not([contenteditable="false"]) {
+    font-size: max(16px, 1em);
+  }
+}

@@ -22,7 +22,11 @@ function node(number: number, overrides: Record<string, unknown> = {}) {
     headRefName: `feat/${number}`,
     baseRefName: "main",
     changedFiles: 3,
-    author: { login: "octo" },
+    author: {
+      login: "octo",
+      avatarUrl: "https://avatars.githubusercontent.com/u/1?v=4",
+    },
+    mergeable: "CONFLICTING",
     repository: { nameWithOwner: "acme/api" },
     reviewRequests: { nodes: [] },
     commits: { nodes: [] },
@@ -88,6 +92,8 @@ test("mapOpenPrs maps every state field", () => {
         repo: "acme/api",
         number: "7",
         author: "octo",
+        authorAvatar: "https://avatars.githubusercontent.com/u/1?v=4",
+        mergeable: "CONFLICTING",
         draft: "true",
         reviewDecision: "CHANGES_REQUESTED",
         reviewRequestedFromMe: "true",
@@ -100,6 +106,17 @@ test("mapOpenPrs maps every state field", () => {
       },
     },
   ]);
+});
+
+test("a node without mergeable or an author avatar maps both meta keys to empty strings", () => {
+  const { items } = mapOpenPrs(
+    answer([node(2, { mergeable: undefined, author: { login: "octo" } })]),
+    "me",
+  );
+  assert.equal(items[0]?.meta.mergeable, "");
+  assert.equal(items[0]?.meta.authorAvatar, "");
+  const none = mapOpenPrs(answer([node(3, { author: null })]), "me");
+  assert.equal(none.items[0]?.meta.authorAvatar, "");
 });
 
 test("reviewRequestedFromMe is false when another user is requested", () => {

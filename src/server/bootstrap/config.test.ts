@@ -7,6 +7,7 @@ import { DEFAULT_TERMINAL_APPEARANCE } from "../../shared/terminal-appearance.js
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "dispatch-config-test-"));
 process.env.HOME = home;
+process.env.DISPATCH_DIR = path.join(home, ".dispatch");
 const configPath = path.join(home, ".dispatch", "config.json");
 const { CONFIG_PATH } = await import("../services/infra/paths.js");
 assert.ok(

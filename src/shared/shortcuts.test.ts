@@ -5,7 +5,7 @@ import {
   bindShortcuts,
   GLOBAL_SHORTCUTS,
   INBOX_SHORTCUTS,
-  SESSIONS_SHORTCUTS,
+  isEditableRole,
   resolveShortcut,
   type ShortcutBinding,
   type ShortcutEvent,
@@ -123,17 +123,6 @@ test("Enter and Space stay with a focused button or link while letters still fir
   );
 });
 
-test("the Sessions shortcut table lists j, k and Enter with labels", () => {
-  assert.deepEqual(
-    SESSIONS_SHORTCUTS.map((s) => [s.key, s.label]),
-    [
-      ["j", "Next session"],
-      ["k", "Previous session"],
-      ["Enter", "Open"],
-    ],
-  );
-});
-
 const meta: ShortcutBinding[] = [
   { key: "k", label: "Command palette", meta: true, run: () => {} },
   { key: "j", label: "Next card", run: () => {} },
@@ -194,12 +183,7 @@ test("the global and board tables list each key once, board keys 1 to 7 follow t
     "7",
   ]);
   assert.equal(BOARD_SHORTCUTS[7]?.label, "Move to Needs Input");
-  for (const table of [
-    GLOBAL_SHORTCUTS,
-    BOARD_SHORTCUTS,
-    INBOX_SHORTCUTS,
-    SESSIONS_SHORTCUTS,
-  ]) {
+  for (const table of [GLOBAL_SHORTCUTS, BOARD_SHORTCUTS, INBOX_SHORTCUTS]) {
     const keys = table.map((b) => `${b.meta === true ? "meta+" : ""}${b.key}`);
     assert.equal(new Set(keys).size, keys.length);
     for (const b of table) assert.ok(b.label.length > 0 && b.key.length > 0);
@@ -281,4 +265,17 @@ test("b is inert in a text field, with a modifier, in a dialog and in a menu", (
     resolveShortcut(key("b"), switchBoard, { ...idle, menuOpen: true }),
     null,
   );
+});
+
+test("isEditableRole flags a combobox or listbox and nothing else", () => {
+  const withRole = (role: string | null) => ({
+    tagName: "BUTTON",
+    getAttribute: (name: string) => (name === "role" ? role : null),
+  });
+  assert.equal(isEditableRole(withRole("combobox")), true);
+  assert.equal(isEditableRole(withRole("listbox")), true);
+  assert.equal(isEditableRole(withRole("button")), false);
+  assert.equal(isEditableRole(withRole(null)), false);
+  assert.equal(isEditableRole({ tagName: "BUTTON" }), false);
+  assert.equal(isEditableRole(null), false);
 });

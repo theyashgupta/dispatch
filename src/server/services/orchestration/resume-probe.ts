@@ -1,7 +1,6 @@
 import { MEMORY_RESUME_LINE } from "../../../shared/dispatch-lines.js";
 import type { Card, Session } from "../../../shared/types.js";
 import { sleep } from "../../adapters/exec.js";
-import { signalSafe } from "../../adapters/process-tree.js";
 import {
   capturePane,
   hasSession,
@@ -13,6 +12,7 @@ import {
 import { boardRepository as store } from "../../store/board-repository.js";
 import { paneBusy, paneDialog } from "../domain/supervisor-state.js";
 import { withCardLock } from "./card-lock.js";
+import { endJob } from "./end-job.js";
 import { activeSession } from "./pause-card.js";
 import { runActions } from "./supervisor-actions.js";
 import { markNeedsInput, record } from "./supervisor-record.js";
@@ -20,7 +20,6 @@ import { ensureWatcher } from "./supervisor-registry.js";
 import { SHELL_SESSION_ENV } from "./steps.js";
 import {
   sendLine,
-  waitFor,
   type SendReason,
   type SendTiming,
 } from "./supervisor-send.js";
@@ -31,6 +30,7 @@ const ATTEMPTS = 3;
 const RELAUNCH_ON: ReadonlySet<SendReason> = new Set([
   "not ready",
   "not in transcript",
+  "held in prompt box",
 ]);
 const probing = new Set<string>();
 
@@ -42,7 +42,7 @@ export const probeTools: {
   shellRoot: (name: string) => Promise<boolean>;
   hasSession: typeof hasSession;
   send: typeof sendLine;
-  resume: (card: Card, session: Session, evidence: string) => Promise<void>;
+  resume: (card: Card, session: Session, evidence: string) => Promise<unknown>;
   watcher: typeof ensureWatcher;
   kill: (pid: number, signal: "SIGHUP" | "SIGKILL") => void;
   sleep: (ms: number) => Promise<void>;
@@ -73,34 +73,6 @@ type Outcome =
   | { kind: "confirmed" }
   | { kind: "unconfirmed"; reason?: string }
   | { kind: "ended"; why: string };
-
-/**
- * End the foreground job of a pane: hang it up, then kill it if the shell does not return.
- *
- * @remarks Never signals the shell group, so a pane already at its prompt is left alone. The kill
- * goes out only when the same group still owns the terminal, so a pid reused meanwhile is spared.
- */
-async function endJob(target: string): Promise<void> {
-  const read = () =>
-    Promise.resolve(probeTools.paneTerminal(target)).catch(() => null);
-  const terminal = await read();
-  if (!terminal || terminal.tpgid === terminal.pgid) return;
-  if (!signalSafe(terminal.tpgid)) return;
-  const signal = (name: "SIGHUP" | "SIGKILL") => {
-    try {
-      probeTools.kill(-terminal.tpgid, name);
-    } catch {
-      return;
-    }
-  };
-  const atPrompt = () => probeTools.atShellPrompt(target);
-  const { hangupMs, killMs, pollMs } = probeTools.grace;
-  signal("SIGHUP");
-  if (await waitFor(atPrompt, hangupMs, pollMs)) return;
-  if ((await read())?.tpgid !== terminal.tpgid) return;
-  signal("SIGKILL");
-  await waitFor(atPrompt, killMs, pollMs);
-}
 
 /**
  * Wait until the pane shows an idle input row, or give up when the card or session is gone.
@@ -164,7 +136,7 @@ async function attempt(
     reason: why,
   });
   console.warn(`[memory] relaunching ${cardId}: ${why}`);
-  await endJob(target);
+  await endJob(target, probeTools);
   return { kind: "ended", why };
 }
 

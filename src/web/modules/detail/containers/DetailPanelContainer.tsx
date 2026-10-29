@@ -45,6 +45,7 @@ import {
   useStartCardMutation,
   useUnpauseCardMutation,
 } from "@/queries/cards-queries";
+import { useOrchestrationSummaryQuery } from "@/queries/orchestration-summary-queries";
 import { useSessionAccountMove } from "@/queries/session-account-queries";
 import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { useItems } from "@/components/ui/hooks/use-items";
@@ -63,6 +64,7 @@ import {
   PanelRow,
 } from "@/modules/detail/components/PanelFrame";
 import {
+  frozenNote,
   pauseFailureCopy,
   pausedNote,
 } from "@/modules/detail/domain/pause-copy";
@@ -71,9 +73,14 @@ import {
   RESUME_TARGET_ERROR,
   RESUME_TARGET_LOADING,
 } from "@/modules/detail/domain/resume-target";
-import { PanelMutedNotice } from "@/modules/detail/components/PanelNotice";
+import {
+  PanelAlert,
+  PanelMutedNotice,
+} from "@/modules/detail/components/PanelNotice";
+import { liveResumeFailure } from "@/modules/detail/domain/live-resume-failure";
 import { PanelHeader } from "@/modules/detail/components/PanelHeader";
 import { PanelResizeHandle } from "@/modules/detail/components/PanelResizeHandle";
+import { RunClaudeButton } from "@/modules/detail/components/RunClaudeButton";
 import { PreviewRow } from "@/modules/detail/components/PreviewRow";
 import { ReferenceBlocks } from "@/modules/detail/components/ReferenceBlocks";
 import { SessionFlowRow } from "@/modules/detail/components/SessionFlowRow";
@@ -85,7 +92,11 @@ import { UnknownProbeRow } from "@/modules/detail/components/UnknownProbeRow";
 import { reviewHeader as buildReviewHeader } from "@/modules/detail/domain/review-header";
 import { heldPrItems } from "../../../../shared/pr-rows.js";
 import { panelEscapeAction } from "@/modules/detail/domain/panel-escape";
-import { hasSessionFlow } from "@/modules/detail/domain/session-flow";
+import { groupCostLine } from "@/modules/detail/domain/group-cost-line";
+import {
+  hasSessionFlow,
+  terminalReady,
+} from "@/modules/detail/domain/session-flow";
 import { useFocusReturn } from "@/modules/detail/hooks/use-focus-return";
 import { usePanelHistory } from "@/modules/detail/hooks/use-panel-history";
 import { usePanelResize } from "@/modules/detail/hooks/use-panel-resize";
@@ -101,6 +112,7 @@ import { CardTimelineContainer } from "./CardTimelineContainer";
 import { canBeBlocked } from "../../../../shared/blocked-by.js";
 import { BlockedByFieldContainer } from "./BlockedByFieldContainer";
 import { LinearSectionContainer } from "./LinearSectionContainer";
+import { OrchestratorFieldContainer } from "./OrchestratorFieldContainer";
 
 export function DetailPanelContainer() {
   const { appStore } = useRouteContext({ from: "__root__" });
@@ -147,6 +159,10 @@ export function DetailPanelContainer() {
   const editors = board?.editors;
   const accounts = accountsData?.accounts;
   const cardIdentifiers = identifiersOf(cards ?? []);
+  const summary = useOrchestrationSummaryQuery(
+    card?.boardKey ?? boardKey,
+    card?.source === "group",
+  );
   const onClose = appStore.closePanel;
   const onRetryPinFetch = appStore.retryPinFetch;
   const onStartRequest = (req: string | StartRequest) =>
@@ -364,6 +380,8 @@ export function DetailPanelContainer() {
 
   const hasLiveSession = !!(c?.tmuxSession && !c.sessionLost);
   const note = c != null ? pausedNote(c) : null;
+  const frozen = c != null ? frozenNote(c) : null;
+  const liveFailure = c != null ? liveResumeFailure(c) : null;
   const activeSessionLost = c?.activeSessionId != null && !c.tmuxSession;
   const resumeTarget = useResumeTargetQuery(c?.id ?? "", activeSessionLost);
   const resumeLine =
@@ -384,6 +402,69 @@ export function DetailPanelContainer() {
     setFullscreen(false);
   }
 
+  const accountGroup =
+    sessionAccount != null ? (
+      <PanelAccountRow
+        name={sessionAccount.name}
+        stale={sessionAccount.stale}
+        continueAction={sessionAccount.continueAction}
+        pendingNote={sessionAccount.pendingNote}
+        pending={
+          accountMove.pending?.key === accountKey
+            ? accountMove.pending.kind
+            : null
+        }
+        busy={accountMove.pending !== null}
+        note={accountKey == null ? undefined : accountMove.notes[accountKey]}
+        onRestart={() =>
+          moveSessionAccount("restart", sessionAccount.accountId, "Restarted")
+        }
+        onContinue={() => {
+          if (accountsData == null) return;
+          moveSessionAccount(
+            "continue",
+            accountsData.activeId,
+            `Moved to ${accountName(accountsData.accounts, accountsData.activeId)}`,
+          );
+        }}
+      />
+    ) : undefined;
+  const hasSwitcher = c != null && (c.sessionSummaries?.length ?? 0) >= 2;
+  const showRunClaude =
+    hasLiveSession &&
+    !hydrating &&
+    pinFetchError == null &&
+    c != null &&
+    terminalReady(c);
+  const sessionControls =
+    hasSwitcher || showStartAnother || showRunClaude ? (
+      <>
+        {hasSwitcher && (
+          <SessionSwitcher
+            card={c}
+            onSwitch={(cardId, sessionId) => {
+              switchSession({ cardId, sessionId }).catch(console.error);
+            }}
+          />
+        )}
+        {showStartAnother && (
+          <StartAnotherSessionButton
+            card={c}
+            onStartRequest={onStartRequest}
+            narrowPanel={narrowPanel}
+          />
+        )}
+        {showRunClaude && (
+          <RunClaudeButton
+            card={c}
+            onRunClaude={(id) => {
+              void runClaude(id).catch(console.error);
+            }}
+          />
+        )}
+      </>
+    ) : null;
+
   const referenceColumn = (
     <>
       <ReferenceBlocks
@@ -396,6 +477,13 @@ export function DetailPanelContainer() {
       />
       {c != null && canBeBlocked(c) && (
         <BlockedByFieldContainer key={c.id} card={c} cards={cards ?? []} />
+      )}
+      {c != null && (
+        <OrchestratorFieldContainer
+          key={c.id}
+          card={c}
+          board={c.boardKey ?? DEFAULT_BOARD_KEY}
+        />
       )}
       {c != null && (c.source ?? "linear") === "linear" && (
         <LinearSectionContainer key={c.id} card={c} />
@@ -467,62 +555,17 @@ export function DetailPanelContainer() {
                 (unpause.isPending && unpause.variables?.id === c.id))
             }
             onAskRequest={onAskRequest}
+            account={accountGroup}
             resumeLine={resumeLine}
             reviewHeader={reviewHeader}
+            costLine={groupCostLine(c, summary.data?.groups ?? [])}
           />
 
-          {sessionAccount != null && (
-            <PanelAccountRow
-              name={sessionAccount.name}
-              stale={sessionAccount.stale}
-              continueAction={sessionAccount.continueAction}
-              pendingNote={sessionAccount.pendingNote}
-              pending={
-                accountMove.pending?.key === accountKey
-                  ? accountMove.pending.kind
-                  : null
-              }
-              busy={accountMove.pending !== null}
-              note={
-                accountKey == null ? undefined : accountMove.notes[accountKey]
-              }
-              onRestart={() =>
-                moveSessionAccount(
-                  "restart",
-                  sessionAccount.accountId,
-                  "Restarted",
-                )
-              }
-              onContinue={() => {
-                if (accountsData == null) return;
-                moveSessionAccount(
-                  "continue",
-                  accountsData.activeId,
-                  `Moved to ${accountName(accountsData.accounts, accountsData.activeId)}`,
-                );
-              }}
-            />
+          {c != null && hasSessionFlow(c) ? (
+            <SessionFlowRow card={c}>{sessionControls}</SessionFlowRow>
+          ) : (
+            sessionControls != null && <PanelRow>{sessionControls}</PanelRow>
           )}
-          {((c?.sessionSummaries?.length ?? 0) >= 2 || showStartAnother) && (
-            <PanelRow>
-              {c != null && (c.sessionSummaries?.length ?? 0) >= 2 && (
-                <SessionSwitcher
-                  card={c}
-                  onSwitch={(cardId, sessionId) => {
-                    switchSession({ cardId, sessionId }).catch(console.error);
-                  }}
-                />
-              )}
-              {showStartAnother && c != null && (
-                <StartAnotherSessionButton
-                  card={c}
-                  onStartRequest={onStartRequest}
-                  narrowPanel={narrowPanel}
-                />
-              )}
-            </PanelRow>
-          )}
-          {c != null && hasSessionFlow(c) && <SessionFlowRow card={c} />}
 
           <PanelBody>
             {hydrating ? (
@@ -568,14 +611,29 @@ export function DetailPanelContainer() {
                   </div>
                 )}
 
+                {frozen !== null && (
+                  <div
+                    data-testid="frozen-note"
+                    className="mx-(--space-xl) mb-(--space-lg)"
+                  >
+                    <PanelMutedNotice label="Status">{frozen}</PanelMutedNotice>
+                  </div>
+                )}
+
+                {liveFailure !== null && (
+                  <div
+                    data-testid="live-resume-failure"
+                    className="mx-(--space-xl) mb-(--space-lg)"
+                  >
+                    <PanelAlert>{liveFailure}</PanelAlert>
+                  </div>
+                )}
+
                 {hasLiveSession && c && (
                   <TerminalRegion
                     card={c}
                     onReconnect={(id) => {
                       ensureTerminal(id).catch(console.error);
-                    }}
-                    onRunClaude={(id) => {
-                      void runClaude(id).catch(console.error);
                     }}
                   />
                 )}

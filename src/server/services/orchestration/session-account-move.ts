@@ -23,7 +23,11 @@ import {
   planLimitKeys,
   type LimitSurface,
 } from "../domain/limit-surface.js";
-import { readRegistry, resolveLaunchAccount } from "./claude-accounts.js";
+import {
+  canonicalAccountId,
+  readRegistry,
+  resolveLaunchAccount,
+} from "./claude-accounts.js";
 import { withCardLock } from "./card-lock.js";
 import { forgetTurnState, paneTurnState, turnStateOf } from "./session-turn.js";
 import {
@@ -89,7 +93,7 @@ async function awaitPane(
  *
  * @remarks Text higher up can be stale scrollback, so readiness is read from the footer only.
  */
-function footer(pane: string, lines = FOOTER_LINES): string {
+export function footer(pane: string, lines = FOOTER_LINES): string {
   return pane
     .split("\n")
     .filter((line) => line.trim() !== "")
@@ -268,7 +272,8 @@ export async function moveSessionAccount(
     if (!(await sessionEnvHas(sessionTarget, SHELL_SESSION_ENV)))
       return "legacy";
     if (
-      (session.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID) === accountId &&
+      canonicalAccountId(session.claudeAccountId) ===
+        canonicalAccountId(accountId) &&
       session.claudeAccountStale !== true
     ) {
       return "same";
@@ -325,6 +330,10 @@ export async function moveSessionAccount(
       card,
     );
     await typeLaunchLine(tmuxSession, argv);
+    const live = sessionOf(card.id, session.id);
+    if (live?.state === "released") {
+      await store.setSessionStateIfSession(card.id, live.id, "working");
+    }
     forgetTurnState(card.id, session.id);
     try {
       await awaitReplReady(tmuxSession);

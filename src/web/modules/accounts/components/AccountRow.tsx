@@ -3,6 +3,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Item, ItemContent } from "@/components/ui/item";
 import { UsageDot } from "./UsageDot";
+import { accountMeta } from "@/modules/accounts/domain/account-meta";
+import { chainStateBadge } from "@/modules/accounts/domain/chain-state";
 import {
   tightestWindow,
   loginExpiryView,
@@ -18,6 +20,7 @@ interface AccountRowProps {
   onSwitch: () => void;
   onRelogin: () => void;
   onRemove: () => void;
+  onRemoveDuplicate: () => void;
 }
 
 export function AccountRow({
@@ -28,14 +31,16 @@ export function AccountRow({
   onSwitch,
   onRelogin,
   onRemove,
+  onRemoveDuplicate,
 }: AccountRowProps) {
   const tightest =
     account.usage.status === "ok"
       ? tightestWindow(account.usage.windows)
       : null;
   const expiry = loginExpiryView(account.usage.loginExpiresAt, now);
+  const shadowed = account.state === "shadowed-by-home";
   const meta = [
-    account.isDefault ? "Default (your home login)" : account.orgName,
+    accountMeta(account),
     account.subscriptionType,
     account.lastLoginAt
       ? `signed in ${new Date(account.lastLoginAt).toLocaleString()}`
@@ -77,7 +82,12 @@ export function AccountRow({
         )}
       </ItemContent>
       {active && <Badge tone="accent">Active</Badge>}
-      {!active && (
+      {(shadowed || account.state === "needs-login") && (
+        <Badge tone={chainStateBadge(account.state).tone}>
+          {chainStateBadge(account.state).label}
+        </Badge>
+      )}
+      {!active && !shadowed && (
         <Button
           variant="secondary"
           size="sm"
@@ -87,7 +97,17 @@ export function AccountRow({
           Switch
         </Button>
       )}
-      {!account.isDefault && (
+      {shadowed && (
+        <Button
+          variant="secondary"
+          size="sm"
+          aria-label={`Remove duplicate ${account.email}`}
+          onClick={onRemoveDuplicate}
+        >
+          Remove duplicate
+        </Button>
+      )}
+      {!account.isDefault && !shadowed && (
         <>
           <Button
             variant="secondary"

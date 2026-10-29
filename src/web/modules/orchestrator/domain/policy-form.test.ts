@@ -153,7 +153,7 @@ test("a form is dirty when any field differs from the saved values", () => {
   }
 });
 
-test("the payload holds the thirteen policy fields with numbers, null and the stored model", () => {
+test("the payload holds the sixteen policy fields with numbers, null and the stored model", () => {
   const payload = policyPayload(
     edit({
       concurrencyCap: "4",
@@ -163,6 +163,7 @@ test("the payload holds the thirteen policy fields with numbers, null and the st
   );
   assert.deepEqual(Object.keys(payload).sort(), [
     "budgetPerGroup",
+    "budgetWarnPercent",
     "concurrencyCap",
     "crossSessionInbound",
     "groupPlaybook",
@@ -412,4 +413,42 @@ test("the wake timer is a form string, a payload number, and counts as a change"
   assert.equal(policyPayload(edit({ wakeMinutes: "0" })).wakeMinutes, 0);
   assert.equal(policyPayload(edit({ wakeMinutes: "1440" })).wakeMinutes, 1440);
   assert.equal(isPolicyDirty(edit({ wakeMinutes: "30" }), saved), true);
+});
+
+test("the budget warning accepts 1 to 99 and refuses the rest", () => {
+  const table: [string, boolean][] = [
+    ["1", true],
+    ["80", true],
+    ["99", true],
+    ["0", false],
+    ["100", false],
+    ["80.5", false],
+    ["", false],
+  ];
+  for (const [text, ok] of table) {
+    const errors = validatePolicyForm(edit({ budgetWarnPercent: text }));
+    assert.equal(errors.budgetWarnPercent === undefined, ok, text);
+    if (!ok) {
+      assert.equal(
+        errors.budgetWarnPercent,
+        "Enter a whole number from 1 to 99.",
+      );
+    }
+  }
+});
+
+test("the budget warning fills from the policy, reaches the payload as a number and maps its server code", () => {
+  assert.equal(saved.budgetWarnPercent, "80");
+  assert.equal(
+    policyPayload(edit({ budgetWarnPercent: "70" })).budgetWarnPercent,
+    70,
+  );
+  assert.equal(isPolicyDirty(edit({ budgetWarnPercent: "70" }), saved), true);
+  assert.deepEqual(serverFieldErrors("invalid-budgetWarnPercent"), {
+    budgetWarnPercent: POLICY_ERRORS.budgetWarnPercent,
+  });
+  assert.equal(
+    refusalText("invalid-budgetWarnPercent", null),
+    "the budget warning has to be a whole number from 1 to 99",
+  );
 });

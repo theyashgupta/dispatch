@@ -53,6 +53,7 @@ void test("the send rule holds for every session state, and only the typing-wron
     "api_error",
     "lost",
     "stale",
+    "frozen",
     "shell_prompt",
   ];
   const open: (SupervisorState | null)[] = [

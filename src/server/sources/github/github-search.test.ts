@@ -61,7 +61,15 @@ test("a PR returned by two categories becomes one item of the first category", (
 
 test("an item carries the R-05 fields and meta keys", () => {
   const [item] = mergeSearchResults([
-    result(REVIEW, [pr(12, "acme/api", { draft: true })]),
+    result(REVIEW, [
+      pr(12, "acme/api", {
+        draft: true,
+        user: {
+          login: "octo",
+          avatar_url: "https://avatars.githubusercontent.com/u/9?v=4",
+        },
+      }),
+    ]),
   ]).items;
   assert.deepEqual(item, {
     id: "github:acme/api#12",
@@ -77,10 +85,16 @@ test("an item carries the R-05 fields and meta keys", () => {
       repo: "acme/api",
       number: "12",
       author: "octo",
+      authorAvatar: "https://avatars.githubusercontent.com/u/9?v=4",
       draft: "true",
       category: "review",
     },
   });
+});
+
+test("a user without avatar_url maps authorAvatar to an empty string", () => {
+  const [item] = mergeSearchResults([result(REVIEW, [pr(3)])]).items;
+  assert.equal(item?.meta.authorAvatar, "");
 });
 
 test("the snippet is the trimmed body cut at 280 characters", () => {

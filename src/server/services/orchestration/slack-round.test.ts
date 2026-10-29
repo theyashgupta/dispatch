@@ -19,6 +19,7 @@ const {
   SLACK_HIDDEN_TOOLS,
   buildSlackRoundPrompt,
   cachedSlackChannelName,
+  checkSlackConnection,
   listSlackChannelsMcp,
   readSlackThreadMcp,
   runSlackNow,
@@ -111,7 +112,9 @@ function stub(
     "stdin.log",
     "claude.pid",
     "env.log",
+    "nonblocking.log",
     "tool-text.txt",
+    "servers.json",
   ]) {
     fs.rmSync(path.join(stubDir, f), { force: true });
   }
@@ -183,7 +186,12 @@ test("R1 a connected list and the valid round make the two items once, with the 
   assert.equal(status.polledAt, cursor()?.polledAt);
   assert.deepEqual(log("argv.log").split("\n@@")[0]?.split("\n"), [
     "-p",
-    "--restricted",
+    "--setting-sources",
+    "",
+    "--permission-mode",
+    "dontAsk",
+    "--permission-prompts",
+    "none",
     "--output-format",
     "stream-json",
     "--verbose",
@@ -195,10 +203,6 @@ test("R1 a connected list and the valid round make the two items once, with the 
     SLACK_READ_TOOLS.join(","),
     "--disallowedTools",
     SLACK_HIDDEN_TOOLS.join(","),
-    "--permission-mode",
-    "dontAsk",
-    "--permission-prompts",
-    "none",
     "--no-session-persistence",
   ]);
   const stdin = log("stdin.log");
@@ -211,6 +215,7 @@ test("R1 a connected list and the valid round make the two items once, with the 
   assert.ok(stdin.includes("Also call slack_search_public_and_private once"));
   assert.ok(stdin.includes('Never emit the literal text "DISPATCH_STATUS:"'));
   assert.equal(log("env.log"), "60000\n");
+  assert.equal(log("nonblocking.log"), "false\n");
 });
 
 test("R1a an item written by the round carries the relevance meta", async () => {
@@ -281,8 +286,13 @@ test("R3c a failed call is a failed round and keeps the cursor", async () => {
   assert.equal(JSON.stringify(cursor()), cursorBefore);
 });
 
-for (const fake of ["notools", "nouse", "toolerror", "profileonly"]) {
-  test(`R3d a round in ${fake} mode ends failed, keeps the cursor and adds nothing`, async () => {
+for (const [fake, error] of [
+  ["notools", "connector-unavailable"],
+  ["nouse", "failed"],
+  ["toolerror", "failed"],
+  ["profileonly", "failed"],
+] as const) {
+  test(`R3d a round in ${fake} mode ends ${error}, keeps the cursor and adds nothing`, async () => {
     const before = slackItems().length;
     const cursorBefore = JSON.stringify(cursor());
     stub(CONNECTED, VALID, fake);
@@ -290,7 +300,7 @@ for (const fake of ["notools", "nouse", "toolerror", "profileonly"]) {
     assert.equal(slackItems().length, before);
     assert.equal(JSON.stringify(cursor()), cursorBefore);
     const status = await slackMcpStatus();
-    assert.equal(status.lastError, "failed");
+    assert.equal(status.lastError, error);
     assert.equal(status.lastCount, undefined);
     assert.deepEqual(
       log("calls.log")
@@ -811,4 +821,59 @@ test("R24 Run now with no claude on PATH answers not-connected and makes no call
   } finally {
     process.env.PATH = saved;
   }
+});
+
+const PROFILE_TOOL = "mcp__claude_ai_Slack__slack_read_user_profile";
+
+test("K1 a connected list and an init that lists the server answer connected, allowing only the profile tool", async () => {
+  stub(CONNECTED);
+  assert.deepEqual(await checkSlackConnection(), {
+    state: "connected",
+    server: "claude.ai Slack",
+  });
+  assert.equal(modelCalls(), 1);
+  assert.equal(firstCallFlag("--allowedTools"), PROFILE_TOOL);
+  assert.deepEqual(
+    firstCallFlag("--disallowedTools")?.split(","),
+    [...SLACK_READ_TOOLS, ...SLACK_HIDDEN_TOOLS].filter(
+      (t) => t !== PROFILE_TOOL,
+    ),
+  );
+  assert.equal(firstCallFlag("--output-format"), "stream-json");
+  assert.equal(firstCallFlag("--permission-mode"), "dontAsk");
+  assert.ok(!log("argv.log").split("\n").includes("--restricted"));
+  assert.equal(log("nonblocking.log"), "false\n");
+});
+
+test("K2 an init that does not list the server answers connector-unavailable and the status agrees", async () => {
+  configure("mcp");
+  stub(CONNECTED);
+  fs.writeFileSync(path.join(stubDir, "servers.json"), "[]");
+  assert.deepEqual(await checkSlackConnection(), {
+    state: "connector-unavailable",
+    server: "claude.ai Slack",
+  });
+  const status = await slackMcpStatus();
+  assert.equal(status.connector, "connector-unavailable");
+  assert.equal(status.server, "claude.ai Slack");
+});
+
+test("K3 a probe whose claude exits non-zero answers failed", async () => {
+  stub(CONNECTED, VALID, "fail");
+  assert.deepEqual(await checkSlackConnection(), { state: "failed" });
+});
+
+test("K4 a list with no Slack server answers not-found and makes no model call", async () => {
+  stub(NOT_FOUND);
+  assert.deepEqual(await checkSlackConnection(), { state: "not-found" });
+  assert.equal(modelCalls(), 0);
+});
+
+test("K5 a needs-auth list answers needs-auth and makes no model call", async () => {
+  stub(NEEDS_AUTH);
+  assert.deepEqual(await checkSlackConnection(), {
+    state: "needs-auth",
+    server: "claude.ai Slack",
+  });
+  assert.equal(modelCalls(), 0);
 });

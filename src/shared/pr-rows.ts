@@ -9,6 +9,8 @@ export type PrStateText =
 
 export type PrChecksText = "pass" | "fail" | "pending" | "";
 
+export type PrMergeableText = "mergeable" | "conflicting" | "unknown";
+
 export interface PrRow {
   key: string;
   owner: string;
@@ -17,8 +19,10 @@ export interface PrRow {
   number: number;
   title: string;
   author: string;
+  authorAvatar: string;
   state: PrStateText;
   checks: PrChecksText;
+  mergeable: PrMergeableText;
   createdAt: string;
   reviewRequestedFromMe: boolean;
   time: string;
@@ -45,6 +49,18 @@ export const NO_PR_FILTERS: PrFilters = {
 const PR_URL = /^https:\/\/github\.com\/([^/]+)\/([^/]+)\/pull\/(\d+)\/?$/;
 
 const CHECKS = new Set<string>(["pass", "fail", "pending"]);
+
+const AVATAR_HOST_PREFIX = "https://avatars.githubusercontent.com/";
+
+function avatarOf(value: string | undefined): string {
+  return value?.startsWith(AVATAR_HOST_PREFIX) ? value : "";
+}
+
+function mergeableOf(value: string | undefined): PrMergeableText {
+  if (value === "MERGEABLE") return "mergeable";
+  if (value === "CONFLICTING") return "conflicting";
+  return "unknown";
+}
 
 export function prStateText(input: {
   draft: boolean;
@@ -157,12 +173,14 @@ export function buildPrRows(
       number,
       title: item.title,
       author: item.meta.author ?? "",
+      authorAvatar: avatarOf(item.meta.authorAvatar),
       state: prStateText({
         draft,
         reviewRequestedFromMe,
         reviewDecision: item.meta.reviewDecision ?? "",
       }),
       checks: CHECKS.has(checks) ? (checks as PrChecksText) : "",
+      mergeable: mergeableOf(item.meta.mergeable),
       createdAt: item.meta.createdAt || item.createdAt,
       reviewRequestedFromMe,
       time: item.createdAt,
@@ -186,8 +204,10 @@ export function buildPrRows(
           number: review.number,
           title: card.title,
           author: "",
+          authorAvatar: "",
           state: "Open",
           checks: "",
+          mergeable: "unknown",
           createdAt: card.updatedAt,
           reviewRequestedFromMe: false,
           time: card.updatedAt,
@@ -217,8 +237,10 @@ export function buildPrRows(
         number: parsed.number,
         title: pr.title,
         author: "",
+        authorAvatar: "",
         state: pr.isDraft ? "Draft" : "Open",
         checks: pr.ci ?? "",
+        mergeable: "unknown",
         createdAt: card.updatedAt,
         reviewRequestedFromMe: false,
         time: card.updatedAt,

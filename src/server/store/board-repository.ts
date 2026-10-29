@@ -2,11 +2,13 @@ import type { EventEmitter } from "node:events";
 import type { CardSearchResult } from "../../shared/search.js";
 import type {
   AccountEventType,
+  PushoverGap,
   ActivityEvent,
   ArchiveBoardResult,
   ArchivedGroup,
   Board,
   BoardPolicy,
+  BudgetWarning,
   OrchestratorRecord,
   BoardKey,
   BoardPatch,
@@ -77,6 +79,8 @@ export interface BoardRepository {
     cursors: Record<string, SourceCursor>,
   ): Promise<void>;
   setEnabledSources(ids: string[]): void;
+  setPushoverMissing(names: readonly string[], now?: Date): void;
+  pushoverMissing(): PushoverGap | null;
   setSyncUnreachable(flag: boolean): Promise<void>;
   trackedIssueIds(
     scope: BoardScope,
@@ -292,6 +296,7 @@ export interface BoardRepository {
     reason: string,
     cardId?: string | null,
   ): Promise<void>;
+  recordSessionRelaunch(cardId: string, reason: string): Promise<void>;
   listArchive(board: BoardKey): ArchivedGroup[];
   getArchived(archiveId: string): ArchivedGroup | undefined;
   archiveDueForDelete(
@@ -397,6 +402,7 @@ export interface BoardRepository {
     queue: { startQueued: boolean; dependsOn?: string[] },
   ): Promise<void>;
   setBlockedBy(id: string, ids: string[]): Promise<void>;
+  setBudgetWarning(id: string, warning: BudgetWarning | null): Promise<void>;
   setOrchestratorFields(
     id: string,
     fields: Pick<

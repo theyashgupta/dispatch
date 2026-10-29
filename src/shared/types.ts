@@ -37,6 +37,7 @@ export type EventType =
   | "status_done"
   | "session_start"
   | "session_resume"
+  | "session_relaunch"
   | "session_lost"
   | "session_failed"
   | "resume_failed"
@@ -207,6 +208,13 @@ export interface Item {
   autoResolved?: boolean;
 }
 
+export interface BudgetWarning {
+  at: string;
+  cost: number;
+  budget: number;
+  percent: number;
+}
+
 export interface Card {
   /** Internal card id (can equal issueId in Phase 1). */
   id: string;
@@ -365,6 +373,7 @@ export interface Card {
   transcriptPath?: string;
   dependsOn?: string[];
   blockedBy?: string[];
+  budgetWarning?: BudgetWarning;
   startQueued?: boolean;
   createdByOrchestrator?: string;
   ownerOrchestrator?: string;
@@ -401,7 +410,7 @@ export interface Card {
    */
   sessionCount?: number;
   /**
-   * Per-session digest for the detail panel's switcher and the Sessions page.
+   * Per-session digest for the detail panel's switcher.
    *
    * @remarks NON-SECRET like `sessionCount`: built only by `redactCard` through a field pick, so
    * no credential or pane content rides along. Absent when the card owns no session record,
@@ -896,6 +905,7 @@ export interface BoardSnapshot {
   doneCounts?: { awaiting: number; cleaned: number; total: number };
   items?: Item[];
   enabledSources?: string[];
+  pushoverMissing?: PushoverGap;
 }
 
 /**
@@ -1239,7 +1249,12 @@ export type CalendarSettingsPatch = Partial<
 >;
 
 export type GranolaCheckState =
-  "connected" | "needs-auth" | "failed" | "not-found" | "claude-missing";
+  | "connected"
+  | "needs-auth"
+  | "failed"
+  | "not-found"
+  | "claude-missing"
+  | "connector-unavailable";
 
 export type GranolaCheckResult =
   | { state: "connected"; server: string }
@@ -1449,6 +1464,7 @@ export interface ClaudeAccountSummary {
   orgName: string;
   subscriptionType: string;
   isDefault: boolean;
+  managedDefault?: boolean;
   lastLoginAt?: string;
   usage: ClaudeUsageSnapshot;
   position: number;
@@ -1518,7 +1534,13 @@ export const CLAUDE_ACCOUNTS_BOUNDS = {
 } as const;
 
 export type ChainAccountState =
-  "available" | "near-limit" | "limited" | "login-expired" | "unknown";
+  | "available"
+  | "near-limit"
+  | "limited"
+  | "login-expired"
+  | "needs-login"
+  | "shadowed-by-home"
+  | "unknown";
 
 export interface ChainBucket {
   kind: string;
@@ -1530,6 +1552,8 @@ export interface ChainAccountEntry {
   state: ChainAccountState;
   buckets: ChainBucket[];
   limitedUntil: string | null;
+  fetchedAt?: string | null;
+  rejectedReads?: number;
 }
 
 export interface ChainExhaustedRecord {
@@ -1557,6 +1581,7 @@ export interface ChainStateFile {
   exhausted: ChainExhaustedRecord | null;
   moves: ChainMove[];
   loginExpiryNotified: Record<string, string>;
+  decisions: Record<string, string>;
 }
 
 /**
@@ -1835,6 +1860,7 @@ export interface BoardPolicy {
   usageLimit: "wait" | "stop";
   shipRights: "none" | "open_prs" | "merge";
   budgetPerGroup: number | null;
+  budgetWarnPercent: number;
   supervisor: "on" | "off";
   groupPlaybook: string | null;
   wakeMinutes: number;
@@ -1854,6 +1880,8 @@ export type OrchestratorPolicyOverride = Partial<
   >
 >;
 
+export type OrchestratorKind = "board" | "feature";
+
 export interface OrchestratorScope {
   groupIds: string[];
   ticketIds: string[];
@@ -1863,6 +1891,7 @@ export interface OrchestratorRecord {
   id: string;
   name: string;
   role: "main" | "extra";
+  kind?: OrchestratorKind;
   scope: OrchestratorScope;
   policyOverride: OrchestratorPolicyOverride;
   cardId: string | null;
@@ -1992,6 +2021,7 @@ export interface LoopEngine {
   handoffPending: boolean;
   startedAt: string | null;
   closed: boolean;
+  closedReason?: "promise" | "close_loop" | "manual";
 }
 
 export interface LoopGate {
@@ -2044,6 +2074,8 @@ export interface ShipBranch {
   admin: boolean;
   tip: string | null;
   checked: string | null;
+  passed: string | null;
+  checkSkipped: boolean;
 }
 
 export interface ShipFlow {
@@ -2082,6 +2114,7 @@ export type GroupState =
   | "start_failed"
   | "shipped"
   | "ship_stopped"
+  | "ship_check_skipped"
   | "loop_error"
   | "usage_limit";
 
@@ -2101,9 +2134,11 @@ export type SupervisorState =
   | "usage_limit_wait"
   | "api_error"
   | "stale"
+  | "frozen"
   | "lost"
   | "shell_prompt"
-  | "paused";
+  | "paused"
+  | "released";
 
 export type SupervisorStateReason =
   | "usage_stop"
@@ -2211,4 +2246,11 @@ export interface SlackMcpStatus {
   lastError?: SlackRoundError;
   lastCount?: number;
   polledAt?: string;
+}
+
+export type EnvPresence = "unset" | "empty" | "filled";
+
+export interface PushoverGap {
+  names: string[];
+  since: string;
 }

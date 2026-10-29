@@ -6,7 +6,7 @@ import {
 } from "../../../shared/types.js";
 import { hasSession, sessionEnvHas } from "../../adapters/tmux.js";
 import { boardRepository as store } from "../../store/board-repository.js";
-import { readRegistry } from "./claude-accounts.js";
+import { canonicalAccountId, readRegistry } from "./claude-accounts.js";
 import { planApply, type PlanSession } from "./session-account-plan.js";
 import {
   moveSessionAccount,
@@ -39,20 +39,23 @@ async function isKnownAccount(accountId: string): Promise<boolean> {
 
 async function planSessions(): Promise<PlanSession[]> {
   return Promise.all(
-    store.sessionsWithTmux(ALL_BOARDS).map(async ({ card, session }) => {
-      const target = `=${session.tmuxSession}`;
-      const alive = await hasSession(target);
-      return {
-        cardId: card.id,
-        sessionId: session.id,
-        accountId: session.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID,
-        lost: !alive,
-        legacy: alive && !(await sessionEnvHas(target, SHELL_SESSION_ENV)),
-        turn: alive
-          ? await liveTurnState(card.id, session.id, session.tmuxSession)
-          : "unknown",
-      } satisfies PlanSession;
-    }),
+    store
+      .sessionsWithTmux(ALL_BOARDS)
+      .filter(({ session }) => session.state !== "released")
+      .map(async ({ card, session }) => {
+        const target = `=${session.tmuxSession}`;
+        const alive = await hasSession(target);
+        return {
+          cardId: card.id,
+          sessionId: session.id,
+          accountId: canonicalAccountId(session.claudeAccountId),
+          lost: !alive,
+          legacy: alive && !(await sessionEnvHas(target, SHELL_SESSION_ENV)),
+          turn: alive
+            ? await liveTurnState(card.id, session.id, session.tmuxSession)
+            : "unknown",
+        } satisfies PlanSession;
+      }),
   );
 }
 

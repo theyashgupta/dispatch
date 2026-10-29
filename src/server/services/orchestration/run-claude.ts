@@ -9,6 +9,8 @@ import {
 } from "../../adapters/tmux.js";
 import { withCardLock } from "./card-lock.js";
 import { resolveLaunchAccount } from "./claude-accounts.js";
+import { isFolder } from "./resume-session.js";
+import { markNeedsInput, rootOf } from "./supervisor-record.js";
 import {
   awaitReplReady,
   buildLaunch,
@@ -21,7 +23,12 @@ import {
 } from "./steps.js";
 
 export type RunClaudeOutcome =
-  "launched" | "busy" | "no-session" | "legacy" | "account";
+  | "launched"
+  | "busy"
+  | "no-session"
+  | "legacy"
+  | "account"
+  | "workspace-missing";
 
 /**
  * Relaunch claude inside a card's live shell session: the Run Claude button, and the same
@@ -35,7 +42,9 @@ export type RunClaudeOutcome =
  * disk for the cwd. A recorded id Claude refuses ("No conversation found", a session killed
  * before its transcript was flushed) is dropped, so the next click starts fresh instead of
  * failing forever. The built env is deliberately unused, since the shell already holds the
- * hook token and `CLAUDE_CONFIG_DIR` from session creation.
+ * hook token and `CLAUDE_CONFIG_DIR` from session creation. A missing session workspace folder
+ * refuses with `workspace-missing` and moves the card to Needs input, because tmux would start
+ * the pane in the home folder.
  * @see docs/ARCHITECTURE.md#tmux-invocations
  */
 export async function runClaude(cardId: string): Promise<RunClaudeOutcome> {
@@ -55,6 +64,16 @@ async function relaunch(
   if (!(await paneAtPrompt(`=${tmuxSession}:`))) return "busy";
 
   const recorded = card.sessions?.find((s) => s.id === card.activeSessionId);
+  const root = recorded ? rootOf(card, recorded) : "";
+  if (recorded && root !== "" && !(await isFolder(root))) {
+    await markNeedsInput(
+      card,
+      recorded,
+      "resume_failed",
+      `resume: Resume failed: workspace-missing: ${root}`,
+    );
+    return "workspace-missing";
+  }
   const account = await resolveLaunchAccount(
     recorded?.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID,
   ).catch(() => null);
@@ -87,5 +106,11 @@ async function relaunch(
     }
     console.warn(`[run-claude] claude did not reach READY for card ${card.id}`);
   });
+  const live = store
+    .getCard(card.id)
+    ?.sessions?.find((s) => s.id === card.activeSessionId);
+  if (live?.state === "released") {
+    await store.setSessionStateIfSession(card.id, live.id, "working");
+  }
   return "launched";
 }

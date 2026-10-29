@@ -313,6 +313,7 @@ function assertBuilt() {
       .trim();
     throw new Error(
       `refusing to run, \`npm run ${BUILD_SCRIPT}\` failed, so dist/ does not reflect src/:\n${detail || err.message}`,
+      { cause: err },
     );
   }
   if (!existsSync(DIST_ENTRY)) {
@@ -1086,7 +1087,7 @@ async function runBreakPwaManifestAssets() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(distManifestPath, original);
   try {
     writeFileSync(distManifestPath, original.replace(TARGET, REPLACEMENT));
@@ -1268,7 +1269,7 @@ async function runBreakPushRowStateMachine() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(settingsPath, original);
   try {
     writeFileSync(settingsPath, original.replace(TARGET, REPLACEMENT));
@@ -1399,7 +1400,7 @@ async function runBreakDeniedStateNoButton() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(settingsPath, original);
   try {
     writeFileSync(settingsPath, original.replace(TARGET, REPLACEMENT));
@@ -1688,7 +1689,7 @@ async function runBreakPushPromptOnClickOnly() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(pushTsPath, original);
   try {
     writeFileSync(pushTsPath, original.replace(TARGET, REPLACEMENT));
@@ -2007,7 +2008,7 @@ async function runBreakSubscribeRoundTrip() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(pushTsPath, original);
   try {
     writeFileSync(pushTsPath, original.replace(TARGET, REPLACEMENT));
@@ -2259,7 +2260,7 @@ async function runBreakIosGuidanceBranch() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(pushTsPath, original);
   try {
     writeFileSync(pushTsPath, original.replace(TARGET, REPLACEMENT));

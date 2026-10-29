@@ -4,19 +4,39 @@ import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { isHiddenCard } from "../../../shared/hidden-card.js";
 import type { Card, Session } from "../../../shared/types.js";
 import { boardRepository as store } from "../../store/board-repository.js";
-import { capturePane, paneAtPrompt, sendKeys } from "../../adapters/tmux.js";
-import { ENGINE_FILE } from "../domain/loop-progress.js";
+import {
+  capturePane,
+  paneAtPrompt,
+  paneTerminal,
+  sendKeys,
+  sessionEnvHas,
+} from "../../adapters/tmux.js";
+import {
+  closedEngineText,
+  ENGINE_FILE,
+  withClosedReason,
+} from "../domain/loop-progress.js";
 import {
   declineKeys,
+  type PlanMemory,
   type SupervisorAction,
 } from "../domain/supervisor-plan.js";
+import { isPrdModel } from "../domain/prd-progress.js";
+import { unsentBoxText } from "../domain/supervisor-state.js";
+import { readTranscriptTail } from "../../adapters/transcript.js";
+import { sessionTranscriptPath } from "./supervisor-transcript.js";
+import { withCardLock } from "./card-lock.js";
+import { endJob, type EndJobTools } from "./end-job.js";
 import { refreshLoopProgress } from "./loop-progress-reader.js";
 import { memoryCheck } from "./memory-governor.js";
-import { resumeSession } from "./resume-session.js";
+import { isFolder, resumeSession } from "./resume-session.js";
 import { runClaude, type RunClaudeOutcome } from "./run-claude.js";
-import { sendConfirmed, waitFor } from "./supervisor-send.js";
+import { SHELL_SESSION_ENV } from "./steps.js";
+import { sendConfirmed, waitFor, type SendResult } from "./supervisor-send.js";
 import {
+  isHandoffPending,
   orchestratorResumePromptText,
+  resumePromptText,
   runHandoff,
 } from "./supervisor-handoff.js";
 import { answerLimit, escapeLimit, moveOrWait } from "./supervisor-limit.js";
@@ -28,19 +48,26 @@ import {
   rootOf,
 } from "./supervisor-record.js";
 
-export interface ActionDeps {
+export interface ActionDeps extends EndJobTools {
   resume: (cardId: string) => Promise<void>;
   relaunch: (cardId: string) => Promise<RunClaudeOutcome>;
-  atShellPrompt: (target: string) => Promise<boolean>;
+  shellRoot: (name: string) => Promise<boolean>;
   claudeUpMs: number;
   send?: typeof sendConfirmed;
+  capture?: (target: string) => Promise<string>;
+  userTexts?: (card: Card, session: Session) => Promise<string[]>;
 }
 
-const DEFAULT_DEPS: ActionDeps = {
+export const actionTools: ActionDeps = {
   resume: resumeSession,
   relaunch: runClaude,
   atShellPrompt: (target) => paneAtPrompt(target).catch(() => false),
+  shellRoot: (name) =>
+    sessionEnvHas(`=${name}`, SHELL_SESSION_ENV).catch(() => false),
   claudeUpMs: 60_000,
+  paneTerminal,
+  kill: (pid, signal) => process.kill(pid, signal),
+  grace: { hangupMs: 10_000, killMs: 5_000, pollMs: 500 },
 };
 const POLL_MS = 500;
 
@@ -79,64 +106,146 @@ async function answerPrompt(
   });
 }
 
+async function writeAtomic(file: string, text: string): Promise<void> {
+  const tmp = `${file}.tmp`;
+  await fsp.writeFile(tmp, text);
+  await fsp.rename(tmp, file);
+}
+
+async function closeEngineFile(
+  card: Card,
+  engine: string,
+  closedBy: "promise" | "close_loop",
+): Promise<{ result: string; reason: typeof closedBy | "manual" }> {
+  const done = `${engine}.done`;
+  try {
+    await fsp.rename(engine, done);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    const slug = card.loopProgress?.slug;
+    if (code === "ENOENT" && slug) {
+      if (
+        await fsp.access(done).then(
+          () => true,
+          () => false,
+        )
+      ) {
+        return { result: "closed", reason: closedBy };
+      }
+      try {
+        const sessionId = card.loopProgress?.engine?.sessionId ?? null;
+        await writeAtomic(done, closedEngineText(slug, sessionId, closedBy));
+        return { result: "closed", reason: closedBy };
+      } catch (writeErr) {
+        const writeCode = (writeErr as NodeJS.ErrnoException).code;
+        return { result: `failed: ${writeCode ?? "error"}`, reason: closedBy };
+      }
+    }
+    return { result: `failed: ${code ?? "error"}`, reason: closedBy };
+  }
+  try {
+    const text = await fsp.readFile(done, "utf8");
+    await writeAtomic(done, withClosedReason(text, closedBy));
+    return { result: "closed", reason: closedBy };
+  } catch {
+    return { result: "closed", reason: "manual" };
+  }
+}
+
 async function closeLoop(card: Card, session: Session): Promise<void> {
   const root = rootOf(card, session);
   const engine = path.join(root, ENGINE_FILE);
-  let result = "closed";
-  if (root === "") result = "failed: no session root";
-  else {
-    try {
-      await fsp.rename(engine, `${engine}.done`);
-    } catch (err) {
-      result = `failed: ${(err as NodeJS.ErrnoException).code ?? "error"}`;
-    }
-  }
-  record(card, session, { action: "close_loop", file: engine, result });
+  const closedBy =
+    card.loopProgress?.completion === "complete" ? "close_loop" : "promise";
+  const { result, reason } =
+    root === ""
+      ? { result: "failed: no session root", reason: closedBy }
+      : await closeEngineFile(card, engine, closedBy);
+  record(card, session, {
+    action: "close_loop",
+    file: engine,
+    result,
+    reason,
+  });
   await refreshLoopProgress(card.id);
+}
+
+/**
+ * The reason a resume must not act on a card, or null when it may.
+ *
+ * @remarks A hidden orchestrator card resumes only while its orchestrator runs. The memory check
+ * applies only where a claude launch follows, so `resume` skips it on the lost-session path.
+ */
+function resumeBlocked(card: Card, withMemory = true): string | null {
+  if (isHiddenCard(card) && orchestratorOf(card)?.state !== "running")
+    return "the orchestrator is not running";
+  if (!withMemory) return null;
+  const memory = memoryCheck(card.boardKey ?? DEFAULT_BOARD_KEY);
+  return memory.ok ? null : memory.reason;
 }
 
 /**
  * Bring claude back in a lost or shell-prompt session, then send the resume prompt.
  *
  * @remarks A pane whose shell owns the foreground is relaunched with `runClaude`, since the resume
- * saga reattaches a live tmux session without starting claude. The prompt is typed only after
- * claude takes the foreground, so it never reaches the login shell.
+ * saga reattaches a live tmux session without starting claude, and a pane whose workspace folder
+ * is missing is not relaunched. The prompt is typed only after claude takes the foreground, so it
+ * never reaches the login shell, and a loop whose engine waits for a handoff gets the handoff
+ * resume prompt; it resolves the send result, or null when the resume skipped or failed before
+ * the prompt send.
  */
 async function resume(
   card: Card,
   session: Session,
   deps: ActionDeps,
-): Promise<void> {
+): Promise<SendResult | null> {
   if (store.isStarting(card.id)) {
     record(card, session, {
       action: "resume",
       result: "skipped",
       reason: "a start is in flight",
     });
-    return;
+    return null;
   }
-  const owner = orchestratorOf(card);
-  if (isHiddenCard(card) && owner?.state !== "running") {
+  const hidden = resumeBlocked(card, false);
+  if (hidden !== null) {
     record(card, session, {
       action: "resume",
       result: "skipped",
-      reason: "the orchestrator is not running",
+      reason: hidden,
     });
-    return;
+    return null;
   }
-  const failed = (why: string) =>
-    markNeedsInput(card, session, "resume_failed", `resume: ${why}`);
+  const owner = orchestratorOf(card);
+  const failed = async (why: string) => {
+    await markNeedsInput(card, session, "resume_failed", `resume: ${why}`);
+    return null;
+  };
   if (
     session.tmuxSession !== undefined &&
     (await deps.atShellPrompt(`=${session.tmuxSession}:`))
   ) {
-    const memory = memoryCheck(card.boardKey ?? DEFAULT_BOARD_KEY);
-    if (!memory.ok) return failed(memory.reason);
+    const root = rootOf(card, session);
+    if (root !== "" && !(await isFolder(root)))
+      return failed(`Resume failed: workspace-missing: ${root}`);
+    const blocked = resumeBlocked(card);
+    if (blocked !== null) return failed(blocked);
     const outcome = await deps.relaunch(card.id);
     if (outcome !== "launched") return failed(`run claude ${outcome}`);
   } else {
     await deps.resume(card.id);
   }
+  return promptAfterResume(card, session, owner, deps, failed);
+}
+
+/** Wait for claude to take the foreground of the relaunched session, then type its resume prompt. */
+async function promptAfterResume(
+  card: Card,
+  session: Session,
+  owner: ReturnType<typeof orchestratorOf>,
+  deps: ActionDeps,
+  failed: (why: string) => Promise<null>,
+): Promise<SendResult | null> {
   const live = store.getCard(card.id);
   const resumed = live?.sessions?.find((s) => s.id === session.id);
   if (!live || !resumed?.tmuxSession) {
@@ -149,37 +258,152 @@ async function resume(
     POLL_MS,
   );
   if (!up) return failed("claude did not start");
+  const slug = live.loopProgress?.slug;
+  const text = owner
+    ? orchestratorResumePromptText(owner.id, live.boardKey ?? DEFAULT_BOARD_KEY)
+    : isHandoffPending(live) && slug
+      ? resumePromptText(
+          slug,
+          rootOf(live, resumed),
+          live.loopProgress?.prdFile,
+          isPrdModel(live.loopProgress),
+        )
+      : continueText(live, resumed, "resume");
   const result = await (deps.send ?? sendConfirmed)(
     live,
     resumed,
-    owner
-      ? orchestratorResumePromptText(
-          owner.id,
-          live.boardKey ?? DEFAULT_BOARD_KEY,
-        )
-      : continueText(live, resumed, "resume"),
+    text,
     "resume",
   );
   record(card, session, { action: "resume", result });
+  return result;
+}
+
+function frozenStale(live: Card | undefined, session: Session): string | null {
+  if (!live) return "the card is gone";
+  const current = live.sessions?.find((s) => s.id === session.id);
+  if (live.activeSessionId !== session.id || !current)
+    return "the session is not the active one";
+  if (current.tmuxSession !== session.tmuxSession)
+    return "the tmux session changed";
+  if (live.paused) return "the card is paused";
+  if (store.isStarting(live.id)) return "a start is in flight";
+  return session.tmuxSession === undefined ? "no tmux session" : null;
+}
+
+/**
+ * Stop a frozen claude in its tmux window, then relaunch it with resume and type the loop prompt once.
+ *
+ * @remarks The stop reuses `endJob` (hangup, then kill of the foreground group, never the shell
+ * group) because a typed `/exit` would only queue in the frozen box. Every check runs before the
+ * first signal.
+ */
+async function relaunchFrozen(
+  card: Card,
+  session: Session,
+  frozenSince: string,
+  evidence: string,
+  deps: ActionDeps,
+): Promise<void> {
+  const event = { action: "relaunch_frozen", frozenSince, evidence };
+  const fail = async (why: string) => {
+    record(card, session, {
+      ...event,
+      result: "failed",
+      reason: why,
+    });
+    await markNeedsInput(card, session, "resume_failed", `relaunch: ${why}`);
+  };
+  const live = store.getCard(card.id);
+  const name = session.tmuxSession;
+  const stale = frozenStale(live, session);
+  if (live === undefined || name === undefined || stale !== null) {
+    record(card, session, { ...event, result: "skipped", reason: stale });
+    return;
+  }
+  const root = rootOf(live, session);
+  if (root !== "" && !(await isFolder(root)))
+    return fail(`workspace-missing: ${root}`);
+  const blocked = resumeBlocked(live);
+  if (blocked !== null) return fail(blocked);
+  if (!(await deps.shellRoot(name))) return fail("no shell root");
+  const target = `=${name}:`;
+  const ended = await withCardLock(card.id, () => endJob(target, deps));
+  if (ended === "busy") {
+    record(card, session, {
+      ...event,
+      result: "skipped",
+      reason: "card busy",
+    });
+    return;
+  }
+  if (!(await deps.atShellPrompt(target))) return fail("claude did not exit");
+  record(card, session, { ...event, result: "stopped" });
+  const sent = await resume(card, session, deps);
+  if (sent !== null)
+    await store.recordSessionRelaunch(
+      card.id,
+      `relaunched with resume after a freeze since ${frozenSince}`,
+    );
+}
+
+async function defaultUserTexts(
+  card: Card,
+  session: Session,
+): Promise<string[]> {
+  const file = await sessionTranscriptPath(card, session);
+  const tail = file === null ? null : await readTranscriptTail(file);
+  return tail?.userTexts ?? [];
+}
+
+async function unsentLine(
+  card: Card,
+  session: Session,
+  deps: ActionDeps,
+): Promise<string | null> {
+  const target = `=${session.tmuxSession}:`;
+  const pane = await (deps.capture ?? capturePane)(target).catch(() => "");
+  const texts = await (deps.userTexts ?? defaultUserTexts)(card, session);
+  return unsentBoxText(pane, texts);
 }
 
 /**
  * Run the planned actions of one state change in order and record each as one event.
  *
  * @remarks Runs inside the session's sampling turn, so a slow send holds later samples of that
- * session instead of letting them plan a second time.
+ * session instead of letting them plan a second time. Resolves true when every continue action
+ * was confirmed in the transcript, or when there is none.
  */
 export async function runActions(
   card: Card,
   session: Session,
   actions: SupervisorAction[],
   evidence: string,
-  deps: ActionDeps = DEFAULT_DEPS,
-): Promise<void> {
+  deps: ActionDeps = actionTools,
+): Promise<boolean> {
+  let confirmed = true;
   for (const action of actions) {
     switch (action.kind) {
       case "continue": {
-        const result = await sendConfirmed(
+        const held = await unsentLine(card, session, deps);
+        if (held !== null) {
+          record(card, session, {
+            action: "continue",
+            duty: action.duty,
+            result: "skipped",
+            reason: "previous line unsent",
+            evidence: held.slice(0, 80),
+          });
+          await markNeedsInput(
+            card,
+            session,
+            "supervisor_gave_up",
+            `previous line unsent: ${held.slice(0, 80)}`,
+          );
+          confirmed = false;
+          break;
+        }
+        const result = await (deps.send ?? sendConfirmed)(
           card,
           session,
           continueText(card, session, action.duty),
@@ -191,6 +415,7 @@ export async function runActions(
           result,
           evidence,
         });
+        if (result !== "confirmed") confirmed = false;
         break;
       }
       case "needs_input":
@@ -221,6 +446,62 @@ export async function runActions(
       case "handoff":
         await runHandoff(card, session);
         break;
+      case "relaunch_frozen":
+        await relaunchFrozen(card, session, action.frozenSince, evidence, deps);
+        break;
     }
   }
+  return confirmed;
+}
+
+/**
+ * Run planned actions and return the plan memory to keep.
+ *
+ * @remarks A continue that the transcript does not show leaves its once-per-phase slot unspent, so
+ * the next stop can try again.
+ */
+export async function runPlanned(
+  card: Card,
+  session: Session,
+  planned: { actions: SupervisorAction[]; memory: PlanMemory },
+  before: PlanMemory,
+  evidence: string,
+  deps: ActionDeps = actionTools,
+): Promise<PlanMemory> {
+  const confirmed = await runActions(
+    card,
+    session,
+    planned.actions,
+    evidence,
+    deps,
+  );
+  return confirmed ? planned.memory : before;
+}
+
+/**
+ * Relaunch a lost card for the `resume_session` tool and type its resume prompt, as the lost-session duty does.
+ *
+ * @remarks The saga starts before any await, so the start latch is taken inside the caller's cap
+ * lock. With the supervisor off or no session record it types nothing.
+ */
+export async function resumeLostCard(
+  card: Card,
+  deps: ActionDeps = actionTools,
+): Promise<void> {
+  const session = card.sessions?.find((s) => s.id === card.activeSessionId);
+  const supervised =
+    store.getBoard(card.boardKey ?? DEFAULT_BOARD_KEY)?.policy.supervisor ===
+    "on";
+  await deps.resume(card.id);
+  if (!session || !supervised) return;
+  await promptAfterResume(
+    card,
+    session,
+    orchestratorOf(card),
+    deps,
+    async (why) => {
+      await markNeedsInput(card, session, "resume_failed", `resume: ${why}`);
+      return null;
+    },
+  );
 }

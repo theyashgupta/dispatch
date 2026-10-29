@@ -10,6 +10,7 @@ import {
   needsCallText,
   spentText,
 } from "@/modules/dashboard/domain/header-strip";
+import { orchestratorScopeText } from "@/modules/dashboard/domain/orchestrator-scope-text";
 import { loopsRunningText } from "@/modules/dashboard/domain/progress-rows";
 import { clock } from "@/modules/dashboard/domain/usage-meters";
 import { useAttentionRows } from "./use-attention-rows";
@@ -22,8 +23,16 @@ function focusNeedsYourCall() {
 }
 
 export function HeaderStripContainer() {
-  const { boardKey, snapshot, summary, decisions, boardName, connection, now } =
-    useDashboardData();
+  const {
+    boardKey,
+    snapshot,
+    summary,
+    decisions,
+    boardName,
+    connection,
+    now,
+    orchestrators,
+  } = useDashboardData();
   const needsCount = useAttentionRows().length;
   const cards = snapshot.data?.cards;
   const updatedAt = snapshot.dataUpdatedAt;
@@ -45,8 +54,9 @@ export function HeaderStripContainer() {
         ? null
         : gatesText(gatesPassedToday(cards, new Date(now))),
       summary.data === undefined ? null : spentText(summary.data.groups),
+      orchestratorScopeText(orchestrators, cards ?? []),
     ].filter((fact) => fact !== null);
-  }, [staleText, updatedAt, summary.data, cards, now]);
+  }, [staleText, updatedAt, summary.data, cards, now, orchestrators]);
   return (
     <HeaderStrip
       boardName={boardName}

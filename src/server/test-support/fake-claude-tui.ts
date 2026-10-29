@@ -10,9 +10,78 @@ if (process.argv[2] === "--version") {
   process.exit(0);
 }
 
+const LOGIN_URL = "https://claude.com/cai/oauth/authorize?code=abc&state=xyz";
+const SECOND_IDENTITY = JSON.stringify({
+  loggedIn: true,
+  email: "second@example.com",
+  orgId: "org-2",
+  orgName: "Second Org",
+  subscriptionType: "pro",
+});
+
+function leave(code, text, stream = process.stdout) {
+  stream.write(text, () => process.exit(code));
+}
+
+function runAuthLogin(configDir) {
+  const prompt = "Paste code here if prompted > ";
+  const loginFile = path.join(configDir, ".fake-login");
+  const copyIdentity = (source, fallback) => {
+    if (source && fs.existsSync(source)) fs.copyFileSync(source, loginFile);
+    else fs.writeFileSync(loginFile, fallback + "\n");
+  };
+  process.stdout.write(
+    "Opening browser to sign in…\n" +
+      "If the browser didn't open, visit: \x1b]8;;" + LOGIN_URL + "\x07" + LOGIN_URL + "\x1b]8;;\x07\n" +
+      prompt,
+  );
+  let buffer = "";
+  const onCode = (code) => {
+    if (code === "good") {
+      copyIdentity(process.env.FAKE_CLAUDE_LOGIN_IDENTITY_FILE, SECOND_IDENTITY);
+      leave(0, "Logged in\n");
+    } else if (code === "home") {
+      copyIdentity(process.env.FAKE_CLAUDE_IDENTITY_FILE, SECOND_IDENTITY);
+      leave(0, "Logged in\n");
+    } else if (code === "stale") {
+      leave(1, "Login failed: Request failed with status code 400\n", process.stderr);
+    } else if (code === "crash") process.exit(1);
+    else if (code === "hang") setTimeout(() => process.exit(1), 30000);
+    else if (code === "deny") {
+      leave(1, "OAuth error: error=access_denied&error_description=user+cancelled\n");
+    } else if (code === "noid") leave(0, "Logged in\n");
+    else {
+      process.stdout.write("Invalid code. Please make sure the full code was copied.\n" + prompt);
+    }
+  };
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (chunk) => {
+    buffer += chunk;
+    let at;
+    while ((at = buffer.indexOf("\n")) !== -1) {
+      const line = buffer.slice(0, at);
+      buffer = buffer.slice(at + 1);
+      onCode(line);
+    }
+  });
+  process.stdin.on("end", () => process.exit(1));
+}
+
 if (process.argv[2] === "auth") {
-  process.stdout.write(JSON.stringify({ loggedIn: false }) + "\n");
-  process.exit(0);
+  const configDir = process.env.CLAUDE_CONFIG_DIR;
+  const loginFile = configDir ? path.join(configDir, ".fake-login") : "";
+  const homeFile = process.env.FAKE_CLAUDE_IDENTITY_FILE;
+  if (process.argv[3] === "logout") {
+    if (loginFile) fs.rmSync(loginFile, { force: true });
+    leave(0, "Logged out\n");
+  } else if (process.argv[3] === "login" && configDir) {
+    runAuthLogin(configDir);
+  } else {
+    const source = configDir ? loginFile : homeFile;
+    const logged = source && fs.existsSync(source);
+    leave(0, logged ? fs.readFileSync(source, "utf8") : JSON.stringify({ loggedIn: false }) + "\n");
+  }
+  await new Promise(() => setInterval(() => undefined, 1 << 30));
 }
 
 if (process.argv[2] === "mcp" && process.argv[3] === "list") {
@@ -27,7 +96,12 @@ if (process.env.FAKE_CLAUDE_ARGV_FILE) {
 process.stdout._handle?.setBlocking?.(false);
 
 for (const signal of ["SIGTERM", "SIGINT", "SIGHUP"]) {
-  process.on(signal, () => process.exit(0));
+  process.on(signal, () => {
+    try {
+      if (scenario.freezeFile) fs.unlinkSync(scenario.freezeFile);
+    } catch {}
+    process.exit(0);
+  });
 }
 
 const startedAt = Date.now();
@@ -38,6 +112,7 @@ let shown = [];
 let dialog = null;
 let lastWarm = null;
 let droppedEnters = 0;
+let droppedClears = 0;
 let transcriptFile = null;
 let clearedAt = 0;
 let statusOverride = null;
@@ -105,7 +180,15 @@ function render() {
   } else {
     lines.push("");
   }
-  lines.push((scenario.prompt ?? "❯ ") + input, "", ...status);
+  lines.push((scenario.prompt ?? "❯ ") + input);
+  if (scenario.slashMenu && input.startsWith("/") && !dialog) {
+    lines.push(
+      "─".repeat(40),
+      "  ❯ /clear      Start a new session with empty context",
+      "    /compact    Clear conversation history but keep a summary",
+    );
+  }
+  lines.push("", ...status);
   process.stdout.write("\x1b[2J\x1b[H" + lines.join("\n"));
 }
 
@@ -129,6 +212,22 @@ function clearConversation() {
     transcriptFile =
       scenario.transcriptDir + "/" + Date.now().toString(36) + "-fresh.jsonl";
     clearedAt = 1;
+    const at = new Date().toISOString();
+    const entry = (content) =>
+      JSON.stringify({
+        type: "user",
+        message: { role: "user", content },
+        timestamp: at,
+      }) + "\n";
+    fs.appendFileSync(
+      transcriptFile,
+      entry(
+        "<local-command-caveat>Caveat: The command below was run directly in Claude Code.</local-command-caveat>",
+      ) +
+        entry(
+          "<command-name>/clear</command-name>\n            <command-message>clear</command-message>\n            <command-args></command-args>",
+        ),
+    );
   }
 }
 
@@ -147,11 +246,21 @@ function submit() {
   const text = input;
   if (text === "") return;
   notifyWaiters(text);
+  if (text === "/clear" && droppedClears < (scenario.dropClears ?? 0)) {
+    droppedClears++;
+    input = "";
+    return;
+  }
   if (text === "/clear") {
     wasCleared = true;
     return clearConversation();
   }
-  if (text === "/exit" && scenario.exitOnExit) process.exit(0);
+  if (text === "/exit") {
+    shown.push("> /exit", "  ⎿  Goodbye!");
+    input = "";
+    setImmediate(() => leave(0, "\n"));
+    return;
+  }
   const limit = scenario.limitStop;
   const reply = limit ?? scenario.reply ?? "ok";
   const file = transcriptFile ?? scenario.transcriptPath;
@@ -542,6 +651,7 @@ function handleKey(key) {
     return;
   }
   if (key === "enter") {
+    if (scenario.freezeFile && fs.existsSync(scenario.freezeFile)) return;
     if (droppedEnters < (scenario.dropEnters ?? 0)) droppedEnters++;
     else submit();
   } else if (key === "ctrl:21") input = "";
@@ -635,7 +745,7 @@ function shellQuote(value: string): string {
  *
  * @remarks Lookup order is `<dir>/<DISPATCH_CARD_ID>.json`, `<dir>/default.json`, then the variable. Scenario keys: `byConfigDir`
  * merges a partial scenario by `CLAUDE_CONFIG_DIR` folder name, `limitStop` answers each prompt as a usage limit stop, and
- * `exitOnExit` ends the process on `/exit`. The fake is test-only and sets stdout non-blocking, since a blocking write stalls on a full pty.
+ * `exitOnExit` ends the process on `/exit`, and `freezeFile` holds every Enter while that file exists (a signal that ends the fake deletes it). The fake is test-only and sets stdout non-blocking, since a blocking write stalls on a full pty.
  */
 export function writeFakeClaudeTui(binDir: string): string {
   const script = path.join(binDir, "fake-claude-tui.mjs");

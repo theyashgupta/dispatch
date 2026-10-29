@@ -18,13 +18,11 @@ import { Route as ErrorsChar123IdChar125RouteImport } from './routes/errors.{-$i
 import { Route as InboxChar123IdChar125RouteImport } from './routes/inbox.{-$id}'
 import { Route as OrchestratorChar123IdChar125RouteImport } from './routes/orchestrator.{-$id}'
 import { Route as PullRequestsChar123IdChar125RouteImport } from './routes/pull-requests.{-$id}'
-import { Route as SessionsChar123IdChar125RouteImport } from './routes/sessions.{-$id}'
 import { Route as BoardsKeyIndexRouteImport } from './routes/boards.$key.index'
 import { Route as BoardsKeySettingsRouteImport } from './routes/boards.$key.settings'
 import { Route as BoardsKeyDashboardChar123IdChar125RouteImport } from './routes/boards.$key.dashboard.{-$id}'
 import { Route as BoardsKeyInboxChar123IdChar125RouteImport } from './routes/boards.$key.inbox.{-$id}'
 import { Route as BoardsKeyOrchestratorChar123IdChar125RouteImport } from './routes/boards.$key.orchestrator.{-$id}'
-import { Route as BoardsKeySessionsChar123IdChar125RouteImport } from './routes/boards.$key.sessions.{-$id}'
 
 const AccountsChar123IdChar125LazyRouteImport =
   createFileRoute('/accounts/{-$id}')()
@@ -151,12 +149,6 @@ const PullRequestsChar123IdChar125Route =
   } as any).lazy(() =>
     import('./routes/pull-requests.{-$id}.lazy').then((d) => d.Route),
   )
-const SessionsChar123IdChar125Route =
-  SessionsChar123IdChar125RouteImport.update({
-    id: '/sessions/{-$id}',
-    path: '/sessions/{-$id}',
-    getParentRoute: () => rootRouteImport,
-  } as any)
 const SettingsChar123IdChar125LazyRoute =
   SettingsChar123IdChar125LazyRouteImport.update({
     id: '/settings/{-$id}',
@@ -253,14 +245,6 @@ const BoardsKeyOrchestratorChar123IdChar125Route =
       (d) => d.Route,
     ),
   )
-const BoardsKeySessionsChar123IdChar125Route =
-  BoardsKeySessionsChar123IdChar125RouteImport.update({
-    id: '/boards/$key/sessions/{-$id}',
-    path: '/boards/$key/sessions/{-$id}',
-    getParentRoute: () => rootRouteImport,
-  } as any).lazy(() =>
-    import('./routes/boards.$key.sessions.{-$id}.lazy').then((d) => d.Route),
-  )
 
 export interface FileRoutesByFullPath {
   '/board/{-$id}': typeof BoardChar123IdChar125Route
@@ -269,7 +253,6 @@ export interface FileRoutesByFullPath {
   '/inbox/{-$id}': typeof InboxChar123IdChar125Route
   '/orchestrator/{-$id}': typeof OrchestratorChar123IdChar125Route
   '/pull-requests/{-$id}': typeof PullRequestsChar123IdChar125Route
-  '/sessions/{-$id}': typeof SessionsChar123IdChar125Route
   '/accounts/{-$id}': typeof AccountsChar123IdChar125LazyRoute
   '/activity/{-$id}': typeof ActivityChar123IdChar125LazyRoute
   '/archive/{-$id}': typeof ArchiveChar123IdChar125LazyRoute
@@ -291,7 +274,6 @@ export interface FileRoutesByFullPath {
   '/boards/$key/dashboard/{-$id}': typeof BoardsKeyDashboardChar123IdChar125Route
   '/boards/$key/inbox/{-$id}': typeof BoardsKeyInboxChar123IdChar125Route
   '/boards/$key/orchestrator/{-$id}': typeof BoardsKeyOrchestratorChar123IdChar125Route
-  '/boards/$key/sessions/{-$id}': typeof BoardsKeySessionsChar123IdChar125Route
 }
 export interface FileRoutesByTo {
   '/board/{-$id}': typeof BoardChar123IdChar125Route
@@ -300,7 +282,6 @@ export interface FileRoutesByTo {
   '/inbox/{-$id}': typeof InboxChar123IdChar125Route
   '/orchestrator/{-$id}': typeof OrchestratorChar123IdChar125Route
   '/pull-requests/{-$id}': typeof PullRequestsChar123IdChar125Route
-  '/sessions/{-$id}': typeof SessionsChar123IdChar125Route
   '/accounts/{-$id}': typeof AccountsChar123IdChar125LazyRoute
   '/activity/{-$id}': typeof ActivityChar123IdChar125LazyRoute
   '/archive/{-$id}': typeof ArchiveChar123IdChar125LazyRoute
@@ -322,7 +303,6 @@ export interface FileRoutesByTo {
   '/boards/$key/dashboard/{-$id}': typeof BoardsKeyDashboardChar123IdChar125Route
   '/boards/$key/inbox/{-$id}': typeof BoardsKeyInboxChar123IdChar125Route
   '/boards/$key/orchestrator/{-$id}': typeof BoardsKeyOrchestratorChar123IdChar125Route
-  '/boards/$key/sessions/{-$id}': typeof BoardsKeySessionsChar123IdChar125Route
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -332,7 +312,6 @@ export interface FileRoutesById {
   '/inbox/{-$id}': typeof InboxChar123IdChar125Route
   '/orchestrator/{-$id}': typeof OrchestratorChar123IdChar125Route
   '/pull-requests/{-$id}': typeof PullRequestsChar123IdChar125Route
-  '/sessions/{-$id}': typeof SessionsChar123IdChar125Route
   '/accounts/{-$id}': typeof AccountsChar123IdChar125LazyRoute
   '/activity/{-$id}': typeof ActivityChar123IdChar125LazyRoute
   '/archive/{-$id}': typeof ArchiveChar123IdChar125LazyRoute
@@ -354,7 +333,6 @@ export interface FileRoutesById {
   '/boards/$key/dashboard/{-$id}': typeof BoardsKeyDashboardChar123IdChar125Route
   '/boards/$key/inbox/{-$id}': typeof BoardsKeyInboxChar123IdChar125Route
   '/boards/$key/orchestrator/{-$id}': typeof BoardsKeyOrchestratorChar123IdChar125Route
-  '/boards/$key/sessions/{-$id}': typeof BoardsKeySessionsChar123IdChar125Route
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -365,7 +343,6 @@ export interface FileRouteTypes {
     | '/inbox/{-$id}'
     | '/orchestrator/{-$id}'
     | '/pull-requests/{-$id}'
-    | '/sessions/{-$id}'
     | '/accounts/{-$id}'
     | '/activity/{-$id}'
     | '/archive/{-$id}'
@@ -387,7 +364,6 @@ export interface FileRouteTypes {
     | '/boards/$key/dashboard/{-$id}'
     | '/boards/$key/inbox/{-$id}'
     | '/boards/$key/orchestrator/{-$id}'
-    | '/boards/$key/sessions/{-$id}'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/board/{-$id}'
@@ -396,7 +372,6 @@ export interface FileRouteTypes {
     | '/inbox/{-$id}'
     | '/orchestrator/{-$id}'
     | '/pull-requests/{-$id}'
-    | '/sessions/{-$id}'
     | '/accounts/{-$id}'
     | '/activity/{-$id}'
     | '/archive/{-$id}'
@@ -418,7 +393,6 @@ export interface FileRouteTypes {
     | '/boards/$key/dashboard/{-$id}'
     | '/boards/$key/inbox/{-$id}'
     | '/boards/$key/orchestrator/{-$id}'
-    | '/boards/$key/sessions/{-$id}'
   id:
     | '__root__'
     | '/board/{-$id}'
@@ -427,7 +401,6 @@ export interface FileRouteTypes {
     | '/inbox/{-$id}'
     | '/orchestrator/{-$id}'
     | '/pull-requests/{-$id}'
-    | '/sessions/{-$id}'
     | '/accounts/{-$id}'
     | '/activity/{-$id}'
     | '/archive/{-$id}'
@@ -449,7 +422,6 @@ export interface FileRouteTypes {
     | '/boards/$key/dashboard/{-$id}'
     | '/boards/$key/inbox/{-$id}'
     | '/boards/$key/orchestrator/{-$id}'
-    | '/boards/$key/sessions/{-$id}'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -459,7 +431,6 @@ export interface RootRouteChildren {
   InboxChar123IdChar125Route: typeof InboxChar123IdChar125Route
   OrchestratorChar123IdChar125Route: typeof OrchestratorChar123IdChar125Route
   PullRequestsChar123IdChar125Route: typeof PullRequestsChar123IdChar125Route
-  SessionsChar123IdChar125Route: typeof SessionsChar123IdChar125Route
   AccountsChar123IdChar125LazyRoute: typeof AccountsChar123IdChar125LazyRoute
   ActivityChar123IdChar125LazyRoute: typeof ActivityChar123IdChar125LazyRoute
   ArchiveChar123IdChar125LazyRoute: typeof ArchiveChar123IdChar125LazyRoute
@@ -481,7 +452,6 @@ export interface RootRouteChildren {
   BoardsKeyDashboardChar123IdChar125Route: typeof BoardsKeyDashboardChar123IdChar125Route
   BoardsKeyInboxChar123IdChar125Route: typeof BoardsKeyInboxChar123IdChar125Route
   BoardsKeyOrchestratorChar123IdChar125Route: typeof BoardsKeyOrchestratorChar123IdChar125Route
-  BoardsKeySessionsChar123IdChar125Route: typeof BoardsKeySessionsChar123IdChar125Route
 }
 
 declare module '@tanstack/react-router' {
@@ -591,13 +561,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PullRequestsChar123IdChar125RouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/sessions/{-$id}': {
-      id: '/sessions/{-$id}'
-      path: '/sessions/{-$id}'
-      fullPath: '/sessions/{-$id}'
-      preLoaderRoute: typeof SessionsChar123IdChar125RouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/settings/{-$id}': {
       id: '/settings/{-$id}'
       path: '/settings/{-$id}'
@@ -682,13 +645,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof BoardsKeyOrchestratorChar123IdChar125RouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/boards/$key/sessions/{-$id}': {
-      id: '/boards/$key/sessions/{-$id}'
-      path: '/boards/$key/sessions/{-$id}'
-      fullPath: '/boards/$key/sessions/{-$id}'
-      preLoaderRoute: typeof BoardsKeySessionsChar123IdChar125RouteImport
-      parentRoute: typeof rootRouteImport
-    }
   }
 }
 
@@ -699,7 +655,6 @@ const rootRouteChildren: RootRouteChildren = {
   InboxChar123IdChar125Route: InboxChar123IdChar125Route,
   OrchestratorChar123IdChar125Route: OrchestratorChar123IdChar125Route,
   PullRequestsChar123IdChar125Route: PullRequestsChar123IdChar125Route,
-  SessionsChar123IdChar125Route: SessionsChar123IdChar125Route,
   AccountsChar123IdChar125LazyRoute: AccountsChar123IdChar125LazyRoute,
   ActivityChar123IdChar125LazyRoute: ActivityChar123IdChar125LazyRoute,
   ArchiveChar123IdChar125LazyRoute: ArchiveChar123IdChar125LazyRoute,
@@ -723,8 +678,6 @@ const rootRouteChildren: RootRouteChildren = {
   BoardsKeyInboxChar123IdChar125Route: BoardsKeyInboxChar123IdChar125Route,
   BoardsKeyOrchestratorChar123IdChar125Route:
     BoardsKeyOrchestratorChar123IdChar125Route,
-  BoardsKeySessionsChar123IdChar125Route:
-    BoardsKeySessionsChar123IdChar125Route,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

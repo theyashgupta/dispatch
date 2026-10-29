@@ -8,7 +8,7 @@ import {
   type Config,
   type StartError,
 } from "../../../shared/types.js";
-import { sleep } from "../../adapters/exec.js";
+import { run, sleep } from "../../adapters/exec.js";
 import {
   branchExists,
   fetchBase,
@@ -54,6 +54,7 @@ import {
 import { recordNewestConversation } from "./resume-target.js";
 import { newHookTokenValue, registerHookToken } from "./hook-tokens.js";
 import { hookSettingsPath } from "../infra/paths.js";
+import { writeLoopSettings } from "../infra/hook-settings.js";
 import { githubRepoAt } from "./github-repos.js";
 import {
   isGuardedLaunch,
@@ -117,6 +118,7 @@ const LAUNCH_CLEAR_MS = 3_000;
 const LAUNCH_CLEAR_POLL_MS = 150;
 const PASTE_SETTLE_MS = 500;
 const NEWEST_CONVERSATION_DELAY_MS = 5_000;
+const NPM_CI_TIMEOUT_MS = 10 * 60_000;
 
 /**
  * Mutable saga bookkeeping. `run` records creations here; `undo` compensates against these
@@ -384,6 +386,38 @@ async function createRepoWorktree(
 }
 
 /**
+ * Run `npm ci` in a worktree that has a `package-lock.json` and no `node_modules`.
+ *
+ * @remarks The start waits for the full install, which takes minutes for a large lock file, so the
+ * first check of the session finds its dependencies. `NODE_ENV` is removed because the server runs
+ * with `production`, which makes `npm ci` skip dev dependencies. A failure is a warning, never a
+ * failed start.
+ */
+async function installNodeModules(
+  ctx: SagaContext,
+  worktreePath: string,
+): Promise<void> {
+  if (
+    !fs.existsSync(path.join(worktreePath, "package-lock.json")) ||
+    fs.existsSync(path.join(worktreePath, "node_modules"))
+  ) {
+    return;
+  }
+  try {
+    await run("env", ["-u", "NODE_ENV", "npm", "ci"], {
+      cwd: worktreePath,
+      timeout: NPM_CI_TIMEOUT_MS,
+      maxBuffer: 16 * 1024 * 1024,
+    });
+  } catch (err) {
+    console.warn(`[start] npm ci failed in ${worktreePath}: ${stderrOf(err)}`);
+    ctx.warnings.push(
+      `npm ci failed in ${path.basename(worktreePath)}, node_modules is missing`,
+    );
+  }
+}
+
+/**
  * The path of the workspace repository whose `origin` is the GitHub repository `prRepo`, or null.
  *
  * @remarks Matches by remote name, not by position or folder name: the Start dialog may send any
@@ -477,6 +511,10 @@ const createWorktrees: SagaStep = {
           base,
           repoPath === reviewRepo ? reviewPr?.number : undefined,
         ),
+      );
+      await installNodeModules(
+        ctx,
+        buildWorktreePath(ctx.workspacePath, repoPath),
       );
     }
   },
@@ -598,6 +636,7 @@ type LaunchHooks = { port: number; token: string; cardId: string } | null;
 export async function launchClaude(input: LaunchClaudeInput): Promise<boolean> {
   const { cardId, sessionId, tmuxSession, cwd, leadingArgs, account } = input;
   if (account.external !== true) await preSeedTrust(cwd, account.configDir);
+  if (account.external !== true) await writeLoopSettings(account.configDir);
   const created = !(await hasSession(`=${tmuxSession}`));
   const hooks = created
     ? await mintHooks(cardId, sessionId)
@@ -812,7 +851,10 @@ export async function buildLaunch(
     claudePath: (await resolveBinaryPath("claude")) ?? "claude",
     claudeArgs: policy?.claudeArgs ?? configured,
     leadingArgs: [...(policy?.leadingArgs ?? []), ...leadingArgs],
-    settingsPath: hookSettingsPath(inbound),
+    settingsPath: hookSettingsPath(
+      inbound,
+      current !== undefined && isHiddenCard(current),
+    ),
     hooks,
     configDir: account.configDir,
   });

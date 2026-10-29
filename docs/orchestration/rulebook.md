@@ -29,6 +29,24 @@ End every turn with `wait_for_event`. Use these values:
 
 Never end a turn with only a report.
 
+### Scope
+
+Each orchestrator has a scope: board or feature. The kickoff direction names your scope.
+
+- The main orchestrator is a board orchestrator. It triages the To Do column and acts on each card that no feature orchestrator owns. Section 2 applies to it.
+- An extra orchestrator is a feature orchestrator. It acts only on the cards that are assigned to it: its groups, the tickets in those groups and its tickets. `list_cards` returns only these cards. The other card tools refuse a card that is not assigned to it with `out-of-scope`.
+
+A feature orchestrator uses these rules in place of section 2:
+
+1. Act only on the cards that are assigned to you. Do not look for work in the To Do column.
+2. A typed direction that names other cards is a request to assign them to you. Call `assign_card` for each card that the direction names. Then act on the card. `assign_card` accepts only a card in To Do. For a card in another column, tell the user to assign it from the card detail panel.
+3. Never start, stop or ship a card that is not assigned to you.
+4. An `intake_submitted` event with your orchestrator id and a `cardId` tells you that the user assigned that card to you. Read the card with `get_card`.
+5. Ignore an event for a card that is not assigned to you.
+6. When no card is assigned to you, call `wait_for_event` and do nothing more.
+
+Sections 3 to 12 apply to a feature orchestrator for its assigned cards. A feature orchestrator ships its assigned cards with the ship procedure of section 9.
+
 ## 2. Intake triage
 
 Work starts from one of three inputs:
@@ -270,7 +288,7 @@ A server restart or a reboot marks the live sessions lost. At boot the superviso
 
 For a card that is still lost, call `resume_session`. Do not raise a decision item that asks the user to press Restart or Resume. Call it only below the cap. For a card in Agent done or a later column, call it only when that card needs more work. For a card that `stop_session`, a usage stop or the budget stopped, follow the rules for that stop.
 
-A resumed session gets no kickoff prompt and sits at its prompt, so send_input a continue line after the session is live. Use `list_sessions` or `read_pane_tail` to see that it is live.
+On a board with the supervisor on, the supervisor types the resume prompt once the session is live and confirms it in the transcript. With the supervisor off the resumed session gets no prompt and sits at its prompt, so send_input a continue line after the session is live. Use `list_sessions` or `read_pane_tail` to see that it is live.
 
 `resume_session` refuses in these cases:
 
@@ -280,6 +298,8 @@ A resumed session gets no kickoff prompt and sits at its prompt, so send_input a
 - 409 `memory-low`: memory on this Mac is low. Wait for the next wake.
 - 400 `invalid-identifier`: the card id is not a ticket id. Raise a decision item.
 - 403 `policy-refused`: the cap is reached. Wait until a loop finishes.
+- A card whose session state is `released`: Claude exited after DONE to free memory. `resume_session` brings Claude back in the live session, then send_input.
+- 409 `revive-failed`: Claude did not start in the released session. Use `read_pane_tail`, then raise a decision item.
 
 ### Loop count
 
@@ -302,15 +322,15 @@ Ship one squash PR for each unit. Implementation files and new test files never 
 The server runs the ship flow. For each branch the flow does these steps:
 
 1. Merge main into the branch. The flow never rebases.
-2. Run the check command.
-3. Open the PR.
+2. Run the check command. If the merged tip is the commit on which the check command last passed, skip the command. The diff scope check and the prose check still run.
+3. Open the PR. If the branch already has an open PR into main, adopt that PR.
 4. Wait for the checks.
 5. With merge rights, squash merge the PR. With `open_prs` rights, wait for the user to merge.
 6. After each merge, check the author identity. Check that the commit has no Co-Authored-By line.
 
 Call `get_ship_state` to follow the flow.
 
-When the flow stops, the server creates a decision item of kind `ship_failure`. Read the failed step and the reason in `get_ship_state`.
+When the flow stops, the server creates a decision item of kind `ship_failure`. Read the failed step and the reason in `get_ship_state`. The reason of a failed check command names the failing step, the exit code and the last 40 lines of the output.
 
 To fix a failed check, call `send_input` with the fix instruction to the group session. Then call `start_ship` again.
 
@@ -375,5 +395,6 @@ An orchestrator never:
 8. Acts on another board, or on a card outside its scope (D-7).
 9. Answers its own decision item, or approves a permission prompt.
 10. Deletes a branch, a worktree or a card that it did not create.
+11. Acts, as a feature orchestrator, on a card that is not assigned to it.
 
 One more rule applies: never write the status marker in a direction.

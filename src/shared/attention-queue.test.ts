@@ -134,6 +134,7 @@ function build(cards: Card[], decisions: DecisionItem[] = [], events = []) {
     cards,
     decisions,
     events,
+    pushoverMissing: null,
     now: NOW,
   });
 }
@@ -212,6 +213,7 @@ test("permission_prompt reads the evidence of the newest matching event", () => 
       event(3, minutesAgo(1), "working", "s-GROUP-1"),
       event(4, minutesAgo(1), "permission_prompt", "other"),
     ],
+    pushoverMissing: null,
     now: NOW,
   });
   assert.equal(items[0]?.text, "evidence 2");
@@ -442,6 +444,7 @@ test("a wire-shape permission prompt reads the event evidence", () => {
         ts: minutesAgo(4),
       },
     ],
+    pushoverMissing: null,
     now: NOW,
   });
   assert.equal(items[0]?.text, "Allow Bash?");
@@ -583,4 +586,113 @@ test("auto-answered ticket_proposal and plan items stay out of the queue and the
   const views = decisionViews(items, new Map(), NOW.getTime());
   assert.equal(views.length, 1);
   assert.equal(views[0]?.id, "d-ruling");
+});
+
+test("a budget warning mark yields one budget_warning item with the numbers and the mark time", () => {
+  const at = minutesAgo(30);
+  const cards = [
+    card("GROUP-1", {
+      budgetWarning: { at, cost: 8.5, budget: 10, percent: 80 },
+    }),
+  ];
+  const first = build(cards);
+  const second = build(cards);
+  assert.equal(first.length, 1);
+  assert.deepEqual(
+    second.map((i) => i.id),
+    ["budget_warning:id-GROUP-1"],
+  );
+  assert.equal(first[0]?.kind, "budget_warning");
+  assert.equal(first[0]?.waitingSince, at);
+  assert.equal(first[0]?.waitMinutes, 30);
+  assert.equal(first[0]?.reply, false);
+  assert.deepEqual(first[0]?.warning, { cost: 8.5, budget: 10, percent: 80 });
+});
+
+test("a budget warning mark on a done card yields no item", () => {
+  const queue = build([
+    card("GROUP-1", {
+      column: "done",
+      budgetWarning: {
+        at: minutesAgo(30),
+        cost: 8.5,
+        budget: 10,
+        percent: 80,
+      },
+    }),
+  ]);
+  assert.deepEqual(queue, []);
+});
+
+test("a budget stop shows the budget_stop item and no budget_warning item", () => {
+  const queue = build([
+    withSession("GROUP-1", "needs_input", minutesAgo(5), "budget", {
+      budgetWarning: {
+        at: minutesAgo(30),
+        cost: 12,
+        budget: 10,
+        percent: 80,
+      },
+    }),
+  ]);
+  assert.deepEqual(
+    queue.map((i) => i.kind),
+    ["budget_stop"],
+  );
+});
+
+const ONE_NAME =
+  "Pushover PUSHOVER_USER_KEY is empty or not set. Loop phase notifications are not sent. Fill the value in the env vault.";
+const TWO_NAMES =
+  "Pushover PUSHOVER_USER_KEY and PUSHOVER_APP_TOKEN are empty or not set. Loop phase notifications are not sent. Fill the values in the env vault.";
+
+function withGap(names: string[], cards: Card[] = [], since = minutesAgo(10)) {
+  return buildAttentionQueue({
+    boardKey: DEFAULT_BOARD_KEY,
+    cards,
+    decisions: [],
+    pushoverMissing: { names, since },
+    now: NOW,
+  });
+}
+
+test("one empty Pushover name gives one pushover_missing item", () => {
+  const [item, ...rest] = withGap(["PUSHOVER_USER_KEY"]);
+  assert.equal(rest.length, 0);
+  assert.equal(item?.id, "pushover_missing");
+  assert.equal(item?.kind, "pushover_missing");
+  assert.equal(item?.cardId, null);
+  assert.equal(item?.groupId, null);
+  assert.equal(item?.waitMinutes, 10);
+  assert.equal(item?.text, ONE_NAME);
+});
+
+test("two empty Pushover names give the two-name text", () => {
+  const [item] = withGap(["PUSHOVER_USER_KEY", "PUSHOVER_APP_TOKEN"]);
+  assert.equal(item?.text, TWO_NAMES);
+});
+
+test("an empty names list and an absent input give no pushover_missing item", () => {
+  assert.deepEqual(withGap([]), []);
+  assert.deepEqual(build([]), []);
+});
+
+test("the pushover_missing item sorts by its since among other items", () => {
+  const queue = withGap(
+    ["PUSHOVER_USER_KEY"],
+    [withSession("GROUP-1", "stale", minutesAgo(20))],
+    minutesAgo(30),
+  );
+  assert.deepEqual(
+    queue.map((i) => i.kind),
+    ["pushover_missing", "stale"],
+  );
+});
+
+test("buildAttentionQueue requires the pushoverMissing input", () => {
+  const items = buildAttentionQueue(
+    // @ts-expect-error LOCAL-176: pushoverMissing is a required input
+    { boardKey: DEFAULT_BOARD_KEY, cards: [], decisions: [], now: NOW },
+  );
+  assert.deepEqual(items, []);
 });
