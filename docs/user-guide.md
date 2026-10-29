@@ -282,7 +282,7 @@ The loop also reports each phase gate and unit gate to Dispatch. The report uses
 
 ## The dashboard
 
-Open the dashboard from the sidebar row **Dashboard** (group **Work**), or from the palette command **Go to Dashboard**. The sidebar row and the palette command show only when the board has a main orchestrator. The dashboard shows the board that is selected in the **Boards** section.
+Open the dashboard from the row of the board in the **Dashboards** section of the sidebar, or from the palette command **Go to Dashboard**. The **Dashboards** section lists only boards that have a main orchestrator. In the collapsed sidebar, the **Dashboards** icon opens the dashboard of the current board. The icon and the palette command show only when the current board has a main orchestrator. The dashboard shows the board that is selected in the **Boards** section.
 
 The page has the title "Project map" on a dot-grid background. Each section shows its own loading state and its own error. A section error has the button **Try again**. The other sections stay.
 
