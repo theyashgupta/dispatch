@@ -1,3 +1,4 @@
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import type { Card, Session, SupervisorState } from "../../../shared/types.js";
 import { sendKeys } from "../../adapters/tmux.js";
 import { boardRepository as store } from "../../store/board-repository.js";
@@ -8,7 +9,7 @@ import {
 } from "../domain/errors.js";
 import { checkBudget, checkCap } from "../domain/orchestrator-policy.js";
 import type { OrchestratorIdentity } from "../domain/orchestrator-scope.js";
-import { callerPolicy, runningLoops } from "./boards.js";
+import { callerPolicy, runningLoops, withCapLock } from "./boards.js";
 import { enforce } from "./orchestrator-groups.js";
 import { groupCost } from "./orchestrator-read.js";
 import { sendHandoffRequest } from "./supervisor-handoff.js";
@@ -18,13 +19,16 @@ import {
   typedLine,
   type SendResult,
 } from "./supervisor-send.js";
-import { assertMemoryHeadroom } from "./memory-governor.js";
+import { memoryCheck } from "./memory-governor.js";
+import { releaseForMemory, waitForMemory } from "./memory-wait.js";
 import { pauseCard, unpauseCard } from "./pause-card.js";
+import { resumeLostCard } from "./supervisor-actions.js";
 
 export const sessionTools: {
   send: typeof sendConfirmed;
   keys: typeof sendKeys;
-} = { send: sendConfirmed, keys: sendKeys };
+  resume: (card: Card) => Promise<void>;
+} = { send: sendConfirmed, keys: sendKeys, resume: resumeLostCard };
 
 const KEYLESS_STATES: ReadonlySet<SupervisorState> = new Set([
   "permission_prompt",
@@ -32,6 +36,7 @@ const KEYLESS_STATES: ReadonlySet<SupervisorState> = new Set([
   "usage_limit_wait",
   "shell_prompt",
   "paused",
+  "released",
 ]);
 const USER_MUST_RESUME = "user must resume";
 const MODE_CHARACTERS = new Set(["!", "/", "#", "&", "@"]);
@@ -213,7 +218,8 @@ export async function requestHandoff(
  * Continue a loop stopped by `stop_session` or a supervisor give-up, under the cap and budget.
  *
  * @remarks The stopped session still counts as running, and resuming adds no loop, so the cap
- * counts the running groups without this card.
+ * counts the running groups without this card. Low memory first releases the finished sessions of
+ * the board, and refuses with `memory-pressure` only when memory is still low after 30 seconds.
  */
 export async function resumeLoop(
   caller: OrchestratorIdentity,
@@ -233,7 +239,10 @@ export async function resumeLoop(
           "session is not stopped by stop_session or a supervisor give-up",
       });
     }
-    assertMemoryHeadroom(caller.boardKey);
+    const memory = await releaseForMemory(caller.boardKey);
+    if (!memory.ok) {
+      throw new ConflictError("memory-pressure", { reason: memory.reason });
+    }
     const policy = callerPolicy(caller);
     enforce(
       checkCap({
@@ -263,6 +272,55 @@ export async function resumeLoop(
       );
     }
     return result;
+  });
+}
+
+/**
+ * Resume a card whose session is lost, through the same saga as the Resume button.
+ *
+ * @remarks Memory is checked here, before the resume starts, so the refusal is `memory-low` and not
+ * `memory-pressure`. The cap gates only a card that holds a loop slot, the set `runningLoops` counts,
+ * and runs with the live guards again inside `withCapLock`. On a board with the supervisor on, the
+ * supervisor types the resume prompt once claude is up.
+ */
+export async function resumeLostSession(
+  caller: OrchestratorIdentity,
+  card: Card,
+): Promise<void> {
+  if (card.tmuxSession) throw new ConflictError("session-live");
+  const hasRecord = card.sessions?.some((s) => s.id === card.activeSessionId);
+  if (
+    !card.workspacePath ||
+    (card.sessionLost !== true && hasRecord !== true)
+  ) {
+    throw new ConflictError("no-lost-session");
+  }
+  if (store.isStarting(card.id)) throw new ConflictError("start-in-flight");
+  if (!/^[A-Za-z0-9]+-\d+$/.test(card.identifier)) {
+    throw new ValidationError("invalid-identifier");
+  }
+  const memory = memoryCheck(card.boardKey ?? DEFAULT_BOARD_KEY);
+  if (!memory.ok) {
+    throw new ConflictError("memory-low", { reason: memory.reason });
+  }
+  await withCapLock(() => {
+    const current = store.getCard(card.id) ?? card;
+    if (current.tmuxSession) throw new ConflictError("session-live");
+    if (store.isStarting(card.id)) throw new ConflictError("start-in-flight");
+    if (current.source === "group" || current.launch !== undefined) {
+      enforce(
+        checkCap({
+          policy: callerPolicy(caller),
+          runningLoops: runningLoops(caller.boardKey, card.id),
+        }),
+      );
+    }
+    void sessionTools.resume(current).catch((err: unknown) => {
+      console.warn(
+        `[resume] resume_session prompt failed: ${(err as Error).message}`,
+      );
+    });
+    return Promise.resolve();
   });
 }
 
@@ -340,13 +398,51 @@ export async function orchestratorPauseCard(
   });
 }
 
-/** Resume a paused loop on behalf of an orchestrator, refused while memory is low. */
+const memoryWaits = new Set<string>();
+
+/**
+ * Resume a paused loop on behalf of an orchestrator, or wait in the background while memory is low.
+ *
+ * @remarks The wait shows the status reason `Waiting for memory…`, and a second call during the
+ * wait starts no second wait. A refusal after 30 minutes or a failed unpause shows
+ * `Resume failed: <reason>`; a card that another path resumed during the wait only clears the reason.
+ */
 export async function orchestratorResumeCard(
   caller: OrchestratorIdentity,
   card: Card,
-): Promise<void> {
-  assertMemoryHeadroom(card.boardKey);
-  await unpauseCard(card.id, {
-    reason: `resumed by orchestrator ${caller.orchestratorId}`,
-  });
+): Promise<{ resumed: true } | { resumed: false; waitingForMemory: string }> {
+  const reason = `resumed by orchestrator ${caller.orchestratorId}`;
+  const memory = memoryCheck(card.boardKey);
+  if (memory.ok) {
+    await unpauseCard(card.id, { reason });
+    return { resumed: true };
+  }
+  if (!card.paused) throw new ConflictError("not-paused");
+  if (!memoryWaits.has(card.id)) {
+    memoryWaits.add(card.id);
+    void unpauseAfterMemory(card, reason).finally(() =>
+      memoryWaits.delete(card.id),
+    );
+  }
+  return { resumed: false, waitingForMemory: memory.reason };
+}
+
+/** Wait for memory, then unpause the card, leaving the outcome in its status reason. */
+async function unpauseAfterMemory(card: Card, reason: string): Promise<void> {
+  try {
+    await store.setStatusReason(card.id, "Waiting for memory…");
+    const memory = await waitForMemory(card.boardKey);
+    if (!memory.ok) throw new Error(memory.reason);
+    await store.setStatusReason(card.id, null);
+    await unpauseCard(card.id, { reason });
+  } catch (err) {
+    const resumedElsewhere =
+      err instanceof ConflictError && err.code === "not-paused";
+    await store
+      .setStatusReason(
+        card.id,
+        resumedElsewhere ? null : `Resume failed: ${(err as Error).message}`,
+      )
+      .catch(() => undefined);
+  }
 }

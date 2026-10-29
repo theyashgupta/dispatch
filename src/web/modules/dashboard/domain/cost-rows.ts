@@ -1,3 +1,5 @@
+import { dollars } from "../../../../shared/cost-text.js";
+
 export interface CostRow {
   cardId: string;
   groupId: string;
@@ -6,15 +8,8 @@ export interface CostRow {
   near: boolean;
 }
 
-const NEAR_RATIO = 0.8;
-
-/** Formats an amount as dollars with two decimals, such as "$12.40". */
-export function dollars(value: number): string {
-  return `$${value.toFixed(2)}`;
-}
-
 /**
- * Builds the cost bar rows of the groups, with the near budget mark at 80 percent of the budget and the over budget mark above 100 percent.
+ * Builds the cost bar rows of the groups, with the near budget mark at `nearPercent` of the budget and the over budget mark above 100 percent.
  *
  * @remarks A budget that an owner orchestrator override set names that orchestrator, so the user knows where to change it.
  */
@@ -26,6 +21,7 @@ export function costRows(
     budget: number | null;
     ownerName?: string | null;
   }[],
+  nearPercent: number,
 ): CostRow[] {
   return groups.map(({ cardId, groupId, cost, budget, ownerName }) => {
     if (budget === null || budget <= 0) {
@@ -38,7 +34,7 @@ export function costRows(
       };
     }
     const percent = Math.round((cost / budget) * 100);
-    const near = cost / budget >= NEAR_RATIO;
+    const near = cost >= (budget * nearPercent) / 100;
     const base = `${dollars(cost)} of ${dollars(budget)}, ${percent}%`;
     const over = cost > budget;
     const text = over

@@ -1,9 +1,11 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { DEFAULT_BOARD_KEY, parseBoardKey } from "../../../shared/board-key.js";
 import type { BoardKey } from "../../../shared/types.js";
+import type { ActionDeps } from "./supervisor-actions.js";
 import { startedGroup } from "../../test-support/group-fixtures.js";
 
 const env = isolateEnv();
@@ -15,8 +17,14 @@ const {
   supervisePane,
   superviseLost,
 } = await import("./supervisor-registry.js");
+const { actionTools } = await import("./supervisor-actions.js");
+const { recordMemory } = await import("../../test-support/memory-fixtures.js");
 await store.load();
-after(() => env.cleanup());
+const realTools = { ...actionTools };
+after(() => {
+  Object.assign(actionTools, realTools);
+  env.cleanup();
+});
 
 const SBX = parseBoardKey("SBX")!;
 await store.createBoard({
@@ -30,10 +38,14 @@ await store.createBoard({
 const PANES = new URL("../../test-support/fixtures/panes/", import.meta.url);
 const pane = (name: string) => readFileSync(new URL(name, PANES), "utf8");
 
-async function startedCard(board: BoardKey, title: string) {
+async function startedCard(
+  board: BoardKey,
+  title: string,
+  workspacePath = `/tmp/ws-${title}`,
+) {
   const created = await store.createLocalCard(board, title, "");
   await store.completeStart(created.id, undefined, {
-    workspacePath: `/tmp/ws-${title}`,
+    workspacePath,
     tmuxSession: `dsp-${title}`,
     branch: title,
   });
@@ -144,6 +156,32 @@ void test("a server restart with the session still idle writes no new event", as
   );
 });
 
+void test("a stored usage_limit_wait read by a fresh watcher runs the limit duty once, and the next sample does not", async () => {
+  const ids = await startedCard(SBX, "restart-limit");
+  await store.setSessionStateIfSession(
+    ids.cardId,
+    ids.sessionId,
+    "usage_limit_wait",
+  );
+  dropWatcher(ids.tmuxSession);
+  const limitWaits = () =>
+    store
+      .listOrchestrationEvents(SBX, 0, 500)
+      .filter(
+        (e) =>
+          e.cardId === ids.cardId &&
+          e.kind === "supervisor_action" &&
+          e.data.action === "limit_wait",
+      ).length;
+  await supervisePane({ ...ids, pane: pane("auto-continue.txt") });
+  assert.equal(sessionOf(ids.cardId)?.state, "usage_limit_wait");
+  assert.equal(stateEvents(SBX, ids.cardId).length, 0);
+  assert.equal(limitWaits(), 1);
+  await supervisePane({ ...ids, pane: pane("auto-continue.txt") });
+  assert.equal(limitWaits(), 1);
+  dropWatcher(ids.tmuxSession);
+});
+
 void test("a paused card gets the paused state and no action even over an api error pane", async () => {
   const ids = await startedCard(SBX, "paused-card");
   await supervisePane({ ...ids, pane: pane("working.txt") });
@@ -202,9 +240,18 @@ void test("an orchestrator's continue budget is keyed by the UTC day, so a new d
   };
   const dayOne = Date.UTC(2026, 9, 8, 12);
   const dayTwo = Date.UTC(2026, 9, 9, 12);
-  for (const now of [dayOne, dayTwo]) {
-    await store.setSessionStateIfSession(ids.cardId, ids.sessionId, "working");
-    await supervisePane({ ...ids, pane: pane("api-error.txt") }, now);
+  actionTools.send = () => Promise.resolve("confirmed");
+  try {
+    for (const now of [dayOne, dayTwo]) {
+      await store.setSessionStateIfSession(
+        ids.cardId,
+        ids.sessionId,
+        "working",
+      );
+      await supervisePane({ ...ids, pane: pane("api-error.txt") }, now);
+    }
+  } finally {
+    delete actionTools.send;
   }
   assert.deepEqual(ensureWatcher(ids.tmuxSession).plan.prompts, {
     "retry:orchestrator/2026-10-08": 1,
@@ -341,4 +388,163 @@ void test("superviseLost records lost and runs the duty once for a whole-card lo
   } finally {
     store.endStart(ids.cardId);
   }
+});
+
+const JOB = 5100;
+
+function frozenFixture() {
+  const calls = { kill: 0, relaunch: 0 };
+  let atPrompt = false;
+  const fake: Partial<ActionDeps> = {
+    paneTerminal: () =>
+      Promise.resolve({ pgid: 5000, tpgid: atPrompt ? 5000 : JOB }),
+    kill: () => {
+      calls.kill++;
+      atPrompt = true;
+    },
+    relaunch: () => {
+      calls.relaunch++;
+      atPrompt = false;
+      return Promise.resolve("launched");
+    },
+    resume: () => Promise.resolve(),
+    atShellPrompt: () => Promise.resolve(atPrompt),
+    shellRoot: () => Promise.resolve(true),
+    send: () => Promise.resolve("confirmed"),
+    claudeUpMs: 50,
+    grace: { hangupMs: 50, killMs: 50, pollMs: 10 },
+  };
+  return { calls, fake };
+}
+
+function relaunchEvents(cardId: string) {
+  return store
+    .listOrchestrationEvents(SBX, 0, 500)
+    .filter(
+      (e) =>
+        e.cardId === cardId &&
+        e.kind === "supervisor_action" &&
+        e.data.action === "relaunch_frozen",
+    );
+}
+
+async function frozenSession(title: string) {
+  const workspace = path.join(env.root, "ws", title);
+  mkdirSync(workspace, { recursive: true });
+  const ids = await startedCard(SBX, title, workspace);
+  const file = path.join(env.root, "projects", title, "transcript.jsonl");
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, '{"type":"summary"}\n');
+  await store.setTranscriptPath(ids.cardId, ids.sessionId, file);
+  await store.setSessionMetersIfSession(ids.cardId, ids.tmuxSession, {
+    contextPercent: 0,
+    model: "Opus 5.5",
+    cost: null,
+    usage: { fiveHourPercent: null, sevenDayPercent: null },
+  });
+  recordMemory(2048, 1000);
+  const base = Date.now();
+  await supervisePane({ ...ids, pane: pane("frozen-compacted.txt") }, base);
+  await supervisePane(
+    { ...ids, pane: pane("frozen-compacted.txt") },
+    base + 60_000,
+  );
+  const session = sessionOf(ids.cardId);
+  assert.equal(session?.state, "frozen");
+  return { ids, since: Date.parse(session.stateSince!) };
+}
+
+void test("a session frozen for 15 minutes is relaunched once and later samples add nothing", async () => {
+  delete process.env.DISPATCH_FROZEN_RELAUNCH_MS;
+  const { calls, fake } = frozenFixture();
+  Object.assign(actionTools, fake);
+  try {
+    const { ids, since } = await frozenSession("frozen-15");
+    const frozen = { ...ids, pane: pane("frozen-compacted.txt") };
+    await supervisePane(frozen, since + 15 * 60_000 - 1_000);
+    assert.equal(calls.kill, 0);
+    assert.equal(relaunchEvents(ids.cardId).length, 0);
+    await supervisePane(frozen, since + 15 * 60_000);
+    assert.equal(calls.kill, 1);
+    assert.equal(calls.relaunch, 1);
+    assert.equal(relaunchEvents(ids.cardId).length, 1);
+    await supervisePane(frozen, since + 16 * 60_000);
+    await supervisePane(frozen, since + 17 * 60_000);
+    assert.equal(calls.kill, 1);
+    assert.equal(calls.relaunch, 1);
+    assert.equal(relaunchEvents(ids.cardId).length, 1);
+    assert.equal(sessionOf(ids.cardId)?.state, "frozen");
+    assert.equal(Date.parse(sessionOf(ids.cardId)!.stateSince!), since);
+  } finally {
+    Object.assign(actionTools, realTools);
+  }
+});
+
+void test("DISPATCH_FROZEN_RELAUNCH_MS moves the relaunch time", async () => {
+  process.env.DISPATCH_FROZEN_RELAUNCH_MS = "120000";
+  const { calls, fake } = frozenFixture();
+  Object.assign(actionTools, fake);
+  try {
+    const { ids, since } = await frozenSession("frozen-env");
+    const frozen = { ...ids, pane: pane("frozen-compacted.txt") };
+    await supervisePane(frozen, since + 119_000);
+    assert.equal(calls.kill, 0);
+    await supervisePane(frozen, since + 120_000);
+    assert.equal(calls.kill, 1);
+    assert.equal(relaunchEvents(ids.cardId).length, 1);
+  } finally {
+    delete process.env.DISPATCH_FROZEN_RELAUNCH_MS;
+    Object.assign(actionTools, realTools);
+  }
+});
+
+void test("a second freeze in the same phase gives needs_input with resume_failed and never flaps back to frozen", async () => {
+  delete process.env.DISPATCH_FROZEN_RELAUNCH_MS;
+  const { calls, fake } = frozenFixture();
+  Object.assign(actionTools, fake);
+  try {
+    const { ids, since } = await frozenSession("frozen-twice");
+    const frozen = { ...ids, pane: pane("frozen-compacted.txt") };
+    await supervisePane(frozen, since + 15 * 60_000);
+    assert.equal(calls.kill, 1);
+    assert.equal(calls.relaunch, 1);
+    const healthy = since + 16 * 60_000;
+    await supervisePane({ ...ids, pane: pane("working.txt") }, healthy);
+    assert.notEqual(sessionOf(ids.cardId)?.state, "frozen");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await supervisePane(frozen, healthy + 60_000);
+    await supervisePane(frozen, healthy + 120_000);
+    const second = sessionOf(ids.cardId);
+    assert.equal(second?.state, "frozen");
+    const due = Math.max(
+      Date.parse(second.stateSince!) + 15 * 60_000,
+      healthy + 180_000,
+    );
+    await supervisePane(frozen, due);
+    assert.equal(sessionOf(ids.cardId)?.state, "needs_input");
+    assert.equal(sessionOf(ids.cardId)?.stateReason, "resume_failed");
+    await supervisePane(frozen, due + 60_000);
+    await supervisePane(frozen, due + 120_000);
+    assert.equal(sessionOf(ids.cardId)?.state, "needs_input");
+    assert.equal(sessionOf(ids.cardId)?.stateReason, "resume_failed");
+    assert.equal(calls.kill, 1);
+    assert.equal(calls.relaunch, 1);
+    assert.equal(relaunchEvents(ids.cardId).length, 1);
+  } finally {
+    Object.assign(actionTools, realTools);
+  }
+});
+
+void test("a server restart keeps a frozen session frozen with the same stateSince", async () => {
+  const { ids } = await frozenSession("frozen-restart");
+  const before = sessionOf(ids.cardId);
+  const events = stateEvents(SBX, ids.cardId).length;
+  dropWatcher(ids.tmuxSession);
+  const frozen = { ...ids, pane: pane("frozen-compacted.txt") };
+  await supervisePane(frozen, Date.now());
+  await supervisePane(frozen, Date.now() + 1_000);
+  const kept = sessionOf(ids.cardId);
+  assert.equal(kept?.state, "frozen");
+  assert.equal(kept?.stateSince, before?.stateSince);
+  assert.equal(stateEvents(SBX, ids.cardId).length, events);
 });

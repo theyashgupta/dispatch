@@ -237,6 +237,7 @@ function assertBuilt() {
     throw new Error(
       `refusing to run — \`npm run ${BUILD_SERVER_SCRIPT}\` failed, so dist/ does not reflect ` +
         `src/ and any verdict would describe code you are not running:\n${detail || err.message}`,
+      { cause: err },
     );
   }
   if (!existsSync(DIST_ENTRY)) {

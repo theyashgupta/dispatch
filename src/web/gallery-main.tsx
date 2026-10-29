@@ -19,6 +19,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -467,6 +468,17 @@ function Gallery() {
                 <AlertTitle>Destructive</AlertTitle>
                 <AlertDescription>Something failed.</AlertDescription>
               </Alert>
+            </div>
+          </Demo>
+          <Demo title="Avatar">
+            <div className="flex items-center gap-2">
+              <Avatar size="sm">
+                <AvatarImage src="" alt="" />
+                <AvatarFallback>MC</AvatarFallback>
+              </Avatar>
+              <Avatar>
+                <AvatarFallback>AN</AvatarFallback>
+              </Avatar>
             </div>
           </Demo>
           <Demo title="Badge tones">

@@ -15,12 +15,15 @@ const argvFile = path.join(env.root, "stub.argv");
 process.env.ASK_STUB_PID = pidFile;
 process.env.ASK_STUB_STDIN = stdinFile;
 process.env.ASK_STUB_ARGV = argvFile;
+const configDirFile = path.join(env.root, "stub.configdir");
+process.env.ASK_STUB_CONFIG_DIR = configDirFile;
 
 const { store } = await import("../store/board.store.js");
 const express = (await import("express")).default;
 const { askRouter } = await import("./ask.route.js");
 const { askClaude, AskError } =
   await import("../services/orchestration/ask.js");
+const accounts = await import("../services/orchestration/claude-accounts.js");
 
 await store.load();
 await store.createLocalCard(DEFAULT_BOARD_KEY, "Fix the flaky login test", "");
@@ -235,4 +238,32 @@ void test("an aborted child that ignores SIGTERM is killed by the escalation", a
   await new Promise((r) => setTimeout(r, 300));
   assert.ok(alive(pid), "SIGTERM alone should not end this child");
   assert.ok(await waitFor(() => !alive(pid), 15000), "SIGKILL never came");
+});
+
+void test("askClaude runs on the managed default dir once one exists and on the home login before", async () => {
+  process.env.ASK_STUB_MODE = "answer";
+  const signal = new AbortController().signal;
+  await askClaude("prompt", signal);
+  assert.equal(
+    fs.readFileSync(configDirFile, "utf8").trim(),
+    process.env.CLAUDE_CONFIG_DIR ?? "",
+  );
+  const id = "44444444-4444-4444-8444-444444444444";
+  const dir = accounts.accountDir(id);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  await accounts.adoptManagedDefault({
+    id,
+    email: "managed@example.com",
+    orgId: "org-x",
+    orgName: "Org X",
+    subscriptionType: "pro",
+    createdAt: "2026-09-02T00:00:00.000Z",
+    lastLoginAt: "2026-09-02T00:00:00.000Z",
+  });
+  try {
+    await askClaude("prompt", signal);
+  } finally {
+    await accounts.removeAccount(id);
+  }
+  assert.equal(fs.readFileSync(configDirFile, "utf8").trim(), dir);
 });

@@ -1,5 +1,6 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
+import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -19,6 +20,12 @@ import {
 } from "../domain/errors.js";
 
 const env = isolateEnv();
+const { DISPATCH_DATA_DIR } = await import("../../store/data-dir.js");
+assert.notEqual(
+  path.resolve(DISPATCH_DATA_DIR),
+  path.join(os.userInfo().homedir, ".dispatch"),
+  "test bound to the live board.db",
+);
 const { store } = await import("../../store/board.store.js");
 const { tempRepoWithWorkspace } =
   await import("../../test-support/git-fixtures.js");
@@ -564,4 +571,34 @@ void test("start_card with a chosen account passes the account and no pin, and s
     sessions.some((s) => s.accountPinned !== undefined),
     false,
   );
+});
+
+void test("a card with an open blocker is refused with 409 blocked and the blocker identifier", async () => {
+  const blocker = await ticket();
+  const done = await ticket();
+  const card = await ticket();
+  await store.moveCardManual(done.id, "done");
+  await store.setBlockedBy(card.id, [done.id, blocker.id]);
+  const startsBefore = starts.length;
+  await assert.rejects(
+    startOrchestratorCard(CALLER, store.getCard(card.id)!, {
+      playbook: PLAYBOOK,
+    }),
+    (err) =>
+      err instanceof ConflictError &&
+      err.code === "blocked" &&
+      err.details?.reason === blocker.identifier,
+  );
+  nothingWritten(card, startsBefore);
+});
+
+void test("a card whose blockers are all done starts", async () => {
+  const blocker = await ticket();
+  const card = await ticket();
+  await store.setBlockedBy(card.id, [blocker.id]);
+  await store.moveCardManual(blocker.id, "done");
+  await startOrchestratorCard(CALLER, store.getCard(card.id)!, {
+    playbook: PLAYBOOK,
+  });
+  assert.equal(starts.at(-1)?.id, card.id);
 });

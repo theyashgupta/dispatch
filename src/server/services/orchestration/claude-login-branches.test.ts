@@ -1,17 +1,51 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import path from "node:path";
+import { randomUUID } from "node:crypto";
+import type { Card } from "../../../shared/types.js";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { fakeBoardRepository } from "../../test-support/fake-board-repository.js";
 
 const env = isolateEnv();
 const { setBoardRepository } = await import("../../store/board-repository.js");
 const accounts = await import("./claude-accounts.js");
+const configHolder = await import("../infra/config-holder.js");
 const login = await import("./claude-login.js");
 
+configHolder.setOrchestrationConfig({ linearApiKey: "", port: 4700 });
+
 const events: { type: string; reason: string; cardId: string | null }[] = [];
+const cardSessions: { id: string; claudeAccountId?: string }[] = [];
+const sessionWrites: string[] = [];
+
+/**
+ * Record an account write against the seeded sessions and apply it to their state.
+ */
+function sessionWriter(
+  name: string,
+  apply?: (sessionId: string, accountId: string) => void,
+): (...args: unknown[]) => Promise<void> {
+  return (...args: unknown[]): Promise<void> => {
+    sessionWrites.push(`${name}:${args.map(String).join(",")}`);
+    apply?.(args[1] as string, args[2] as string);
+    return Promise.resolve();
+  };
+}
+
 setBoardRepository(
   fakeBoardRepository({
+    getCard: () =>
+      ({ id: "card-1", sessions: cardSessions }) as unknown as Card,
+    setSessionAccount: sessionWriter("setSessionAccount", (sid, acct) => {
+      const s = cardSessions.find((x) => x.id === sid);
+      if (s) s.claudeAccountId = acct;
+    }),
+    markAccountStale: sessionWriter("markAccountStale"),
+    setPendingAccount: sessionWriter("setPendingAccount"),
+    setAccountPinned: sessionWriter("setAccountPinned"),
+    clearPendingAccountsFor: sessionWriter("clearPendingAccountsFor"),
+    clearPendingAccountsExcept: sessionWriter("clearPendingAccountsExcept"),
     recordAccountEvent: (type, reason, cardId = null) => {
       events.push({ type, reason, cardId });
       return Promise.resolve();
@@ -29,8 +63,12 @@ async function waitFor(state: string): Promise<void> {
   );
 }
 
-async function runWithCode(code: string, end: string): Promise<string> {
-  assert.deepEqual(await login.startLogin(), { ok: true });
+async function runWithCode(
+  code: string,
+  end: string,
+  opts: { managedDefault?: boolean } = {},
+): Promise<string> {
+  assert.deepEqual(await login.startLogin(undefined, opts), { ok: true });
   await waitFor("awaiting-code");
   const view = login.getLoginView();
   const id = view.state === "awaiting-code" ? view.accountId : "";
@@ -52,10 +90,11 @@ async function assertFailure(
   code: string,
   reason: string,
   message: string,
+  opts: { managedDefault?: boolean } = {},
 ): Promise<void> {
   const before = events.length;
   const registryBefore = await registryEmails();
-  const id = await runWithCode(code, "error");
+  const id = await runWithCode(code, "error", opts);
   assert.equal(errorMessage(), message);
   assert.deepEqual(events.slice(before), [
     { type: "account_login_failed", reason, cardId: null },
@@ -146,6 +185,238 @@ void test("a cancel while the url is shown emits cancelled, removes the new dir 
   ]);
   assert.equal(fs.existsSync(accounts.accountDir(id)), false);
   assert.deepEqual(await registryEmails(), ["second@example.com"]);
+});
+
+function registryOnDisk(): {
+  defaultPosition: number;
+  accounts: { id: string; position: number }[];
+} {
+  return JSON.parse(
+    fs.readFileSync(
+      path.join(env.dispatchDir, "claude-accounts", "accounts.json"),
+      "utf8",
+    ),
+  ) as ReturnType<typeof registryOnDisk>;
+}
+
+function storedPointer(): unknown {
+  return (
+    JSON.parse(
+      fs.readFileSync(path.join(env.dispatchDir, "config.json"), "utf8"),
+    ) as Record<string, unknown>
+  ).activeClaudeAccountId;
+}
+
+void test("a managed login with the home identity becomes the managed default at Default's position", async () => {
+  const before = events.length;
+  const id = await runWithCode("home", "done", { managedDefault: true });
+  const view = login.getLoginView();
+  assert.equal(view.state === "done" && view.account.managedDefault, true);
+  assert.equal(view.state === "done" && view.account.isDefault, false);
+  assert.equal(
+    events.slice(before).some((e) => e.reason === "home-login"),
+    false,
+  );
+  assert.equal(accounts.getManagedDefaultId(), id);
+  const onDisk = registryOnDisk();
+  assert.equal(
+    onDisk.accounts.find((a) => a.id === id)?.position,
+    onDisk.defaultPosition,
+  );
+  const order = await accounts.readChainOrder();
+  assert.equal(order.includes("default"), false);
+  assert.equal(order.includes(id), true);
+  assert.equal(accounts.getActiveAccountId(), id);
+  assert.equal(storedPointer(), id);
+
+  assert.deepEqual(
+    await login.startLogin(undefined, { managedDefault: true }),
+    {
+      ok: false,
+      error: "managed-exists",
+    },
+  );
+  await login.cancelLogin();
+
+  assert.deepEqual(await login.startLogin(id), { ok: true });
+  await waitFor("awaiting-code");
+  assert.deepEqual(login.submitLoginCode("home"), { ok: true });
+  await waitFor("done");
+  assert.equal(accounts.getManagedDefaultId(), id);
+  assert.equal(
+    events.slice(before).some((e) => e.reason === "home-login"),
+    false,
+  );
+  await login.cancelLogin();
+
+  assert.deepEqual(await accounts.removeAccount(id), { ok: true });
+  assert.equal(accounts.getManagedDefaultId(), undefined);
+});
+
+void test("a managed login with another identity is refused and leaves no trace", async () => {
+  const registryBefore = await registryEmails();
+  const pointerBefore = storedPointer();
+  await assertFailure(
+    "good",
+    "not-home-identity",
+    "Sign in with the same Claude account as your terminal login (home@example.com).",
+    { managedDefault: true },
+  );
+  assert.equal(accounts.getManagedDefaultId(), undefined);
+  assert.deepEqual(await registryEmails(), registryBefore);
+  assert.equal(storedPointer(), pointerBefore);
+});
+
+const OTHER_HOME = JSON.stringify({
+  loggedIn: true,
+  email: "moved@example.com",
+  orgId: "org-moved",
+  orgName: "Moved Org",
+  subscriptionType: "max",
+});
+const ORIGINAL_HOME = JSON.stringify({
+  loggedIn: true,
+  email: "home@example.com",
+  orgId: "org-home",
+  orgName: "Home Org",
+  subscriptionType: "max",
+});
+
+async function relogin(id: string, code: string, end: string): Promise<void> {
+  assert.deepEqual(await login.startLogin(id), { ok: true });
+  await waitFor("awaiting-code");
+  assert.deepEqual(login.submitLoginCode(code), { ok: true });
+  await waitFor(end);
+}
+
+void test("a managed re-login is checked against its own record, not the current home login", async () => {
+  const id = await runWithCode("home", "done", { managedDefault: true });
+  await login.cancelLogin();
+  const homeFile = path.join(env.root, "moved-home.json");
+  const loginFile = path.join(env.root, "login-identity.json");
+  fs.writeFileSync(homeFile, OTHER_HOME);
+  fs.writeFileSync(loginFile, ORIGINAL_HOME);
+  process.env.FAKE_CLAUDE_IDENTITY_FILE = homeFile;
+  process.env.FAKE_CLAUDE_LOGIN_IDENTITY_FILE = loginFile;
+  try {
+    await relogin(id, "good", "done");
+    assert.equal(accounts.getManagedDefaultId(), id);
+    await login.cancelLogin();
+
+    fs.rmSync(loginFile);
+    await relogin(id, "good", "error");
+    assert.equal(
+      errorMessage(),
+      "Sign in with the same Claude account as your terminal login (home@example.com).",
+    );
+    await login.cancelLogin();
+  } finally {
+    delete process.env.FAKE_CLAUDE_IDENTITY_FILE;
+    delete process.env.FAKE_CLAUDE_LOGIN_IDENTITY_FILE;
+    await accounts.removeAccount(id);
+  }
+});
+
+void test("with a managed default, a login of the home identity is a duplicate, not a home login", async () => {
+  const id = await runWithCode("home", "done", { managedDefault: true });
+  await login.cancelLogin();
+  try {
+    await assertFailure(
+      "home",
+      "duplicate",
+      "home@example.com is already added as a Claude account.",
+    );
+  } finally {
+    await accounts.removeAccount(id);
+  }
+});
+
+void test("a managed login lets the chain forget the stale default entry", async () => {
+  let forgotten = 0;
+  login.onManagedDefaultAdopted(() => {
+    forgotten += 1;
+    return Promise.resolve();
+  });
+  const id = await runWithCode("home", "done", { managedDefault: true });
+  await login.cancelLogin();
+  assert.equal(forgotten, 1);
+  await accounts.removeAccount(id);
+});
+
+void test("removing the account during a managed re-login cancels it instead of adopting", async () => {
+  const id = await runWithCode("home", "done", { managedDefault: true });
+  await login.cancelLogin();
+  const before = events.length;
+  assert.deepEqual(await login.startLogin(id), { ok: true });
+  await waitFor("awaiting-code");
+  assert.deepEqual(await accounts.removeAccount(id), { ok: true });
+  assert.deepEqual(login.submitLoginCode("home"), { ok: true });
+  await waitFor("idle");
+  assert.deepEqual(events.slice(before), [
+    { type: "account_login_failed", reason: "cancelled", cardId: null },
+  ]);
+  assert.equal(accounts.getManagedDefaultId(), undefined);
+  assert.equal((await registryEmails()).includes("home@example.com"), false);
+});
+
+void test("removing the account during a managed re-login ends cancelled even when the CLI then exits non-zero", async () => {
+  const id = await runWithCode("home", "done", { managedDefault: true });
+  await login.cancelLogin();
+  const before = events.length;
+  assert.deepEqual(await login.startLogin(id), { ok: true });
+  await waitFor("awaiting-code");
+  assert.deepEqual(await accounts.removeAccount(id), { ok: true });
+  assert.deepEqual(login.submitLoginCode("crash"), { ok: true });
+  await waitFor("idle");
+  assert.deepEqual(events.slice(before), [
+    { type: "account_login_failed", reason: "cancelled", cardId: null },
+  ]);
+});
+
+void test("a managed login or an adopted managed default leaves every running session on its recorded account", async () => {
+  const addedId = randomUUID();
+  await accounts.upsertAccount({
+    id: addedId,
+    email: "added@example.com",
+    orgId: "org-added",
+    orgName: "Added Org",
+    subscriptionType: "pro",
+    createdAt: "2026-09-02T00:00:00.000Z",
+    lastLoginAt: "2026-09-02T00:00:00.000Z",
+  });
+  cardSessions.splice(
+    0,
+    cardSessions.length,
+    { id: "session-default" },
+    { id: "session-added", claudeAccountId: addedId },
+  );
+  sessionWrites.length = 0;
+  const loginId = await runWithCode("home", "done", { managedDefault: true });
+  await login.cancelLogin();
+  try {
+    assert.equal(accounts.getManagedDefaultId(), loginId);
+    assert.deepEqual(await accounts.removeAccount(loginId), { ok: true });
+
+    await accounts.adoptManagedDefault({
+      id: loginId,
+      email: "home@example.com",
+      orgId: "org-home",
+      orgName: "Home Org",
+      subscriptionType: "max",
+      createdAt: "2026-09-02T00:00:00.000Z",
+      lastLoginAt: "2026-09-02T00:00:00.000Z",
+    });
+    assert.equal(accounts.getManagedDefaultId(), loginId);
+
+    assert.deepEqual(
+      cardSessions.map((s) => s.claudeAccountId),
+      [undefined, addedId],
+    );
+    assert.deepEqual(sessionWrites, []);
+  } finally {
+    await accounts.removeAccount(loginId);
+    await accounts.removeAccount(addedId);
+  }
 });
 
 void test.after(() => env.cleanup());

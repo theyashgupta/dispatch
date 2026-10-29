@@ -1,50 +1,41 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
-import { isolateEnv } from "../../test-support/fixtures.js";
-import { ConflictError, ValidationError } from "../domain/errors.js";
+import fs from "node:fs";
+import { isolateEnv, waitFor } from "../../test-support/fixtures.js";
+import { ConflictError } from "../domain/errors.js";
 
 const env = isolateEnv();
+const { DISPATCH_DATA_DIR } = await import("../../store/data-dir.js");
+assert.notEqual(
+  path.resolve(DISPATCH_DATA_DIR),
+  path.join(os.userInfo().homedir, ".dispatch"),
+  "test bound to the live board.db",
+);
 const { store } = await import("../../store/board.store.js");
-const { actionableCard, groupedMemberError, moveCard } =
-  await import("./card-move.js");
+const { tempRepoWithWorkspace } =
+  await import("../../test-support/git-fixtures.js");
+const { setOrchestrationConfig } = await import("../infra/config-holder.js");
+const { sessionStarter } = await import("./start-session.js");
+const { moveCard } = await import("./card-move.js");
 
+const fixture = await tempRepoWithWorkspace();
+const starts: string[] = [];
+sessionStarter.start = (id) => {
+  starts.push(id);
+  return Promise.resolve();
+};
+setOrchestrationConfig({ linearApiKey: "" });
 await store.load();
-after(() => env.cleanup());
+after(() => {
+  fs.rmSync(fixture.root, { recursive: true, force: true });
+  env.cleanup();
+});
 
 const ticket = (title: string) =>
   store.createLocalCard(DEFAULT_BOARD_KEY, title, "");
-
-void test("groupedMemberError names the group of a member and is null for any other card", async () => {
-  const a = await ticket("member a");
-  const b = await ticket("member b");
-  const made = await store.createGroupCard(DEFAULT_BOARD_KEY, "g", [
-    a.id,
-    b.id,
-  ]);
-  assert.ok(made.ok);
-  const member = store.getCard(a.id)!;
-  assert.equal(
-    groupedMemberError(member),
-    `card is grouped under ${made.card.id}, act on the group card`,
-  );
-  assert.equal(groupedMemberError(made.card), null);
-  assert.equal(groupedMemberError(await ticket("plain")), null);
-});
-
-void test("actionableCard refuses an unknown id with 400 and a grouped member with 409", async () => {
-  const a = await ticket("grouped a");
-  const b = await ticket("grouped b");
-  await store.createGroupCard(DEFAULT_BOARD_KEY, "g2", [a.id, b.id]);
-  assert.throws(
-    () => actionableCard("NOPE-1"),
-    (err) =>
-      err instanceof ValidationError && err.code === "unknown card id: NOPE-1",
-  );
-  assert.throws(() => actionableCard(a.id), ConflictError);
-  const plain = await ticket("plain");
-  assert.equal(actionableCard(plain.id).id, plain.id);
-});
 
 void test("moveCard moves a To Do card to Parked and back", async () => {
   const card = await ticket("movable");
@@ -74,4 +65,43 @@ void test("moveCard promotes an Inbox card only to To Do", async () => {
   );
   await moveCard(card.id, "todo");
   assert.equal(store.getCard(card.id)?.column, "todo");
+});
+
+async function blockedTicket(...blockers: string[]) {
+  const card = await ticket("blocked");
+  await store.setCardWorkspace(card.id, {
+    folder: fixture.root,
+    repos: [{ path: fixture.repo, base: "main" }],
+  });
+  await store.setBlockedBy(card.id, blockers);
+  return card;
+}
+
+void test("a move to Done starts the blocked To Do card that it unblocks", async () => {
+  const blocker = await ticket("blocker");
+  const card = await blockedTicket(blocker.id);
+  await moveCard(blocker.id, "done");
+  await waitFor(
+    () => Promise.resolve(starts.includes(card.id)),
+    2000,
+    "blocked card start",
+  );
+  assert.equal(store.getCard(card.id)?.column, "todo");
+});
+
+void test("a move to another column starts nothing", async () => {
+  const blocker = await ticket("blocker");
+  const other = await ticket("other");
+  const card = await blockedTicket(blocker.id);
+  await store.moveCardManual(blocker.id, "done");
+  await moveCard(other.id, "parked");
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(starts.includes(card.id), false);
+  await moveCard(other.id, "todo");
+  await moveCard(other.id, "done");
+  await waitFor(
+    () => Promise.resolve(starts.includes(card.id)),
+    2000,
+    "blocked card start",
+  );
 });

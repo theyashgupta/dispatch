@@ -1,8 +1,4 @@
-import type {
-  BoardKey,
-  OrchestrationEvent,
-  OrchestrationSummary,
-} from "../../../../shared/types.js";
+import type { BoardKey, OrchestrationEvent } from "../../../../shared/types.js";
 import { http, httpError } from "@/lib/http";
 
 export interface OrchestrationEventsParams {
@@ -12,17 +8,6 @@ export interface OrchestrationEventsParams {
 
 const boardPath = (board: BoardKey) =>
   `/api/boards/${encodeURIComponent(board)}`;
-
-/** Fetch the orchestration summary of a board: GET /api/boards/:key/orchestration. */
-export async function fetchOrchestrationSummary(
-  board: BoardKey,
-): Promise<OrchestrationSummary> {
-  const result = await http<OrchestrationSummary>(
-    `${boardPath(board)}/orchestration`,
-  );
-  if (!result.ok) throw httpError("fetchOrchestrationSummary", result);
-  return result.data;
-}
 
 /**
  * Fetch orchestration events of a board: GET /api/boards/:key/orchestration/events.

@@ -1,3 +1,4 @@
+import fsp from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import {
@@ -33,6 +34,7 @@ export interface HandoffTiming {
   readyMs: number;
   engineMs: number;
   cancelWindowMs: number;
+  clearMs: number;
   pollMs: number;
 }
 
@@ -40,8 +42,11 @@ const HANDOFF_TIMING: HandoffTiming = {
   readyMs: 60_000,
   engineMs: 80_000,
   cancelWindowMs: 5 * 60_000,
+  clearMs: 10_000,
   pollMs: 500,
 };
+const CLEAR_ENTRY = "<command-name>/clear</command-name>";
+const CLEAR_PICKED = /^[ \t]+❯[ \t]*\/clear(?=[ \t]{2,}|[ \t]*$)/m;
 const REQUEST_SIGN = new RegExp(
   `${HANDOFF_REQUEST_TITLE}|context-refresh request|-handoff(-hard)?\\.md`,
 );
@@ -159,12 +164,19 @@ export function isHandoffPending(card: Card): boolean {
   return handoffFacts(card)?.pending === true;
 }
 
+/** Whether the pane shows the input prompt and no running turn. */
+async function quietAndReady(target: string): Promise<boolean> {
+  const pane = await capturePane(target).catch(() => "");
+  return paneReady(pane) && !paneBusy(pane);
+}
+
 /**
  * Send the handoff request once per threshold crossing, and the hard request once above the hard threshold.
  *
  * @remarks
  * The crossing re-arms when the meter falls under `handoffPercent`, as after a clear. A
- * session that is already `handoff-pending` gets no request.
+ * session that is already `handoff-pending` gets no request. An orchestrator still pending in a
+ * quiet pane runs the fresh session steps here, since a user /clear can wipe its HANDOFF_READY line.
  */
 export async function checkHandoffThreshold(
   card: Card,
@@ -172,8 +184,14 @@ export async function checkHandoffThreshold(
   policy: Pick<BoardPolicy, "handoffPercent" | "handoffHardPercent">,
 ): Promise<void> {
   const facts = handoffFacts(card);
+  if (!facts?.active) return;
+  if (facts.pending && isHiddenCard(card)) {
+    if (await quietAndReady(`=${session.tmuxSession}:`))
+      await runFreshSession(card, session);
+    return;
+  }
   const percent = session.contextPercent;
-  if (!facts?.active || percent == null) return;
+  if (percent == null) return;
   if (percent < policy.handoffPercent) {
     crossings.delete(session.id);
     return;
@@ -255,10 +273,11 @@ async function engineSessionId(root: string): Promise<string | null> {
  * Start a fresh conversation in the same pane and resume the loop or the orchestrator in it.
  *
  * @remarks
- * `/clear` starts a new transcript file, so the resume prompt is confirmed in the newest
- * transcript of the same project folder. A loop must also have its engine name that file within
- * 80 s; an orchestrator has no engine file, so the confirmed prompt clears its `handoffReady`
- * flag instead. Any unconfirmed step leaves the session at `needs_input`.
+ * The clear is confirmed by a new transcript file in the project folder that holds the `/clear`
+ * command entry, and an unconfirmed `/clear` is typed once more. Enter goes out only on a ready
+ * pane or the command menu with `/clear` selected. The resume prompt is confirmed in that file; a
+ * loop must also have its engine name it within 80 s, an orchestrator clears its `handoffReady`
+ * flag instead, and any unconfirmed step leaves the session at `needs_input`.
  */
 export async function runFreshSession(
   card: Card,
@@ -282,19 +301,38 @@ export async function runFreshSession(
   if ((!owner && !slug) || old === null) return fail("transcript");
   const dir = path.dirname(old);
   const newest = () => newestJsonl(dir);
-  const quietAndReady = async () => {
-    const pane = await capturePane(target).catch(() => "");
-    return paneReady(pane) && !paneBusy(pane);
-  };
+  const quiet = () => quietAndReady(target);
 
-  if (!(await waitFor(quietAndReady, timing.readyMs, timing.pollMs)))
+  const known = new Set(await fsp.readdir(dir).catch(() => [] as string[]));
+  const cleared = async () => {
+    const names = await fsp.readdir(dir).catch(() => [] as string[]);
+    for (const name of names) {
+      if (!name.endsWith(".jsonl") || known.has(name)) continue;
+      const tail = await readTranscriptTail(path.join(dir, name));
+      if (tail?.userTexts.some((t) => t.startsWith(CLEAR_ENTRY))) return true;
+    }
+    return false;
+  };
+  const enterable = async () => {
+    const pane = await capturePane(target).catch(() => "");
+    return !paneBusy(pane) && (paneReady(pane) || CLEAR_PICKED.test(pane));
+  };
+  const idle = async () => !paneBusy(await capturePane(target).catch(() => ""));
+
+  if (!(await waitFor(quiet, timing.readyMs, timing.pollMs)))
     return fail("clear");
-  await sendKeys(target, ["C-u"]);
-  await sendLiteral(target, "/clear");
-  await sleep(SEND_TIMING.settleMs);
-  if (!(await quietAndReady())) return fail("clear");
-  await sendKeys(target, ["Enter"]);
-  if (!(await waitFor(quietAndReady, timing.readyMs, timing.pollMs)))
+  for (let attempt = 0; attempt < 2 && !(await cleared()); attempt++) {
+    if (attempt > 0 && !(await waitFor(idle, timing.readyMs, timing.pollMs)))
+      return fail("clear");
+    await sendKeys(target, ["C-u"]);
+    await sendLiteral(target, "/clear");
+    await sleep(SEND_TIMING.settleMs);
+    if (!(await enterable())) return fail("clear");
+    await sendKeys(target, ["Enter"]);
+    await waitFor(cleared, timing.clearMs, timing.pollMs);
+  }
+  if (!(await cleared())) return fail("clear");
+  if (!(await waitFor(quiet, timing.readyMs, timing.pollMs)))
     return fail("clear");
 
   const sent = await sendConfirmed(

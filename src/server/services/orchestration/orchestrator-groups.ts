@@ -26,10 +26,11 @@ import {
   boardRefusal,
   callerPolicy,
   dependencyDone,
-  isLiveSessionCard,
   getBoard,
+  isLiveSessionCard,
   isRunningCard,
   runningLoops,
+  scopeRefusalCode,
   scopeTargetOf,
   withCapLock,
 } from "./boards.js";
@@ -42,7 +43,7 @@ import {
 } from "./group-launch.js";
 import { groupCost } from "./orchestrator-read.js";
 import { appendToExtraScope } from "./orchestrator-session.js";
-import { assertMemoryHeadroom } from "./memory-governor.js";
+import { memoryCheck } from "./memory-governor.js";
 
 export const groupStarter: { start: typeof startGroup } = {
   start: startGroup,
@@ -164,7 +165,7 @@ export async function createOrchestratorGroup(
     const member = store.getCard(id);
     const scope = member && checkScope(caller, scopeTargetOf(member));
     if (scope && !scope.ok && scope.reason === "other-owner") {
-      throw new ForbiddenError("other-owner");
+      throw new ForbiddenError(scopeRefusalCode(caller, scope.reason));
     }
   }
   const dependsOn = input.dependsOn ?? [];
@@ -206,11 +207,16 @@ export async function createOrchestratorGroup(
  * @remarks Every refusal throws before the first write, so a refused start leaves no queue flag and
  * no session. The cap check and the start call run inside the cap lock, so two overlapping calls
  * cannot both take the last slot; a failed start restores the queue flag and answers 409 `start-failed`.
+ * Under low memory the reply does not wait for the start saga, which waits for memory itself, and a
+ * later failure is only recorded.
  */
 export async function startOrchestratorGroup(
   caller: OrchestratorIdentity,
   card: Card,
-): Promise<{ started: true } | { queued: true; waitingOn: string[] }> {
+): Promise<
+  | { started: true; waitingForMemory?: string }
+  | { queued: true; waitingOn: string[] }
+> {
   if (card.source !== "group") throw new ValidationError("not-group-card");
   if (isRunningCard(card) || isLiveSessionCard(card)) {
     throw new ConflictError("already-started");
@@ -224,7 +230,6 @@ export async function startOrchestratorGroup(
     if (!current || isRunningCard(current) || isLiveSessionCard(current)) {
       throw new ConflictError("already-started");
     }
-    assertMemoryHeadroom(caller.boardKey);
     enforce(checkCap({ policy, runningLoops: runningLoops(caller.boardKey) }));
     enforce(checkBudget({ policy, cost: groupCost(current) }));
     const waitingOn = (current.dependsOn ?? []).filter(
@@ -248,6 +253,21 @@ export async function startOrchestratorGroup(
   if ("queued" in launched) return launched;
   const { wasQueued } = launched;
   if (wasQueued) await store.setGroupQueue(card.id, { startQueued: false });
+  const memory = memoryCheck(caller.boardKey);
+  if (!memory.ok) {
+    void launched.outcome
+      .then((result) =>
+        result.ok
+          ? undefined
+          : recordStartFailure(card, wasQueued, result.reason),
+      )
+      .catch((err: unknown) => {
+        console.warn(
+          `[group] start failure of ${card.id} not recorded: ${(err as Error).message}`,
+        );
+      });
+    return { started: true, waitingForMemory: memory.reason };
+  }
   const result = await launched.outcome;
   if (!result.ok) {
     await recordStartFailure(card, wasQueued, result.reason);

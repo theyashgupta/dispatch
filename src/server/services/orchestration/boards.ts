@@ -10,10 +10,14 @@ import {
   isReservedBoardKey,
   parseBoardKey,
 } from "../../../shared/board-key.js";
+import { isBlockerDone } from "../../../shared/blocked-by.js";
 import { BOARD_NAME_MAX } from "../../../shared/orchestrator-limits.js";
 import { buildAttentionQueue } from "../../../shared/attention-queue.js";
 import { loopView } from "../../../shared/loop-view.js";
-import { cardOwner } from "../../../shared/orchestrator-owner.js";
+import {
+  cardOwner,
+  orchestratorKind,
+} from "../../../shared/orchestrator-owner.js";
 import {
   hasLiveSession,
   hasLoopProgress,
@@ -143,6 +147,29 @@ export function callerPolicy(caller: OrchestratorIdentity): BoardPolicy {
   );
 }
 
+/** Whether the caller is a feature orchestrator; a missing record answers false. */
+export function isFeatureCaller(caller: OrchestratorIdentity): boolean {
+  const record = store
+    .getBoard(caller.boardKey)
+    ?.orchestrators.find((r) => r.id === caller.orchestratorId);
+  return record !== undefined && orchestratorKind(record) === "feature";
+}
+
+/**
+ * The error code of a scope refusal for this caller.
+ *
+ * @remarks A feature orchestrator sees only its own cards, so a card it does not own is out of its
+ * scope, not another owner's. The board orchestrator keeps the exact reason.
+ */
+export function scopeRefusalCode(
+  caller: OrchestratorIdentity,
+  reason: "other-board" | "other-owner",
+): string {
+  return reason === "other-owner" && isFeatureCaller(caller)
+    ? "out-of-scope"
+    : reason;
+}
+
 /** The board and the owner orchestrator of a card, for the scope check of an orchestrator call. */
 export function scopeTargetOf(card: Card): ScopeTarget {
   const records =
@@ -219,11 +246,7 @@ export function withCapLock<T>(fn: () => Promise<T>): Promise<T> {
 
 /** True for a dependency group in Done, or with at least one PR and every PR merged. */
 export function dependencyDone(id: string): boolean {
-  const dep = store.getCard(id);
-  if (!dep) return false;
-  if (dep.column === "done") return true;
-  const prs = dep.prs ?? [];
-  return prs.length > 0 && prs.every((pr) => pr.state === "merged");
+  return isBlockerDone(store.getCard(id));
 }
 
 interface CardListFilters {
@@ -237,12 +260,15 @@ interface CardListFilters {
  * The cards of one board that match the filters, redacted for the wire.
  *
  * @remarks Each card passes through `redactCard`, so no `hookToken` or session record leaves. A
- * missing filter matches every card; `total` counts the matches.
+ * missing filter matches every card; `total` counts the matches. `owner` keeps only the cards that
+ * orchestrator owns.
  */
 export function listBoardCards(
   board: BoardKey,
   filters: CardListFilters,
+  owner?: string,
 ): { cards: Card[]; total: number } {
+  const records = store.getBoard(board)?.orchestrators ?? [];
   const cards = store
     .listCards(board)
     .filter(
@@ -252,7 +278,13 @@ export function listBoardCards(
           (card.source ?? "linear") === filters.source) &&
         (filters.hasSession === undefined ||
           hasSession(card) === filters.hasSession) &&
-        (filters.text === undefined || matchesText(card, filters.text)),
+        (filters.text === undefined || matchesText(card, filters.text)) &&
+        (owner === undefined ||
+          cardOwner(
+            records,
+            card,
+            card.groupId ? store.getCard(card.groupId) : undefined,
+          ) === owner),
     )
     .map(redactCard);
   return { cards, total: cards.length };
@@ -339,6 +371,7 @@ export function boardCounts(): BoardCounts {
       boardKey: count.key,
       cards: cardsByKey.get(count.key) ?? [],
       decisions: store.listDecisionItems(count.key, "open"),
+      pushoverMissing: store.pushoverMissing(),
       now,
     }).length;
   }
@@ -446,9 +479,9 @@ export function getBoard(key: BoardKey): Board {
 /**
  * Store a board policy and answer the board as the API shows it, or the typed 404 `unknown-board`.
  *
- * @remarks An omitted `groupPlaybook`, `wakeMinutes`, `crossSessionInbound`, `memoryFloorMb` or
- * `swapCeilingMb` keeps the stored value, and an explicit null clears the playbook or the inbound
- * value.
+ * @remarks An omitted `groupPlaybook`, `wakeMinutes`, `crossSessionInbound`, `memoryFloorMb`,
+ * `swapCeilingMb` or `budgetWarnPercent` keeps the stored value, and an explicit null clears the
+ * playbook or the inbound value.
  */
 export async function setBoardPolicy(
   key: BoardKey,
@@ -459,12 +492,14 @@ export async function setBoardPolicy(
     | "crossSessionInbound"
     | "memoryFloorMb"
     | "swapCeilingMb"
+    | "budgetWarnPercent"
   > & {
     groupPlaybook?: string | null | undefined;
     wakeMinutes?: number | undefined;
     crossSessionInbound?: CrossSessionInbound | null | undefined;
     memoryFloorMb?: number | undefined;
     swapCeilingMb?: number | undefined;
+    budgetWarnPercent?: number | undefined;
   },
 ): Promise<Board> {
   const stored = store.getBoard(key)?.policy;
@@ -488,6 +523,10 @@ export async function setBoardPolicy(
       policy.memoryFloorMb ?? stored?.memoryFloorMb ?? defaults.memoryFloorMb,
     swapCeilingMb:
       policy.swapCeilingMb ?? stored?.swapCeilingMb ?? defaults.swapCeilingMb,
+    budgetWarnPercent:
+      policy.budgetWarnPercent ??
+      stored?.budgetWarnPercent ??
+      defaults.budgetWarnPercent,
   });
   if (!board) throw new BoardNotFoundError("unknown-board");
   return viewOf(board);

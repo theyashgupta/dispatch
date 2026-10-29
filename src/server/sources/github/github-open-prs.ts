@@ -48,7 +48,8 @@ const OPEN_PRS_QUERY = `query($q: String!, $first: Int!) {
         headRefName
         baseRefName
         changedFiles
-        author { login }
+        mergeable
+        author { login avatarUrl }
         repository { nameWithOwner }
         reviewRequests(first: 30) {
           nodes { requestedReviewer { ... on User { login } } }
@@ -78,7 +79,8 @@ interface PrNode {
   headRefName?: string;
   baseRefName?: string;
   changedFiles?: number;
-  author?: { login?: string } | null;
+  mergeable?: string;
+  author?: { login?: string; avatarUrl?: string } | null;
   repository?: { nameWithOwner?: string };
   reviewRequests?: {
     nodes?: ({ requestedReviewer?: { login?: string } | null } | null)[];
@@ -164,6 +166,8 @@ export function mapOpenPrs(
         priority: 25,
         meta: {
           author: node.author?.login ?? "",
+          authorAvatar: node.author?.avatarUrl ?? "",
+          mergeable: node.mergeable ?? "",
           draft: node.isDraft === true ? "true" : "false",
           reviewDecision: node.reviewDecision ?? "",
           reviewRequestedFromMe: requested ? "true" : "false",

@@ -18,6 +18,7 @@ import { httpErrorHandler } from "./error-handler.js";
 import {
   addCommentHandler,
   approveRoadmapHandler,
+  assignCardHandler,
   createBaseBranchHandler,
   createBoardHandler,
   createDecisionItemHandler,
@@ -43,6 +44,7 @@ import {
   requestHandoffHandler,
   resumeCardHandler,
   resumeLoopHandler,
+  resumeSessionHandler,
   sendInputHandler,
   startCardHandler,
   startGroupHandler,
@@ -280,6 +282,10 @@ orchestratorRouter.post(
   tool("resume_loop", resumeLoopHandler),
 );
 orchestratorRouter.post(
+  "/sessions/:cardId/resume-lost",
+  tool("resume_session", resumeSessionHandler),
+);
+orchestratorRouter.post(
   "/sessions/:cardId/stop",
   tool("stop_session", stopSessionHandler),
 );
@@ -318,6 +324,10 @@ orchestratorRouter.get("/rulebook", tool("get_rulebook", getRulebookHandler));
 orchestratorRouter.post(
   "/cards/:cardId/start",
   tool("start_card", startCardHandler),
+);
+orchestratorRouter.post(
+  "/cards/:cardId/assign",
+  tool("assign_card", assignCardHandler),
 );
 
 orchestratorRouter.use(httpErrorHandler);

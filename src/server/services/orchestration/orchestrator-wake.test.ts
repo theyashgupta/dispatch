@@ -620,6 +620,16 @@ void test("a group event wakes only the extra that holds the group, and a decisi
   );
 });
 
+void test("answering an account decision wakes no orchestrator", async () => {
+  reset();
+  const main = await addOrch("m-accounts", "main");
+  answer(main, "account-login", "dispatch-accounts");
+  drive(main, IDLE, T0);
+  await settle();
+  assert.equal(sent.length, 0);
+  assert.equal(recordOf(main.id).lastWake, undefined);
+});
+
 void test(
   "a supervisor sample of a real orchestrator pane types the wake line and the transcript confirms it",
   { skip: !hasTmux },

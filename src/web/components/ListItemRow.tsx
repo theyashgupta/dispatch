@@ -8,6 +8,7 @@ interface ListItemRowProps {
   title: ReactNode;
   snippet?: string;
   detail?: string;
+  footer?: ReactNode;
   meta: ReactNode;
   metaClassName?: string;
   selected: boolean;
@@ -21,6 +22,7 @@ export function ListItemRow({
   title,
   snippet,
   detail,
+  footer,
   meta,
   metaClassName,
   selected,
@@ -66,6 +68,7 @@ export function ListItemRow({
             {detail}
           </span>
         ) : null}
+        {footer}
       </ItemContent>
       {unread ? (
         <span

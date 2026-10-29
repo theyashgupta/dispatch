@@ -7,6 +7,7 @@ import type {
   Board,
   BoardKey,
   Card,
+  OrchestratorKind,
   OrchestratorPolicyOverride,
   OrchestratorRecord,
   OrchestratorScope,
@@ -20,6 +21,7 @@ import { boardRepository as store } from "../../store/board-repository.js";
 import { DISPATCH_DATA_DIR } from "../../store/data-dir.js";
 import {
   ConflictError,
+  ForbiddenError,
   NotFoundError,
   PolicyError,
   ValidationError,
@@ -27,6 +29,7 @@ import {
 import {
   orchestratorMcpConfig,
   orchestratorMcpConfigPath,
+  scopeBlock,
 } from "../domain/orchestrator-launch.js";
 import type { OrchestratorIdentity } from "../domain/orchestrator-scope.js";
 import {
@@ -34,6 +37,12 @@ import {
   type RecordsRefusal,
 } from "../domain/orchestrator-rules.js";
 import { isHiddenCard } from "../../../shared/hidden-card.js";
+import {
+  cardOwner,
+  isGroupMember,
+  mainOrchestrator,
+  orchestratorKind,
+} from "../../../shared/orchestrator-owner.js";
 import { isLiveSessionCard, resolveBoard } from "./boards.js";
 import { requireOrchestrationConfig } from "./group-launch.js";
 import { revokeOrchestratorToken } from "./orchestrator-tokens.js";
@@ -65,6 +74,7 @@ export interface OrchestratorInput {
   id: string;
   name: string;
   role: "main" | "extra";
+  kind?: OrchestratorKind;
   scope: OrchestratorScope;
   policyOverride: OrchestratorPolicyOverride;
 }
@@ -316,6 +326,7 @@ export async function addOrchestrator(
   assertScopeCards(board, input.scope);
   const record: OrchestratorRecord = {
     ...input,
+    kind: input.kind ?? orchestratorKind({ role: input.role }),
     cardId: null,
     state: "stopped",
     createdAt: new Date().toISOString(),
@@ -364,7 +375,7 @@ export async function editOrchestrator(
  * Add a card an orchestrator created to its scope when it is an extra, so the scope stays the one ownership source.
  *
  * @remarks
- * The append re-reads the record inside the record queue, so it keeps every earlier scope edit.
+ * The append re-reads the record inside the record queue, so it keeps every earlier scope edit, and it does nothing when an extra already lists the id.
  * It runs no scope or override check: an append cannot widen anything, and a create that already
  * wrote its card must not fail on a stale scope id or a stale override.
  */
@@ -378,16 +389,94 @@ export async function appendToExtraScope(
       (r) => r.id === caller.orchestratorId && r.role === "extra",
     );
   if (!isExtra(resolveBoard(caller.boardKey))) return;
-  await writeRecords(caller.boardKey, (board) => ({
-    records: board.orchestrators.map((r) =>
-      r.id === caller.orchestratorId &&
-      r.role === "extra" &&
-      !r.scope[field].includes(id)
-        ? { ...r, scope: { ...r.scope, [field]: [...r.scope[field], id] } }
-        : r,
-    ),
-    result: undefined,
-  }));
+  await writeRecords(caller.boardKey, (board) => {
+    const listed = board.orchestrators.some(
+      (r) => r.role === "extra" && r.scope[field].includes(id),
+    );
+    return {
+      records: board.orchestrators.map((r) =>
+        !listed && r.id === caller.orchestratorId && r.role === "extra"
+          ? { ...r, scope: { ...r.scope, [field]: [...r.scope[field], id] } }
+          : r,
+      ),
+      result: undefined,
+    };
+  });
+}
+
+/**
+ * Move the owner of one card to the named orchestrator, the main when it is the target.
+ *
+ * @remarks
+ * The removal from every extra scope and the add to the target happen in one record write, so the
+ * move is atomic. The card is read again inside that write, so a card grouped or deleted in between is refused.
+ * The event reaches a feature orchestrator that waits on `intake_submitted`.
+ */
+export async function assignCard(
+  boardKey: BoardKey,
+  cardId: string,
+  targetId: string,
+  by: "user" | "orchestrator",
+): Promise<{ cardId: string; orchestratorId: string; changed: boolean }> {
+  const readCard = (): Card => {
+    const card = store.getCard(cardId);
+    if (
+      !card ||
+      isHiddenCard(card) ||
+      (card.boardKey ?? DEFAULT_BOARD_KEY) !== boardKey
+    ) {
+      throw new NotFoundError("unknown-card");
+    }
+    if (isGroupMember(card)) throw new ValidationError("group-member");
+    return card;
+  };
+  readCard();
+  const { changed, feature, card } = await writeRecords(boardKey, (board) => {
+    const card = readCard();
+    const field = card.source === "group" ? "groupIds" : "ticketIds";
+    const target = findRecord(board, targetId);
+    const feature = orchestratorKind(target) === "feature";
+    const previous = cardOwner(board.orchestrators, card, undefined);
+    if (by === "orchestrator") {
+      if (!feature) throw new ValidationError("not-feature-orchestrator");
+      if (
+        previous !== mainOrchestrator(board.orchestrators)?.id &&
+        previous !== targetId
+      ) {
+        throw new ForbiddenError("other-owner");
+      }
+      if (previous !== targetId && card.column !== "todo") {
+        throw new ConflictError("not-todo");
+      }
+    }
+    const records = board.orchestrators.map((r) => {
+      if (r.role !== "extra") return r;
+      const without = r.scope[field].filter((id) => id !== cardId);
+      const ids = r.id === targetId ? [...without, cardId] : without;
+      return { ...r, scope: { ...r.scope, [field]: ids } };
+    });
+    assertRecords(board, records, []);
+    return {
+      records,
+      result: { changed: previous !== targetId, feature, card },
+    };
+  });
+  if (by === "user" && changed && feature) {
+    store.appendOrchestrationEvent({
+      boardKey,
+      cardId: card.id,
+      sessionId: null,
+      kind: "intake_submitted",
+      data: {
+        orchestratorId: targetId,
+        cardId: card.id,
+        goal: `Assigned card ${card.identifier}: ${card.title}`,
+        requirements: null,
+      },
+      ts: new Date().toISOString(),
+    });
+  }
+  return { cardId, orchestratorId: targetId, changed };
 }
 
 /**
@@ -482,7 +571,7 @@ async function writeMcpConfig(
 }
 
 function kickoffDirection(board: Board, record: OrchestratorRecord): string {
-  return `${ORCHESTRATOR_KICKOFF_LEAD}${record.name}" (id ${record.id}) of board ${board.key}. Use the dispatch tools to coordinate the work of this board.`;
+  return `${ORCHESTRATOR_KICKOFF_LEAD}${record.name}" (id ${record.id}) of board ${board.key}. Use the dispatch tools to coordinate the work of this board.\n${scopeBlock(orchestratorKind(record))}`;
 }
 
 function settledState(cardId: string): "running" | "stopped" {
@@ -655,6 +744,8 @@ export async function resumeOrchestrator(
       const outcome = live ? await orchestratorTools.relaunch(cardId) : null;
       if (outcome === "launched") return;
       if (outcome === "busy") return previous;
+      if (outcome === "workspace-missing")
+        throw new ConflictError("workspace-missing");
       if (live) throw new ConflictError("orchestrator-busy");
       await orchestratorTools.start(
         cardId,

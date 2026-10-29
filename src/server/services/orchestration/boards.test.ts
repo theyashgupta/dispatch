@@ -451,6 +451,26 @@ test("boardCounts counts a Needs Input group once, not once per mirrored member"
   );
 });
 
+test("boardCounts adds one attention item for a group card with a budget warning mark", async () => {
+  const board = key("CNTW");
+  await createBoard(input({ key: board, name: board }), countingReader([]));
+  const m1 = await store.createLocalCard(board, "m1", "");
+  const m2 = await store.createLocalCard(board, "m2", "");
+  const group = await store.createGroupCard(board, "group", [m1.id, m2.id]);
+  assert.ok(group.ok);
+  if (!group.ok) return;
+  const attention = () =>
+    boardCounts().counts.find((count) => count.key === board)?.attention;
+  assert.equal(attention(), 0);
+  await store.setBudgetWarning(group.card.id, {
+    at: "2026-10-20T00:00:00.000Z",
+    cost: 8.5,
+    budget: 10,
+    percent: 80,
+  });
+  assert.equal(attention(), 1);
+});
+
 test("boardCounts lists the running loops of a board, sorted by group id", async () => {
   const board = key("CNTL");
   await createBoard(input({ key: "CNTL", name: "Loops" }), countingReader([]));
@@ -797,4 +817,18 @@ test("createBoard refuses with no-workspaces-root when no folder is given and Co
   } finally {
     setOrchestrationConfig({ linearApiKey: "", workspaceRoot: sessions });
   }
+});
+
+test("boardCounts counts the Pushover item on an empty board and drops it when cleared", async () => {
+  const board = key("CNTP");
+  await createBoard(input({ key: board, name: board }), countingReader([]));
+  const find = () =>
+    boardCounts().counts.find((count) => count.key === board)?.attention;
+  store.setPushoverMissing(["PUSHOVER_USER_KEY"]);
+  try {
+    assert.equal(find(), 1);
+  } finally {
+    store.setPushoverMissing([]);
+  }
+  assert.equal(find(), 0);
 });

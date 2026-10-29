@@ -24,7 +24,7 @@ fs.writeFileSync(`${fixture}.path`, `${secretPath}\n`, { mode: 0o600 });
  * Answer the fixture at the secret path, shaped by the mode file next to it.
  */
 function answer(res) {
-  let mode = "ok";
+  let mode;
   try {
     mode = fs.readFileSync(`${fixture}.mode`, "utf8").trim() || "ok";
   } catch {

@@ -7,12 +7,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Toggle } from "@/components/ui/toggle";
+import {
+  parsePrGroupBy,
+  PR_GROUP_BY_LABELS,
+  type PrGroupBy,
+} from "@/modules/pull-requests/domain/pr-list-rows";
 
 interface PrFilterBarProps {
   filters: PrFilters;
   authors: string[];
   repos: string[];
+  groupBy: PrGroupBy;
   onChange: (filters: PrFilters) => void;
+  onGroupByChange: (groupBy: PrGroupBy) => void;
 }
 
 const ALL = "__all__";
@@ -21,7 +28,9 @@ export function PrFilterBar({
   filters,
   authors,
   repos,
+  groupBy,
   onChange,
+  onGroupByChange,
 }: PrFilterBarProps) {
   return (
     <div className="flex flex-none flex-wrap items-center gap-2 border-b border-border bg-sidebar px-4 py-2">
@@ -91,6 +100,21 @@ export function PrFilterBar({
           {repos.map((repo) => (
             <SelectItem key={repo} value={repo} className="break-all">
               {repo}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select
+        value={groupBy}
+        onValueChange={(value) => onGroupByChange(parsePrGroupBy(value))}
+      >
+        <SelectTrigger size="sm" aria-label="Group by" className="flex-none">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {(Object.keys(PR_GROUP_BY_LABELS) as PrGroupBy[]).map((key) => (
+            <SelectItem key={key} value={key}>
+              {PR_GROUP_BY_LABELS[key]}
             </SelectItem>
           ))}
         </SelectContent>

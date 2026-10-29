@@ -3,13 +3,15 @@ import type { Page, Route } from "../../../../shared/route.js";
 import { useSidebar } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 import { AppSidebar } from "@/modules/shell/components/AppSidebar";
-import type { SidebarBoardsData } from "./SidebarBoards";
-import type { SidebarDashboardsData } from "./SidebarDashboards";
+import { BottomBar } from "@/modules/shell/components/BottomBar";
 import { PageHeader } from "@/modules/shell/components/PageHeader";
 import { TopBar } from "@/modules/shell/components/TopBar";
+import type { SidebarBoardsData } from "./SidebarBoards";
+import type { SidebarDashboardsData } from "./SidebarDashboards";
 import type { NavCounts, NavItem } from "../../../../shared/nav-items.js";
 import type { SyncSnapshot } from "@/modules/shell/domain/sync-status";
-import { useChromeTop } from "@/modules/shell/hooks/use-chrome-top";
+import { useBarVisible } from "@/modules/shell/hooks/use-bar-visible";
+import { usePublishedHeight } from "@/modules/shell/hooks/use-published-height";
 import { useMenuFocusReturn } from "@/modules/shell/hooks/use-menu-focus-return";
 
 interface ShellFrameProps {
@@ -35,6 +37,7 @@ interface ShellFrameProps {
   detail: ReactNode;
   children?: ReactNode;
   onMobileOpenChange?: (open: boolean) => void;
+  needsYouCount: number;
 }
 
 export function ShellFrame({
@@ -60,11 +63,14 @@ export function ShellFrame({
   onMobileOpenChange,
   onOpenCreateTicket,
   onOpenActivity,
+  needsYouCount,
 }: ShellFrameProps) {
   const { isMobile, openMobile, setOpenMobile, state } = useSidebar();
   const [root, setRoot] = useState<HTMLDivElement | null>(null);
   const [chrome, setChrome] = useState<HTMLDivElement | null>(null);
-  useChromeTop(chrome, root);
+  usePublishedHeight(chrome, root, "--chrome-top");
+  const [column, setColumn] = useState<HTMLDivElement | null>(null);
+  const barHidden = !useBarVisible(isMobile ? column : null, route.page);
   const phoneSheetOpen = isMobile && openMobile;
   const skipFocusReturn = useMenuFocusReturn(phoneSheetOpen);
 
@@ -131,6 +137,7 @@ export function ShellFrame({
         }}
       />
       <div
+        ref={setColumn}
         className="flex min-w-0 flex-1 flex-col overflow-hidden"
         inert={phoneSheetOpen}
       >
@@ -142,6 +149,15 @@ export function ShellFrame({
           </PageHeader>
         </div>
         {content}
+        {isMobile ? (
+          <BottomBar
+            current={route.page}
+            onNavigate={onNavigate}
+            onOpenCreateTicket={onOpenCreateTicket}
+            hidden={barHidden}
+            needsYouCount={needsYouCount}
+          />
+        ) : null}
       </div>
       <div className="contents" inert={phoneSheetOpen}>
         {detail}

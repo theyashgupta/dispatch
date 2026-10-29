@@ -26,6 +26,7 @@ import type {
   ArchiveBoardResult,
   Board,
   BoardPolicy,
+  BudgetWarning,
   OrchestratorRecord,
   BoardKey,
   BoardPatch,
@@ -54,6 +55,7 @@ import type {
   LoopProgress,
   ShipFlow,
   OrchestrationEvent,
+  PushoverGap,
   SettableItemState,
   StartError,
   TerminalError,
@@ -559,6 +561,7 @@ class BoardStore extends EventEmitter {
     cursor: false,
   };
   private enabledSourceIds: string[] = [];
+  private pushoverGap: PushoverGap | null = null;
   /**
    * Registered workspace-folder paths, persisted in board.json and broadcast on every snapshot so
    * the start modal reads them live. Runtime state (unlike the boot-only pollIntervalMs/editors), so
@@ -1298,6 +1301,7 @@ class BoardStore extends EventEmitter {
           (c.groupId != null && !outOfWindow.has(c.groupId)),
       );
     }
+    const gap = this.pushoverMissing();
     return {
       ...snap,
       boardKey: board,
@@ -1316,6 +1320,7 @@ class BoardStore extends EventEmitter {
         return held !== undefined && held.column !== "done";
       }),
       enabledSources: this.enabledSourceIds,
+      ...(gap ? { pushoverMissing: gap } : {}),
     };
   }
 
@@ -1418,6 +1423,40 @@ class BoardStore extends EventEmitter {
       next.every((id, i) => id === this.enabledSourceIds[i]);
     this.enabledSourceIds = next;
     if (!same) this.emit("change");
+  }
+
+  /**
+   * Record the empty Pushover names so every board shows one attention item for them.
+   *
+   * @remarks The gap lives in memory only; `since` stays while the gap lasts and an unchanged list
+   * does not broadcast.
+   */
+  setPushoverMissing(names: readonly string[], now: Date = new Date()): void {
+    const current = this.pushoverGap;
+    if (
+      current !== null &&
+      current.names.length === names.length &&
+      current.names.every((name, i) => name === names[i])
+    ) {
+      return;
+    }
+    if (names.length === 0) {
+      if (current === null) return;
+      this.pushoverGap = null;
+    } else {
+      this.pushoverGap = {
+        names: [...names],
+        since: current?.since ?? now.toISOString(),
+      };
+    }
+    this.emit("change");
+  }
+
+  /** Read the empty Pushover names and the time the gap began, or null when none is empty. */
+  pushoverMissing(): PushoverGap | null {
+    return this.pushoverGap === null
+      ? null
+      : { ...this.pushoverGap, names: [...this.pushoverGap.names] };
   }
 
   /**
@@ -1572,15 +1611,19 @@ class BoardStore extends EventEmitter {
    * Store a group card's loop progress, writing only when it differs from the stored value.
    *
    * @remarks The compare runs before the queue because every `enqueue` persists all cards and emits
-   * `change`, so a poll that re-reads identical progress must not enter it. An unknown card id is a
-   * no-op.
+   * `change`, so a poll that re-reads identical progress must not enter it. `force` skips the compare
+   * so a caller can advance `readAt` alone. An unknown card id is a no-op.
    */
-  setLoopProgress(cardId: string, progress: LoopProgress): Promise<void> {
+  setLoopProgress(
+    cardId: string,
+    progress: LoopProgress,
+    force = false,
+  ): Promise<void> {
     const card = this.cards.get(cardId);
     if (card === undefined) return Promise.resolve();
     const stable = (p: LoopProgress | undefined) =>
       JSON.stringify(p === undefined ? null : { ...p, readAt: "" });
-    if (stable(card.loopProgress) === stable(progress))
+    if (!force && stable(card.loopProgress) === stable(progress))
       return Promise.resolve();
     return this.enqueue(() => {
       const current = this.cards.get(cardId);
@@ -2979,6 +3022,13 @@ class BoardStore extends EventEmitter {
         reason,
         source: "accounts",
       },
+    ]);
+  }
+
+  /** Append one `session_relaunch` activity row for a card the supervisor relaunched. */
+  recordSessionRelaunch(cardId: string, reason: string): Promise<void> {
+    return this.enqueue(() => [
+      this.event("session_relaunch", { cardId, reason, source: "supervisor" }),
     ]);
   }
 
@@ -4620,6 +4670,28 @@ class BoardStore extends EventEmitter {
       if (!card) return [];
       card.startQueued = queue.startQueued;
       if (queue.dependsOn !== undefined) card.dependsOn = [...queue.dependsOn];
+      return [];
+    });
+  }
+
+  /** Store the blocker ids of a card; an empty list removes the field and an unknown card is a no-op. */
+  setBlockedBy(id: string, ids: string[]): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      if (ids.length === 0) delete card.blockedBy;
+      else card.blockedBy = [...ids];
+      return [];
+    });
+  }
+
+  /** Store the budget warning mark of a card; null removes the field and an unknown card is a no-op. */
+  setBudgetWarning(id: string, warning: BudgetWarning | null): Promise<void> {
+    return this.enqueue(() => {
+      const card = this.cards.get(id);
+      if (!card) return [];
+      if (warning === null) delete card.budgetWarning;
+      else card.budgetWarning = { ...warning };
       return [];
     });
   }

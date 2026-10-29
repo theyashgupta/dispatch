@@ -1,4 +1,4 @@
-import { mainOrchestrator } from "../../../shared/orchestrator-owner.js";
+import { orchestratorKind } from "../../../shared/orchestrator-owner.js";
 import type {
   BoardPolicy,
   OrchestratorPolicyOverride,
@@ -11,7 +11,7 @@ export type RecordsRefusal =
   | { ok: false; code: "extra-needs-main" }
   | { ok: false; code: "main-has-scope" }
   | { ok: false; code: "main-has-override" }
-  | { ok: false; code: "extra-needs-scope"; id: string }
+  | { ok: false; code: "kind-mismatch"; id: string }
   | { ok: false; code: "group-owned"; groupId: string; owner: string }
   | { ok: false; code: "ticket-owned"; ticketId: string; owner: string }
   | {
@@ -107,6 +107,14 @@ export function checkRecords(
       return { ok: false, code: "duplicate-id", id: record.id };
     ids.add(record.id);
   }
+  for (const record of records) {
+    if (
+      record.kind !== undefined &&
+      record.kind !== orchestratorKind({ role: record.role })
+    ) {
+      return { ok: false, code: "kind-mismatch", id: record.id };
+    }
+  }
   const mains = records.filter((r) => r.role === "main");
   if (mains.length > 1) return { ok: false, code: "main-exists" };
   const extras = records.filter((r) => r.role === "extra");
@@ -122,9 +130,6 @@ export function checkRecords(
   }
   const owners = new Map<string, string>();
   for (const extra of extras) {
-    if (extra.scope.groupIds.length + extra.scope.ticketIds.length === 0) {
-      return { ok: false, code: "extra-needs-scope", id: extra.id };
-    }
     for (const groupId of extra.scope.groupIds) {
       const owner = owners.get(groupId);
       if (owner !== undefined && owner !== extra.id) {
@@ -148,11 +153,18 @@ export function checkRecords(
   return { ok: true };
 }
 
-/** Decide whether an orchestrator may start a ship flow: only the main may, once records exist. */
+/**
+ * Decide whether an orchestrator may start a ship flow.
+ *
+ * @remarks
+ * Any caller may ship while no record exists. A feature orchestrator ships only its own cards, because the ship routes owner-check a feature caller.
+ */
 export function mayShip(
   records: OrchestratorRecord[],
   orchestratorId: string,
 ): boolean {
   if (records.length === 0) return true;
-  return mainOrchestrator(records)?.id === orchestratorId;
+  const caller = records.find((r) => r.id === orchestratorId);
+  if (!caller) return false;
+  return caller.role === "main" || orchestratorKind(caller) === "feature";
 }

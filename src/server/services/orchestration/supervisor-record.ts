@@ -10,6 +10,7 @@ import type {
   SupervisorStateReason,
 } from "../../../shared/types.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
+import { DONE_MARKER_PREFIX } from "../../../shared/marker-key.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import { loopFilePath } from "../domain/loop-progress.js";
 import {
@@ -128,13 +129,25 @@ export async function markNeedsInput(
   record(card, session, { action: "needs_input", reason, evidence });
 }
 
-/** Move the live card to the `needs_input` column unless it is already there. */
+/**
+ * Move the live card to the `needs_input` column unless it is already there.
+ *
+ * @remarks A supervisor stop never replaces the DONE marker of a card whose loop engine is closed.
+ */
 export async function moveToNeedsInput(
   card: Card,
   session: Session,
   evidence: string,
 ): Promise<void> {
-  if (store.getCard(card.id)?.column === "needs_input") return;
+  const live = store.getCard(card.id);
+  if (live?.column === "needs_input") return;
+  if (
+    live?.column === "agent_done" &&
+    live.lastMarker?.startsWith(DONE_MARKER_PREFIX) &&
+    live.loopProgress?.engine?.closed === true
+  ) {
+    return;
+  }
   await store.applyMarker(
     card.id,
     session.id,

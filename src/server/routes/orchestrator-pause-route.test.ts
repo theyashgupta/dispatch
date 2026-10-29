@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { after, afterEach, beforeEach, test } from "node:test";
-import { isolateEnv } from "../test-support/fixtures.js";
+import { isolateEnv, waitFor } from "../test-support/fixtures.js";
 import { parseBoardKey } from "../../shared/board-key.js";
 import type { BoardKey } from "../../shared/types.js";
 
@@ -12,7 +12,8 @@ const { orchestratorRouter } = await import("./orchestrator.route.js");
 const { boardsRouter } = await import("./boards.route.js");
 const { SBX, setupSupervisedBoard } =
   await import("../test-support/supervised-session.js");
-const { recordMemory } = await import("../test-support/memory-fixtures.js");
+const { recordMemory, withMemoryFakes } =
+  await import("../test-support/memory-fixtures.js");
 
 const OTH = parseBoardKey("OTH") as BoardKey;
 
@@ -147,23 +148,72 @@ test("pause_card on a card that is not a loop answers 409 not-pausable", async (
   assert.deepEqual(signals, []);
 });
 
-test("resume_card is refused under memory pressure, then resumes after recovery", async () => {
+const LOW = "free memory 100 MB is below the 1024 MB floor";
+
+test("resume_card under low memory answers 202 at once, waits with Waiting for memory, then resumes", async () => {
   const id = await loopCard();
   await call(`/sessions/${id}/pause`);
   signals = [];
-
   recordMemory(100, 100);
-  const refused = await call(`/sessions/${id}/unpause`);
-  assert.equal(refused.status, 409);
-  assert.equal(refused.body.error, "memory-pressure");
-  assert.equal(
-    refused.body.reason,
-    "free memory 100 MB is below the 1024 MB floor",
-  );
+  try {
+    await withMemoryFakes([100, 4096], async ({ slept, onSleep }) => {
+      const seen: unknown[] = [];
+      onSleep(() =>
+        seen.push({
+          reason: store.getCard(id)?.statusReason,
+          paused: !!store.getCard(id)?.paused,
+          signals: signals.length,
+        }),
+      );
+      const reply = await call(`/sessions/${id}/unpause`);
+      assert.equal(reply.status, 202);
+      assert.deepEqual(reply.body, { resumed: false, waitingForMemory: LOW });
+      await waitFor(
+        () => Promise.resolve(!store.getCard(id)?.paused),
+        5000,
+        "the waited resume",
+      );
+      assert.deepEqual(seen, [
+        { reason: "Waiting for memory…", paused: true, signals: 0 },
+      ]);
+      assert.deepEqual(slept, [30_000]);
+    });
+  } finally {
+    recordMemory(4096, 100);
+  }
+  assert.equal(store.getCard(id)?.statusReason, undefined);
+  assert.deepEqual(signals[0], ["SIGCONT", [4242]]);
+  assert.equal(reasons(id).at(-1), "resumed by orchestrator orc-sbx");
+});
+
+test("resume_card under low memory refuses after 30 minutes with the floor and the last reading", async () => {
+  const id = await loopCard();
+  await call(`/sessions/${id}/pause`);
+  signals = [];
+  const failed = `Resume failed: ${LOW} after 30 minutes of retries`;
+  recordMemory(100, 100);
+  try {
+    await withMemoryFakes([100], async ({ slept }) => {
+      const reply = await call(`/sessions/${id}/unpause`);
+      assert.equal(reply.status, 202);
+      await waitFor(
+        () => Promise.resolve(store.getCard(id)?.statusReason === failed),
+        5000,
+        "the refused resume",
+      );
+      assert.equal(slept.length, 60);
+    });
+  } finally {
+    recordMemory(4096, 100);
+  }
   assert.ok(store.getCard(id)?.paused);
   assert.deepEqual(signals, []);
+});
 
-  recordMemory(4096, 100);
+test("resume_card with memory free resumes at once and answers 200", async () => {
+  const id = await loopCard();
+  await call(`/sessions/${id}/pause`);
+  signals = [];
   const resumed = await call(`/sessions/${id}/unpause`);
   assert.equal(resumed.status, 200);
   assert.deepEqual(resumed.body, { resumed: true });
@@ -179,13 +229,16 @@ test("resume_card on an unpaused card answers 409 not-paused", async () => {
   assert.equal(reply.body.error, "not-paused");
 });
 
-test("resume_card on an unpaused card under memory pressure answers 409 memory-pressure", async () => {
+test("resume_card on an unpaused card under low memory answers 409 not-paused", async () => {
   const id = await loopCard();
   recordMemory(100, 100);
-  const reply = await call(`/sessions/${id}/unpause`);
-  assert.equal(reply.status, 409);
-  assert.equal(reply.body.error, "memory-pressure");
-  recordMemory(4096, 100);
+  try {
+    const reply = await call(`/sessions/${id}/unpause`);
+    assert.equal(reply.status, 409);
+    assert.equal(reply.body.error, "not-paused");
+  } finally {
+    recordMemory(4096, 100);
+  }
 });
 
 test("pause_card and resume_card answer 404 unknown-card on the hidden orchestrator card and change nothing", async () => {

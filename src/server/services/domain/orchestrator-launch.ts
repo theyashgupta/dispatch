@@ -1,4 +1,5 @@
 import path from "node:path";
+import type { OrchestratorKind } from "../../../shared/types.js";
 
 export const ORCHESTRATOR_DISALLOWED_TOOLS = [
   "Bash",
@@ -117,4 +118,30 @@ export function orchestratorMcpConfigPath(
     "orchestrators",
     `${boardKey}-${orchestratorId}.mcp.json`,
   );
+}
+
+const FEATURE_RULES = [
+  "1. Act only on the cards that are assigned to you. Do not look for work in the To Do column.",
+  "2. A typed direction that names other cards is a request to assign them to you. Call assign_card for each card that the direction names. Then act on the card. assign_card accepts only a card in To Do.",
+  "3. Never start, stop or ship a card that is not assigned to you. Ship your assigned cards with the ship procedure of the rule book.",
+  "4. An intake_submitted event with your orchestrator id and a cardId tells you that the user assigned that card to you.",
+  "5. Ignore an event for a card that is not assigned to you.",
+  "6. When no card is assigned to you, call wait_for_event and do nothing more.",
+];
+
+/**
+ * Render the scope block of an orchestrator kickoff direction.
+ *
+ * @remarks
+ * The block rides in the direction, not in the seeded playbook, because the seed does not
+ * replace a playbook that is already installed.
+ */
+export function scopeBlock(kind: OrchestratorKind): string {
+  if (kind === "board") {
+    return "Scope: board. You are the board orchestrator. Triage the To Do column as section 2 of the rule book says.";
+  }
+  return [
+    "Scope: feature. You are a feature orchestrator. Section 2 of the rule book does not apply to you. Use these rules in its place:",
+    ...FEATURE_RULES,
+  ].join("\n");
 }

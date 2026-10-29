@@ -1,9 +1,14 @@
 import type { Card, Session, SupervisorState } from "../../../shared/types.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { isLoopCard } from "../../../shared/running-group.js";
+import { FROZEN_RELAUNCH_MINUTES } from "../../../shared/orchestrator-limits.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import type { PaneSample } from "../../adapters/markers/watcher.js";
-import { paneAtPrompt, sessionEnvHas } from "../../adapters/tmux.js";
+import {
+  paneAtPrompt,
+  sessionEnvHas,
+  widenNarrowWindow,
+} from "../../adapters/tmux.js";
 import { readTranscriptTail } from "../../adapters/transcript.js";
 import {
   detectState,
@@ -11,17 +16,20 @@ import {
   type DetectMemory,
   type Detection,
 } from "../domain/supervisor-state.js";
+import { promiseCompletes } from "../domain/loop-completion.js";
 import { groupStateOfSupervisor } from "../domain/group-state.js";
 import {
   holdsNeedsInput,
   initialPlanMemory,
   planActions,
+  planFrozenRelaunch,
   type LoopFacts,
   type PlanMemory,
 } from "../domain/supervisor-plan.js";
+import { holdsReleased } from "../domain/session-release.js";
 import { recordGroupState } from "./group-state-events.js";
 import { driveWake, wakeInFlight } from "./orchestrator-wake.js";
-import { runActions } from "./supervisor-actions.js";
+import { runActions, runPlanned } from "./supervisor-actions.js";
 import {
   checkHandoffCancel,
   checkHandoffThreshold,
@@ -34,7 +42,9 @@ import {
 } from "./supervisor-record.js";
 import { sessionTranscriptPath } from "./supervisor-transcript.js";
 import { refreshLoopProgress } from "./loop-progress-reader.js";
-import { SHELL_SESSION_ENV } from "./steps.js";
+import { floorExiting } from "./floor-release.js";
+import { footer } from "./session-account-move.js";
+import { READY, SHELL_SESSION_ENV } from "./steps.js";
 
 export interface SupervisorWatcher {
   tmuxSession: string;
@@ -43,7 +53,11 @@ export interface SupervisorWatcher {
   shellRoot: boolean;
   plan: PlanMemory;
   progressRead: boolean;
+  closeTriedAt: number;
+  relaunchedFor: string | null;
 }
+
+const CLOSE_RETRY_MS = 60_000;
 
 const watchers = new Map<string, SupervisorWatcher>();
 let lastWakeAt: number | null = null;
@@ -67,6 +81,8 @@ export function ensureWatcher(
       shellRoot: false,
       plan: initialPlanMemory(),
       progressRead: false,
+      closeTriedAt: 0,
+      relaunchedFor: null,
     };
     watchers.set(tmuxSession, watcher);
   }
@@ -171,6 +187,39 @@ function engineSessionIdOf(card: Card): string | null {
   return card.loopProgress?.engine?.sessionId ?? null;
 }
 
+/** How long a session stays frozen before the relaunch; the env override is for the sandbox e2e. */
+function frozenRelaunchMs(): number {
+  return (
+    Number(process.env.DISPATCH_FROZEN_RELAUNCH_MS) ||
+    FROZEN_RELAUNCH_MINUTES * 60_000
+  );
+}
+
+/**
+ * Plan and run the frozen relaunch once the session has been frozen long enough.
+ *
+ * @remarks The clock starts at the stored `stateSince`, so a server restart does not reset it.
+ */
+async function relaunchIfDue(
+  card: Card,
+  session: Session,
+  watcher: SupervisorWatcher,
+  evidence: string,
+  now: number,
+): Promise<void> {
+  const since = session.stateSince;
+  if (
+    since === undefined ||
+    watcher.relaunchedFor === since ||
+    now - Date.parse(since) < frozenRelaunchMs()
+  )
+    return;
+  watcher.relaunchedFor = since;
+  const planned = planFrozenRelaunch(loopOf(card, now), watcher.plan, since);
+  watcher.plan = planned.memory;
+  await runActions(card, session, planned.actions, evidence);
+}
+
 /** Record one change, then plan and run its actions in the same sampling turn. */
 async function act(
   card: Card,
@@ -191,9 +240,9 @@ async function act(
     now,
     memory: plan,
   });
-  if (planned.actions.length > 0)
-    await runActions(card, session, planned.actions, change.evidence);
-  return planned.memory;
+  return planned.actions.length > 0
+    ? runPlanned(card, session, planned, plan, change.evidence)
+    : planned.memory;
 }
 
 /**
@@ -210,7 +259,8 @@ export async function superviseLost(cardId: string): Promise<void> {
     !card ||
     card.sessionLost !== true ||
     !session ||
-    session.state === "lost"
+    session.state === "lost" ||
+    session.state === "released"
   )
     return;
   if (
@@ -233,7 +283,10 @@ export async function superviseLost(cardId: string): Promise<void> {
  * @remarks Sessions on a board with `supervisor: off` get no watcher, no state and no event. A sample
  * that arrives while the same session is still being sampled, or while a wake line is being typed
  * into the pane, is skipped. A group card's loop files are read before its first plan, and an orchestrator
- * card gets the wake duty after the sample's own state work, which a state change skips.
+ * card gets the wake duty after the sample's own state work, which a state change skips. The first sample
+ * of a new watcher that reads a stored `usage_limit_wait` plans once as if from no state, so a restart
+ * re-arms the limit move or wait. A session that stays `frozen` past the relaunch delay gets the
+ * relaunch duty once per freeze.
  */
 export async function supervisePane(
   sample: PaneSample,
@@ -247,10 +300,12 @@ export async function supervisePane(
     watchers.delete(sample.tmuxSession);
     return;
   }
+  const created = !watchers.has(sample.tmuxSession);
   const watcher = ensureWatcher(sample.tmuxSession, session.state ?? null);
   if (watcher.running || wakeInFlight(card)) return;
   watcher.running = true;
   try {
+    await widenNarrowWindow(sample.tmuxSession);
     if (isLoopCard(card) && !watcher.progressRead) {
       await refreshLoopProgress(card.id);
       watcher.progressRead = true;
@@ -261,23 +316,80 @@ export async function supervisePane(
       ),
       atShellPrompt(watcher),
     ]);
+    const engine = card.loopProgress?.engine;
+    const engineOpen = engine?.active === true && !engine.closed;
     const detection = detectState({
       now,
       tmuxAlive: true,
       atShellPrompt: shellPrompt,
       paused: card.paused ?? null,
       pane: sample.pane,
+      contextPercent: session.contextPercent ?? null,
       engineSessionId: engineSessionIdOf(card),
-      completion: card.loopProgress?.completion ?? null,
+      completion: promiseCompletes(
+        card.loopProgress,
+        engineOpen,
+        transcript?.lastAssistantText,
+      )
+        ? "complete"
+        : (card.loopProgress?.completion ?? null),
+      engineOpen,
       transcript,
       memory: watcher.memory,
     });
     watcher.memory = detection.memory;
+    const claudeShown = !shellPrompt && READY.test(footer(sample.pane));
     const changed =
       detection.state !== (session.state ?? null) &&
-      !holdsNeedsInput(session.state ?? null, session.stateReason, detection);
+      !holdsReleased(
+        session.state ?? null,
+        claudeShown && !floorExiting(session.id),
+      ) &&
+      !holdsNeedsInput(
+        session.state ?? null,
+        session.stateReason,
+        detection,
+        engineOpen,
+      );
     if (changed)
       watcher.plan = await act(card, session, detection, watcher.plan, now);
+    if (changed && detection.state === "roadmap_complete")
+      watcher.closeTriedAt = now;
+    if (
+      !changed &&
+      detection.state === "roadmap_complete" &&
+      engineOpen &&
+      now - watcher.closeTriedAt >= CLOSE_RETRY_MS
+    ) {
+      watcher.closeTriedAt = now;
+      await runActions(
+        card,
+        session,
+        [{ kind: "close_loop" }],
+        detection.evidence,
+      );
+    }
+    if (!changed && session.state === "frozen" && detection.state === "frozen")
+      await relaunchIfDue(card, session, watcher, detection.evidence, now);
+    if (
+      created &&
+      !changed &&
+      detection.state === "usage_limit_wait" &&
+      session.stateReason === undefined
+    ) {
+      const planned = planActions({
+        from: null,
+        to: detection.state,
+        loop: loopOf(card, now),
+        usageLimit: ownerPolicy(card)?.usageLimit ?? "wait",
+        wokeAt: lastWakeAt,
+        now,
+        memory: watcher.plan,
+      });
+      watcher.plan = planned.memory;
+      if (planned.actions.length > 0)
+        await runActions(card, session, planned.actions, detection.evidence);
+    }
     if (
       (detection.state === "working" || detection.state === "idle") &&
       store.getCard(card.id)?.sessions?.find((s) => s.id === session.id)
