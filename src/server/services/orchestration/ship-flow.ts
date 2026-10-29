@@ -229,7 +229,7 @@ export async function runCheck(
         "-u",
         "NODE_ENV",
         `DISPATCH_CHECK_WAIT_SECONDS=${SLOT_WAIT_SECONDS}`,
-        "DISPATCH_CHECK_PRIORITY=ship",
+        "DISPATCH_CHECK_CLASS=ship",
         ...argv,
       ],
       {

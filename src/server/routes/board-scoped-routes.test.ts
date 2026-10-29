@@ -31,7 +31,6 @@ const { eventsRouter } = await import("./events.route.js");
 const { archiveRouter } = await import("./archive.route.js");
 const { workspacesRouter } = await import("./workspaces.route.js");
 const { itemsRouter } = await import("./items.route.js");
-const { sessionsRouter } = await import("./sessions.route.js");
 const { setOrchestrationConfig } =
   await import("../services/infra/config-holder.js");
 const { unwindGroup } = await import("../services/orchestration/unwind.js");
@@ -78,7 +77,6 @@ for (const [board, name, repo] of [
   });
 }
 const betaCard = await store.createLocalCard(BETA, "shared word beta", "");
-const betaLive = await startedGroup(store, { board: BETA });
 const betaArchivedGroup = await startedGroup(store, { board: BETA });
 assert.equal((await unwindGroup(betaArchivedGroup.g.id, "todo")).ok, true);
 await store.setBoardArchived(BETA, true);
@@ -93,7 +91,6 @@ app.use(
   archiveRouter,
   workspacesRouter,
   itemsRouter,
-  sessionsRouter,
 );
 const server: Server = await new Promise((resolve) => {
   const s = app.listen(0, "127.0.0.1", () => resolve(s));
@@ -321,7 +318,6 @@ test("every collection route that takes a board keeps ACME out of the no-board r
     ["/search?q=shared%20word", acmeTodo.id],
     ["/events", acmeTodo.id],
     ["/archive", acmeArchived.g.id],
-    ["/sessions", acmeGroup.g.id],
     ["/workspaces", worktreeCard.id],
     ["/workspace-folders", path.join(acmeFolder, "repo")],
   ];
@@ -360,14 +356,6 @@ test("an archived board still serves its cards on every read route", async () =>
     "/archive?board=BETA",
   );
   assert.deepEqual(ids(archive.archived), [betaArchivedGroup.g.id]);
-
-  const sessions = await get<{ sessions: { cardId: string }[] }>(
-    "/sessions?board=BETA",
-  );
-  assert.deepEqual(
-    sessions.sessions.map((s) => s.cardId),
-    [betaLive.g.id],
-  );
 
   const folders = await get<{ folders: string[] }>(
     "/workspace-folders?board=BETA",

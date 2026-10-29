@@ -233,7 +233,7 @@ void test(
         .actions()
         .filter((e) => e.data.action === "handoff")
         .map((e) => [e.data.result, e.data.step]),
-      [["unconfirmed", "resume prompt"]],
+      [["unconfirmed", "clear"]],
     );
     assert.equal(s.session().state, "needs_input");
     assert.equal(s.record().handoffReady, true);

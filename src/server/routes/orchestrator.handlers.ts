@@ -472,7 +472,7 @@ export const pauseCardHandler: ToolHandler = async (req, res, caller, call) => {
   res.status(200).json({ paused: true });
 };
 
-/** Resume a paused loop, refused while memory is low. */
+/** Resume a paused loop, or answer 202 while the resume waits for memory. */
 export const resumeCardHandler: ToolHandler = async (
   req,
   res,
@@ -480,9 +480,12 @@ export const resumeCardHandler: ToolHandler = async (
   call,
 ) => {
   const { cardId } = parseOrThrow(sessionCardParamsSchema, req.params);
-  await orchestratorResumeCard(caller, scopedCard(caller, call, cardId));
-  call.result = "resumed";
-  res.status(200).json({ resumed: true });
+  const outcome = await orchestratorResumeCard(
+    caller,
+    scopedCard(caller, call, cardId),
+  );
+  call.result = outcome.resumed ? "resumed" : "waiting for memory";
+  res.status(outcome.resumed ? 200 : 202).json(outcome);
 };
 
 /** Raise a decision item for the user to answer. */
