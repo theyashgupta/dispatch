@@ -40,12 +40,10 @@ import {
   type Page,
   type Route,
 } from "../../../../shared/route.js";
-import { flattenSessions } from "../../../../shared/sessions.js";
 import {
   BOARD_SHORTCUTS,
   GLOBAL_SHORTCUTS,
   INBOX_SHORTCUTS,
-  SESSIONS_SHORTCUTS,
   bindShortcuts,
 } from "../../../../shared/shortcuts.js";
 import { hideDisabledSlack } from "../../../../shared/hide-disabled-slack.js";
@@ -125,7 +123,6 @@ const TOAST_OFFSET = {
 const SHORTCUT_GROUPS_AFTER_GLOBAL = [
   { title: "Board", rows: BOARD_SHORTCUTS },
   { title: "Inbox", rows: INBOX_SHORTCUTS },
-  { title: "Sessions", rows: SESSIONS_SHORTCUTS },
 ];
 
 const PANEL_FREE_PAGES: ReadonlySet<Page> = new Set([
@@ -143,7 +140,6 @@ const PANEL_FREE_PAGES: ReadonlySet<Page> = new Set([
 const PAGE_TITLES: Record<Page, string> = {
   board: "Board",
   inbox: "Inbox",
-  sessions: "Sessions",
   tickets: "Tickets",
   workspace: "Workspace",
   settings: "Settings",
@@ -423,8 +419,6 @@ export function ShellContainer({
         }).length;
   const meetingItems = items.filter((item) => item.source === "meeting");
   const inboxCount = inboxWaitingCount(board.cards, inboxItems);
-  const sessionRows = flattenSessions(board.cards, nowMs());
-  const liveSessionCount = sessionRows.filter((row) => row.running).length;
   const githubEnabled = board.enabledSources?.includes("github") === true;
   const prCount = githubEnabled
     ? items.filter((item) => item.source === "github" && item.state !== "done")
@@ -437,7 +431,6 @@ export function ShellContainer({
   const pageCounts: Partial<Record<Page, number>> = {
     board: board.cards.length,
     inbox: inboxCount,
-    sessions: sessionRows.length,
     tickets: ticketsCount,
     activity: events.length,
     "pull-requests": githubEnabled ? buildPrRows(items, board.cards).length : 0,
@@ -494,7 +487,6 @@ export function ShellContainer({
         counts={{
           inbox: inboxCount,
           meetings: meetingItems.length,
-          sessions: liveSessionCount,
           "pull-requests": prCount,
           tickets: ticketsCount,
           errors: errorCount,

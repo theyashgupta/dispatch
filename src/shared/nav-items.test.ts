@@ -49,10 +49,10 @@ test("the System group lists its pages in order, Workspaces after Archive, Flow 
   );
 });
 
-test("the Work group lists Sessions, Workspace and Activity in order", () => {
+test("the Work group lists Workspace and Activity in order", () => {
   assert.deepEqual(
     NAV_ITEMS.filter((item) => item.group === "Work").map((item) => item.page),
-    ["sessions", "workspace", "activity"],
+    ["workspace", "activity"],
   );
 });
 

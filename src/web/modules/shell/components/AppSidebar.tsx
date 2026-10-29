@@ -109,9 +109,6 @@ export function AppSidebar({
                     brand={item.brand}
                     active={current === item.page}
                     collapsed={collapsed}
-                    live={
-                      item.page === "sessions" && (counts.sessions ?? 0) > 0
-                    }
                     count={counts[item.page]}
                     neutral={item.page === "tickets"}
                     onNavigate={onNavigate}

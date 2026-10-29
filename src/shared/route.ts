@@ -3,7 +3,6 @@ import { DEFAULT_BOARD_KEY } from "./board-key.js";
 export const PAGES = [
   "board",
   "inbox",
-  "sessions",
   "tickets",
   "workspace",
   "settings",
@@ -32,7 +31,6 @@ export const KEYED_PAGES = [
   "dashboard",
   "orchestrator",
   "inbox",
-  "sessions",
   "board-settings",
 ] as const;
 
@@ -68,12 +66,7 @@ function parseBoardsPath(segments: string[]): Route {
   if (key === undefined || key === "") return { page: "boards" };
   const board = decode(key);
   if (child === "settings") return { page: "board-settings", board };
-  if (
-    child === "dashboard" ||
-    child === "orchestrator" ||
-    child === "inbox" ||
-    child === "sessions"
-  ) {
+  if (child === "dashboard" || child === "orchestrator" || child === "inbox") {
     const id = tail.join("/");
     return id === ""
       ? { page: child, board }
@@ -83,7 +76,7 @@ function parseBoardsPath(segments: string[]): Route {
 }
 
 /**
- * Parses a location hash into a route, mapping anything unknown or empty to the board.
+ * Parses a location hash into a route, mapping an unknown or empty hash to the board and the retired `sessions` page to the boards list.
  * @remarks The hash is untrusted text from the URL bar, a push link or the tunnel, so an unknown
  * page never reaches the route switch: the board is the one page that always exists.
  */
@@ -91,6 +84,7 @@ export function parseRoute(hash: string): Route {
   const trimmed = hash.replace(/^#\/?/, "");
   if (trimmed === "") return BOARD;
   const [page, ...rest] = trimmed.split("/");
+  if (page === "sessions") return { page: "boards" };
   if (page === undefined || !isPage(page)) return BOARD;
   if (page === "boards") return parseBoardsPath(rest);
   const id = rest.join("/");
