@@ -12,6 +12,8 @@ const fake = installFakeTmux(env);
 const { store } = await import("../../store/board.store.js");
 const { upsertAccount, accountDir } = await import("./claude-accounts.js");
 const { moveSessionAccount } = await import("./session-account-move.js");
+const { moveOrWait } = await import("./supervisor-limit.js");
+const { listBoardSessions } = await import("./boards.js");
 const { runClaude } = await import("./run-claude.js");
 const { typeLaunchLine } = await import("./steps.js");
 const { resolveBinaryPath } = await import("../../adapters/resolve-binary.js");
@@ -182,4 +184,63 @@ void test("typeLaunchLine types the line after about 3 s when the pane never cle
   assert.ok(elapsed >= 2_900 && elapsed < 6_000, String(elapsed));
   const typed = calls().filter((c) => c[1] === "-l");
   assert.equal(typed.length, 1);
+});
+
+void test("a limit move of a stale Default session lands on the added account with no stale flag and shows it on the session list", async () => {
+  const { cardId, sessionId } = await staleSession("r-limit", "default", true);
+  await store.setPendingAccount(cardId, sessionId, ACCOUNT_A);
+  const card = store.getCard(cardId)!;
+  const session = card.sessions!.find((x) => x.id === sessionId)!;
+  const bucket = (percent: number) => [
+    { kind: "weekly_all", percent, resetsAt: null },
+  ];
+  await moveOrWait(
+    card,
+    session,
+    "You've hit your weekly limit · resets Oct 7 at 8:30am (Asia/Calcutta)",
+    {
+      now: Date.now,
+      schedule: () => undefined,
+      usageResetAt: () => null,
+      cursorWaitMs: 0,
+      candidates: () =>
+        Promise.resolve([
+          {
+            id: "default",
+            state: "limited",
+            limitedUntil: null,
+            buckets: bucket(100),
+          },
+          {
+            id: ACCOUNT_A,
+            state: "available",
+            limitedUntil: null,
+            buckets: bucket(13),
+          },
+        ]),
+      send: () => Promise.resolve("confirmed"),
+    },
+  );
+  const live = store
+    .getCard(cardId)!
+    .sessions!.find((x) => x.id === sessionId)!;
+  assert.equal(live.claudeAccountId, ACCOUNT_A);
+  assert.notEqual(live.claudeAccountStale, true);
+  assert.equal(live.pendingClaudeAccountId, undefined);
+  const listed = listBoardSessions(DEFAULT_BOARD_KEY, true).find(
+    (x) => x.id === sessionId,
+  );
+  assert.equal(listed?.claudeAccountId, ACCOUNT_A);
+  assert.notEqual(listed?.claudeAccountStale, true);
+  const event = store
+    .listOrchestrationEvents(DEFAULT_BOARD_KEY, 0, 500)
+    .find(
+      (e) =>
+        e.cardId === cardId &&
+        e.kind === "supervisor_action" &&
+        e.data.action === "limit_move",
+    );
+  assert.equal(event?.data.from, "default");
+  assert.equal(event?.data.to, ACCOUNT_A);
+  assert.equal(event?.data.result, "moved");
 });

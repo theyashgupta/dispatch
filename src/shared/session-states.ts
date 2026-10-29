@@ -16,7 +16,9 @@ export const SESSION_STATES: Readonly<
   usage_limit_wait: { label: "Waiting for usage reset", tone: "muted" },
   api_error: { label: "API error", tone: "error" },
   stale: { label: "No progress", tone: "attention" },
+  frozen: { label: "Frozen after compaction", tone: "attention" },
   lost: { label: "Session lost", tone: "error" },
   shell_prompt: { label: "Claude exited", tone: "error" },
   paused: { label: "Paused", tone: "muted" },
+  released: { label: "Released", tone: "muted" },
 };

@@ -2,6 +2,7 @@ import type { ClaudeAccountSummary } from "../../../../shared/types.js";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { Button } from "@/components/ui/button";
 import { AccountRow } from "./AccountRow";
+import { ManagedDefaultOffer } from "./ManagedDefaultOffer";
 
 interface AccountsListProps {
   accounts: ClaudeAccountSummary[];
@@ -9,11 +10,15 @@ interface AccountsListProps {
   now: number;
   loaded: boolean;
   failed: boolean;
+  removeError: string | null;
   addDisabled: boolean;
+  managedDefaultOffer: boolean;
   onAdd: () => void;
+  onManagedLogin: () => void;
   onSwitch: (account: ClaudeAccountSummary) => void;
   onRelogin: (account: ClaudeAccountSummary) => void;
   onRemove: (account: ClaudeAccountSummary) => void;
+  onRemoveDuplicate: (account: ClaudeAccountSummary) => void;
   reloginDisabled: boolean;
 }
 
@@ -23,11 +28,15 @@ export function AccountsList({
   now,
   loaded,
   failed,
+  removeError,
   addDisabled,
+  managedDefaultOffer,
   onAdd,
+  onManagedLogin,
   onSwitch,
   onRelogin,
   onRemove,
+  onRemoveDuplicate,
   reloginDisabled,
 }: AccountsListProps) {
   const defaultOnly = accounts.every((account) => account.isDefault);
@@ -50,10 +59,15 @@ export function AccountsList({
         </Button>
       </div>
 
+      {managedDefaultOffer && (
+        <ManagedDefaultOffer disabled={addDisabled} onLogin={onManagedLogin} />
+      )}
+
       {!loaded && (
         <span className="text-xs text-muted-foreground">Loading…</span>
       )}
       {failed && <ErrorAlert>Couldn't load Claude accounts.</ErrorAlert>}
+      {removeError && <ErrorAlert>{removeError}</ErrorAlert>}
 
       {loaded && defaultOnly && (
         <p
@@ -78,6 +92,7 @@ export function AccountsList({
               onSwitch={() => onSwitch(account)}
               onRelogin={() => onRelogin(account)}
               onRemove={() => onRemove(account)}
+              onRemoveDuplicate={() => onRemoveDuplicate(account)}
             />
           ))}
         </div>

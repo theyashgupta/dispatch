@@ -65,6 +65,7 @@ export const addBodySchema = z.strictObject(
     id: orchestratorIdSchema,
     name: nameSchema,
     role: z.enum(["main", "extra"], "invalid-role"),
+    kind: z.enum(["board", "feature"], "invalid-kind").optional(),
     scope: scopeSchema.default({ groupIds: [], ticketIds: [] }),
     policyOverride: overrideSchema.default({}),
   },
@@ -82,3 +83,8 @@ export const editBodySchema = z
     unknownField,
   )
   .refine((patch) => Object.keys(patch).length > 0, "empty-patch");
+
+export const assignBodySchema = z.strictObject(
+  { orchestratorId: orchestratorIdSchema },
+  unknownField,
+);

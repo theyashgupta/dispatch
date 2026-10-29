@@ -13,13 +13,16 @@ import { getClaudeAccountsSettings } from "../infra/config-holder.js";
 import { continueActionFor } from "../domain/limit-surface.js";
 import {
   accountDir,
+  canonicalAccountId,
   isExternalAccountDir,
   getActiveAccountId,
+  getManagedDefaultId,
   listAccounts,
   readChainOrder,
   readRegistry,
   removeAccount,
 } from "./claude-accounts.js";
+import { expireLimit } from "../domain/account-state.js";
 import { readChainState } from "./account-chain-state.js";
 import { forgetChainAccount } from "./account-chain.js";
 import { forgetUsage, getUsage, usageBuckets } from "./claude-usage.js";
@@ -57,7 +60,8 @@ export function cacheHomeIdentity(identity: ClaudeIdentity): void {
  * List every account in chain order with its usage snapshot and chain fields for `GET /accounts`.
  *
  * @remarks `state`, `buckets` and `limitedUntil` come from the chain state file; an account the
- * controller has not read yet is `unknown` with the buckets of its usage snapshot.
+ * controller has not read yet is `unknown` with the buckets of its usage snapshot. A stored
+ * `limited` state whose `limitedUntil` passed reads `unknown` with no `limitedUntil`.
  */
 export async function listAccountSummaries(): Promise<ClaudeAccountSummary[]> {
   const [accounts, order, chain] = await Promise.all([
@@ -70,17 +74,40 @@ export async function listAccountSummaries(): Promise<ClaudeAccountSummary[]> {
     .map((a) => {
       const usage = getUsage(a.id);
       const entry = chain.accounts[a.id];
+      const stored = expireLimit(
+        {
+          state: entry?.state ?? "unknown",
+          limitedUntil: entry?.limitedUntil ?? null,
+        },
+        new Date(),
+      );
       return {
         ...a,
         usage,
         position: order.indexOf(a.id),
-        state: entry?.state ?? "unknown",
+        ...stored,
         buckets: entry?.buckets ?? usageBuckets(usage),
-        limitedUntil: entry?.limitedUntil ?? null,
         inUse: a.id === activeId,
       } satisfies ClaudeAccountSummary;
     })
     .sort((a, b) => a.position - b.position);
+}
+
+/**
+ * Return the code that refuses a manual switch to an account, or null when the switch may go ahead.
+ *
+ * @remarks
+ * It reads the same chain state file as the account listing, so the page and the guard agree. The
+ * canonical id makes `default` resolve to the managed default.
+ */
+export async function manualSwitchRefusal(
+  id: string,
+): Promise<"account-needs-login" | "account-shadowed-by-home" | null> {
+  const state = (await readChainState()).accounts[canonicalAccountId(id)]
+    ?.state;
+  if (state === "needs-login") return "account-needs-login";
+  if (state === "shadowed-by-home") return "account-shadowed-by-home";
+  return null;
 }
 
 /**
@@ -108,7 +135,7 @@ export async function listAccountSessions(): Promise<AccountSessionEntry[]> {
   const activeId = getActiveAccountId();
   return Promise.all(
     store.sessionsWithTmux(ALL_BOARDS).map(async ({ card, session }) => {
-      const accountId = session.claudeAccountId ?? DEFAULT_CLAUDE_ACCOUNT_ID;
+      const accountId = canonicalAccountId(session.claudeAccountId);
       const turn = await liveTurnState(
         card.id,
         session.id,
@@ -136,9 +163,24 @@ export async function listAccountSessions(): Promise<AccountSessionEntry[]> {
 }
 
 /**
+ * True when Default can be offered a managed login: none exists and the home login is not held by a record.
+ */
+export async function managedDefaultOffered(): Promise<boolean> {
+  if (getManagedDefaultId() !== undefined) return false;
+  const home = await homeIdentity();
+  if (!home.loggedIn) return false;
+  return !(await readRegistry()).some(
+    (a) =>
+      a.email === home.email &&
+      (!a.orgId || !home.orgId || a.orgId === home.orgId),
+  );
+}
+
+/**
  * Remove an added account with its dir, registry record, cached usage, queued moves and chain entry.
  *
- * @remarks The dir is signed out first so Claude Code deletes its own keychain item.
+ * @remarks The dir is signed out first so Claude Code deletes its own keychain item. Removing the
+ * managed default first retags its sessions to `default`, which is the home login again.
  */
 export async function removeAccountAndLogout(
   id: string,
@@ -146,6 +188,19 @@ export async function removeAccountAndLogout(
   const known = (await readRegistry()).some((a) => a.id === id);
   if (!known || isExternalAccountDir(id))
     return { ok: false, error: "not-found" };
+  if (id === getManagedDefaultId()) {
+    for (const card of store.listCards(ALL_BOARDS)) {
+      for (const session of card.sessions ?? []) {
+        if (session.claudeAccountId === id) {
+          await store.setSessionAccount(
+            card.id,
+            session.id,
+            DEFAULT_CLAUDE_ACCOUNT_ID,
+          );
+        }
+      }
+    }
+  }
   await logoutClaudeConfigDir(accountDir(id));
   const result = await removeAccount(id);
   if (result.ok) {

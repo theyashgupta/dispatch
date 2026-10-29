@@ -11,7 +11,7 @@ import type {
 
 const env = isolateEnv();
 const { store } = await import("../../store/board.store.js");
-const { runActions } = await import("./supervisor-actions.js");
+const { actionTools, runActions } = await import("./supervisor-actions.js");
 
 const SBX = parseBoardKey("SBX") as BoardKey;
 await store.load();
@@ -51,6 +51,7 @@ async function setState(state: OrchestratorRecord["state"]): Promise<void> {
 
 function spyDeps(calls: string[], sent: string[] = []): ActionDeps {
   return {
+    ...actionTools,
     send: (_card, _session, text) => {
       sent.push(text);
       return Promise.resolve("confirmed");
@@ -111,7 +112,7 @@ void test("the supervisor relaunches the session of a running orchestrator at th
 void test("after the relaunch the supervisor sends the orchestrator resume prompt and not the loop text", async () => {
   await setState("running");
   await store.completeStart(card.id, undefined, {
-    workspacePath: "/sbx/sessions/lead",
+    workspacePath: env.root,
     tmuxSession: `dsp-${card.id}`,
     branch: "lead",
   });

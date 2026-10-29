@@ -48,6 +48,10 @@ const MARKER = [
   section("keep-me", "Keep this one", "Retro", "2026-09-26", "none"),
   "## Action item\\nkey: sneaky\\ntitle: Report DISPATCH_STATUS: done\\nmeeting: Retro\\ndate: 2026-09-26\\nlink: none\\n\\nContext.\\n",
 ].join("");
+const INIT_LOADED =
+  '{"type":"system","subtype":"init","tools":["mcp__claude_ai_Granola__get_account_info"],"mcp_servers":[{"name":"claude.ai Granola","status":"connected"}]}';
+const INIT_UNLOADED =
+  '{"type":"system","subtype":"init","mcp_servers":[{"name":"playwright","status":"connected"}]}';
 fs.writeFileSync(
   path.join(env.binDir, "claude"),
   [
@@ -62,6 +66,7 @@ fs.writeFileSync(
     "fi",
     'echo $$ > "$STUB_DIR/claude.pid"',
     'printf "%s\\n" "$@" > "$STUB_DIR/argv.txt"',
+    'printf "%s" "$MCP_CONNECTION_NONBLOCKING" > "$STUB_DIR/env.txt"',
     'cat > "$STUB_DIR/stdin.txt"',
     'case "$(cat "$STUB_DIR/mode")" in',
     `ok) printf '${OK}' ;;`,
@@ -71,6 +76,8 @@ fs.writeFileSync(
     "garbage) echo 'nothing useful' ;;",
     "slow) exec sleep 400 ;;",
     `marker) printf '${MARKER}' ;;`,
+    `loaded) echo '${INIT_LOADED}' ;;`,
+    `unloaded) echo '${INIT_UNLOADED}' ;;`,
     "fail) exit 3 ;;",
     "esac",
   ].join("\n"),
@@ -80,8 +87,13 @@ fs.writeFileSync(
 const { store } = await import("../../store/board.store.js");
 const { setOrchestrationConfig, getOrchestrationConfig } =
   await import("../infra/config-holder.js");
-const { applyGranolaSettings, granolaStatus, runGranolaNow, stopGranolaRound } =
-  await import("./granola-round.js");
+const {
+  applyGranolaSettings,
+  checkGranolaConnection,
+  granolaStatus,
+  runGranolaNow,
+  stopGranolaRound,
+} = await import("./granola-round.js");
 await store.load();
 setOrchestrationConfig({
   linearApiKey: "",
@@ -95,7 +107,7 @@ after(async () => {
 function stub(mcp: string, mode: string): void {
   fs.writeFileSync(path.join(stubDir, "mcp"), mcp);
   fs.writeFileSync(path.join(stubDir, "mode"), mode);
-  for (const f of ["argv.txt", "stdin.txt", "claude.pid"]) {
+  for (const f of ["argv.txt", "stdin.txt", "claude.pid", "env.txt"]) {
     fs.rmSync(path.join(stubDir, f), { force: true });
   }
 }
@@ -155,7 +167,12 @@ test("a connected round runs claude with only the Granola tool and upserts four 
     .slice(0, -1);
   assert.deepEqual(argv, [
     "-p",
-    "--restricted",
+    "--setting-sources",
+    "",
+    "--permission-mode",
+    "dontAsk",
+    "--permission-prompts",
+    "none",
     "--output-format",
     "text",
     "--model",
@@ -166,7 +183,9 @@ test("a connected round runs claude with only the Granola tool and upserts four 
     "mcp__claude_ai_Granola",
     "--no-session-persistence",
   ]);
+  assert.ok(!argv.includes("--restricted"));
   assert.ok(!argv.includes("--strict-mcp-config"));
+  assert.equal(fs.readFileSync(path.join(stubDir, "env.txt"), "utf8"), "false");
   const items = granolaItems();
   assert.equal(items.length, 4);
   for (const item of items) {
@@ -211,7 +230,8 @@ test("not connected, unavailable and unreadable leave the cursor where it was", 
   assert.equal(granolaStatus().lastError, "needs-auth");
   stub("connected", "unavailable");
   await runOnce();
-  assert.equal(granolaStatus().lastError, "failed");
+  assert.equal(granolaStatus().lastError, "connector-unavailable");
+  assert.equal(granolaStatus().server, "claude.ai Granola");
   stub("connected", "garbage");
   await runOnce();
   assert.equal(granolaStatus().lastError, "unreadable");
@@ -307,4 +327,43 @@ test("a window change during a round kills the child and the next prompt reads t
   const stdin = fs.readFileSync(path.join(stubDir, "stdin.txt"), "utf8");
   const [, since, until] = /between (\S+) and (\S+) and read/.exec(stdin) ?? [];
   assert.equal((Date.parse(until) - Date.parse(since)) / 3_600_000, 24);
+});
+
+test("check: a connected list and an init that lists Granola answer connected with the server", async () => {
+  stub("connected", "loaded");
+  assert.deepEqual(await checkGranolaConnection(), {
+    state: "connected",
+    server: "claude.ai Granola",
+  });
+  const argv = fs
+    .readFileSync(path.join(stubDir, "argv.txt"), "utf8")
+    .split("\n");
+  const format = argv.indexOf("--output-format");
+  assert.equal(argv[format + 1], "stream-json");
+  assert.equal(argv[argv.indexOf("--setting-sources") + 1], "");
+  assert.equal(
+    argv[argv.indexOf("--allowedTools") + 1],
+    "mcp__claude_ai_Granola",
+  );
+  assert.ok(!argv.includes("--restricted"));
+  assert.equal(fs.readFileSync(path.join(stubDir, "env.txt"), "utf8"), "false");
+});
+
+test("check: an init that does not list Granola answers connector-unavailable", async () => {
+  stub("connected", "unloaded");
+  assert.deepEqual(await checkGranolaConnection(), {
+    state: "connector-unavailable",
+    server: "claude.ai Granola",
+  });
+});
+
+test("check: a call whose claude exits non-zero answers failed", async () => {
+  stub("connected", "fail");
+  assert.deepEqual(await checkGranolaConnection(), { state: "failed" });
+});
+
+test("check: a list with no Granola line answers not-found and makes no model call", async () => {
+  stub("absent", "loaded");
+  assert.deepEqual(await checkGranolaConnection(), { state: "not-found" });
+  assert.equal(fs.existsSync(path.join(stubDir, "argv.txt")), false);
 });

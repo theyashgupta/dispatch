@@ -53,8 +53,7 @@ export function ExtraFormContainer({
   const errors = validateOverride(values, policy);
   const valid = Object.keys(errors).length === 0;
   const canSubmit =
-    valid &&
-    (editing === null ? picked.length > 0 : isOverrideDirty(values, saved));
+    valid && (editing === null || isOverrideDirty(values, saved));
   const pending = add.isPending || edit.isPending;
 
   async function submit(): Promise<void> {

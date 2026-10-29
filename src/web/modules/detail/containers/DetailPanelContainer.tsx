@@ -45,13 +45,14 @@ import {
   useStartCardMutation,
   useUnpauseCardMutation,
 } from "@/queries/cards-queries";
+import { useOrchestrationSummaryQuery } from "@/queries/orchestration-summary-queries";
 import { useSessionAccountMove } from "@/queries/session-account-queries";
+import { SidePanel } from "@/components/ui/side-panel";
 import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { useItems } from "@/components/ui/hooks/use-items";
 import { stampLastOpened } from "@/components/ui/hooks/use-last-opened";
 import { CAROUSEL_QUERY } from "../../../../shared/media-queries.js";
 import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
-import { SidePanel } from "@/components/ui/side-panel";
 import {
   PanelAccountRow,
   PanelBody,
@@ -63,6 +64,7 @@ import {
   PanelRow,
 } from "@/modules/detail/components/PanelFrame";
 import {
+  frozenNote,
   pauseFailureCopy,
   pausedNote,
 } from "@/modules/detail/domain/pause-copy";
@@ -71,8 +73,13 @@ import {
   RESUME_TARGET_ERROR,
   RESUME_TARGET_LOADING,
 } from "@/modules/detail/domain/resume-target";
-import { PanelMutedNotice } from "@/modules/detail/components/PanelNotice";
+import {
+  PanelAlert,
+  PanelMutedNotice,
+} from "@/modules/detail/components/PanelNotice";
+import { liveResumeFailure } from "@/modules/detail/domain/live-resume-failure";
 import { PanelHeader } from "@/modules/detail/components/PanelHeader";
+import { RunClaudeButton } from "@/modules/detail/components/RunClaudeButton";
 import { PreviewRow } from "@/modules/detail/components/PreviewRow";
 import { ReferenceBlocks } from "@/modules/detail/components/ReferenceBlocks";
 import { SessionFlowRow } from "@/modules/detail/components/SessionFlowRow";
@@ -83,7 +90,11 @@ import { TerminalRegion } from "@/modules/detail/components/TerminalRegion";
 import { UnknownProbeRow } from "@/modules/detail/components/UnknownProbeRow";
 import { reviewHeader as buildReviewHeader } from "@/modules/detail/domain/review-header";
 import { heldPrItems } from "../../../../shared/pr-rows.js";
-import { hasSessionFlow } from "@/modules/detail/domain/session-flow";
+import { groupCostLine } from "@/modules/detail/domain/group-cost-line";
+import {
+  hasSessionFlow,
+  terminalReady,
+} from "@/modules/detail/domain/session-flow";
 import { useFocusReturn } from "@/modules/detail/hooks/use-focus-return";
 import { usePanelHistory } from "@/modules/detail/hooks/use-panel-history";
 import {
@@ -95,7 +106,10 @@ import {
   useSwitchSessionMutation,
 } from "@/modules/detail/queries/detail-queries";
 import { CardTimelineContainer } from "./CardTimelineContainer";
+import { canBeBlocked } from "../../../../shared/blocked-by.js";
+import { BlockedByFieldContainer } from "./BlockedByFieldContainer";
 import { LinearSectionContainer } from "./LinearSectionContainer";
+import { OrchestratorFieldContainer } from "./OrchestratorFieldContainer";
 
 export function DetailPanelContainer() {
   const { appStore } = useRouteContext({ from: "__root__" });
@@ -142,6 +156,10 @@ export function DetailPanelContainer() {
   const editors = board?.editors;
   const accounts = accountsData?.accounts;
   const cardIdentifiers = identifiersOf(cards ?? []);
+  const summary = useOrchestrationSummaryQuery(
+    card?.boardKey ?? boardKey,
+    card?.source === "group",
+  );
   const onClose = appStore.closePanel;
   const onRetryPinFetch = appStore.retryPinFetch;
   const onStartRequest = (req: string | StartRequest) =>
@@ -326,6 +344,8 @@ export function DetailPanelContainer() {
 
   const hasLiveSession = !!(c?.tmuxSession && !c.sessionLost);
   const note = c != null ? pausedNote(c) : null;
+  const frozen = c != null ? frozenNote(c) : null;
+  const liveFailure = c != null ? liveResumeFailure(c) : null;
   const activeSessionLost = c?.activeSessionId != null && !c.tmuxSession;
   const resumeTarget = useResumeTargetQuery(c?.id ?? "", activeSessionLost);
   const resumeLine =
@@ -346,6 +366,69 @@ export function DetailPanelContainer() {
     setFullscreen(false);
   }
 
+  const accountGroup =
+    sessionAccount != null ? (
+      <PanelAccountRow
+        name={sessionAccount.name}
+        stale={sessionAccount.stale}
+        continueAction={sessionAccount.continueAction}
+        pendingNote={sessionAccount.pendingNote}
+        pending={
+          accountMove.pending?.key === accountKey
+            ? accountMove.pending.kind
+            : null
+        }
+        busy={accountMove.pending !== null}
+        note={accountKey == null ? undefined : accountMove.notes[accountKey]}
+        onRestart={() =>
+          moveSessionAccount("restart", sessionAccount.accountId, "Restarted")
+        }
+        onContinue={() => {
+          if (accountsData == null) return;
+          moveSessionAccount(
+            "continue",
+            accountsData.activeId,
+            `Moved to ${accountName(accountsData.accounts, accountsData.activeId)}`,
+          );
+        }}
+      />
+    ) : undefined;
+  const hasSwitcher = c != null && (c.sessionSummaries?.length ?? 0) >= 2;
+  const showRunClaude =
+    hasLiveSession &&
+    !hydrating &&
+    pinFetchError == null &&
+    c != null &&
+    terminalReady(c);
+  const sessionControls =
+    hasSwitcher || showStartAnother || showRunClaude ? (
+      <>
+        {hasSwitcher && (
+          <SessionSwitcher
+            card={c}
+            onSwitch={(cardId, sessionId) => {
+              switchSession({ cardId, sessionId }).catch(console.error);
+            }}
+          />
+        )}
+        {showStartAnother && (
+          <StartAnotherSessionButton
+            card={c}
+            onStartRequest={onStartRequest}
+            narrowPanel={narrowPanel}
+          />
+        )}
+        {showRunClaude && (
+          <RunClaudeButton
+            card={c}
+            onRunClaude={(id) => {
+              void runClaude(id).catch(console.error);
+            }}
+          />
+        )}
+      </>
+    ) : null;
+
   const referenceColumn = (
     <>
       <ReferenceBlocks
@@ -356,6 +439,16 @@ export function DetailPanelContainer() {
           cleanupCard(id).catch(console.error);
         }}
       />
+      {c != null && canBeBlocked(c) && (
+        <BlockedByFieldContainer key={c.id} card={c} cards={cards ?? []} />
+      )}
+      {c != null && (
+        <OrchestratorFieldContainer
+          key={c.id}
+          card={c}
+          board={c.boardKey ?? DEFAULT_BOARD_KEY}
+        />
+      )}
       {c != null && (c.source ?? "linear") === "linear" && (
         <LinearSectionContainer key={c.id} card={c} />
       )}
@@ -369,183 +462,6 @@ export function DetailPanelContainer() {
       )}
     </>
   );
-  const panel =
-    docked && c == null ? (
-      <PanelEmptyState />
-    ) : (
-      <>
-        <PanelHeader
-          card={c}
-          editors={editors}
-          hasLiveSession={hasLiveSession}
-          detailsExpanded={detailsExpanded}
-          onToggleDetails={() => setDetailsExpanded((v) => !v)}
-          fullscreen={fullscreen}
-          onToggleFullscreen={() => setFullscreen((v) => !v)}
-          onClose={requestClose}
-          docked={docked}
-          takeover={takeover}
-          narrowPanel={narrowPanel}
-          onOpenEditor={(id, editor) => {
-            openEditor({ id, editor }).catch(console.error);
-          }}
-          onMove={(id, column) => {
-            moveCard({ id, column }).catch(console.error);
-          }}
-          onStartRequest={onStartRequest}
-          onCleanupRequest={onCleanupRequest}
-          onUnwindRequest={onUnwindRequest}
-          onResetRequest={onResetRequest}
-          onSyncRequest={onSyncRequest}
-          onPauseRequest={(id) => runPauseChange(pause.mutateAsync({ id }))}
-          onResumePausedRequest={(id) =>
-            runPauseChange(unpause.mutateAsync({ id }))
-          }
-          pausePending={
-            c != null &&
-            ((pause.isPending && pause.variables?.id === c.id) ||
-              (unpause.isPending && unpause.variables?.id === c.id))
-          }
-          onAskRequest={onAskRequest}
-          resumeLine={resumeLine}
-          reviewHeader={reviewHeader}
-        />
-
-        {sessionAccount != null && (
-          <PanelAccountRow
-            name={sessionAccount.name}
-            stale={sessionAccount.stale}
-            continueAction={sessionAccount.continueAction}
-            pendingNote={sessionAccount.pendingNote}
-            pending={
-              accountMove.pending?.key === accountKey
-                ? accountMove.pending.kind
-                : null
-            }
-            busy={accountMove.pending !== null}
-            note={
-              accountKey == null ? undefined : accountMove.notes[accountKey]
-            }
-            onRestart={() =>
-              moveSessionAccount(
-                "restart",
-                sessionAccount.accountId,
-                "Restarted",
-              )
-            }
-            onContinue={() => {
-              if (accountsData == null) return;
-              moveSessionAccount(
-                "continue",
-                accountsData.activeId,
-                `Moved to ${accountName(accountsData.accounts, accountsData.activeId)}`,
-              );
-            }}
-          />
-        )}
-        {((c?.sessionSummaries?.length ?? 0) >= 2 || showStartAnother) && (
-          <PanelRow>
-            {c != null && (c.sessionSummaries?.length ?? 0) >= 2 && (
-              <SessionSwitcher
-                card={c}
-                onSwitch={(cardId, sessionId) => {
-                  switchSession({ cardId, sessionId }).catch(console.error);
-                }}
-              />
-            )}
-            {showStartAnother && c != null && (
-              <StartAnotherSessionButton
-                card={c}
-                onStartRequest={onStartRequest}
-                narrowPanel={narrowPanel}
-              />
-            )}
-          </PanelRow>
-        )}
-        {c != null && hasSessionFlow(c) && <SessionFlowRow card={c} />}
-
-        <PanelBody>
-          {hydrating ? (
-            <PanelLoading />
-          ) : pinFetchError != null ? (
-            <PanelLoadError kind={pinFetchError} onRetry={onRetryPinFetch} />
-          ) : (
-            <>
-              {hasLiveSession ? (
-                detailsExpanded && (
-                  <PanelReference capped grow={false}>
-                    {referenceColumn}
-                  </PanelReference>
-                )
-              ) : (
-                <PanelReference capped={false} grow={!c?.tmuxSession}>
-                  {referenceColumn}
-                </PanelReference>
-              )}
-
-              {c != null &&
-                (c.previewsUnknown != null ||
-                  (c.previews != null && c.previews.length > 0)) && (
-                  <PanelPreviews>
-                    {c.previews?.map((preview) => (
-                      <PreviewRow key={preview.port} preview={preview} />
-                    ))}
-                    {c.previewsUnknown != null && (
-                      <UnknownProbeRow
-                        category={c.previewsUnknown.category}
-                        partial={(c.previews?.length ?? 0) > 0}
-                      />
-                    )}
-                  </PanelPreviews>
-                )}
-
-              {note !== null && (
-                <div
-                  data-testid="paused-note"
-                  className="mx-(--space-xl) mb-(--space-lg)"
-                >
-                  <PanelMutedNotice label="Status">{note}</PanelMutedNotice>
-                </div>
-              )}
-
-              {hasLiveSession && c && (
-                <TerminalRegion
-                  card={c}
-                  onReconnect={(id) => {
-                    ensureTerminal(id).catch(console.error);
-                  }}
-                  onRunClaude={(id) => {
-                    void runClaude(id).catch(console.error);
-                  }}
-                />
-              )}
-
-              {activeSessionLost && (
-                <SessionLostSection
-                  card={c}
-                  resume={(id) => resumeCard({ id })}
-                  resumeLine={resumeLine}
-                  onRestart={(lost) => {
-                    if (lost.workspace) {
-                      startCard({
-                        id: lost.id,
-                        extraDirection: lost.extraDirection ?? "",
-                      })
-                        .then((result) => {
-                          if (!result.ok) toast.error(startRefusalText(result));
-                        })
-                        .catch(console.error);
-                    } else {
-                      onStartRequest?.(lost.id);
-                    }
-                  }}
-                />
-              )}
-            </>
-          )}
-        </PanelBody>
-      </>
-    );
   return (
     <SidePanel
       placement="overlay"
@@ -557,7 +473,168 @@ export function DetailPanelContainer() {
       expanded={fullscreen}
       sheet={takeover}
       onClose={takeover ? requestClose : onClose}
-      panel={panel}
+      panel={
+        <>
+          {docked && c == null ? (
+            <PanelEmptyState />
+          ) : (
+            <>
+              <PanelHeader
+                card={c}
+                editors={editors}
+                hasLiveSession={hasLiveSession}
+                detailsExpanded={detailsExpanded}
+                onToggleDetails={() => setDetailsExpanded((v) => !v)}
+                fullscreen={fullscreen}
+                onToggleFullscreen={() => setFullscreen((v) => !v)}
+                onClose={requestClose}
+                docked={docked}
+                takeover={takeover}
+                narrowPanel={narrowPanel}
+                onOpenEditor={(id, editor) => {
+                  openEditor({ id, editor }).catch(console.error);
+                }}
+                onMove={(id, column) => {
+                  moveCard({ id, column }).catch(console.error);
+                }}
+                onStartRequest={onStartRequest}
+                onCleanupRequest={onCleanupRequest}
+                onUnwindRequest={onUnwindRequest}
+                onResetRequest={onResetRequest}
+                onSyncRequest={onSyncRequest}
+                onPauseRequest={(id) =>
+                  runPauseChange(pause.mutateAsync({ id }))
+                }
+                onResumePausedRequest={(id) =>
+                  runPauseChange(unpause.mutateAsync({ id }))
+                }
+                pausePending={
+                  c != null &&
+                  ((pause.isPending && pause.variables?.id === c.id) ||
+                    (unpause.isPending && unpause.variables?.id === c.id))
+                }
+                onAskRequest={onAskRequest}
+                account={accountGroup}
+                resumeLine={resumeLine}
+                reviewHeader={reviewHeader}
+                costLine={groupCostLine(c, summary.data?.groups ?? [])}
+              />
+
+              {c != null && hasSessionFlow(c) ? (
+                <SessionFlowRow card={c}>{sessionControls}</SessionFlowRow>
+              ) : (
+                sessionControls != null && (
+                  <PanelRow>{sessionControls}</PanelRow>
+                )
+              )}
+
+              <PanelBody>
+                {hydrating ? (
+                  <PanelLoading />
+                ) : pinFetchError != null ? (
+                  <PanelLoadError
+                    kind={pinFetchError}
+                    onRetry={onRetryPinFetch}
+                  />
+                ) : (
+                  <>
+                    {hasLiveSession ? (
+                      detailsExpanded && (
+                        <PanelReference capped grow={false}>
+                          {referenceColumn}
+                        </PanelReference>
+                      )
+                    ) : (
+                      <PanelReference capped={false} grow={!c?.tmuxSession}>
+                        {referenceColumn}
+                      </PanelReference>
+                    )}
+
+                    {c != null &&
+                      (c.previewsUnknown != null ||
+                        (c.previews != null && c.previews.length > 0)) && (
+                        <PanelPreviews>
+                          {c.previews?.map((preview) => (
+                            <PreviewRow key={preview.port} preview={preview} />
+                          ))}
+                          {c.previewsUnknown != null && (
+                            <UnknownProbeRow
+                              category={c.previewsUnknown.category}
+                              partial={(c.previews?.length ?? 0) > 0}
+                            />
+                          )}
+                        </PanelPreviews>
+                      )}
+
+                    {note !== null && (
+                      <div
+                        data-testid="paused-note"
+                        className="mx-(--space-xl) mb-(--space-lg)"
+                      >
+                        <PanelMutedNotice label="Status">
+                          {note}
+                        </PanelMutedNotice>
+                      </div>
+                    )}
+
+                    {frozen !== null && (
+                      <div
+                        data-testid="frozen-note"
+                        className="mx-(--space-xl) mb-(--space-lg)"
+                      >
+                        <PanelMutedNotice label="Status">
+                          {frozen}
+                        </PanelMutedNotice>
+                      </div>
+                    )}
+
+                    {liveFailure !== null && (
+                      <div
+                        data-testid="live-resume-failure"
+                        className="mx-(--space-xl) mb-(--space-lg)"
+                      >
+                        <PanelAlert>{liveFailure}</PanelAlert>
+                      </div>
+                    )}
+
+                    {hasLiveSession && c && (
+                      <TerminalRegion
+                        card={c}
+                        onReconnect={(id) => {
+                          ensureTerminal(id).catch(console.error);
+                        }}
+                      />
+                    )}
+
+                    {activeSessionLost && (
+                      <SessionLostSection
+                        card={c}
+                        resume={(id) => resumeCard({ id })}
+                        resumeLine={resumeLine}
+                        onRestart={(lost) => {
+                          if (lost.workspace) {
+                            startCard({
+                              id: lost.id,
+                              extraDirection: lost.extraDirection ?? "",
+                            })
+                              .then((result) => {
+                                if (!result.ok)
+                                  toast.error(startRefusalText(result));
+                              })
+                              .catch(console.error);
+                          } else {
+                            onStartRequest?.(lost.id);
+                          }
+                        }}
+                      />
+                    )}
+                  </>
+                )}
+              </PanelBody>
+            </>
+          )}
+        </>
+      }
     />
   );
 }

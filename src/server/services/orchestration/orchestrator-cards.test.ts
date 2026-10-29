@@ -1,5 +1,6 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
+import os from "node:os";
 import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -19,6 +20,12 @@ import {
 } from "../domain/errors.js";
 
 const env = isolateEnv();
+const { DISPATCH_DATA_DIR } = await import("../../store/data-dir.js");
+assert.notEqual(
+  path.resolve(DISPATCH_DATA_DIR),
+  path.join(os.userInfo().homedir, ".dispatch"),
+  "test bound to the live board.db",
+);
 const { store } = await import("../../store/board.store.js");
 const { tempRepoWithWorkspace } =
   await import("../../test-support/git-fixtures.js");
@@ -28,6 +35,8 @@ const { runningLoops } = await import("./boards.js");
 const { sessionStarter, startSession } = await import("./start-session.js");
 const { startOrchestratorCard } = await import("./orchestrator-cards.js");
 const { accountDir, upsertAccount } = await import("./claude-accounts.js");
+const { LOOP_PROGRESS } =
+  await import("../../test-support/supervised-session.js");
 
 const SBX = parseBoardKey("SBX") as BoardKey;
 const NOB = parseBoardKey("NOB") as BoardKey;
@@ -564,4 +573,76 @@ void test("start_card with a chosen account passes the account and no pin, and s
     sessions.some((s) => s.accountPinned !== undefined),
     false,
   );
+});
+
+void test("a card with an open blocker is refused with 409 blocked and the blocker identifier", async () => {
+  const blocker = await ticket();
+  const done = await ticket();
+  const card = await ticket();
+  await store.moveCardManual(done.id, "done");
+  await store.setBlockedBy(card.id, [done.id, blocker.id]);
+  const startsBefore = starts.length;
+  await assert.rejects(
+    startOrchestratorCard(CALLER, store.getCard(card.id)!, {
+      playbook: PLAYBOOK,
+    }),
+    (err) =>
+      err instanceof ConflictError &&
+      err.code === "blocked" &&
+      err.details?.reason === blocker.identifier,
+  );
+  nothingWritten(card, startsBefore);
+});
+
+void test("a card whose blockers are all done starts", async () => {
+  const blocker = await ticket();
+  const card = await ticket();
+  await store.setBlockedBy(card.id, [blocker.id]);
+  await store.moveCardManual(blocker.id, "done");
+  await startOrchestratorCard(CALLER, store.getCard(card.id)!, {
+    playbook: PLAYBOOK,
+  });
+  assert.equal(starts.at(-1)?.id, card.id);
+});
+
+void test("a finished card in Needs input frees its slot for start_card, and a third open loop fills the cap", async () => {
+  const engine = {
+    active: true,
+    iteration: 1,
+    sessionId: "conv",
+    handoffPending: false,
+    startedAt: null,
+    closed: false,
+  };
+  const loop = async (closed: boolean) => {
+    const { g } = await startedGroup(store, { board: SBX });
+    await store.setLoopProgress(g.id, {
+      ...LOOP_PROGRESS,
+      engine: closed ? { ...engine, active: false, closed } : engine,
+    });
+    return g;
+  };
+  const base = runningLoops(SBX);
+  await loop(false);
+  await loop(false);
+  const finished = await loop(true);
+  await store.moveCardManual(finished.id, "needs_input");
+  assert.equal(runningLoops(SBX), base + 2);
+  await setPolicy({ concurrencyCap: base + 3 });
+  try {
+    const card = await ticket();
+    const startsBefore = starts.length;
+    await startOrchestratorCard(CALLER, card, { playbook: PLAYBOOK });
+    assert.equal(starts.length, startsBefore + 1);
+    await loop(false);
+    const refusedCard = await ticket();
+    await refused(
+      refusedCard,
+      { playbook: PLAYBOOK },
+      PolicyError,
+      "policy-refused",
+    );
+  } finally {
+    await setPolicy({ concurrencyCap: 10 });
+  }
 });

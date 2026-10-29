@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   ACCOUNT_ID_MAX,
+  BLOCKED_BY_MAX,
   CARD_ID_MAX,
   DECISION_ID_RE,
   DECISION_LABEL_MAX,
@@ -87,6 +88,10 @@ const ticketTitle = boundedText(ITEM_TITLE_MAX, "invalid-title").refine(
   MARKER_ERROR,
 );
 
+const blockedByField = z
+  .array(cardId("invalid-blocked-by"), "invalid-blocked-by")
+  .max(BLOCKED_BY_MAX, "invalid-blocked-by");
+
 const ticketDescription = boundedText(
   ITEM_DESCRIPTION_MAX,
   "invalid-description",
@@ -107,6 +112,7 @@ export const createTicketBodySchema = z.strictObject(
       .number("invalid-index")
       .int("invalid-index")
       .min(0, "invalid-index"),
+    blockedBy: blockedByField.optional(),
   },
   {
     error: unknownFieldError(),
@@ -145,11 +151,15 @@ export const updateTicketBodySchema = z
     {
       title: ticketTitle.optional(),
       description: ticketDescription.optional(),
+      blockedBy: blockedByField.optional(),
     },
     "empty-ticket-patch",
   )
   .refine(
-    (patch) => patch.title !== undefined || patch.description !== undefined,
+    (patch) =>
+      patch.title !== undefined ||
+      patch.description !== undefined ||
+      patch.blockedBy !== undefined,
     "empty-ticket-patch",
   );
 

@@ -2,6 +2,7 @@ import test, { after, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { parseBoardKey } from "../../../shared/board-key.js";
+import { buildAttentionQueue } from "../../../shared/attention-queue.js";
 import type {
   BoardKey,
   BoardPolicy,
@@ -376,6 +377,172 @@ test("under the budget a gate change does nothing", async () => {
   const session = await budgetRun(3, true);
   assert.notEqual(session.state, "needs_input");
   assert.equal(session.stateReason, undefined);
+});
+
+/** Start a group on a board with the given policy patch and return it with a setter for its cost meter. */
+async function warnRun(patch: Partial<BoardPolicy>, cost: number) {
+  const board = await newBoard(patch);
+  const card = await groupCard(board, "warn");
+  const tmux = await startCard(card.id);
+  const meter = (value: number) =>
+    store.setSessionMetersIfSession(card.id, tmux, {
+      contextPercent: 10,
+      model: "Opus 5.5",
+      cost: value,
+      usage: { fiveHourPercent: 1, sevenDayPercent: 1 },
+    });
+  await meter(cost);
+  const warnings = () =>
+    events(board, "supervisor_action").filter(
+      (e) => e.cardId === card.id && e.data.action === "budget_warning",
+    );
+  return { board, card, meter, warnings };
+}
+
+test("a group at 80 percent of its budget is marked once and records one budget_warning event", async () => {
+  const { card, warnings } = await warnRun({ budgetPerGroup: 10 }, 8.5);
+  const h = harness();
+  await h.pass();
+  await h.pass();
+  await h.pass();
+  const mark = store.getCard(card.id)?.budgetWarning;
+  assert.equal(mark?.cost, 8.5);
+  assert.equal(mark?.budget, 10);
+  assert.equal(mark?.percent, 80);
+  assert.equal(warnings().length, 1);
+  assert.deepEqual(warnings()[0].data, {
+    action: "budget_warning",
+    cost: 8.5,
+    budget: 10,
+    percent: 80,
+  });
+});
+
+test("a group below the warning percent gets no mark and no event", async () => {
+  const { card, warnings } = await warnRun({ budgetPerGroup: 10 }, 7.9);
+  const h = harness();
+  await h.pass();
+  assert.equal(store.getCard(card.id)?.budgetWarning, undefined);
+  assert.deepEqual(warnings(), []);
+});
+
+test("a raised budget clears the mark and the next crossing marks again with a second event", async () => {
+  const { board, card, meter, warnings } = await warnRun(
+    { budgetPerGroup: 10 },
+    8.5,
+  );
+  const h = harness();
+  await h.pass();
+  assert.notEqual(store.getCard(card.id)?.budgetWarning, undefined);
+
+  await setPolicy(board, { budgetPerGroup: 20 });
+  await h.pass();
+  assert.equal(store.getCard(card.id)?.budgetWarning, undefined);
+  assert.equal(warnings().length, 1);
+
+  await meter(17);
+  await h.pass();
+  const mark = store.getCard(card.id)?.budgetWarning;
+  assert.equal(mark?.cost, 17);
+  assert.equal(mark?.budget, 20);
+  assert.equal(warnings().length, 2);
+});
+
+test("a board with the supervisor off gets no mark and no event", async () => {
+  const { board, card, warnings } = await warnRun(
+    { budgetPerGroup: 10, supervisor: "off" },
+    9,
+  );
+  assert.equal(store.getBoard(board)?.policy.supervisor, "off");
+  const h = harness();
+  await h.pass();
+  assert.equal(store.getCard(card.id)?.budgetWarning, undefined);
+  assert.deepEqual(warnings(), []);
+});
+
+test("a raised budget that the cost still passes refreshes the mark with no new event", async () => {
+  const { board, card, warnings } = await warnRun({ budgetPerGroup: 10 }, 8.5);
+  const h = harness();
+  await h.pass();
+  const at = store.getCard(card.id)?.budgetWarning?.at;
+
+  await setPolicy(board, { budgetPerGroup: 10.5 });
+  await h.pass();
+  const mark = store.getCard(card.id)?.budgetWarning;
+  assert.equal(mark?.budget, 10.5);
+  assert.equal(mark?.cost, 8.5);
+  assert.equal(mark?.at, at);
+  assert.equal(warnings().length, 1);
+});
+
+test("a pass clears the mark of a board whose supervisor was turned off", async () => {
+  const { board, card } = await warnRun({ budgetPerGroup: 10 }, 8.5);
+  const h = harness();
+  await h.pass();
+  assert.notEqual(store.getCard(card.id)?.budgetWarning, undefined);
+
+  await setPolicy(board, { supervisor: "off" });
+  await h.pass();
+  assert.equal(store.getCard(card.id)?.budgetWarning, undefined);
+});
+
+test("three passes over the threshold give one budget_warning item in the attention queue", async () => {
+  const { board, card } = await warnRun({ budgetPerGroup: 10 }, 8.5);
+  const h = harness();
+  await h.pass();
+  await h.pass();
+  await h.pass();
+  const items = buildAttentionQueue({
+    boardKey: board,
+    cards: store.listCards(board),
+    decisions: [],
+    pushoverMissing: null,
+    now: new Date(),
+  }).filter((item) => item.kind === "budget_warning");
+  assert.equal(items.length, 1);
+  assert.equal(items[0].cardId, card.id);
+});
+
+test("a removed budget clears the mark on the next pass", async () => {
+  const { board, card } = await warnRun({ budgetPerGroup: 10 }, 8.5);
+  const h = harness();
+  await h.pass();
+  assert.notEqual(store.getCard(card.id)?.budgetWarning, undefined);
+
+  await setPolicy(board, { budgetPerGroup: null });
+  await h.pass();
+  assert.equal(store.getCard(card.id)?.budgetWarning, undefined);
+});
+
+test("a group in Done over the threshold gets no mark and no event", async () => {
+  const { card, warnings } = await warnRun({ budgetPerGroup: 10 }, 9);
+  await store.moveCardManual(card.id, "done");
+  assert.equal(store.getCard(card.id)?.column, "done");
+  const h = harness();
+  await h.pass();
+  assert.equal(store.getCard(card.id)?.budgetWarning, undefined);
+  assert.deepEqual(warnings(), []);
+});
+
+test("a warned group that then hits the hard stop shows budget_stop and no budget_warning", async () => {
+  const { board, card, meter } = await warnRun({ budgetPerGroup: 10 }, 8.5);
+  await setGate(card.id, null);
+  const h = harness();
+  await h.pass();
+  assert.notEqual(store.getCard(card.id)?.budgetWarning, undefined);
+
+  await meter(12);
+  await setGate(card.id, GATE);
+  await h.pass();
+  const kinds = buildAttentionQueue({
+    boardKey: board,
+    cards: store.listCards(board),
+    decisions: [],
+    pushoverMissing: null,
+    now: new Date(),
+  }).map((item) => item.kind);
+  assert.ok(kinds.includes("budget_stop"));
+  assert.ok(!kinds.includes("budget_warning"));
 });
 
 test("a cost meter that drops after a relaunch adds to the earlier cost, so the budget stop still fires", async () => {

@@ -1,3 +1,4 @@
+import fsp from "node:fs/promises";
 import path from "node:path";
 import {
   type Card,
@@ -6,7 +7,11 @@ import {
 } from "../../../shared/types.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { boardRepository as store } from "../../store/board-repository.js";
-import { hasSession, killSession } from "../../adapters/tmux.js";
+import {
+  hasSession,
+  killSession,
+  widenNarrowWindow,
+} from "../../adapters/tmux.js";
 import { resolveLaunchAccount } from "./claude-accounts.js";
 import { launchClaude, RESUME_MISSING, StartStepError } from "./steps.js";
 import {
@@ -17,17 +22,47 @@ import { continueSession } from "./pause-card.js";
 import { registerHookToken } from "./hook-tokens.js";
 import { REATTACH_STATUS_CLEAR_MS } from "./start-session.js";
 import { ensureTerminal } from "./terminal.js";
-import { assertMemoryHeadroom, memoryCheck } from "./memory-governor.js";
+import { waitForMemory } from "./memory-wait.js";
 
 const ACCOUNT_STEP = "resolving Claude account";
 const MEMORY_STEP = "checking memory";
 
+/** Whether a path names an existing folder; any stat error reads as missing. */
+export function isFolder(dir: string): Promise<boolean> {
+  return fsp.stat(dir).then(
+    (s) => s.isDirectory(),
+    () => false,
+  );
+}
+
 /**
- * Refuse a resume with the 409 `memory-pressure` when memory is low, else relaunch the session in
- * the background.
+ * Refuse the relaunch of a session whose workspace folder is gone, with one `resume_failed` event.
+ *
+ * @remarks tmux starts a pane in the home folder when its cwd is missing, and a continued claude
+ * there resumes the newest conversation of another session. The session goes to `needs_input`
+ * with `resume_failed`, so the card shows the refusal.
  */
+async function refuseMissingWorkspace(
+  cardId: string,
+  sessionId: string,
+  workspacePath: string,
+): Promise<void> {
+  await store.setSessionStateIfSession(
+    cardId,
+    sessionId,
+    "needs_input",
+    "resume_failed",
+  );
+  await store.recordResumeFailure(
+    cardId,
+    sessionId,
+    `workspace-missing: ${workspacePath}`,
+  );
+  console.error(`[resume] refused for card ${cardId} (workspace missing)`);
+}
+
+/** Relaunch a lost session in the background; the resume saga waits for memory when it is low. */
 export function beginResume(card: Card): void {
-  assertMemoryHeadroom(card.boardKey ?? DEFAULT_BOARD_KEY);
   void resumeSession(card.id);
 }
 
@@ -42,6 +77,7 @@ export async function reconnectTerminal(cardId: string): Promise<void> {
   const card = store.getCard(cardId);
   if (!card?.tmuxSession || !card.activeSessionId) return;
   if (await hasSession(`=${card.tmuxSession}`)) {
+    await widenNarrowWindow(card.tmuxSession);
     await ensureTerminal(cardId, card.activeSessionId, card.tmuxSession);
     return;
   }
@@ -131,7 +167,19 @@ export async function resumeSession(cardId: string): Promise<void> {
     }
 
     killTarget = null;
-    const memory = memoryCheck(card.boardKey ?? DEFAULT_BOARD_KEY);
+    if (!(await isFolder(card.workspacePath))) {
+      await refuseMissingWorkspace(cardId, sessionId, card.workspacePath);
+      return;
+    }
+    let waited = false;
+    const memory = await waitForMemory(
+      card.boardKey ?? DEFAULT_BOARD_KEY,
+      () => {
+        waited = true;
+        return store.setStatusReason(cardId, "Waiting for memory…");
+      },
+    );
+    if (waited) await store.setStatusReason(cardId, null);
     if (!memory.ok)
       throw new StartStepError(MEMORY_STEP, memory.reason, "config");
     const recorded = card.sessions?.find((s) => s.id === sessionId);

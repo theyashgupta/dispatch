@@ -25,6 +25,7 @@ import { blocksAgentDoneManualEntry } from "../../../../shared/column-transition
 import { COLUMN_LABELS } from "../../../../shared/column-labels.js";
 import { startRefusalText } from "../../../../shared/memory-refusal.js";
 import { inboxWaitingCount } from "../../../../shared/inbox-count.js";
+import { blockerChip } from "../../../../shared/blocked-by.js";
 import { membersOf } from "../../../../shared/group-members.js";
 import {
   BOARD_SHORTCUTS,
@@ -217,6 +218,7 @@ export function BoardContainer({ search }: BoardContainerProps) {
       groupMembersById.set(card.id, membersOf(card, cards));
     }
   }
+  const cardsById = new Map(cards.map((card) => [card.id, card]));
   const waitingInInbox = inboxWaitingCount(cards);
 
   function groupMembers() {
@@ -489,6 +491,7 @@ export function BoardContainer({ search }: BoardContainerProps) {
       onRetryStart={retryStart}
       onRestart={restart}
       resume={resume}
+      blocker={blockerChip(card, cardsById)}
     />
   );
 
@@ -565,6 +568,9 @@ export function BoardContainer({ search }: BoardContainerProps) {
             activeCard != null ? groupMembersById.get(activeCard.id) : undefined
           }
           selected={activeCard != null && activeCard.id === selectedCardId}
+          blocker={
+            activeCard != null ? blockerChip(activeCard, cardsById) : null
+          }
           ids={
             activeCardId != null
               ? dragSelectionIds(activeCardId, selectedIds)

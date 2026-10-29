@@ -174,6 +174,61 @@ void test(
   },
 );
 
+async function frozenPane(name: string): Promise<Pane> {
+  const freezeFile = path.join(env.root, `${name}.freeze`);
+  fs.writeFileSync(freezeFile, "");
+  return startPane(name, { freezeFile });
+}
+
+void test(
+  "a line held in the prompt box is unconfirmed",
+  { skip: !hasTmux },
+  async () => {
+    const before = events.length;
+    const pane = await frozenPane("send-held");
+    const result = await sendConfirmed(
+      pane.card,
+      pane.session,
+      "run the next phase",
+      "continue",
+      FAST,
+    );
+    assert.equal(result, "unconfirmed");
+    assert.equal(events.length, before + 1);
+    assert.equal(events.at(-1)?.data.reason, "held in prompt box");
+    assert.deepEqual(userTexts(pane), []);
+  },
+);
+
+void test(
+  "a line in the transcript but still in the box is unconfirmed",
+  { skip: !hasTmux },
+  async () => {
+    const before = events.length;
+    const pane = await frozenPane("send-held-seen");
+    const text = "run the next phase";
+    setTimeout(
+      () =>
+        fs.appendFileSync(
+          pane.transcript,
+          `${JSON.stringify({ type: "user", message: { role: "user", content: text } })}\n`,
+        ),
+      FAST.settleMs + 100,
+    );
+    const result = await sendConfirmed(
+      pane.card,
+      pane.session,
+      text,
+      "continue",
+      FAST,
+    );
+    assert.equal(result, "unconfirmed");
+    assert.equal(userTexts(pane).length, 1);
+    assert.equal(events.length, before + 1);
+    assert.equal(events.at(-1)?.data.reason, "held in prompt box");
+  },
+);
+
 void test(
   "a text over 500 characters is written to a file and sent as a one line pointer",
   { skip: !hasTmux },

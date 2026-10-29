@@ -20,6 +20,8 @@ const CHAIN_STATES = new Set([
   "near-limit",
   "limited",
   "login-expired",
+  "needs-login",
+  "shadowed-by-home",
   "unknown",
 ]);
 
@@ -33,6 +35,7 @@ export function emptyChainState(): ChainStateFile {
     exhausted: null,
     moves: [],
     loginExpiryNotified: {},
+    decisions: {},
   };
 }
 
@@ -64,7 +67,7 @@ function validAccounts(
   return accounts;
 }
 
-function validNotified(raw: unknown): Record<string, string> {
+function stringRecord(raw: unknown): Record<string, string> {
   if (!isRecord(raw)) return {};
   return Object.fromEntries(
     Object.entries(raw).filter(
@@ -102,7 +105,8 @@ export async function readChainState(): Promise<ChainStateFile> {
     moves: Array.isArray(parsed.moves)
       ? (parsed.moves as ChainMove[]).slice(-MAX_CHAIN_MOVES)
       : [],
-    loginExpiryNotified: validNotified(parsed.loginExpiryNotified),
+    loginExpiryNotified: stringRecord(parsed.loginExpiryNotified),
+    decisions: stringRecord(parsed.decisions),
   };
 }
 

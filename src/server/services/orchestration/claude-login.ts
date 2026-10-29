@@ -11,6 +11,8 @@ import {
 } from "../../adapters/claude-login.js";
 import {
   accountDir,
+  adoptManagedDefault,
+  getManagedDefaultId,
   isExternalAccountDir,
   materializeConfigDir,
   readChainOrder,
@@ -32,12 +34,14 @@ type LoginFailure =
   | "no-identity"
   | "duplicate"
   | "home-login"
+  | "not-home-identity"
   | "save-failed"
   | "cancelled";
 
 interface ActiveLogin {
   accountId: string;
   isNew: boolean;
+  managed: boolean;
   process: LoginProcess;
   timer: NodeJS.Timeout;
   finished: boolean;
@@ -49,6 +53,16 @@ interface ActiveLogin {
 let view: ClaudeLoginView = { state: "idle" };
 let active: ActiveLogin | null = null;
 let cancelledStartId: string | null = null;
+const managedAdoptedListeners: (() => Promise<void>)[] = [];
+
+/**
+ * Run `listener` after a login makes an account the managed Default.
+ *
+ * @remarks The account chain registers here, because it imports this module and cannot be imported back.
+ */
+export function onManagedDefaultAdopted(listener: () => Promise<void>): void {
+  managedAdoptedListeners.push(listener);
+}
 
 /**
  * The login state for the wire: never the pasted code, never CLI output beyond the url.
@@ -112,18 +126,33 @@ function sameIdentity(
   return a.email === b.email && a.orgId === b.orgId;
 }
 
+function matchesIdentity(
+  a: { email: string; orgId: string },
+  b: { email: string; orgId: string },
+): boolean {
+  return a.email === b.email && (!a.orgId || !b.orgId || a.orgId === b.orgId);
+}
+
 async function settle(
   login: ActiveLogin,
   code: number | null,
   accessDenied: boolean,
 ): Promise<void> {
+  const dir = accountDir(login.accountId);
+  const existing = await readRegistry();
+  const prior = existing.find((a) => a.id === login.accountId);
+  if (!login.isNew && !prior) {
+    await logoutClaudeConfigDir(dir);
+    view = { state: "idle" };
+    await recordFailure("cancelled");
+    return;
+  }
   if (code !== 0) {
     await fail(login, ...exitFailure(login, accessDenied));
     return;
   }
 
   view = { state: "finishing", accountId: login.accountId };
-  const dir = accountDir(login.accountId);
   const identity = await readClaudeIdentity(dir);
   if (!identity.loggedIn || identity.email === "") {
     await fail(
@@ -135,12 +164,28 @@ async function settle(
   }
 
   const home = await readClaudeIdentity();
-  if (home.loggedIn && sameIdentity(home, identity)) {
+  if (login.managed) {
+    const reference = prior ?? (home.loggedIn ? home : undefined);
+    if (!reference || !matchesIdentity(identity, reference)) {
+      await logoutClaudeConfigDir(dir);
+      await fail(
+        login,
+        "not-home-identity",
+        reference
+          ? `Sign in with the same Claude account as your terminal login (${reference.email}).`
+          : "Sign in with the same Claude account as your terminal login.",
+      );
+      return;
+    }
+  } else if (
+    getManagedDefaultId() === undefined &&
+    home.loggedIn &&
+    sameIdentity(home, identity)
+  ) {
     await logoutClaudeConfigDir(dir);
     await fail(login, "home-login", "This is already your home login");
     return;
   }
-  const existing = await readRegistry();
   const duplicate = existing.find(
     (a) => a.id !== login.accountId && sameIdentity(a, identity),
   );
@@ -162,7 +207,6 @@ async function settle(
   }
 
   const now = new Date().toISOString();
-  const prior = existing.find((a) => a.id === login.accountId);
   const record: ClaudeAccountRecord = {
     id: login.accountId,
     email: identity.email,
@@ -172,7 +216,21 @@ async function settle(
     createdAt: prior?.createdAt ?? now,
     lastLoginAt: now,
   };
-  await upsertAccount(record);
+  if (login.managed) {
+    await adoptManagedDefault(record);
+    await Promise.all(
+      managedAdoptedListeners.map((listener) =>
+        listener().catch((err: unknown) =>
+          console.warn(
+            "[accounts] managed default listener failed",
+            err instanceof Error ? err.message : err,
+          ),
+        ),
+      ),
+    );
+  } else {
+    await upsertAccount(record);
+  }
   await refreshUsage(record.id, "login").catch(() => undefined);
   const usage = getUsage(record.id);
   view = {
@@ -183,6 +241,7 @@ async function settle(
       orgName: record.orgName,
       subscriptionType: record.subscriptionType,
       isDefault: false,
+      ...(login.managed ? { managedDefault: true } : {}),
       lastLoginAt: record.lastLoginAt,
       usage,
       position: (await readChainOrder()).indexOf(record.id),
@@ -224,15 +283,23 @@ async function finish(
  * Start a Claude login for a fresh account, or for an existing id to repair its token.
  *
  * @remarks The slot is reserved synchronously before the first await, otherwise two requests in
- * one tick both pass the in-flight check and spawn two CLI children (React's dev double-effect
- * did exactly that). A re-login logs the dir out first so the CLI does not short-circuit on the
- * stale token. The 10 minute timer is the only thing that ends an abandoned login and leaves time
- * to switch the Claude account in the browser, which 180 seconds did not.
+ * one tick both spawn a CLI child (React's dev double-effect did exactly that). A re-login logs the
+ * dir out first so the CLI does not short-circuit on the stale token; `opts.managedDefault` signs in
+ * the terminal identity as the managed Default and fails with `managed-exists` when one exists. The
+ * 10 minute timer is the only thing that ends an abandoned login and leaves time to switch the
+ * Claude account in the browser.
  */
 export async function startLogin(
   accountId?: string,
-): Promise<{ ok: true } | { ok: false; error: "in-flight" | "not-found" }> {
+  opts: { managedDefault?: boolean } = {},
+): Promise<
+  | { ok: true }
+  | { ok: false; error: "in-flight" | "not-found" | "managed-exists" }
+> {
   if (inFlight()) return { ok: false, error: "in-flight" };
+  if (opts.managedDefault === true && getManagedDefaultId() !== undefined) {
+    return { ok: false, error: "managed-exists" };
+  }
   if (accountId !== undefined && isExternalAccountDir(accountId)) {
     return { ok: false, error: "not-found" };
   }
@@ -269,6 +336,9 @@ export async function startLogin(
   const login: ActiveLogin = {
     accountId: id,
     isNew,
+    managed:
+      opts.managedDefault === true ||
+      (accountId !== undefined && accountId === getManagedDefaultId()),
     finished: false,
     codeRejected: false,
     timedOut: false,

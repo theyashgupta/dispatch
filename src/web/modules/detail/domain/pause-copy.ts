@@ -3,6 +3,7 @@ import {
   isLoopCard,
 } from "../../../../shared/running-group.js";
 import type { ActionRefusal } from "../../../../shared/memory-refusal.js";
+import { FROZEN_RELAUNCH_MINUTES } from "../../../../shared/orchestrator-limits.js";
 import type { Card } from "../../../../shared/types.js";
 
 const NETWORK_COPY = "Couldn't reach the server. Try again.";
@@ -33,6 +34,18 @@ export function pausedNote(card: Card): string | null {
   return card.paused.by === "memory"
     ? "Paused for memory. Dispatch resumes it when swap falls."
     : "Paused. Resume it when you are ready.";
+}
+
+/** The status note for a frozen card with its start time, or null when the card is not frozen. */
+export function frozenNote(card: Card): string | null {
+  if (card.state !== "frozen" || card.stateSince === undefined) return null;
+  const since = new Date(card.stateSince);
+  if (Number.isNaN(since.getTime())) return null;
+  const time = since.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+  return `Frozen after an idle compaction since ${time}. Dispatch relaunches Claude with resume ${FROZEN_RELAUNCH_MINUTES} minutes after that.`;
 }
 
 /** Which header button the detail panel shows: Resume for a paused card, Pause for a live loop card, else none. */

@@ -5,7 +5,7 @@ import type {
   ClaudeAccountSummary,
   Session,
 } from "../../../../shared/types.js";
-import { clock, usageMeters } from "./usage-meters.js";
+import { accountFor, clock, usageMeters } from "./usage-meters.js";
 
 const UTC = { timeZone: "UTC" };
 
@@ -245,4 +245,14 @@ test("an unparseable reset time reads reset time unknown and does not throw", ()
     entry?.meters.map((m) => m.text),
     ["Window 23%, reset time unknown", "Week 41%, resets Mon 05:30"],
   );
+});
+
+test("a default session finds the managed Default row", () => {
+  const managed = {
+    ...account("m-1", "me@home.test", []),
+    managedDefault: true,
+  } as ClaudeAccountSummary;
+  const other = account("acc-1", "work@corp.test", []);
+  assert.equal(accountFor([other, managed], "default"), managed);
+  assert.equal(accountFor([other], "default"), undefined);
 });

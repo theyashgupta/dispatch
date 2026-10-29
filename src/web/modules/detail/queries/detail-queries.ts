@@ -1,4 +1,9 @@
-import { queryOptions, useMutation, useQuery } from "@tanstack/react-query";
+import {
+  queryOptions,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import type { BoardKey, Column } from "../../../../shared/types.js";
 import { fetchEvents } from "@/queries/activity-api";
 import {
@@ -13,8 +18,11 @@ import {
   getCardComments,
   postCardComment,
   runClaude,
+  setCardBlockedBy,
   setCardLinearState,
+  setCardOrchestrator,
 } from "./detail-api.js";
+import { boardListKeys } from "@/queries/board-list-queries";
 
 export const detailKeys = {
   all: ["detail"] as const,
@@ -143,5 +151,40 @@ export function useSetCardLinearStateMutation() {
   return useMutation({
     mutationFn: ({ id, stateId }: { id: string; stateId: string }) =>
       setCardLinearState(id, stateId),
+  });
+}
+
+/** Replace a card's blockers; a refusal resolves as typed data. */
+export function useSetCardBlockedByMutation() {
+  return useMutation({
+    mutationFn: ({ id, blockedBy }: { id: string; blockedBy: string[] }) =>
+      setCardBlockedBy(id, blockedBy),
+  });
+}
+
+/**
+ * Move a card to an orchestrator and refresh the board records and the orchestrator views.
+ *
+ * @remarks A refusal resolves as typed data, not as a thrown error.
+ */
+export function useSetCardOrchestratorMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      board,
+      id,
+      orchestratorId,
+    }: {
+      board: BoardKey;
+      id: string;
+      orchestratorId: string;
+    }) => setCardOrchestrator(board, id, orchestratorId),
+    onSuccess: (result) => {
+      if (!result.ok) return;
+      return Promise.all([
+        queryClient.invalidateQueries({ queryKey: boardListKeys.list }),
+        queryClient.invalidateQueries({ queryKey: ["orchestrators"] }),
+      ]);
+    },
   });
 }

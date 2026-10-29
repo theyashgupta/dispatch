@@ -12,6 +12,7 @@ interface BoardDragOverlayProps {
   members?: Card[];
   selected: boolean;
   ids: string[] | null;
+  blocker?: { label: string; title: string } | null;
 }
 
 export function BoardDragOverlay({
@@ -19,6 +20,7 @@ export function BoardDragOverlay({
   members,
   selected,
   ids,
+  blocker,
 }: BoardDragOverlayProps) {
   const lastOpenedMap = useLastOpened();
   const view =
@@ -31,6 +33,7 @@ export function BoardDragOverlay({
         showGone={deriveShowGone(card)}
         hover={false}
         elevated
+        blocker={blocker}
         domProps={{ "aria-hidden": true, inert: true }}
       />
     ) : null;

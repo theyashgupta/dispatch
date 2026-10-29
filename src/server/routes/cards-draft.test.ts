@@ -8,6 +8,7 @@ import type { Server } from "node:http";
 
 const home = await fsp.mkdtemp(path.join(os.tmpdir(), "dsp-draft-"));
 process.env.HOME = home;
+process.env.DISPATCH_DIR = path.join(home, ".dispatch");
 const binDir = path.join(home, "bin");
 const argvFile = path.join(home, "claude-argv.txt");
 const stdinFile = path.join(home, "claude-stdin.txt");

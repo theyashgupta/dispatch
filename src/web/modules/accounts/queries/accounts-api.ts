@@ -7,6 +7,17 @@ import type {
 } from "../../../../shared/types.js";
 import { http, httpError } from "@/lib/http";
 
+const SWITCH_REFUSALS = new Map([
+  [
+    "account-needs-login",
+    "This account needs a new login. Log in again, then switch.",
+  ],
+  [
+    "account-shadowed-by-home",
+    "This account is the same login as Default. Switch to Default or remove the duplicate.",
+  ],
+]);
+
 /**
  * Make an account the one new sessions launch on: PUT /api/accounts/active.
  *
@@ -34,6 +45,9 @@ export async function setActiveAccount(
       skipped: result.data.skipped.length,
     };
   }
+  const refusal =
+    result.status === 409 ? SWITCH_REFUSALS.get(result.error ?? "") : undefined;
+  if (refusal) return { ok: false, error: refusal };
   if (result.status === 404) {
     return { ok: false, error: "That account is no longer registered." };
   }
@@ -68,13 +82,13 @@ export async function refreshAccountUsage(
 }
 
 /**
- * Start a Claude login for a new account, or for `accountId` to repair its token: POST /api/accounts/login.
+ * Start a Claude login for a new, repaired or managed Default account: POST /api/accounts/login.
  *
  * @remarks
- * A 409 means one is already running.
+ * A 409 means one is already running, unless its code is `managed-exists`.
  */
 export async function startLogin(
-  accountId?: string,
+  target: { accountId?: string; managedDefault?: true } = {},
 ): Promise<
   | { ok: true; accountId: string | null }
   | { ok: false; error: string; inFlight?: boolean }
@@ -82,14 +96,22 @@ export async function startLogin(
   const result = await http<ClaudeLoginView | null>("/api/accounts/login", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(accountId ? { accountId } : {}),
+    body: JSON.stringify(target),
   });
   if (result.ok) {
     const view = result.data;
     return {
       ok: true,
       accountId:
-        view && "accountId" in view ? view.accountId : (accountId ?? null),
+        view && "accountId" in view
+          ? view.accountId
+          : (target.accountId ?? null),
+    };
+  }
+  if (result.status === 409 && result.error === "managed-exists") {
+    return {
+      ok: false,
+      error: "The Default account already uses a Dispatch login.",
     };
   }
   if (result.status === 409) {

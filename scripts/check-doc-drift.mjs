@@ -1,5 +1,5 @@
 /**
- * Doc-drift gate (dev tooling, NOT test code): mechanically catches two classes of stale
+ * Doc-drift gate (dev tooling, NOT test code): mechanically catches three classes of stale
  * documentation drift between docs/ARCHITECTURE.md and src/ — the same category as
  * check-invariants.mjs (plain Node ESM, no assertion framework, no test runner, lives outside
  * src/). It answers narrow, grep-shaped questions only, never "is this paragraph still true":
@@ -19,6 +19,7 @@
  *      future maintainer relies on. Patterns (case-insensitive): `this phase`,
  *      `pre-this-phase`, `Plan NN-NN`, `Phase <number>`, `phase-smoke-tester`, `ROADMAP`,
  *      `.planning/`.
+ *   3. SCENARIO NAMES - no numbered scenario file, reference or label; the doc list is current.
  *
  * TRADEOFF (read before "fixing" a Class-2 finding away): `Phase <number>` / `Plan NN-NN` fire
  * everywhere EXCEPT inside a JSDoc block — the same JSDoc-vs-body distinction
@@ -49,6 +50,7 @@
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { scenarioDrift } from "./scenario-names.mjs";
 
 const SRC_DIR = "src";
 const SCRIPTS_DIR = "scripts";
@@ -217,6 +219,8 @@ const LOOP_FORMAT_FILES = [
   /^src\/server\/services\/orchestration\/supervisor-record\.test\.ts$/,
   /^src\/server\/services\/orchestration\/orchestrator-sessions\.test\.ts$/,
   /^src\/server\/routes\/orchestrator-sessions-route\.test\.ts$/,
+  /^src\/server\/routes\/loop-engine-close-route\.test\.ts$/,
+  /^src\/server\/routes\/orchestrator-card-progress-route\.test\.ts$/,
 ];
 const LOOP_FORMAT_PATTERNS = new Set([
   "ROADMAP",
@@ -289,7 +293,7 @@ function checkPlanningVocabulary() {
 }
 
 /**
- * Run all three checks and set the process exit code.
+ * Run all checks and set the process exit code.
  * @returns Nothing; exits 0 iff every check is clean, 1 otherwise.
  */
 function run() {
@@ -309,6 +313,7 @@ function run() {
     ["Class 1a — dangling @see anchors", danglingAnchors],
     ["Class 1b — dangling doc source references", danglingDocPaths],
     ["Class 2 — planning vocabulary in src/", planningVocab],
+    ["Class 3 - stale scenario names or list", scenarioDrift(process.cwd())],
   ];
 
   let total = 0;
@@ -321,7 +326,7 @@ function run() {
 
   if (total === 0) {
     console.log(
-      `PASS: doc-drift clean (0 dangling anchors, 0 dangling doc references, 0 planning-vocabulary hits)`,
+      `PASS: doc-drift clean (0 dangling anchors, 0 dangling doc references, 0 planning-vocabulary hits, 0 scenario drift)`,
     );
     process.exit(0);
   }

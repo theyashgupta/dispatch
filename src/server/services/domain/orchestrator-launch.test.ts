@@ -9,6 +9,7 @@ import {
   orchestratorLaunchArgs,
   orchestratorMcpConfig,
   orchestratorSessionEnv,
+  scopeBlock,
 } from "./orchestrator-launch.js";
 
 const input = {
@@ -16,7 +17,7 @@ const input = {
   mcpConfigPath: "/data/orchestrators/SBX-main.mcp.json",
 };
 
-void test("the leading args hold model, mcp config, strict mode, the read-only tools, the board tool allow, manual mode and the four disallowed tools", () => {
+void test("the leading args hold model, mcp config, strict mode, the read-only tools, the board tool allow, the bypass flag and the four disallowed tools", () => {
   const { leadingArgs } = orchestratorLaunchArgs({ ...input, claudeArgs: [] });
   assert.deepEqual(leadingArgs, [
     "--model",
@@ -30,8 +31,7 @@ void test("the leading args hold model, mcp config, strict mode, the read-only t
     "Grep",
     "--allowedTools",
     "mcp__dispatch",
-    "--permission-mode",
-    "manual",
+    "--dangerously-skip-permissions",
     "--disallowedTools",
     "Bash",
     "Write",
@@ -63,7 +63,7 @@ void test("the built-in tool allowlist holds no command, code or edit tool", () 
   }
 });
 
-void test("the default Settings arguments lose the bypass flag", () => {
+void test("the default Settings arguments lose their bypass flag so the policy flag is the only one", () => {
   const { claudeArgs } = orchestratorLaunchArgs({
     ...input,
     claudeArgs: parseClaudeArgs(DEFAULT_CLAUDE_ARGS),
@@ -107,7 +107,7 @@ void test("every bypass, permission, model, mcp and tool flag is removed in both
   ]);
 });
 
-void test("the built argv holds no bypass flag and keeps resume after the policy flags", () => {
+void test("the built argv holds one bypass flag, no permission mode and keeps resume after the policy flags", () => {
   const { leadingArgs, claudeArgs } = orchestratorLaunchArgs({
     ...input,
     claudeArgs: parseClaudeArgs(DEFAULT_CLAUDE_ARGS),
@@ -119,12 +119,14 @@ void test("the built argv holds no bypass flag and keeps resume after the policy
     settingsPath: "/data/hook-settings.json",
     hooks: null,
   });
+  assert.deepEqual(
+    argv.filter((a) => a.includes("dangerously")),
+    ["--dangerously-skip-permissions"],
+  );
   assert.equal(
-    argv.some((a) => a.includes("dangerously")),
+    argv.some((a) => a.startsWith("--permission-mode")),
     false,
   );
-  assert.equal(argv.filter((a) => a === "--permission-mode").length, 1);
-  assert.equal(argv[argv.indexOf("--permission-mode") + 1], "manual");
   assert.ok(argv.indexOf("--resume") > argv.indexOf("--disallowedTools"));
   assert.equal(argv[argv.indexOf("--resume") + 1], "abc");
 });
@@ -152,4 +154,28 @@ void test("the session env carries the token and the port as text", () => {
     DISPATCH_ORCHESTRATOR_TOKEN: "t0k",
     DISPATCH_PORT: "4700",
   });
+});
+
+void test("the board scope block keeps the To Do triage of section 2", () => {
+  const block = scopeBlock("board");
+  assert.match(block, /^Scope: board\./);
+  assert.match(block, /Triage the To Do column as section 2/);
+  assert.doesNotMatch(block, /assign_card/);
+});
+
+void test("the feature scope block replaces section 2 with the assigned card rules", () => {
+  const block = scopeBlock("feature");
+  assert.match(block, /^Scope: feature\./);
+  assert.match(block, /Section 2 of the rule book does not apply to you/);
+  assert.match(block, /Act only on the cards that are assigned to you/);
+  assert.match(block, /Do not look for work in the To Do column/);
+  assert.match(block, /names other cards is a request to assign them to you/);
+  assert.match(block, /Call assign_card/);
+  assert.match(
+    block,
+    /Never start, stop or ship a card that is not assigned to you/,
+  );
+  assert.match(block, /When no card is assigned to you, call wait_for_event/);
+  assert.match(block, /Ship your assigned cards/);
+  assert.match(block, /Ignore an event for a card that is not assigned to you/);
 });

@@ -15,7 +15,7 @@ export function SelectionBar({
 }: SelectionBarProps) {
   if (count < 2) return null;
   return (
-    <Card className="fixed bottom-(--space-xl) left-1/2 z-5 w-max max-w-[calc(100vw_-_2*var(--space-lg))] -translate-x-1/2 flex-row flex-wrap items-center justify-center gap-(--space-lg) px-(--space-lg) py-(--space-sm) shadow-(--shadow-float)">
+    <Card className="fixed bottom-[calc(var(--space-xl)+var(--bottom-bar-height,0px))] left-1/2 z-5 w-max max-w-[calc(100vw_-_2*var(--space-lg))] -translate-x-1/2 flex-row flex-wrap items-center justify-center gap-(--space-lg) px-(--space-lg) py-(--space-sm) shadow-(--shadow-float)">
       <span className="text-sm font-semibold text-muted-foreground">
         {count} selected
       </span>

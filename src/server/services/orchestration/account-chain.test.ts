@@ -7,6 +7,7 @@ import { SWITCH_NOW_REASON } from "../../../shared/account-chain.js";
 import type {
   ClaudeAccountsSettings,
   ClaudeUsageSnapshot,
+  ClaudeUsageWindow,
 } from "../../../shared/types.js";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import type { ChainEvent } from "./account-chain-records.js";
@@ -25,8 +26,15 @@ const env = isolateEnv();
 const fake = installFakeTmux(env);
 
 const { store } = await import("../../store/board.store.js");
-const { upsertAccount, accountDir, getActiveAccountId, setActiveAccount } =
-  await import("./claude-accounts.js");
+const {
+  upsertAccount,
+  accountDir,
+  getActiveAccountId,
+  removeAccount,
+  setActiveAccount,
+  adoptManagedDefault,
+  writeDefaultIdentity,
+} = await import("./claude-accounts.js");
 const { emptyChainState, readChainState, writeChainState } =
   await import("./account-chain-state.js");
 const {
@@ -34,6 +42,7 @@ const {
   forgetChainAccount,
   handleLimitSignal,
   handleUsageRead,
+  noteHomeIdentity,
   requestFailover,
   startAccountChain,
   updateChainSettings,
@@ -45,6 +54,9 @@ const { moveOrQueue, runPendingMove, sweepPendingMoves } =
   await import("./session-account-apply.js");
 const { liveTurnState, recordTurnEvent } = await import("./session-turn.js");
 const { refreshUsage } = await import("./claude-usage.js");
+const { closeAccountDecision, raiseExhaustedDecision, raiseLoginDecision } =
+  await import("./account-decisions.js");
+const { answerDecisionItem } = await import("./decision-items.js");
 const {
   setHooksRuntime,
   setOrchestrationConfig,
@@ -115,6 +127,11 @@ function surfaceAt(ms: number): string {
   return `Usage limit reached · continuing automatically at ${at.getHours() % 12 || 12}:${minutes}${half} · esc to cancel`;
 }
 
+const logins: (string | undefined)[] = [];
+const raised: string[] = [];
+const raisedExhausted: (string | null)[] = [];
+const closed: { decisionId: string; optionId: string; note: string }[] = [];
+
 const fakeDeps = {
   now: () => clock,
   setTimer: (run: () => void, ms: number) => {
@@ -139,6 +156,24 @@ const fakeDeps = {
   loggedIn: () => Promise.resolve(true),
   emit: (event: ChainEvent) => {
     events.push(event);
+  },
+  startLogin: (accountId?: string) => {
+    logins.push(accountId);
+    return Promise.resolve({ ok: true });
+  },
+  raiseLoginDecision: (accountId: string) => {
+    raised.push(accountId);
+    return Promise.resolve(
+      raiseLoginDecision(accountId, `${accountId}@x.test`),
+    );
+  },
+  raiseExhaustedDecision: (earliestResetAt: string | null) => {
+    raisedExhausted.push(earliestResetAt);
+    return Promise.resolve(raiseExhaustedDecision(earliestResetAt));
+  },
+  closeDecision: (decisionId: string, optionId: string, note: string) => {
+    closed.push({ decisionId, optionId, note });
+    closeAccountDecision(decisionId, optionId, note);
   },
   scanMs: 0,
 };
@@ -166,6 +201,7 @@ let stop: () => void = () => undefined;
 async function begin(
   settings: Partial<ClaudeAccountsSettings> = {},
   deps: Partial<typeof fakeDeps> = {},
+  homeIdentity = { email: "", orgId: "" },
 ) {
   stop();
   await whenChainIdle();
@@ -176,10 +212,15 @@ async function begin(
   due = [];
   events.length = 0;
   readLog.length = 0;
+  logins.length = 0;
+  raised.length = 0;
+  raisedExhausted.length = 0;
+  closed.length = 0;
   reads.clear();
   readMode = "fresh";
   clock = BASE;
   await writeChainState(emptyChainState());
+  await writeDefaultIdentity(homeIdentity);
   await setActiveAccount("default");
   updateClaudeAccountsSettings({
     autoMove: true,
@@ -736,13 +777,13 @@ void test("turning autoMove off drops every move the chain queued (U2-15)", asyn
   assert.equal(sessionOf(busy)?.pendingClaudeAccountId, undefined);
 });
 
-void test("a hook limit with no surface on screen moves the session without Continue. (C-03b)", async () => {
+void test("a hook limit with no surface on screen moves the session and sends Continue. (C-03b)", async () => {
   await begin();
   const s = await sessionCard("hl-idle");
   recordTurnEvent(s.cardId, s.sessionId, "StopFailure", "rate_limit");
   await whenChainIdle();
   assert.equal(sessionOf(s)?.claudeAccountId, ACCOUNT_A);
-  assert.equal(continued("hl-idle"), false);
+  assert.equal(continued("hl-idle"), true);
 });
 
 void test("Continue. is not typed when Claude is not ready after the move or the pane shows a surface (C-05)", async () => {
@@ -1056,13 +1097,33 @@ void test("a return never moves work down the chain", async () => {
   assert.deepEqual(events, []);
 });
 
-void test("a read below the threshold before limitedUntil keeps the account limited, so a failover skips it", async () => {
+void test("an ok read below the threshold before limitedUntil clears the limit, so a failover may select the account", async () => {
   await begin();
-  const s = await sessionCard("hd-held");
+  const s = await sessionCard("hd-clear");
   await handleUsageRead("default", usage(100, iso(BASE + 60 * MIN)));
   assert.equal(getActiveAccountId(), ACCOUNT_A);
   await advance(5 * MIN);
   await handleUsageRead("default", usage(10));
+  const saved = await readChainState();
+  assert.equal(saved.accounts.default?.state, "available");
+  assert.equal(saved.accounts.default?.limitedUntil, null);
+  assert.equal(getActiveAccountId(), ACCOUNT_A);
+  assert.ok(chainTimers().some((t) => t.key === "return:default"));
+
+  await handleUsageRead(ACCOUNT_A, usage(100, iso(BASE + 90 * MIN)));
+  claudeInForeground();
+  await handleLimitSignal(s.cardId, s.sessionId, null);
+  assert.equal(getActiveAccountId(), "default");
+});
+
+void test("a rate-limited read before limitedUntil keeps the account limited, so a failover skips it", async () => {
+  await begin();
+  const s = await sessionCard("hd-held");
+  const lastGood = usage(100, iso(BASE + 60 * MIN));
+  await handleUsageRead("default", lastGood);
+  assert.equal(getActiveAccountId(), ACCOUNT_A);
+  await advance(5 * MIN);
+  await handleUsageRead("default", { ...lastGood, status: "rate-limited" });
   const saved = await readChainState();
   assert.equal(saved.accounts.default?.state, "limited");
   assert.equal(saved.accounts.default?.limitedUntil, iso(BASE + 60 * MIN));
@@ -1070,6 +1131,28 @@ void test("a read below the threshold before limitedUntil keeps the account limi
   claudeInForeground();
   await handleLimitSignal(s.cardId, s.sessionId, null);
   assert.equal(getActiveAccountId(), ACCOUNT_B);
+});
+
+void test("an ok read with no windows before limitedUntil keeps the account limited", async () => {
+  await begin();
+  await sessionCard("hd-empty");
+  await handleUsageRead("default", usage(100, iso(BASE + 60 * MIN)));
+  await advance(5 * MIN);
+  await handleUsageRead("default", { ...usage(10), windows: [] });
+  const saved = await readChainState();
+  assert.equal(saved.accounts.default?.state, "limited");
+  assert.equal(saved.accounts.default?.limitedUntil, iso(BASE + 60 * MIN));
+});
+
+void test("an ok read at the threshold before limitedUntil keeps the account limited", async () => {
+  await begin();
+  await sessionCard("hd-at");
+  await handleUsageRead("default", usage(100, iso(BASE + 60 * MIN)));
+  await advance(5 * MIN);
+  await handleUsageRead("default", usage(100, iso(BASE + 90 * MIN)));
+  const saved = await readChainState();
+  assert.equal(saved.accounts.default?.state, "limited");
+  assert.equal(saved.accounts.default?.limitedUntil, iso(BASE + 90 * MIN));
 });
 
 void test("the exhausted check never continues on an account it has no fresh ok read for, even when a poll cleared it", async () => {
@@ -1515,4 +1598,819 @@ void test("login expiry: a past expiry sends one login-expiring event and none a
   stop = await startAccountChain(fakeDeps);
   await handleUsageRead(ACCOUNT_A, expired);
   assert.equal(expiring().length, 1);
+});
+
+const TICKET_CLOCK = Date.parse("2026-10-20T10:10:00.000Z");
+const TICKET_LIMITED_UNTIL = "2026-10-22T07:00:00.000Z";
+const TICKET_WEEKLY_RESET = "2026-10-27T07:00:00.000Z";
+const TICKET_OLD_FETCH = "2026-10-19T10:00:00.000Z";
+const WEEK = 7 * 24 * 60 * MIN;
+
+/** A usage window of `kind` at `percent` whose period began `spanMs` before `resetsAt`. */
+function periodWindow(
+  kind: string,
+  label: string,
+  percent: number,
+  resetsAt: string,
+  spanMs: number,
+): ClaudeUsageWindow {
+  return {
+    kind,
+    label,
+    percent,
+    resetsAt,
+    isActive: kind === "session",
+    periodStart: iso(Date.parse(resetsAt) - spanMs),
+    periodEnd: resetsAt,
+  };
+}
+
+/** The windows of the 2026-10-20 ticket snapshot, where the weekly buckets just started a new period. */
+function newPeriodWindows(): ClaudeUsageWindow[] {
+  return [
+    periodWindow(
+      "session",
+      "Session",
+      4,
+      iso(TICKET_CLOCK + 3 * 60 * MIN),
+      5 * 60 * MIN,
+    ),
+    periodWindow("weekly_all", "Weekly", 1, TICKET_WEEKLY_RESET, WEEK),
+    periodWindow("weekly_scoped", "Weekly Fable", 2, TICKET_WEEKLY_RESET, WEEK),
+  ];
+}
+
+/** The windows the account showed when it hit the weekly limit. */
+function oldPeriodWindows(): ClaudeUsageWindow[] {
+  return [
+    periodWindow("weekly_all", "Weekly", 100, TICKET_LIMITED_UNTIL, WEEK),
+  ];
+}
+
+/** Start the controller with `default` stored as limited by a weekly bucket read at `TICKET_OLD_FETCH`. */
+async function beginWithStoredWeeklyLimit(): Promise<void> {
+  await begin();
+  const state = emptyChainState();
+  state.accounts.default = {
+    state: "limited",
+    limitedUntil: TICKET_LIMITED_UNTIL,
+    buckets: [
+      { kind: "weekly_all", percent: 100, resetsAt: TICKET_LIMITED_UNTIL },
+    ],
+    fetchedAt: TICKET_OLD_FETCH,
+  };
+  await writeChainState(state);
+  clock = TICKET_CLOCK;
+  stop();
+  stop = await startAccountChain(fakeDeps);
+}
+
+void test("a managed login drops the stale default entry from the chain", async () => {
+  await beginWithStoredWeeklyLimit();
+  assert.ok((await readChainState()).accounts.default);
+  const { startLogin, submitLoginCode, getLoginView } =
+    await import("./claude-login.js");
+  assert.deepEqual(await startLogin(undefined, { managedDefault: true }), {
+    ok: true,
+  });
+  for (let i = 0; getLoginView().state !== "awaiting-code" && i < 100; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  assert.deepEqual(submitLoginCode("home"), { ok: true });
+  for (let i = 0; getLoginView().state !== "done" && i < 100; i++) {
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  const view = getLoginView();
+  assert.equal(view.state, "done");
+  try {
+    await whenChainIdle();
+    assert.equal((await readChainState()).accounts.default, undefined);
+  } finally {
+    if (view.state === "done") await removeAccount(view.account.id);
+    await setActiveAccount("default");
+  }
+});
+
+void test("an ok read that shows a new period releases a limited account in one read", async () => {
+  await beginWithStoredWeeklyLimit();
+  await handleUsageRead("default", {
+    status: "ok",
+    fetchedAt: iso(clock),
+    windows: newPeriodWindows(),
+  });
+  const saved = await readChainState();
+  assert.equal(saved.accounts.default?.state, "available");
+  assert.equal(saved.accounts.default?.limitedUntil, null);
+  assert.equal(saved.accounts.default?.fetchedAt, iso(clock));
+  assert.equal(getActiveAccountId(), "default");
+  assert.deepEqual(events, []);
+  assert.ok(chainTimers().some((t) => t.key === "return:default"));
+});
+
+void test("a rate-limited read with a newer fetchedAt and new period windows releases a limited account", async () => {
+  await beginWithStoredWeeklyLimit();
+  await handleUsageRead("default", {
+    status: "rate-limited",
+    fetchedAt: iso(clock - MIN),
+    windows: newPeriodWindows(),
+  });
+  const saved = await readChainState();
+  assert.equal(saved.accounts.default?.state, "available");
+  assert.equal(saved.accounts.default?.limitedUntil, null);
+  assert.equal(getActiveAccountId(), "default");
+});
+
+void test("a rate-limited read that repeats the old windows and fetchedAt keeps the account limited", async () => {
+  await beginWithStoredWeeklyLimit();
+  await handleUsageRead("default", {
+    status: "rate-limited",
+    fetchedAt: TICKET_OLD_FETCH,
+    windows: oldPeriodWindows(),
+  });
+  const saved = await readChainState();
+  assert.equal(saved.accounts.default?.state, "limited");
+  assert.equal(saved.accounts.default?.limitedUntil, TICKET_LIMITED_UNTIL);
+  assert.equal(saved.accounts.default?.fetchedAt, TICKET_OLD_FETCH);
+});
+
+void test("a stale token-rejected read with a newer fetchedAt and new period windows keeps a limited account limited", async () => {
+  await beginWithStoredWeeklyLimit();
+  await handleUsageRead("default", {
+    status: "stale",
+    error: "token-rejected",
+    fetchedAt: iso(clock - MIN),
+    windows: newPeriodWindows(),
+  });
+  const saved = await readChainState();
+  assert.equal(saved.accounts.default?.state, "limited");
+  assert.equal(saved.accounts.default?.limitedUntil, TICKET_LIMITED_UNTIL);
+});
+
+const rejectedRead = (prior: ClaudeUsageSnapshot): ClaudeUsageSnapshot => ({
+  status: "stale",
+  error: "token-rejected",
+  windows: prior.windows,
+  fetchedAt: prior.fetchedAt,
+});
+
+void test("one token-rejected read keeps the account out of needs-login and raises nothing", async () => {
+  await begin();
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  const saved = (await readChainState()).accounts[ACCOUNT_A];
+  assert.notEqual(saved?.state, "needs-login");
+  assert.equal(saved?.rejectedReads, 1);
+  assert.deepEqual(raised, []);
+});
+
+void test("two token-expired reads keep the account unknown and eligible and raise nothing", async () => {
+  await begin();
+  for (let i = 0; i < 3; i++) {
+    await handleUsageRead(ACCOUNT_A, {
+      ...rejectedRead(usage(10)),
+      error: "token-expired",
+    });
+  }
+  const saved = (await readChainState()).accounts[ACCOUNT_A];
+  assert.equal(saved?.state, "unknown");
+  assert.notEqual(saved?.rejectedReads, 3);
+  assert.deepEqual(raised, []);
+});
+
+void test("two token-rejected reads make needs-login and raise one decision, and later reads raise nothing", async () => {
+  await begin();
+  for (let i = 0; i < 4; i++) {
+    await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  }
+  const saved = await readChainState();
+  assert.equal(saved.accounts[ACCOUNT_A]?.state, "needs-login");
+  assert.equal(saved.accounts[ACCOUNT_A]?.limitedUntil, null);
+  assert.equal(saved.accounts[ACCOUNT_A]?.rejectedReads, 4);
+  assert.deepEqual(raised, [ACCOUNT_A]);
+  const decisionId = saved.decisions[`needs-login:${ACCOUNT_A}`];
+  assert.equal(store.getDecisionItem(decisionId ?? "")?.state, "open");
+  assert.deepEqual(
+    chainTimers().filter((t) => t.key === `return:${ACCOUNT_A}`),
+    [],
+  );
+});
+
+void test("a limited account that becomes needs-login loses its return timer", async () => {
+  await begin();
+  await handleUsageRead(ACCOUNT_A, usage(100, iso(BASE + 60 * MIN)));
+  assert.equal(
+    chainTimers().some((t) => t.key === `return:${ACCOUNT_A}`),
+    true,
+  );
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(100)));
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(100)));
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "needs-login",
+  );
+  assert.deepEqual(
+    chainTimers().filter((t) => t.key === `return:${ACCOUNT_A}`),
+    [],
+  );
+});
+
+void test("removing an account whose decision close throws does not throw and drops the stored id", async () => {
+  await begin(
+    {},
+    {
+      closeDecision: () => {
+        throw new Error("close failed");
+      },
+    },
+  );
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await forgetChainAccount(ACCOUNT_A);
+  const saved = await readChainState();
+  assert.equal(saved.accounts[ACCOUNT_A], undefined);
+  assert.equal(saved.decisions[`needs-login:${ACCOUNT_A}`], undefined);
+});
+
+void test("a restart then another rejected read raises nothing", async () => {
+  await begin();
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  stop();
+  await whenChainIdle();
+  stop = await startAccountChain({ ...fakeDeps });
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  assert.deepEqual(raised, [ACCOUNT_A]);
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "needs-login",
+  );
+});
+
+void test("a login-expired folder with two rejected reads becomes needs-login", async () => {
+  await begin({}, { loggedIn: () => Promise.resolve(false) });
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "login-expired",
+  );
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "needs-login",
+  );
+  assert.deepEqual(raised, [ACCOUNT_A]);
+});
+
+void test("a 429 between two rejected reads keeps the count", async () => {
+  await begin();
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await handleUsageRead(ACCOUNT_A, failedRead("rate-limited"));
+  assert.equal((await readChainState()).accounts[ACCOUNT_A]?.rejectedReads, 1);
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "needs-login",
+  );
+});
+
+void test("a limit signal does not count as a rejected read", async () => {
+  await begin();
+  await sessionCard("nl-limit");
+  await handleUsageRead("default", rejectedRead(usage(10)));
+  reads.set("default", rejectedRead(usage(10)));
+  const [{ cardId, sessionId }] = made.slice(-1);
+  await handleLimitSignal(cardId, sessionId, null);
+  assert.equal((await readChainState()).accounts.default?.rejectedReads, 1);
+  assert.deepEqual(raised, []);
+});
+
+void test("an ok read after needs-login clears the state and closes the decision once with later", async () => {
+  await begin();
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  const decisionId = (await readChainState()).decisions[
+    `needs-login:${ACCOUNT_A}`
+  ];
+  await handleUsageRead(ACCOUNT_A, usage(10));
+  const saved = await readChainState();
+  assert.equal(saved.accounts[ACCOUNT_A]?.state, "available");
+  assert.equal(saved.accounts[ACCOUNT_A]?.rejectedReads ?? 0, 0);
+  assert.deepEqual(saved.decisions, {});
+  assert.deepEqual(closed, [
+    {
+      decisionId,
+      optionId: "later",
+      note: "The account returned to the chain.",
+    },
+  ]);
+  assert.deepEqual(store.getDecisionItem(decisionId)?.answer, {
+    optionId: "later",
+    note: "The account returned to the chain.",
+  });
+  await handleUsageRead(ACCOUNT_A, usage(10));
+  assert.equal(closed.length, 1);
+  assert.deepEqual(logins, []);
+});
+
+void test("a failover never selects a needs-login account", async () => {
+  await begin();
+  const s = await sessionCard("nl-failover");
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await handleUsageRead("default", usage(100, iso(BASE + 60 * MIN)));
+  assert.equal(getActiveAccountId(), ACCOUNT_B);
+  assert.equal(sessionOf(s)?.claudeAccountId, ACCOUNT_B);
+});
+
+void test("answering the login decision with login starts the login of that account, and later starts nothing", async () => {
+  await begin();
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await handleUsageRead(ACCOUNT_B, rejectedRead(usage(10)));
+  await handleUsageRead(ACCOUNT_B, rejectedRead(usage(10)));
+  const { decisions } = await readChainState();
+  answerDecisionItem(decisions[`needs-login:${ACCOUNT_B}`], {
+    optionId: "later",
+    note: null,
+  });
+  assert.deepEqual(logins, []);
+  answerDecisionItem(decisions[`needs-login:${ACCOUNT_A}`], {
+    optionId: "login",
+    note: null,
+  });
+  assert.deepEqual(logins, [ACCOUNT_A]);
+});
+
+void test("removing a needs-login account closes its decision and drops the cause", async () => {
+  await begin();
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await forgetChainAccount(ACCOUNT_A);
+  assert.equal(closed.length, 1);
+  assert.deepEqual((await readChainState()).decisions, {});
+});
+
+const IDENTITY_A = {
+  email: `${ACCOUNT_A.slice(0, 4)}@example.com`,
+  orgId: "org",
+};
+const IDENTITY_B = {
+  email: `${ACCOUNT_B.slice(0, 4)}@example.com`,
+  orgId: "org",
+};
+
+void test("an account with the home login reads shadowed-by-home at start, with no usage read", async () => {
+  await begin({}, {}, IDENTITY_A);
+  const saved = await readChainState();
+  assert.equal(saved.accounts[ACCOUNT_A]?.state, "shadowed-by-home");
+  assert.equal(saved.accounts[ACCOUNT_A]?.limitedUntil, null);
+  assert.equal(saved.accounts[ACCOUNT_B], undefined);
+  assert.deepEqual(readLog, []);
+});
+
+void test("rejected reads on a shadowed account raise no login decision", async () => {
+  await begin({}, {}, IDENTITY_A);
+  for (let i = 0; i < 3; i++) {
+    await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  }
+  const saved = await readChainState();
+  assert.equal(saved.accounts[ACCOUNT_A]?.state, "shadowed-by-home");
+  assert.equal(saved.accounts[ACCOUNT_A]?.rejectedReads, undefined);
+  assert.deepEqual(raised, []);
+  assert.deepEqual(saved.decisions, {});
+});
+
+void test("a full read on a shadowed account stays shadowed-by-home and arms no return timer", async () => {
+  await begin({}, {}, IDENTITY_A);
+  await handleUsageRead(ACCOUNT_A, usage(100, iso(BASE + 60 * MIN)));
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "shadowed-by-home",
+  );
+  assert.deepEqual(
+    chainTimers().filter((t) => t.key === `return:${ACCOUNT_A}`),
+    [],
+  );
+});
+
+void test("the home login arriving after a needs-login account closes its open decision", async () => {
+  await begin({}, {}, { email: "other@example.com", orgId: "org" });
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  const decisionId = (await readChainState()).decisions[
+    `needs-login:${ACCOUNT_A}`
+  ];
+  assert.equal(store.getDecisionItem(decisionId)?.state, "open");
+  await noteHomeIdentity(IDENTITY_A);
+  const saved = await readChainState();
+  assert.equal(saved.accounts[ACCOUNT_A]?.state, "shadowed-by-home");
+  assert.deepEqual(saved.decisions, {});
+  assert.deepEqual(closed, [
+    {
+      decisionId,
+      optionId: "later",
+      note: "The account returned to the chain.",
+    },
+  ]);
+  assert.notEqual(store.getDecisionItem(decisionId)?.state, "open");
+});
+
+void test("a failover never selects a shadowed account", async () => {
+  await begin({}, {}, IDENTITY_A);
+  const s = await sessionCard("shadow-failover");
+  await handleUsageRead("default", usage(100, iso(BASE + 60 * MIN)));
+  assert.equal(getActiveAccountId(), ACCOUNT_B);
+  assert.equal(sessionOf(s)?.claudeAccountId, ACCOUNT_B);
+  assert.deepEqual(await requestFailover("switch-now"), {
+    ok: false,
+    error: "no-eligible-account",
+  });
+  assert.equal(getActiveAccountId(), ACCOUNT_B);
+});
+
+void test("a boot return never goes back to a shadowed account", async () => {
+  await begin({}, {}, IDENTITY_A);
+  await handleUsageRead("default", usage(100, iso(BASE + 60 * MIN)));
+  assert.equal(getActiveAccountId(), ACCOUNT_B);
+  await advance(30 * MIN);
+  assert.notEqual(getActiveAccountId(), ACCOUNT_A);
+  assert.equal(readLog.includes(ACCOUNT_A), false);
+});
+
+void test("another home login turns a shadowed account to unknown, and the next ok read derives available", async () => {
+  await begin({}, {}, IDENTITY_A);
+  await noteHomeIdentity({ email: "other@example.com", orgId: "org" });
+  assert.equal((await readChainState()).accounts[ACCOUNT_A]?.state, "unknown");
+  await handleUsageRead(ACCOUNT_A, usage(10));
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "available",
+  );
+  await noteHomeIdentity(IDENTITY_A);
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "shadowed-by-home",
+  );
+});
+
+void test("the home login of the other account shadows it instead", async () => {
+  await begin({}, {}, IDENTITY_A);
+  await noteHomeIdentity(IDENTITY_B);
+  const saved = await readChainState();
+  assert.equal(saved.accounts[ACCOUNT_A]?.state, "unknown");
+  assert.equal(saved.accounts[ACCOUNT_B]?.state, "shadowed-by-home");
+});
+
+void test("no account is shadowed once a managed default exists", async () => {
+  const managed = "55555555-5555-4555-8555-555555555555";
+  await adoptManagedDefault({
+    id: managed,
+    email: "managed@example.com",
+    orgId: "org",
+    orgName: "Org",
+    subscriptionType: "max",
+    createdAt: "2026-10-03T00:00:00.000Z",
+    lastLoginAt: "2026-10-03T00:00:00.000Z",
+  });
+  try {
+    await begin({}, {}, IDENTITY_A);
+    await noteHomeIdentity(IDENTITY_A);
+    assert.notEqual(
+      (await readChainState()).accounts[ACCOUNT_A]?.state,
+      "shadowed-by-home",
+    );
+  } finally {
+    await removeAccount(managed);
+    await setActiveAccount("default");
+  }
+});
+
+void test("a usage read for default adds no default entry once a managed default exists", async () => {
+  const managed = "55555555-5555-4555-8555-555555555555";
+  await adoptManagedDefault({
+    id: managed,
+    email: "managed@example.com",
+    orgId: "org",
+    orgName: "Org",
+    subscriptionType: "max",
+    createdAt: "2026-10-03T00:00:00.000Z",
+    lastLoginAt: "2026-10-03T00:00:00.000Z",
+  });
+  try {
+    await begin({}, {}, IDENTITY_A);
+    await handleUsageRead("default", usage(50));
+    assert.equal((await readChainState()).accounts.default, undefined);
+  } finally {
+    await removeAccount(managed);
+    await setActiveAccount("default");
+  }
+});
+
+void test("the account in use is never shadowed, even when it holds the home login", async () => {
+  await begin();
+  await setActiveAccount(ACCOUNT_A);
+  await noteHomeIdentity(IDENTITY_A);
+  assert.equal((await readChainState()).accounts[ACCOUNT_A], undefined);
+});
+
+void test("a shadowed entry that no longer matches the home login at boot goes back to unknown", async () => {
+  await begin();
+  stop();
+  await whenChainIdle();
+  await writeChainState({
+    ...emptyChainState(),
+    accounts: {
+      [ACCOUNT_A]: {
+        state: "shadowed-by-home",
+        limitedUntil: null,
+        buckets: [],
+      },
+    },
+  });
+  stop = await startAccountChain({ ...fakeDeps });
+  assert.equal((await readChainState()).accounts[ACCOUNT_A]?.state, "unknown");
+});
+
+void test("removing a shadowed account clears its shadow, so a later read of the same id derives available", async () => {
+  await begin({}, {}, IDENTITY_A);
+  await forgetChainAccount(ACCOUNT_A);
+  assert.equal((await readChainState()).accounts[ACCOUNT_A], undefined);
+  await handleUsageRead(ACCOUNT_A, usage(10));
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "available",
+  );
+});
+
+/** Read every account at its limit, the earliest reset at `BASE + 30 min`, and hold those reads. */
+function holdAllLimited(): void {
+  reads.set(ACCOUNT_A, usage(100, iso(BASE + 30 * MIN)));
+  reads.set(ACCOUNT_B, usage(100, iso(BASE + 90 * MIN)));
+  reads.set("default", usage(100, iso(BASE + 120 * MIN)));
+}
+
+/** Start the controller with every account limited and the chain exhausted. */
+async function beginExhausted(): Promise<string> {
+  await begin();
+  await sessionCard("ex-held");
+  holdAllLimited();
+  for (const id of [ACCOUNT_A, ACCOUNT_B, "default"]) {
+    await handleUsageRead(id, reads.get(id) as ClaudeUsageSnapshot);
+  }
+  return (await readChainState()).decisions.exhausted;
+}
+
+void test("an exhausted chain raises one decision with the earliest reset", async () => {
+  const decisionId = await beginExhausted();
+  assert.deepEqual(raisedExhausted, [iso(BASE + 30 * MIN)]);
+  const item = store.getDecisionItem(decisionId);
+  assert.equal(item?.state, "open");
+  assert.ok(item?.question.includes(iso(BASE + 30 * MIN)));
+  assert.equal(events.filter((e) => e.kind === "exhausted").length, 1);
+});
+
+void test("a second exhausted check while every account is still limited raises nothing", async () => {
+  await beginExhausted();
+  reads.set(ACCOUNT_A, usage(100, iso(BASE + 90 * MIN)));
+  const reading = readLog.length;
+  await advance(33 * MIN);
+  assert.ok(readLog.length > reading);
+  assert.notEqual((await readChainState()).exhausted, null);
+  assert.equal(raisedExhausted.length, 1);
+  assert.deepEqual(closed, []);
+});
+
+void test("the exhausted check that finds an account usable closes the decision with wait", async () => {
+  const decisionId = await beginExhausted();
+  reads.set(ACCOUNT_A, usage(5));
+  await advance(32 * MIN);
+  const saved = await readChainState();
+  assert.equal(saved.exhausted, null);
+  assert.equal(saved.decisions.exhausted, undefined);
+  assert.deepEqual(closed, [
+    { decisionId, optionId: "wait", note: "An account is usable again." },
+  ]);
+  assert.equal(store.getDecisionItem(decisionId)?.answer?.optionId, "wait");
+});
+
+void test("a switch now that clears the exhausted record closes the decision", async () => {
+  await begin();
+  const decisionId = raiseExhaustedDecision(null);
+  const state = emptyChainState();
+  state.exhausted = { since: iso(BASE), earliestResetAt: null };
+  state.decisions.exhausted = decisionId;
+  await writeChainState(state);
+  stop();
+  stop = await startAccountChain(fakeDeps);
+  assert.equal((await requestFailover("switch-now")).ok, true);
+  assert.deepEqual(closed, [
+    { decisionId, optionId: "wait", note: "An account is usable again." },
+  ]);
+  const saved = await readChainState();
+  assert.equal(saved.exhausted, null);
+  assert.equal(saved.decisions.exhausted, undefined);
+});
+
+void test("a restart of the controller with the stored decision raises none at the next exhausted check", async () => {
+  await beginExhausted();
+  reads.set(ACCOUNT_A, usage(100, iso(BASE + 90 * MIN)));
+  stop();
+  await whenChainIdle();
+  stop = await startAccountChain(fakeDeps);
+  await advance(33 * MIN);
+  assert.notEqual((await readChainState()).exhausted, null);
+  assert.equal(raisedExhausted.length, 1);
+});
+
+void test("a chain file exhausted before the upgrade raises one decision at the next exhausted check", async () => {
+  await begin();
+  const state = emptyChainState();
+  state.exhausted = {
+    since: iso(BASE),
+    earliestResetAt: iso(BASE + 30 * MIN),
+  };
+  await writeChainState(state);
+  holdAllLimited();
+  reads.set(ACCOUNT_A, usage(100, iso(BASE + 90 * MIN)));
+  stop();
+  stop = await startAccountChain(fakeDeps);
+  assert.deepEqual(raisedExhausted, []);
+  await advance(33 * MIN);
+  assert.deepEqual(raisedExhausted, [iso(BASE + 90 * MIN)]);
+  assert.equal(typeof (await readChainState()).decisions.exhausted, "string");
+  assert.equal(events.filter((e) => e.kind === "exhausted").length, 0);
+});
+
+void test("answering the exhausted decision starts no login, since the user adds the account on the accounts page", async () => {
+  const decisionId = await beginExhausted();
+  answerDecisionItem(decisionId, { optionId: "wait", note: null });
+  await beginExhausted();
+  const second = (await readChainState()).decisions.exhausted;
+  answerDecisionItem(second, { optionId: "add", note: null });
+  assert.deepEqual(logins, []);
+});
+
+void test("a limited account that then becomes shadowed loses its return timer and is never read or returned to", async () => {
+  await begin({}, {}, { email: "other@example.com", orgId: "org" });
+  await handleUsageRead(ACCOUNT_A, usage(100, iso(BASE + 60 * MIN)));
+  assert.ok(chainTimers().some((t) => t.key === `return:${ACCOUNT_A}`));
+  await noteHomeIdentity(IDENTITY_A);
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "shadowed-by-home",
+  );
+  assert.equal(
+    chainTimers().some((t) => t.key === `return:${ACCOUNT_A}`),
+    false,
+  );
+  await advance(90 * MIN);
+  assert.equal(readLog.includes(ACCOUNT_A), false);
+  assert.equal(getActiveAccountId(), "default");
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "shadowed-by-home",
+  );
+});
+
+void test("a login decision dep that throws leaves needs-login without a stored decision, and the next rejected read raises one", async () => {
+  let failing = true;
+  await begin(
+    {},
+    {
+      raiseLoginDecision: (accountId: string) => {
+        if (failing) throw new Error("raise failed");
+        return fakeDeps.raiseLoginDecision(accountId);
+      },
+    },
+  );
+  const warn = mock.method(console, "warn", () => undefined);
+  try {
+    await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+    await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+    const saved = await readChainState();
+    assert.equal(saved.accounts[ACCOUNT_A]?.state, "needs-login");
+    assert.equal(saved.decisions[`needs-login:${ACCOUNT_A}`], undefined);
+    assert.deepEqual(raised, []);
+    assert.equal(warn.mock.callCount() > 0, true);
+    failing = false;
+    await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+  } finally {
+    warn.mock.restore();
+  }
+  assert.deepEqual(raised, [ACCOUNT_A]);
+  assert.equal(
+    typeof (await readChainState()).decisions[`needs-login:${ACCOUNT_A}`],
+    "string",
+  );
+});
+
+void test("an exhausted decision dep that rejects keeps the chain exhausted without a stored decision, and the next check raises one", async () => {
+  let failing = true;
+  await begin(
+    {},
+    {
+      raiseExhaustedDecision: (earliestResetAt: string | null) =>
+        failing
+          ? Promise.reject(new Error("raise failed"))
+          : fakeDeps.raiseExhaustedDecision(earliestResetAt),
+    },
+  );
+  await sessionCard("ex-dep-held");
+  holdAllLimited();
+  const warn = mock.method(console, "warn", () => undefined);
+  try {
+    for (const id of [ACCOUNT_A, ACCOUNT_B, "default"]) {
+      await handleUsageRead(id, reads.get(id) as ClaudeUsageSnapshot);
+    }
+    const saved = await readChainState();
+    assert.notEqual(saved.exhausted, null);
+    assert.equal(saved.decisions.exhausted, undefined);
+    assert.deepEqual(raisedExhausted, []);
+    assert.equal(warn.mock.callCount() > 0, true);
+    failing = false;
+    reads.set(ACCOUNT_A, usage(100, iso(BASE + 90 * MIN)));
+    await advance(33 * MIN);
+  } finally {
+    warn.mock.restore();
+  }
+  assert.deepEqual(raisedExhausted, [iso(BASE + 90 * MIN)]);
+  assert.equal(typeof (await readChainState()).decisions.exhausted, "string");
+});
+
+void test("answering a login decision when startLogin resolves not ok or rejects does not throw and keeps the decision answered", async () => {
+  const outcomes = [
+    () => Promise.resolve({ ok: false, error: "in-flight" }),
+    () => Promise.reject(new Error("login failed")),
+  ];
+  for (const outcome of outcomes) {
+    const attempts: (string | undefined)[] = [];
+    await begin(
+      {},
+      {
+        startLogin: (accountId?: string) => {
+          attempts.push(accountId);
+          return outcome();
+        },
+      },
+    );
+    await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+    await handleUsageRead(ACCOUNT_A, rejectedRead(usage(10)));
+    const decisionId = (await readChainState()).decisions[
+      `needs-login:${ACCOUNT_A}`
+    ];
+    const warn = mock.method(console, "warn", () => undefined);
+    try {
+      assert.doesNotThrow(() =>
+        answerDecisionItem(decisionId, { optionId: "login", note: null }),
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+      assert.deepEqual(attempts, [ACCOUNT_A]);
+      assert.equal(warn.mock.callCount(), 1);
+    } finally {
+      warn.mock.restore();
+    }
+    assert.equal(store.getDecisionItem(decisionId)?.state, "answered");
+  }
+});
+
+void test("a shadowed account removed from the registry file loses its chain entry at the next home identity note", async () => {
+  await begin({}, {}, IDENTITY_A);
+  assert.equal(
+    (await readChainState()).accounts[ACCOUNT_A]?.state,
+    "shadowed-by-home",
+  );
+  await removeAccount(ACCOUNT_A);
+  try {
+    await noteHomeIdentity(IDENTITY_A);
+    assert.equal((await readChainState()).accounts[ACCOUNT_A], undefined);
+  } finally {
+    await removeAccount(ACCOUNT_B);
+    for (const [id, day] of [
+      [ACCOUNT_A, "01"],
+      [ACCOUNT_B, "02"],
+    ]) {
+      await upsertAccount({
+        id,
+        email: `${id.slice(0, 4)}@example.com`,
+        orgId: "org",
+        orgName: "Org",
+        subscriptionType: "max",
+        createdAt: `2026-10-${day}T00:00:00.000Z`,
+        lastLoginAt: `2026-10-${day}T00:00:00.000Z`,
+      });
+      fs.mkdirSync(accountDir(id), { recursive: true });
+    }
+  }
+});
+
+void test("a home identity noted while the chain is stopped resolves and changes nothing, and the next start shadows from the stored identity", async () => {
+  await begin();
+  stop();
+  await whenChainIdle();
+  await noteHomeIdentity(IDENTITY_B);
+  assert.equal((await readChainState()).accounts[ACCOUNT_B], undefined);
+  await writeDefaultIdentity(IDENTITY_A);
+  stop = await startAccountChain({ ...fakeDeps });
+  const saved = await readChainState();
+  assert.equal(saved.accounts[ACCOUNT_A]?.state, "shadowed-by-home");
+  assert.equal(saved.accounts[ACCOUNT_B], undefined);
 });

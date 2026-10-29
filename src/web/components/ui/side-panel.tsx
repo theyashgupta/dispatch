@@ -149,18 +149,20 @@ export function SidePanel({
         data-side-panel="overlay"
         data-docked={docked ? "true" : undefined}
         className={cn(
-          "fixed right-0 z-11 flex max-w-screen flex-col bg-(--surface-column)",
+          "fixed right-0 z-11 flex flex-col bg-(--surface-column)",
           docked
             ? DOCKED_GEOMETRY
             : expanded && !sheet
               ? EXPANDED_GEOMETRY
               : "top-0 left-auto h-dvh",
-          docked ? "translate-none transition-none" : "transition-[translate]",
+          docked
+            ? "max-w-screen translate-none transition-none"
+            : "transition-[translate]",
           !docked &&
             (sheet
-              ? "w-screen"
+              ? "w-screen max-w-screen"
               : !expanded &&
-                "w-[var(--panel-live-width,var(--panel-width))] border-l border-border"),
+                "w-[var(--panel-live-width,var(--panel-width))] max-w-[calc(100vw_-_var(--nav-current,0px))] border-l border-border"),
           !docked &&
             (open
               ? "translate-x-0 duration-(--motion-panel-open) ease-(--easing-enter)"

@@ -4,7 +4,10 @@ import type { PrRow } from "../../../../shared/pr-rows.js";
 import { boardSearch } from "../../../../shared/board-select.js";
 import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { actionApi } from "@/queries/action-services";
-import { reviewPullRequestWithAgent } from "@/modules/pull-requests/domain/review-flow";
+import {
+  reviewPullRequestWithAgent,
+  type ReviewStep,
+} from "@/modules/pull-requests/domain/review-flow";
 import {
   useOpenReviewCardMutation,
   usePullRequestLoader,
@@ -12,6 +15,7 @@ import {
 
 interface ReviewFlow {
   reviewingKey: string | null;
+  reviewStep: ReviewStep | null;
   review: (row: PrRow) => Promise<void>;
 }
 
@@ -23,12 +27,14 @@ export function useReviewFlow(): ReviewFlow {
   const loadDetail = usePullRequestLoader();
   const openCard = useOpenReviewCardMutation();
   const [reviewingKey, setReviewingKey] = useState<string | null>(null);
+  const [reviewStep, setReviewStep] = useState<ReviewStep | null>(null);
   const inFlight = useRef(false);
 
   const review = async (row: PrRow) => {
     if (inFlight.current) return;
     inFlight.current = true;
     setReviewingKey(row.key);
+    setReviewStep("loading");
     const ref = { owner: row.owner, repo: row.name, number: row.number };
     try {
       await reviewPullRequestWithAgent(
@@ -47,14 +53,16 @@ export function useReviewFlow(): ReviewFlow {
           openStart: appStore.openStart,
           openCard: (cardId) => appStore.selectCard(cardId, null),
           notice: appStore.notice,
+          onStep: setReviewStep,
         },
         row,
       );
     } finally {
       inFlight.current = false;
       setReviewingKey(null);
+      setReviewStep(null);
     }
   };
 
-  return { reviewingKey, review };
+  return { reviewingKey, reviewStep, review };
 }

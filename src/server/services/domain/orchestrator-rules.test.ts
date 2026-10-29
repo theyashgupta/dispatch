@@ -65,7 +65,23 @@ void test("records: the truth table of main count, extra prerequisites and scope
     [
       "an extra with an empty scope",
       [main, record("empty", "extra")],
-      { ok: false, code: "extra-needs-scope", id: "empty" },
+      { ok: true },
+    ],
+    ["a main with kind board", [{ ...main, kind: "board" }], { ok: true }],
+    [
+      "an extra with kind feature",
+      [main, { ...infra, kind: "feature" }],
+      { ok: true },
+    ],
+    [
+      "a main with kind feature",
+      [{ ...main, kind: "feature" }],
+      { ok: false, code: "kind-mismatch", id: "main" },
+    ],
+    [
+      "an extra with kind board",
+      [main, { ...infra, kind: "board" }],
+      { ok: false, code: "kind-mismatch", id: "infra" },
     ],
     [
       "a main with a scope",
@@ -205,9 +221,10 @@ void test("effective policy takes the narrower value per field, even after the b
   assert.deepEqual(effectivePolicy(policy, main), policy);
 });
 
-void test("ship: only the main ships once records exist", () => {
+void test("ship: the main and a feature orchestrator may ship, an unknown caller may not", () => {
   assert.equal(mayShip([main, infra], "main"), true);
-  assert.equal(mayShip([main, infra], "infra"), false);
+  assert.equal(mayShip([main, infra], "infra"), true);
+  assert.equal(mayShip([main, { ...infra, kind: "feature" }], "infra"), true);
   assert.equal(mayShip([main, infra], "stranger"), false);
   assert.equal(mayShip([], "anyone"), true);
 });

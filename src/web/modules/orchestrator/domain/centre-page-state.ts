@@ -1,4 +1,5 @@
 import { mainOrchestrator } from "../../../../shared/orchestrator-owner.js";
+import { dollars, spentOfBudget } from "../../../../shared/cost-text.js";
 import type { CentreBranch } from "./centre-graph.js";
 import {
   stripPeriod,
@@ -36,10 +37,6 @@ export function contextText(percent: number): string {
   return `Context ${Math.round(percent)}%`;
 }
 
-function dollars(cost: number): string {
-  return `$${cost.toFixed(2)}`;
-}
-
 /** Build the cost line of the centre node. */
 export function costText(cost: number): string {
   return `${dollars(cost)} today`;
@@ -56,7 +53,7 @@ export function playbookText(name: string): string {
  * @remarks A branch that runs but has no reading yet shows no meter, so a tile never claims "Not started" for a live session.
  */
 export function tileMeters(
-  branch: Pick<CentreBranch, "state" | "contextPercent" | "cost">,
+  branch: Pick<CentreBranch, "state" | "contextPercent" | "cost" | "budget">,
 ): string[] {
   if (
     branch.state === "planned" &&
@@ -69,7 +66,9 @@ export function tileMeters(
     ...(branch.contextPercent === null
       ? []
       : [contextText(branch.contextPercent)]),
-    ...(branch.cost === null ? [] : [dollars(branch.cost)]),
+    ...(branch.cost === null
+      ? []
+      : [spentOfBudget(branch.cost, branch.budget ?? null)]),
   ];
 }
 

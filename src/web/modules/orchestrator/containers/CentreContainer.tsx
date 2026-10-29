@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { NARROW_QUERY } from "../../../../shared/media-queries.js";
 import { pinFromBoard } from "../../../../shared/pinned-card.js";
-import type { Card } from "../../../../shared/types.js";
+import type { Card, OrchestrationSummary } from "../../../../shared/types.js";
 import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
 import { readClock, subscribeClock } from "@/components/ui/hooks/wake-clock";
+import { useOrchestrationSummaryQuery } from "@/queries/orchestration-summary-queries";
 import { BranchList } from "@/modules/orchestrator/components/BranchList";
 import type { TileBehaviour } from "@/modules/orchestrator/components/BranchTile";
 import { CentreCanvas } from "@/modules/orchestrator/components/CentreCanvas";
@@ -20,6 +21,7 @@ import {
   regionState,
 } from "@/modules/orchestrator/domain/centre-page-state";
 import { STALE_REASON } from "@/modules/orchestrator/domain/centre-model";
+import { withGroupCosts } from "@/modules/orchestrator/domain/group-costs";
 import { useCentrePane } from "@/modules/orchestrator/hooks/use-centre-pane";
 import { useEdgePaths } from "@/modules/orchestrator/hooks/use-edge-paths";
 import { useTileFocus } from "@/modules/orchestrator/hooks/use-tile-focus";
@@ -30,6 +32,7 @@ import { useCentreSelection } from "./use-centre-selection";
 import { useOrchestratorDecisions } from "./use-orchestrator-decisions";
 
 const NO_CARDS: Card[] = [];
+const NO_GROUPS: OrchestrationSummary["groups"] = [];
 const REASON_ID = "centre-actions-off";
 
 export function CentreContainer() {
@@ -47,22 +50,24 @@ export function CentreContainer() {
   const decisions = useOrchestratorDecisions(boardKey);
   const wide = !useMediaQuery(NARROW_QUERY);
   const now = useSyncExternalStore(subscribeClock, readClock);
-  const [showOlderShipped, setShowOlderShipped] = useState(false);
   const cards = snapshot.data?.cards ?? NO_CARDS;
   const actions = useBranchActions(boardKey, cards);
   const start = useCentreControl(boardKey, null, stale);
 
+  const summary = useOrchestrationSummaryQuery(boardKey);
   const graph = useMemo(
     () =>
-      centreGraph({
-        cards,
-        records,
-        selectedId: record?.id ?? null,
-        decisions: decisions.decisions,
-        now,
-        showOlderShipped,
-      }),
-    [cards, records, record, decisions.decisions, now, showOlderShipped],
+      withGroupCosts(
+        centreGraph({
+          cards,
+          records,
+          selectedId: record?.id ?? null,
+          decisions: decisions.decisions,
+          now,
+        }),
+        summary.data?.groups ?? NO_GROUPS,
+      ),
+    [cards, records, record, decisions.decisions, now, summary.data],
   );
   const order = useMemo(() => focusOrder(graph), [graph]);
   const { register, onKeyDown } = useTileFocus(order);
@@ -102,7 +107,6 @@ export function CentreContainer() {
     draftOf: actions.draftOf,
     setDraft: actions.setDraft,
   };
-  const toggleShipped = () => setShowOlderShipped((shown) => !shown);
 
   const startReason = start.control?.reason ?? null;
   const ready = state === "ready";
@@ -149,8 +153,6 @@ export function CentreContainer() {
           containerRef={container}
           nodeRef={register(CENTRE_FOCUS_ID)}
           onNodeKeyDown={nodeKeyDown}
-          showOlderShipped={showOlderShipped}
-          onToggleShipped={toggleShipped}
           tile={tile}
         />
       </>
@@ -167,17 +169,7 @@ export function CentreContainer() {
       onNodeKeyDown={nodeKeyDown}
       reason={stale ? <StaleReason id={REASON_ID} padded={false} /> : null}
       branches={
-        ready ? (
-          <BranchList
-            bands={graph.bands}
-            hiddenShipped={graph.hiddenShipped}
-            showOlderShipped={showOlderShipped}
-            onToggleShipped={toggleShipped}
-            tile={tile}
-          />
-        ) : (
-          notReady
-        )
+        ready ? <BranchList bands={graph.bands} tile={tile} /> : notReady
       }
     />
   );
