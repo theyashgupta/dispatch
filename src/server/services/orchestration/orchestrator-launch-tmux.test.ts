@@ -21,7 +21,7 @@ const { setHooksRuntime } = await import("../infra/config-holder.js");
 setHooksRuntime({ capable: true, port: 4711, statusChannel: "auto" });
 
 void test(
-  "an orchestrator session gets its policy argv and a token in its env, and a relaunch hands the shell a new token without typing it",
+  "an orchestrator session and its relaunch get the same policy argv with the bypass flag, and the relaunch hands the shell a new token without typing it",
   { skip: !env.canRunRealTmux },
   async () => {
     const argvFile = path.join(env.root, "claude-argv.txt");
@@ -80,10 +80,15 @@ while :; do sleep 1; done
         ),
         ["Bash", "Write", "Edit", "NotebookEdit"],
       );
+      assert.deepEqual(
+        argv.filter((a) => a.includes("dangerously")),
+        ["--dangerously-skip-permissions"],
+      );
       assert.equal(
-        argv.some((a) => a.includes("dangerously")),
+        argv.some((a) => a.startsWith("--permission-mode")),
         false,
       );
+      const policyArgv = argv.slice(0, argv.indexOf("--disallowedTools") + 5);
       const [first, port] = readEnv();
       assert.equal(port, "4711");
       assert.equal(resolveOrchestratorToken(first)?.revoked, false);
@@ -98,6 +103,10 @@ while :; do sleep 1; done
         "relaunch env",
       );
       const [second] = readEnv();
+      assert.deepEqual(
+        (readArgv(argvFile) ?? []).slice(0, policyArgv.length),
+        policyArgv,
+      );
       assert.notEqual(second, first);
       assert.equal(resolveOrchestratorToken(first)?.revoked, true);
       assert.equal(resolveOrchestratorToken(second)?.revoked, false);

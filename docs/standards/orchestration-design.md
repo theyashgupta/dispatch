@@ -633,7 +633,7 @@ When `handoffReady` is `true`, the supervisor reads the handoff as pending, as i
 
 ### Rules for the orchestrator session (Unit 4)
 
-- The orchestrator session is launched with `--tools Read Glob Grep` (an allowlist of the read-only built-in tools, so no command or code running tool such as `Monitor`), `--allowedTools mcp__dispatch` (the board tools run without a permission dialog), `--permission-mode manual` (a user `defaultMode` cannot widen it) and `--disallowedTools Bash Write Edit NotebookEdit`, with every bypass flag stripped. The session then cannot reach the user routes by other means (U3-15, U4-04).
+- The orchestrator session is launched with `--tools Read Glob Grep` (an allowlist of the read-only built-in tools, so no command or code running tool such as `Monitor`), `--allowedTools mcp__dispatch` (the board tools run without a permission dialog), `--dangerously-skip-permissions` (the session runs unattended, so a permission prompt must not stop it) and `--disallowedTools Bash Write Edit NotebookEdit`. Every configured permission mode and bypass flag is removed first, so the policy flag is the only one. The session then cannot reach the user routes by other means (U3-15, U4-04).
 - The user card routes `POST /api/cards/:id/start` and `POST /api/cards/:id/run-claude` refuse a hidden orchestrator card with 409 `orchestrator-card` (reason "use the orchestrator panel"), so only the orchestrator routes start or relaunch it (U4-03).
 - No tool and no route path holds push, merge, credit, vault or a policy change. `get_policy` is the one tool with `policy` in its name, and it only reads. A push and a merge exist only inside the ship flow, behind `shipRights` (U3-13).
 
