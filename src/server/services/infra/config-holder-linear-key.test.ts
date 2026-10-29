@@ -8,6 +8,7 @@ import type { Config } from "../../../shared/types.js";
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "dispatch-linear-key-"));
 process.env.HOME = home;
+process.env.DISPATCH_DIR = path.join(home, ".dispatch");
 const { CONFIG_PATH } = await import("./paths.js");
 assert.ok(CONFIG_PATH.startsWith(home), "CONFIG_PATH escaped the temp HOME");
 fs.mkdirSync(path.dirname(CONFIG_PATH), { recursive: true });

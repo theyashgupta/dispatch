@@ -284,6 +284,7 @@ function assertBuilt() {
       .trim();
     throw new Error(
       `refusing to run, \`npm run ${BUILD_SCRIPT}\` failed, so dist/ does not reflect src/:\n${detail || err.message}`,
+      { cause: err },
     );
   }
   if (!existsSync(DIST_ENTRY)) {
@@ -433,7 +434,7 @@ async function isPortListening(port) {
 // ---------------------------------------------------------------------------
 // CDP: minimal raw-CDP-over-WebSocket client, ported verbatim from
 // panel-110.mjs (lines 545-716: findChrome, the CDP class, connectCDP,
-// waitForCdpUp, evalValue, evalAsyncValue, chromeUserDataDir, launchChrome).
+// waitForCdpUp, evalValue, chromeUserDataDir, launchChrome).
 // ---------------------------------------------------------------------------
 
 function findChrome() {
@@ -558,26 +559,6 @@ async function evalValue(cdp, sessionId, expression) {
       exceptionDetails.text;
     throw new Error(
       `Runtime.evaluate failed: ${thrown}\n--- expression ---\n${expression}`,
-    );
-  }
-  return result.value;
-}
-
-/** Identical to {@link evalValue} but for an expression that itself evaluates to a Promise. */
-async function evalAsyncValue(cdp, sessionId, expression) {
-  const { result, exceptionDetails } = await cdp.send(
-    "Runtime.evaluate",
-    { expression, returnByValue: true, awaitPromise: true },
-    sessionId,
-    35_000,
-  );
-  if (exceptionDetails) {
-    const thrown =
-      exceptionDetails.exception?.description ??
-      exceptionDetails.exception?.value ??
-      exceptionDetails.text;
-    throw new Error(
-      `Runtime.evaluate (async) failed: ${thrown}\n--- expression ---\n${expression}`,
     );
   }
   return result.value;
@@ -1236,7 +1217,7 @@ async function runBreakViewerPageServed() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(VIEWER_PAGE_ROUTE_PATH, original);
   try {
     writeFileSync(
@@ -1382,7 +1363,7 @@ async function runBreakErrorStates() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(VIEWER_MAIN_PATH, original);
   try {
     writeFileSync(
@@ -1647,7 +1628,7 @@ async function runBreakNoRawHtmlInjection() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(VIEWER_DOC_PATH, original);
   try {
     writeFileSync(
@@ -1832,7 +1813,7 @@ async function runBreakSyntaxHighlighting() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(VIEWER_DOC_PATH, original);
   try {
     writeFileSync(
@@ -2015,7 +1996,7 @@ async function runBreakTocThreshold() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(VIEWER_DOC_PATH, original);
   try {
     writeFileSync(
@@ -2219,7 +2200,7 @@ async function runBreakRelativeLinkNavigation() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(VIEWER_DOC_PATH, original);
   try {
     writeFileSync(
@@ -2397,7 +2378,7 @@ async function runBreakAnchorJump() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(VIEWER_MAIN_PATH, original);
   try {
     writeFileSync(
@@ -2730,7 +2711,7 @@ async function runBreakMdLinkOpensViewer() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(TERMINAL_MAIN_PATH, original);
   try {
     writeFileSync(

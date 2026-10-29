@@ -365,8 +365,8 @@ async function main() {
 
   const rows = [];
   const home = makeSandboxHome("run1");
-  let boardText = "";
-  let sseText = "";
+  let boardText;
+  let sseText;
   try {
     const card = makeFixtureCard(home);
     await seedFixtureCard(home, card);

@@ -6,7 +6,12 @@ const ATTENTION_TITLES: ReadonlyArray<(card: CardModel) => string | null> = [
       ? errorCopy(card.startError, card.identifier).heading
       : null,
   (card) =>
-    card.sessionLost === true && card.column !== "done" ? "Session lost" : null,
+    card.sessionLost === true &&
+    card.column !== "in_review" &&
+    card.column !== "parked" &&
+    card.column !== "done"
+      ? "Session lost"
+      : null,
   (card) =>
     card.cleanupBlocked != null && card.cleanupBlocked.length > 0
       ? "Uncommitted work: cleanup blocked"
@@ -14,7 +19,7 @@ const ATTENTION_TITLES: ReadonlyArray<(card: CardModel) => string | null> = [
 ];
 
 /**
- * Whether a card needs attention: a start failure, a lost session outside Done, or blocked cleanup.
+ * Whether a card needs attention: a start failure, a lost session outside In Review, Parked and Done, or blocked cleanup.
  *
  * @remarks
  * Derives from the same ordered list as `attentionTitle`, so the board and the Orca sidebar cannot

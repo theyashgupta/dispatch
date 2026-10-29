@@ -5,6 +5,7 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   unlinkSync,
@@ -15,6 +16,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import {
   checkHolder,
+  isAlive,
   readOwner,
   releaseLine,
   shouldRelease,
@@ -30,12 +32,19 @@ const waitSeconds = nonNegativeInt(env.DISPATCH_CHECK_WAIT_SECONDS, 5400);
 const stoppedLimit = nonNegativeInt(env.DISPATCH_CHECK_STOPPED_SECONDS, 300);
 const lockDir =
   env.DISPATCH_CHECK_LOCK_DIR || join(homedir(), ".dispatch", "locks");
-const shipPriority = env.DISPATCH_CHECK_PRIORITY === "ship";
-const shipMarker = join(lockDir, `.wait-ship-${process.pid}`);
 const POLL_MS = 500;
-const SHIP_MARKER_STALE_MS = 2 * 60 * 60_000;
 const GUARD_STALE_MS = 60_000;
+const QUEUE_STALE_MS = 15_000;
+const queueDir = join(lockDir, "check-queue");
+const entryPath = join(queueDir, `${process.pid}.json`);
+const entry = {
+  pid: process.pid,
+  class: env.DISPATCH_CHECK_CLASS === "ship" ? "ship" : "loop",
+  card: env.DISPATCH_CARD_ID || null,
+  arrivedAt: new Date().toISOString(),
+};
 let heldSlot = null;
+let registered = false;
 let child = null;
 const stoppedSince = new Map();
 
@@ -136,62 +145,22 @@ function reclaim(slotPath, pid) {
 }
 
 /**
- * Tell if another gate with ship priority waits, and remove the markers of dead waiters.
+ * Take a free slot after the first `ahead` open slots and return its path, or null.
  *
  * @remarks
- * A marker older than {@link SHIP_MARKER_STALE_MS} is dead whatever its pid, because a killed
- * waiter leaves its marker and the pid can be reused.
+ * The open slots before it are left to the waiters ahead in the queue. Every poll checks each holder, so a stopped holder is released on the first poll after the limit.
  */
-function liveShipWaiter() {
-  let names;
-  try {
-    names = readdirSync(lockDir);
-  } catch {
-    return false;
-  }
-  for (const name of names) {
-    const match = /^\.wait-ship-(\d+)$/.exec(name);
-    const pid = match ? Number(match[1]) : 0;
-    if (pid <= 0 || pid === process.pid) continue;
-    const marker = join(lockDir, name);
-    const stat = statSync(marker, { throwIfNoEntry: false });
-    if (!stat) continue;
-    let alive = Date.now() - stat.mtimeMs < SHIP_MARKER_STALE_MS;
-    if (alive) {
-      try {
-        process.kill(pid, 0);
-      } catch (error) {
-        alive = error.code === "EPERM";
-      }
-    }
-    if (alive) return true;
-    try {
-      rmSync(marker, { force: true });
-    } catch {
-      continue;
-    }
-  }
-  return false;
-}
-
-/**
- * Take the first free slot and return its path, or null when all slots are held.
- *
- * @remarks
- * Every poll checks each holder, so a stopped holder is released on the first poll after the limit.
- * A gate without ship priority takes no slot while a live ship waiter exists.
- */
-function tryAcquire() {
-  if (!shipPriority && liveShipWaiter()) return null;
+function tryAcquire(ahead) {
+  let open = 0;
   for (let i = 0; i < slots; i += 1) {
     const slotPath = join(lockDir, `check-slot-${i}`);
     const check = checkHolder(slotPath, { stoppedSince });
-    if (check.verdict === "free") {
-      if (tryTake(slotPath)) return slotPath;
-    } else if (mustFree(check)) {
-      reclaim(slotPath, check.pid);
-      if (tryTake(slotPath)) return slotPath;
-    }
+    const free = check.verdict === "free";
+    if (!free && !mustFree(check)) continue;
+    open += 1;
+    if (open <= ahead) continue;
+    if (!free) reclaim(slotPath, check.pid);
+    if (tryTake(slotPath)) return slotPath;
   }
   return null;
 }
@@ -208,23 +177,150 @@ function holders() {
   return pids;
 }
 
-function clearShipMarker() {
+/**
+ * Remove the queue entry and the held slot of this process, then write the status.
+ *
+ * @remarks
+ * The entry goes first, so no waiter counts a finished holder as a waiter ahead of it. The slot is removed only when its pid file still names this process.
+ */
+function release() {
+  dropFile(entryPath);
+  if (heldSlot && readOwner(heldSlot) === process.pid) {
+    rmSync(heldSlot, { force: true });
+  }
+  heldSlot = null;
+  if (registered) writeStatus();
+}
+
+/**
+ * Remove a queue file, and ignore an error so a broken queue never fails the gate or changes its exit.
+ */
+function dropFile(path) {
   try {
-    rmSync(shipMarker, { force: true });
+    rmSync(path, { force: true });
   } catch {
     return;
   }
 }
 
 /**
- * Remove the ship marker, and the held slot only when its pid file names this process.
+ * Write a file through a temp file and a rename, so a reader never sees half of it.
  */
-function release() {
-  if (shipPriority) clearShipMarker();
-  if (heldSlot && readOwner(heldSlot) === process.pid) {
-    rmSync(heldSlot, { force: true });
+function writeAtomic(path, text) {
+  const tmp = join(lockDir, `.tmp-${process.pid}-${randomUUID()}`);
+  writeFileSync(tmp, text);
+  renameSync(tmp, path);
+}
+
+/**
+ * Order queue entries ship class first, then by arrival time, then by pid.
+ */
+function byTakeOrder(a, b) {
+  return (
+    (a.class === "ship" ? 0 : 1) - (b.class === "ship" ? 0 : 1) ||
+    Date.parse(a.arrivedAt) - Date.parse(b.arrivedAt) ||
+    a.pid - b.pid
+  );
+}
+
+/**
+ * Read the queue entries, remove the ones of dead or stale waiters, and return the waiters that hold no slot in take order.
+ *
+ * @remarks
+ * A waiter writes its entry on every poll, so an entry older than 15 s that holds no slot belongs to a stopped waiter, a zombie or a reused pid. A stopped waiter that polls again writes its entry back with its first arrival time and gets its place back. The entry of each pid in `owners` is kept and stored in the map for the status.
+ */
+function readQueue(owners, now = Date.now()) {
+  const queue = [];
+  let pruned = false;
+  for (const name of readdirSync(queueDir)) {
+    const path = join(queueDir, name);
+    let item;
+    let mtimeMs;
+    try {
+      mtimeMs = statSync(path).mtimeMs;
+      item = JSON.parse(readFileSync(path, "utf8"));
+    } catch {
+      continue;
+    }
+    if (owners.has(item?.pid)) {
+      owners.set(item.pid, item);
+    } else if (
+      Number.isInteger(item?.pid) &&
+      item.pid > 0 &&
+      isAlive(item.pid) &&
+      now - mtimeMs <= QUEUE_STALE_MS
+    ) {
+      queue.push(item);
+    } else {
+      dropFile(path);
+      pruned = true;
+    }
   }
-  heldSlot = null;
+  return { queue: queue.sort(byTakeOrder), pruned };
+}
+
+/**
+ * Write the slot holders and the queue to `check-queue.json`.
+ *
+ * @remarks
+ * It is a snapshot, so a pid in it can be gone. A second pass writes again when the state changed during the first, which narrows the race where an older snapshot replaces a newer one. A failed write never fails the gate.
+ */
+function writeStatus() {
+  try {
+    let last = null;
+    for (let pass = 0; pass < 2; pass += 1) {
+      const slotted = [];
+      for (let i = 0; i < slots; i += 1) {
+        const pid = readOwner(join(lockDir, `check-slot-${i}`));
+        if (typeof pid === "number")
+          slotted.push({ slot: `check-slot-${i}`, pid });
+      }
+      const owners = new Map(slotted.map(({ pid }) => [pid, null]));
+      const { queue } = readQueue(owners);
+      const state = {
+        holders: slotted.map(({ slot, pid }) => ({
+          slot,
+          pid,
+          class: owners.get(pid)?.class ?? null,
+          card: owners.get(pid)?.card ?? null,
+        })),
+        queue,
+      };
+      const key = JSON.stringify(state);
+      if (key === last) return;
+      last = key;
+      writeAtomic(
+        join(lockDir, "check-queue.json"),
+        `${JSON.stringify({ updatedAt: new Date().toISOString(), ...state }, null, 2)}\n`,
+      );
+    }
+  } catch {
+    return;
+  }
+}
+
+/**
+ * Register this waiter and count the live waiters ahead of it that hold no slot.
+ *
+ * @remarks
+ * It writes the status on the first poll and after it removes an entry. A queue error gives 0, so a broken queue costs the order but never fails the gate.
+ */
+function waitersAhead() {
+  try {
+    mkdirSync(queueDir, { recursive: true, mode: 0o700 });
+    writeAtomic(entryPath, JSON.stringify(entry));
+    const { queue, pruned } = readQueue(
+      new Map(holders().map((pid) => [pid, null])),
+    );
+    if (!registered || pruned) {
+      registered = true;
+      writeStatus();
+    }
+    const index = queue.findIndex((item) => item.pid === process.pid);
+    return index === -1 ? queue.length : index;
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -280,10 +376,9 @@ const deadline = Date.now() + waitSeconds * 1000;
 let announced = false;
 try {
   mkdirSync(lockDir, { recursive: true, mode: 0o700 });
-  while (!(heldSlot = tryAcquire())) {
+  while (!(heldSlot = tryAcquire(waitersAhead()))) {
     if (!announced) {
       announced = true;
-      if (shipPriority) writeFileSync(shipMarker, String(process.pid));
       console.error(
         `with-check-slot: waiting for a free slot, holders: ${holders().join(",")} (${lockDir})`,
       );
@@ -302,6 +397,6 @@ try {
   );
   process.exit(2);
 }
-if (shipPriority) clearShipMarker();
+writeStatus();
 if (announced) console.error("with-check-slot: acquired");
 process.exit(await run({ ...env, DISPATCH_CHECK_SLOT_HELD: "1" }));

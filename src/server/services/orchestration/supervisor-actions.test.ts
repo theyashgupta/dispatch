@@ -9,7 +9,8 @@ const env = isolateEnv();
 const { store } = await import("../../store/board.store.js");
 const { capturePane } = await import("../../adapters/tmux.js");
 const { resolveBinaryPath } = await import("../../adapters/resolve-binary.js");
-const { runActions, actionTools } = await import("./supervisor-actions.js");
+const { runActions, actionTools, resumeLostCard } =
+  await import("./supervisor-actions.js");
 const { loopFilePath } = await import("../domain/loop-progress.js");
 const { initialPlanMemory, planActions } =
   await import("../domain/supervisor-plan.js");
@@ -244,6 +245,100 @@ void test(
     assert.equal(loop.actions().at(-1)?.data.result, "confirmed");
   },
 );
+
+void test(
+  "resume_session on a supervisor-on board relaunches and types the standard resume line",
+  { skip: !hasTmux },
+  async () => {
+    const loop = await loopCard("resume-card-on", {});
+    const resumed: string[] = [];
+    await resumeLostCard(
+      loop.card(),
+      deps({
+        resume: (id) => {
+          resumed.push(id);
+          return Promise.resolve();
+        },
+      }),
+    );
+    assert.deepEqual(resumed, [loop.card().id]);
+    assert.equal(loop.userTexts().length, 1);
+    assert.ok(loop.userTexts()[0].startsWith("The session was restarted."));
+    const last = loop.actions().at(-1);
+    assert.equal(last?.data.action, "resume");
+    assert.equal(last?.data.result, "confirmed");
+  },
+);
+
+void test(
+  "a loop lost while its handoff is pending gets the handoff resume prompt",
+  { skip: !hasTmux },
+  async () => {
+    const loop = await loopCard("resume-handoff-pending", {});
+    await store.setLoopProgress(loop.card().id, {
+      ...LOOP_PROGRESS,
+      engine: {
+        active: true,
+        iteration: 4,
+        sessionId: "handoff-pending",
+        handoffPending: true,
+        startedAt: null,
+        closed: false,
+      },
+    });
+    await runActions(
+      loop.card(),
+      loop.session(),
+      [{ kind: "resume" }],
+      "tmux: session not found",
+      deps(),
+    );
+    assert.equal(loop.userTexts().length, 1);
+    const typed = loop.userTexts()[0];
+    const pointer = /^Read (.+) and follow it\.$/.exec(typed);
+    const text = pointer ? fs.readFileSync(pointer[1], "utf8") : typed;
+    assert.ok(text.startsWith(`Resume the ${LOOP_PROGRESS.slug} loop.`));
+    assert.ok(text.includes("ralph-loop.local.md"));
+    const last = loop.actions().at(-1);
+    assert.equal(last?.data.action, "resume");
+    assert.equal(last?.data.result, "confirmed");
+  },
+);
+
+void test(
+  "resume_session on a supervisor-off board relaunches and types nothing",
+  { skip: !hasTmux },
+  async () => {
+    const loop = await loopCard("resume-card-off", {});
+    const policy = store.getBoard(SBX)!.policy;
+    const resumed: string[] = [];
+    await store.setBoardPolicy(SBX, { ...policy, supervisor: "off" });
+    try {
+      await resumeLostCard(
+        loop.card(),
+        deps({
+          resume: (id) => {
+            resumed.push(id);
+            return Promise.resolve();
+          },
+        }),
+      );
+    } finally {
+      await store.setBoardPolicy(SBX, { ...policy, supervisor: "on" });
+    }
+    assert.deepEqual(resumed, [loop.card().id]);
+    assert.deepEqual(loop.userTexts(), []);
+    assert.equal(
+      loop.actions().some((e) => e.data.action === "resume"),
+      false,
+    );
+  },
+);
+
+void test("the resume_session tool relaunches through resumeLostCard", async () => {
+  const { sessionTools } = await import("./orchestrator-sessions.js");
+  assert.equal(sessionTools.resume, resumeLostCard);
+});
 
 void test(
   "a failed resume sets needs_input with resume_failed",

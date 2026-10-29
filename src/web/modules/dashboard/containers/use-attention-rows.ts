@@ -30,7 +30,7 @@ export function useAttentionRows() {
       cards,
       decisions: decisions.data,
       events: events.data,
-      pushoverMissing,
+      pushoverMissing: pushoverMissing ?? null,
       now: new Date(now),
     });
     return attentionRows(items, {

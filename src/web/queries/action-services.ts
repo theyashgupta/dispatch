@@ -6,13 +6,7 @@ import {
 import type { BoardKey } from "../../shared/types.js";
 import type { StartRequest } from "../../shared/start-request.js";
 import { isWebUrl } from "../../shared/web-url.js";
-import {
-  cleanupCard,
-  moveCard,
-  resumeCard,
-  setCardInboxDismissed,
-  switchSession,
-} from "./cards-api.js";
+import { moveCard, setCardInboxDismissed } from "./cards-api.js";
 import { promoteItem, setItemState, snoozeItem } from "./item-actions-api.js";
 import { getSlackThread } from "./slack-thread-api.js";
 import { pollSource } from "./source-poll-api.js";
@@ -25,9 +19,6 @@ export function actionApi(board: BoardKey): ActionApi {
     snoozeItem,
     moveCard,
     setCardInboxDismissed,
-    cleanupCard,
-    switchSession,
-    resumeCard,
     pollSource,
     getSlackThread,
   };
@@ -43,7 +34,7 @@ export function copyText(text: string): Promise<void> {
 /**
  * Build the services an item action runs with: the API calls plus the shell's toast, start and ask hooks.
  *
- * @remarks One builder serves the Inbox, Sessions and Calendar pages, so every page runs an action
+ * @remarks One builder serves the Inbox and Calendar pages, so every page runs an action
  * with the same calls and copy.
  */
 export function actionServices(deps: {

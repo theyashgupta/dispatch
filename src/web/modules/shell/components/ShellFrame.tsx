@@ -7,6 +7,7 @@ import { BottomBar } from "@/modules/shell/components/BottomBar";
 import { PageHeader } from "@/modules/shell/components/PageHeader";
 import { TopBar } from "@/modules/shell/components/TopBar";
 import type { SidebarBoardsData } from "./SidebarBoards";
+import type { SidebarDashboardsData } from "./SidebarDashboards";
 import type { NavCounts, NavItem } from "../../../../shared/nav-items.js";
 import type { SyncSnapshot } from "@/modules/shell/domain/sync-status";
 import { useBarVisible } from "@/modules/shell/hooks/use-bar-visible";
@@ -26,6 +27,8 @@ interface ShellFrameProps {
   activityOpen: boolean;
   carousel: boolean;
   boards: SidebarBoardsData;
+  dashboards: SidebarDashboardsData;
+  hasMainOrchestrator: boolean;
   pageTitle: string;
   pageCount?: number;
   headerView?: ReactNode;
@@ -48,6 +51,8 @@ export function ShellFrame({
   activityOpen,
   carousel,
   boards,
+  dashboards,
+  hasMainOrchestrator,
   pageTitle,
   pageCount,
   headerView,
@@ -108,6 +113,14 @@ export function ShellFrame({
             setOpenMobile(false);
           },
         }}
+        dashboards={{
+          ...dashboards,
+          onOpenDashboard: (key) => {
+            dashboards.onOpenDashboard(key);
+            setOpenMobile(false);
+          },
+        }}
+        hasMainOrchestrator={hasMainOrchestrator}
         onNavigate={(page) => {
           onNavigate(page);
           setOpenMobile(false);

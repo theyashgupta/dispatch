@@ -20,4 +20,5 @@ export const SESSION_STATES: Readonly<
   lost: { label: "Session lost", tone: "error" },
   shell_prompt: { label: "Claude exited", tone: "error" },
   paused: { label: "Paused", tone: "muted" },
+  released: { label: "Released", tone: "muted" },
 };

@@ -26,9 +26,10 @@ import {
   type LoopFacts,
   type PlanMemory,
 } from "../domain/supervisor-plan.js";
+import { holdsReleased } from "../domain/session-release.js";
 import { recordGroupState } from "./group-state-events.js";
 import { driveWake, wakeInFlight } from "./orchestrator-wake.js";
-import { runActions } from "./supervisor-actions.js";
+import { runActions, runPlanned } from "./supervisor-actions.js";
 import {
   checkHandoffCancel,
   checkHandoffThreshold,
@@ -40,8 +41,11 @@ import {
   record,
 } from "./supervisor-record.js";
 import { sessionTranscriptPath } from "./supervisor-transcript.js";
+import { releaseIfDue } from "./session-release.js";
 import { refreshLoopProgress } from "./loop-progress-reader.js";
-import { SHELL_SESSION_ENV } from "./steps.js";
+import { floorExiting } from "./floor-release.js";
+import { footer } from "./session-account-move.js";
+import { READY, SHELL_SESSION_ENV } from "./steps.js";
 
 export interface SupervisorWatcher {
   tmuxSession: string;
@@ -237,9 +241,9 @@ async function act(
     now,
     memory: plan,
   });
-  if (planned.actions.length > 0)
-    await runActions(card, session, planned.actions, change.evidence);
-  return planned.memory;
+  return planned.actions.length > 0
+    ? runPlanned(card, session, planned, plan, change.evidence)
+    : planned.memory;
 }
 
 /**
@@ -256,7 +260,8 @@ export async function superviseLost(cardId: string): Promise<void> {
     !card ||
     card.sessionLost !== true ||
     !session ||
-    session.state === "lost"
+    session.state === "lost" ||
+    session.state === "released"
   )
     return;
   if (
@@ -334,8 +339,13 @@ export async function supervisePane(
       memory: watcher.memory,
     });
     watcher.memory = detection.memory;
+    const claudeShown = !shellPrompt && READY.test(footer(sample.pane));
     const changed =
       detection.state !== (session.state ?? null) &&
+      !holdsReleased(
+        session.state ?? null,
+        claudeShown && !floorExiting(session.id),
+      ) &&
       !holdsNeedsInput(
         session.state ?? null,
         session.stateReason,
@@ -362,6 +372,7 @@ export async function supervisePane(
     }
     if (!changed && session.state === "frozen" && detection.state === "frozen")
       await relaunchIfDue(card, session, watcher, detection.evidence, now);
+    await releaseIfDue(card, session, detection, changed, now);
     if (
       created &&
       !changed &&

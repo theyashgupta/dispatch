@@ -31,9 +31,11 @@ const starts: {
   extraDirection: string;
   playbook: string | undefined;
 }[] = [];
+let onStart = () => {};
 sessionStarter.start = (id, extraDirection, _config, opts) => {
   store.beginStart(id);
   starts.push({ id, extraDirection, playbook: opts?.playbook });
+  onStart();
   return Promise.resolve();
 };
 
@@ -80,15 +82,25 @@ const done = async (card: Card) => {
 
 const startedIds = () => starts.map((s) => s.id);
 const settle = () => new Promise((resolve) => setImmediate(resolve));
+const realSetTimeout = setTimeout;
 
 /**
- * Yield to the event loop until `done` holds, at most 500 turns.
+ * Resolve when the session starter has received `count` starts, or reject after 10 seconds.
  *
- * @remarks A retry sweep runs over several awaited store writes, so a fixed number of turns is
- * flaky under load; mocked `setTimeout` rules out a wall-clock wait.
+ * @remarks A retry sweep awaits real file I/O, so a fixed number of event loop turns runs out under
+ * load. The deadline uses the `setTimeout` captured before a test mocks it.
  */
-async function settleUntil(done: () => boolean): Promise<void> {
-  for (let i = 0; i < 500 && !done(); i++) await settle();
+function startsReach(count: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    realSetTimeout(
+      () => reject(new Error(`${starts.length} of ${count} starts`)),
+      10_000,
+    ).unref();
+    onStart = () => {
+      if (starts.length >= count) resolve();
+    };
+    onStart();
+  });
 }
 
 async function sweepLogs(board: BoardKey): Promise<string[]> {
@@ -103,6 +115,7 @@ async function sweepLogs(board: BoardKey): Promise<string[]> {
 }
 
 afterEach(() => {
+  onStart = () => {};
   mock.restoreAll();
   mock.timers.reset();
   recordMemory(100_000, 0);
@@ -137,7 +150,7 @@ void test("a full cap starts the first blocked card, holds the next, and a timer
   await settle();
   assert.deepEqual(startedIds(), [b.id]);
   mock.timers.tick(1);
-  await settleUntil(() => startedIds().length === 2);
+  await startsReach(2);
   assert.deepEqual(startedIds(), [b.id, c.id]);
 });
 
@@ -203,7 +216,7 @@ void test("the memory guard holds a ready card in To Do and a timer starts it on
   await settle();
   assert.deepEqual(startedIds(), []);
   mock.timers.tick(1);
-  await settleUntil(() => startedIds().length === 1);
+  await startsReach(1);
   assert.deepEqual(startedIds(), [b.id]);
 });
 
@@ -227,7 +240,7 @@ void test("a memory wait stops the sweep before a second ready card", async () =
 
   recordMemory(100_000, 0);
   mock.timers.tick(RETRY_MS);
-  await settleUntil(() => startedIds().length === 2);
+  await startsReach(2);
   assert.deepEqual(startedIds().sort(), [b.id, c.id].sort());
 });
 

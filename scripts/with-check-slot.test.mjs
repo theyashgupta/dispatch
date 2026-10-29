@@ -31,7 +31,8 @@ for (const key of [
   "DISPATCH_CHECK_WAIT_SECONDS",
   "DISPATCH_CHECK_STOPPED_SECONDS",
   "DISPATCH_CHECK_SLOT_HELD",
-  "DISPATCH_CHECK_PRIORITY",
+  "DISPATCH_CHECK_CLASS",
+  "DISPATCH_CARD_ID",
 ]) {
   delete baseEnv[key];
 }
@@ -482,130 +483,197 @@ test("the default slot count is one per 8 GB of memory, at least one", async () 
   );
 });
 
+const WAIT_FOR_FILE = `
+  const fs = require("node:fs");
+  const timer = setInterval(() => {
+    if (fs.existsSync(process.argv[1])) clearInterval(timer);
+  }, 50);
+`;
+const APPEND_NAME = `require("node:fs").appendFileSync(process.argv[1], process.argv[2] + " ")`;
+
 /**
- * List the ship waiter marker files left in a lock directory.
+ * Start a gate that holds the slot until the returned release function creates its go file.
  */
-function markersLeft(lockDir) {
-  return readdirSync(lockDir).filter((name) => name.startsWith(".wait-ship-"));
+async function holdUntilReleased(lockDir) {
+  const go = join(scratchDir(), "go");
+  const run = startGate(lockDir, {}, process.execPath, "-e", WAIT_FOR_FILE, go);
+  await waitFor(() => slotsLeft(lockDir).length === 1);
+  return { run, release: () => writeFileSync(go, "") };
 }
 
 /**
- * Collect the stderr of a started gate for `waitFor`.
+ * Start a gate that appends its name to the order file, and wait until its queue entry exists.
  */
-function watchStderr(run) {
-  const seen = { text: "" };
-  run.gate.stderr.on("data", (chunk) => (seen.text += chunk));
-  return seen;
+async function queueWaiter(lockDir, order, name, extraEnv = {}) {
+  const run = startGate(
+    lockDir,
+    extraEnv,
+    process.execPath,
+    "-e",
+    APPEND_NAME,
+    order,
+    name,
+  );
+  await waitFor(() =>
+    existsSync(join(lockDir, "check-queue", `${run.gate.pid}.json`)),
+  );
+  return run;
 }
 
-test("a ship waiter takes the freed slot before an earlier gate waiter", async () => {
+/**
+ * Write a queue entry for a pid, with its arrival time and its file age in seconds.
+ */
+function writeEntry(lockDir, pid, ageSeconds) {
+  const dir = join(lockDir, "check-queue");
+  mkdirSync(dir, { recursive: true });
+  const path = join(dir, `${pid}.json`);
+  const arrivedAt = new Date(Date.now() - 3_600_000).toISOString();
+  writeFileSync(
+    path,
+    JSON.stringify({ pid, class: "loop", card: null, arrivedAt }),
+  );
+  const mtime = new Date(Date.now() - ageSeconds * 1000);
+  utimesSync(path, mtime, mtime);
+  return path;
+}
+
+test("three waiters take the slot in arrival order and leave no queue entry", async () => {
   const lockDir = scratchDir();
-  const out = join(scratchDir(), "out");
-  const slot = holdSlot(lockDir, 0, process.pid);
-  const waitEnv = {
-    DISPATCH_CHECK_SLOTS: "1",
-    DISPATCH_CHECK_WAIT_SECONDS: "20",
-  };
-  const append = (name) =>
-    `require("node:fs").appendFileSync(${JSON.stringify(out)}, ${JSON.stringify(`${name}\n`)})`;
-  const gate = startGate(
-    lockDir,
-    waitEnv,
-    process.execPath,
-    "-e",
-    append("gate"),
+  const order = join(scratchDir(), "order");
+  const holder = await holdUntilReleased(lockDir);
+  const waiters = [];
+  for (const name of ["B", "C", "D"]) {
+    waiters.push(await queueWaiter(lockDir, order, name));
+  }
+  holder.release();
+  const outcomes = await Promise.all(
+    [holder.run, ...waiters].map((run) => run.done),
   );
-  const gateSeen = watchStderr(gate);
-  await waitFor(() => gateSeen.text.includes("waiting for a free slot"));
-  const ship = startGate(
-    lockDir,
-    { ...waitEnv, DISPATCH_CHECK_PRIORITY: "ship" },
-    process.execPath,
-    "-e",
-    `${append("ship")}; setTimeout(() => {}, 500)`,
+  assert.deepEqual(
+    outcomes.map((outcome) => outcome.code),
+    [0, 0, 0, 0],
   );
-  const shipSeen = watchStderr(ship);
-  await waitFor(() => shipSeen.text.includes("waiting for a free slot"));
-  await waitFor(() => existsSync(join(lockDir, `.wait-ship-${ship.gate.pid}`)));
-  rmSync(slot);
-  const [gateResult, shipResult] = await Promise.all([gate.done, ship.done]);
-  assert.equal(shipResult.code, 0);
-  assert.equal(gateResult.code, 0);
-  assert.equal(readFileSync(out, "utf8"), "ship\ngate\n");
-  assert.deepEqual(markersLeft(lockDir), []);
+  assert.equal(readFileSync(order, "utf8"), "B C D ");
+  assert.deepEqual(readdirSync(join(lockDir, "check-queue")), []);
+  assert.deepEqual(slotsLeft(lockDir), []);
 });
 
-test("a gate removes the marker of a dead ship waiter and takes the slot", async () => {
+test("removes the entry of a dead waiter and takes the slot at once", async () => {
   const lockDir = scratchDir();
   const deadPid = spawnSync(process.execPath, ["-e", ""]).pid;
-  const marker = join(lockDir, `.wait-ship-${deadPid}`);
-  writeFileSync(marker, String(deadPid));
-  const { done } = startGate(
-    lockDir,
-    { DISPATCH_CHECK_SLOTS: "1", DISPATCH_CHECK_WAIT_SECONDS: "5" },
-    process.execPath,
-    "-e",
-    "",
-  );
-  assert.equal((await done).code, 0);
-  assert.equal(existsSync(marker), false);
+  const dead = writeEntry(lockDir, deadPid, 0);
+  const { done } = startGate(lockDir, {}, process.execPath, "-e", "");
+  const outcome = await done;
+  assert.equal(outcome.code, 0);
+  assert.doesNotMatch(outcome.stderr, /waiting/);
+  assert.equal(existsSync(dead), false);
 });
 
-test("a ship waiter that gives up with 75 leaves no marker", async () => {
+test("removes the entry of a live waiter that stopped polling", async () => {
   const lockDir = scratchDir();
-  holdSlot(lockDir, 0, process.pid);
-  const { done } = startGate(
-    lockDir,
-    {
-      DISPATCH_CHECK_SLOTS: "1",
-      DISPATCH_CHECK_WAIT_SECONDS: "1",
-      DISPATCH_CHECK_PRIORITY: "ship",
-    },
-    process.execPath,
-    "-e",
-    "",
-  );
-  assert.equal((await done).code, 75);
-  assert.deepEqual(markersLeft(lockDir), []);
+  const stale = writeEntry(lockDir, process.pid, 60);
+  const { done } = startGate(lockDir, {}, process.execPath, "-e", "");
+  const outcome = await done;
+  assert.equal(outcome.code, 0);
+  assert.doesNotMatch(outcome.stderr, /waiting/);
+  assert.equal(existsSync(stale), false);
 });
 
-test("a gate leaves a free slot alone while a live ship marker exists", async () => {
+test("waits behind a live waiter that still polls", async () => {
   const lockDir = scratchDir();
-  const marker = join(lockDir, `.wait-ship-${process.pid}`);
-  writeFileSync(marker, String(process.pid));
-  const blocked = startGate(
+  writeEntry(lockDir, process.pid, 0);
+  const { done } = startGate(
     lockDir,
-    { DISPATCH_CHECK_SLOTS: "1", DISPATCH_CHECK_WAIT_SECONDS: "1" },
+    { DISPATCH_CHECK_WAIT_SECONDS: "1" },
     process.execPath,
     "-e",
     "",
   );
-  assert.equal((await blocked.done).code, 75);
+  const outcome = await done;
+  assert.equal(outcome.code, 75);
   assert.deepEqual(slotsLeft(lockDir), []);
-  rmSync(marker);
-  const free = startGate(
-    lockDir,
-    { DISPATCH_CHECK_SLOTS: "1", DISPATCH_CHECK_WAIT_SECONDS: "5" },
-    process.execPath,
-    "-e",
-    "",
-  );
-  assert.equal((await free.done).code, 0);
 });
 
-test("a ship marker older than two hours does not block a gate, even with a live pid", async () => {
+test("a ship check queued after two loop gates takes the slot before them", async () => {
   const lockDir = scratchDir();
-  const marker = join(lockDir, `.wait-ship-${process.pid}`);
-  writeFileSync(marker, String(process.pid));
-  const old = (Date.now() - 3 * 60 * 60 * 1000) / 1000;
-  utimesSync(marker, old, old);
-  const gate = startGate(
-    lockDir,
-    { DISPATCH_CHECK_SLOTS: "1", DISPATCH_CHECK_WAIT_SECONDS: "1" },
-    process.execPath,
-    "-e",
-    "",
+  const order = join(scratchDir(), "order");
+  const holder = await holdUntilReleased(lockDir);
+  const waiters = [
+    await queueWaiter(lockDir, order, "L1"),
+    await queueWaiter(lockDir, order, "L2"),
+    await queueWaiter(lockDir, order, "S", { DISPATCH_CHECK_CLASS: "ship" }),
+  ];
+  holder.release();
+  await Promise.all([holder.run, ...waiters].map((run) => run.done));
+  assert.equal(readFileSync(order, "utf8"), "S L1 L2 ");
+});
+
+test("check-queue.json names the holder, its class and the queue in take order", async () => {
+  const lockDir = scratchDir();
+  const order = join(scratchDir(), "order");
+  const status = join(lockDir, "check-queue.json");
+  const read = () => JSON.parse(readFileSync(status, "utf8"));
+  const holder = await holdUntilReleased(lockDir);
+  const loop = await queueWaiter(lockDir, order, "L", {
+    DISPATCH_CARD_ID: "LOCAL-1",
+  });
+  const ship = await queueWaiter(lockDir, order, "S", {
+    DISPATCH_CHECK_CLASS: "ship",
+  });
+  const snapshot = await waitFor(() => {
+    const value = existsSync(status) && read();
+    return value?.queue?.length === 2 ? value : null;
+  });
+  assert.deepEqual(snapshot.holders, [
+    {
+      slot: "check-slot-0",
+      pid: holder.run.gate.pid,
+      class: "loop",
+      card: null,
+    },
+  ]);
+  assert.deepEqual(
+    snapshot.queue.map((item) => [item.pid, item.class, item.card]),
+    [
+      [ship.gate.pid, "ship", null],
+      [loop.gate.pid, "loop", "LOCAL-1"],
+    ],
   );
-  assert.equal((await gate.done).code, 0);
-  assert.equal(existsSync(marker), false);
+  assert.ok(
+    snapshot.queue.every((item) => !Number.isNaN(Date.parse(item.arrivedAt))),
+  );
+  holder.release();
+  await Promise.all([holder.run, loop, ship].map((run) => run.done));
+  const last = read();
+  assert.deepEqual([last.holders, last.queue], [[], []]);
+  assert.deepEqual(
+    readdirSync(lockDir).filter((name) => name.startsWith(".tmp-")),
+    [],
+  );
+});
+
+test("a killed waiter leaves check-queue.json after the next poll", async () => {
+  const lockDir = scratchDir();
+  const order = join(scratchDir(), "order");
+  const status = join(lockDir, "check-queue.json");
+  const queued = () =>
+    JSON.parse(readFileSync(status, "utf8")).queue.map((item) => item.pid);
+  const holder = await holdUntilReleased(lockDir);
+  const kept = await queueWaiter(lockDir, order, "K");
+  const killed = await queueWaiter(lockDir, order, "X");
+  await waitFor(() => queued().length === 2);
+  killed.gate.kill("SIGKILL");
+  await killed.done;
+  await waitFor(() => queued().join() === String(kept.gate.pid));
+  holder.release();
+  await Promise.all([holder.run.done, kept.done]);
+  assert.equal(readFileSync(order, "utf8"), "K ");
+});
+
+test("a broken queue folder does not fail the gate", async () => {
+  const lockDir = scratchDir();
+  writeFileSync(join(lockDir, "check-queue"), "");
+  const { done } = startGate(lockDir, {}, process.execPath, "-e", "");
+  assert.equal((await done).code, 0);
+  assert.deepEqual(slotsLeft(lockDir), []);
 });

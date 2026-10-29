@@ -236,7 +236,7 @@ Usage credits are not a value of any field. With `supervisor` off, the board beh
 **Decision:** Shipping is server behaviour. The main orchestrator starts it with `start_ship`, which gives the branches of one group in stack order (unit branches first, then the specs branch if one exists) and the PR title and What/Why/How body for each. The flow needs `shipRights` of `open_prs` or `merge`. Preconditions: the loop is finished (each unit is `built, awaiting /ship`), the supervisor has closed its engine file (F21), and each earlier group in the order is merged. For each branch, in order:
 
 1. Check out the branch in the group worktree and merge origin/main against the old stack tip, so git takes the side of main for the units that are already squashed. Never rebase.
-2. Check that the diff against origin/main holds only this branch. For the Dispatch repository, check that no added prose line in docs, src, scripts, `.claude` and `CLAUDE.md` has an em dash or a double hyphen. Code spans and table delimiter rows are exempt.
+2. Check that the diff against origin/main holds only this branch. For the Dispatch repository, check that no added prose line in docs, src, scripts, `.claude` and `CLAUDE.md` has an em dash or a double hyphen. Code spans and table delimiter rows are exempt. To mark a generated block in a Markdown doc, use only the link reference comment form `[//]: # "<name>:start"` and `[//]: # "<name>:end"`. Do not use an HTML comment as a marker, because its delimiters are double hyphens and the prose rule refuses them.
 3. Run the check command of the repository entry (D-1).
 4. Push and open the PR with the given title and body.
 5. Wait for the checks.
@@ -633,7 +633,7 @@ When `handoffReady` is `true`, the supervisor reads the handoff as pending, as i
 
 ### Rules for the orchestrator session (Unit 4)
 
-- The orchestrator session is launched with `--tools Read Glob Grep` (an allowlist of the read-only built-in tools, so no command or code running tool such as `Monitor`), `--allowedTools mcp__dispatch` (the board tools run without a permission dialog), `--permission-mode manual` (a user `defaultMode` cannot widen it) and `--disallowedTools Bash Write Edit NotebookEdit`, with every bypass flag stripped. The session then cannot reach the user routes by other means (U3-15, U4-04).
+- The orchestrator session is launched with `--tools Read Glob Grep` (an allowlist of the read-only built-in tools, so no command or code running tool such as `Monitor`), `--allowedTools mcp__dispatch` (the board tools run without a permission dialog), `--dangerously-skip-permissions` (the session runs unattended, so a permission prompt must not stop it) and `--disallowedTools Bash Write Edit NotebookEdit`. Every configured permission mode and bypass flag is removed first, so the policy flag is the only one. The session then cannot reach the user routes by other means (U3-15, U4-04).
 - The user card routes `POST /api/cards/:id/start` and `POST /api/cards/:id/run-claude` refuse a hidden orchestrator card with 409 `orchestrator-card` (reason "use the orchestrator panel"), so only the orchestrator routes start or relaunch it (U4-03).
 - No tool and no route path holds push, merge, credit, vault or a policy change. `get_policy` is the one tool with `policy` in its name, and it only reads. A push and a merge exist only inside the ship flow, behind `shipRights` (U3-13).
 
