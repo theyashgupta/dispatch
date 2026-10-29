@@ -41,6 +41,7 @@ import {
   record,
 } from "./supervisor-record.js";
 import { sessionTranscriptPath } from "./supervisor-transcript.js";
+import { releaseIfDue } from "./session-release.js";
 import { refreshLoopProgress } from "./loop-progress-reader.js";
 import { floorExiting } from "./floor-release.js";
 import { footer } from "./session-account-move.js";
@@ -371,6 +372,7 @@ export async function supervisePane(
     }
     if (!changed && session.state === "frozen" && detection.state === "frozen")
       await relaunchIfDue(card, session, watcher, detection.evidence, now);
+    await releaseIfDue(card, session, detection, changed, now);
     if (
       created &&
       !changed &&
