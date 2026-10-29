@@ -517,7 +517,7 @@ Every route sits under `/api/orchestrator/`, and the paths below are relative to
 - Input: `cardId` (card id).
 - Description: "Pause the loop of a card: stop its processes in place. The server never resumes it; call resume_card."
 - A pause records `by: user`, so the memory governor of the server never resumes it. Only `resume_card` or the user resumes the card.
-- Refusals: 403 `other-board` or `other-owner` (as for `stop_session`). 409 `already-paused`, `not-pausable` with `reason` `not a loop`, `orchestrator session`, `start in progress`, `no live session`, `no shell session` or `process read failed`, and `busy`.
+- Refusals: 403 `other-board` or `other-owner` (as for `stop_session`). 409 `already-paused`, `not-pausable` with `reason` `not a loop`, `orchestrator session`, `start in progress`, `no live session`, `no shell session`, `process read failed` or `pid <n> holds the check slot`, and `busy`.
 
 ### `resume_card`
 

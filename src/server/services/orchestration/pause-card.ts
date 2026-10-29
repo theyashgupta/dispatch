@@ -1,3 +1,5 @@
+import { readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { ALL_BOARDS } from "../../../shared/board-key.js";
 import { isHiddenCard } from "../../../shared/hidden-card.js";
 import type {
@@ -9,8 +11,10 @@ import type {
 import { sleep } from "../../adapters/exec.js";
 import {
   readElapsed,
+  readProcessTable,
   signalSafe,
   signalTree,
+  treeOf,
   type TreeSignal,
 } from "../../adapters/process-tree.js";
 import {
@@ -22,6 +26,7 @@ import {
 } from "../../adapters/tmux.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import { ConflictError, NotFoundError } from "../domain/errors.js";
+import { DISPATCH_DIR } from "../infra/paths.js";
 import { withCardLock } from "./card-lock.js";
 import { SHELL_SESSION_ENV } from "./steps.js";
 import { record } from "./supervisor-record.js";
@@ -36,6 +41,8 @@ export const pauseTools: {
   sessionEnvHas: typeof sessionEnvHas;
   sleep: (ms: number) => Promise<void>;
   kill: (pid: number, signal: TreeSignal | "SIGHUP") => void;
+  readTable: typeof readProcessTable;
+  checkLockDir: string;
 } = {
   panePids: panePidsBySession,
   signalTree,
@@ -46,6 +53,9 @@ export const pauseTools: {
   sessionEnvHas,
   sleep,
   kill: (pid, signal) => process.kill(pid, signal),
+  readTable: readProcessTable,
+  checkLockDir:
+    process.env.DISPATCH_CHECK_LOCK_DIR || path.join(DISPATCH_DIR, "locks"),
 };
 
 const NO_LIVE_SESSION = "no live session";
@@ -174,6 +184,46 @@ export async function onPausedPidsReleased(
   }
 }
 
+/** Read the holder pid of each `check-slot-N` file in the lock folder. */
+function slotHolders(dir: string): number[] {
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return names
+    .filter((name) => /^check-slot-\d+$/.test(name))
+    .map((name) => {
+      try {
+        return Number(readFileSync(path.join(dir, name), "utf8").trim());
+      } catch {
+        return NaN;
+      }
+    })
+    .filter((pid) => Number.isInteger(pid) && pid > 0);
+}
+
+/**
+ * Refuse a pause while a process in the pane tree holds a check slot.
+ *
+ * @remarks A stopped holder keeps its slot, so every other gate and ship check waits behind it.
+ * A failed process read does not refuse: the signal step then fails on its own.
+ */
+async function assertNoSlotHolder(tmuxSession: string): Promise<void> {
+  const pids = await panePidsOf(tmuxSession);
+  const table = pids ? await pauseTools.readTable() : null;
+  if (!pids || !table) return;
+  const tree = new Set(treeOf(table, pids));
+  const holder = slotHolders(pauseTools.checkLockDir).find((pid) =>
+    tree.has(pid),
+  );
+  if (holder !== undefined)
+    throw new ConflictError("not-pausable", {
+      reason: `pid ${holder} holds the check slot`,
+    });
+}
+
 function assertPausable(card: Card): LiveSession {
   if (card.paused) throw new ConflictError("already-paused");
   const result = pausable(card);
@@ -201,6 +251,7 @@ export async function pauseCard(
       const target = `=${session.tmuxSession}`;
       if (!(await pauseTools.sessionEnvHas(target, SHELL_SESSION_ENV)))
         throw new ConflictError("not-pausable", { reason: "no shell session" });
+      await assertNoSlotHolder(session.tmuxSession);
       const marked = await store.markCardPaused(card.id, session.id, {
         at: new Date().toISOString(),
         by: opts.by,
