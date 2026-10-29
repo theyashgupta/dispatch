@@ -63,12 +63,6 @@ export const INBOX_SHORTCUTS: readonly ShortcutEntry[] = [
   { key: "r", label: "Restore" },
 ];
 
-export const SESSIONS_SHORTCUTS: readonly ShortcutEntry[] = [
-  { key: "j", label: "Next session" },
-  { key: "k", label: "Previous session" },
-  { key: "Enter", label: "Open" },
-];
-
 /**
  * Attach handlers to a shortcut table, dropping entries without one.
  *
@@ -137,4 +131,17 @@ export function resolveShortcut(
     return null;
   }
   return bindings.find((b) => b.meta !== true && b.key === event.key) ?? null;
+}
+
+const EDITABLE_ROLES = new Set(["combobox", "listbox"]);
+
+/**
+ * Tell whether a focused element is a combobox or listbox.
+ *
+ * @remarks
+ * The shared resolver treats only fields as editable, but a Radix Select trigger is a button with
+ * the combobox role, so a key typed there must not act on the cursor row.
+ */
+export function isEditableRole(target: ShortcutEvent["target"]): boolean {
+  return EDITABLE_ROLES.has(target?.getAttribute?.("role") ?? "");
 }

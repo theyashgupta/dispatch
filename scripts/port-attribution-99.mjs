@@ -279,6 +279,7 @@ function rebuildServer() {
       .trim();
     throw new Error(
       `refusing to proceed, \`npm run ${BUILD_SCRIPT}\` failed, so dist/ does not reflect src/:\n${detail || err.message}`,
+      { cause: err },
     );
   }
   if (!existsSync(DIST_ENTRY_ABS)) {
@@ -1105,7 +1106,7 @@ async function main() {
   const home = makeSandboxHome(`run-${process.pid}`);
   const violations = [];
   const tmuxSpawned = [];
-  let portsHeld = false;
+  let portsHeld;
   let breakResult = null;
 
   const workspaceRoot = join(home, "workspaces");

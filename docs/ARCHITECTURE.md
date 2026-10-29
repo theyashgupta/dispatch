@@ -99,28 +99,28 @@ research). The backend is layered `bootstrap → routes → services → adapter
 [docs/standards/backend-design.md](standards/backend-design.md) — this table names the layers
 and roles only, it does not restate the layering policy.
 
-| Layer               | Modules                                                                                                                                                                                                                                                                                                                                         | Role                                                                                                                                                                                                                                                                                                                 |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Bootstrap           | `bootstrap/index.ts`, `bootstrap/cli.ts`, `bootstrap/binary-check.ts`, `bootstrap/config.ts`, `bootstrap/reconcile.ts`                                                                                                                                                                                                                          | CLI entry (`doctor`/`uninstall`/boot), informative startup preflight lines (via `services/infra/preflight.ts`), `StartupError` for config failures, config load/bootstrap, boot session reconcile, then wire routes + SSE and start poller/watcher.                                                                  |
-| Routes              | `routes/index.ts`, `routes/cards.route.ts`, `routes/board.route.ts`, `routes/sse.route.ts`, `routes/loopback.ts`                                                                                                                                                                                                                                | Loopback-gated REST router, the hand-rolled SSE broadcast endpoint, and the loopback request guard.                                                                                                                                                                                                                  |
-| Linear + mapping    | `adapters/poller.ts`, `store/mapping.ts`                                                                                                                                                                                                                                                                                                        | GraphQL poll loop and the pure issue-versus-card reconcile mapping.                                                                                                                                                                                                                                                  |
-| Store               | `store/board.store.ts`, `store/board-repository.ts`                                                                                                                                                                                                                                                                                             | Single-writer card store: serialized mutation queue, atomic persist, snapshot ordering.                                                                                                                                                                                                                              |
-| Services (start)    | `services/orchestration/start-session.ts`, `services/orchestration/steps.ts`, `services/infra/kickoff.ts`                                                                                                                                                                                                                                       | Start-saga runner, its do/undo steps, and the infra kickoff-prompt builder.                                                                                                                                                                                                                                          |
-| Services (sessions) | `services/orchestration/cleanup.ts`, `services/infra/config-holder.ts`, `services/domain/workspace-paths.ts`                                                                                                                                                                                                                                    | Teardown saga, the orchestration-config holder (routes read config through it, value-free 400 when unset), and the canonical worktree-path builder.                                                                                                                                                                  |
-| Orchestration       | `services/orchestration/boards.ts`, `services/orchestration/orchestrator-session.ts`, `services/orchestration/orchestrator-groups.ts`, `services/orchestration/loop-progress-reader.ts`, `services/orchestration/ship-flow.ts`                                                                                                                  | Board records and policy, the orchestrator lifecycle with its hidden session card, the group create and start rules for orchestrators, the read-only loop file reader, and the ship flow runner.                                                                                                                     |
-| Supervisor          | `services/orchestration/supervisor-registry.ts`, `services/orchestration/supervisor-pass.ts`, `services/orchestration/supervisor-actions.ts`, `services/orchestration/supervisor-limit.ts`, `services/orchestration/supervisor-handoff.ts`, `adapters/power.ts`                                                                                 | One watcher for each live tmux session, the 60 s pass (keep awake, wake check, PR changes, held group starts, budget stop), the planned actions, the usage limit flow, the handoff, and the keep awake holder.                                                                                                       |
-| Orchestrator API    | `routes/orchestrator.route.ts`, `routes/orchestrator.handlers.ts`, `routes/orchestrators.route.ts`, `routes/boards.route.ts`, `routes/board-policy.route.ts`, `routes/loops.route.ts`                                                                                                                                                           | The token-gated orchestrator tool router and its handlers, the user routes for orchestrator records and boards, the policy route, and the loop gate report route. The API section lists every route.                                                                                                                 |
-| Claude accounts     | `orchestration/claude-accounts.ts`, `domain/claude-launch.ts`, `services/orchestration/claude-login.ts`, `services/orchestration/claude-usage.ts`, `services/orchestration/claude-account-ops.ts`, `adapters/claude-cli.ts`, `adapters/claude-login.ts`, `adapters/claude-usage.ts`, `routes/accounts.route.ts`, `src/server/store/data-dir.ts` | Account registry and config dirs (orchestration); the pure launch builder (domain); the CLI login state machine, the usage poll and cache, and the account operations that compose CLI calls (orchestration); the CLI, login-process and usage adapters; their routes; and the data-dir resolver every layer shares. |
-| Markers             | `adapters/markers/parse.ts`, `adapters/markers/scan-decision.ts`, `adapters/markers/pane-view.ts`, `adapters/markers/watcher.ts`                                                                                                                                                                                                                | Pure marker parser, the pure per-tick decision core, the pane-view helpers, and the I/O-shell pane watcher applying one card decision per tick.                                                                                                                                                                      |
-| Adapters            | `adapters/exec.ts`, `adapters/git.ts`, `adapters/tmux.ts`, `adapters/ttyd.ts`, `adapters/claude-trust.ts`, `adapters/editors.ts`, `adapters/resolve-binary.ts`                                                                                                                                                                                  | The argv-only subprocess chokepoint, the git / tmux / ttyd / claude-trust adapters over it, editor launch, and binary-path resolution.                                                                                                                                                                               |
-| Shared              | `shared/types.ts`                                                                                                                                                                                                                                                                                                                               | Pure cross-half contracts; `BoardSnapshot` is both the SSE payload and the on-disk board file.                                                                                                                                                                                                                       |
-| Frontend entry      | `web/main.tsx`, `web/lib/app-store.ts`, `web/lib/query-client.ts`, `web/lib/http.ts`                                                                                                                                                                                                                                                            | The provider stack (QueryClientProvider, ThemeProvider, RouterProvider and the splash), the app store for cross-module UI state, the query client, and the HTTP client that returns 4xx and 5xx responses as typed data.                                                                                             |
-| Frontend routes     | `web/routes/__root.tsx`, `web/routes/board.{-$id}.lazy.tsx`, `web/modules/shell/containers/ShellContainer.tsx`                                                                                                                                                                                                                                  | Hash routes own the URL and its params. The router context gives the query client and the app store to every container. The root route renders the shell view with module views in its slots: the page, the detail panel and the card action dialogs.                                                                |
-| Frontend modules    | `web/modules/board/views/BoardView.tsx`, `web/modules/board/containers/BoardContainer.tsx`, `web/modules/detail/containers/DetailPanelContainer.tsx`, `web/modules/shell/components/AppSidebar.tsx`                                                                                                                                             | One folder per feature under `web/modules/`, with the layers views, containers, components, hooks, domain and queries. A module never imports a sibling module. [frontend-architecture.md](standards/frontend-architecture.md) has the layer rules.                                                                  |
-| Frontend boards     | `web/modules/boards/views/BoardsView.tsx`, `web/modules/boards/containers/BoardsContainer.tsx`, `web/modules/boards/containers/BoardFormContainer.tsx`, `web/modules/shell/components/SidebarBoards.tsx`                                                                                                                                        | The boards page (list, create, edit, archive, restore) and the sidebar Boards section. The path key selects the board on the keyed pages (`/boards/<key>`, `/boards/<key>/inbox` and so on). The `board` search parameter selects it on the other pages.                                                             |
-| Orchestrator centre | `web/modules/orchestrator/views/OrchestratorEntryView.tsx`, `web/modules/orchestrator/views/CentreView.tsx`, `web/modules/orchestrator/containers/SettingsSheetContainer.tsx`, `web/modules/orchestrator/containers/PolicyContainer.tsx`, `web/modules/orchestrator/containers/OrchestratorsContainer.tsx`                                      | The header entry button opens the command centre page of the board. The settings sheet on the centre has the tabs Policy and Orchestrators. The policy form is the only place where a user changes a board policy.                                                                                                   |
-| Frontend dashboard  | `web/routes/dashboard.{-$id}.lazy.tsx`, `web/modules/dashboard/views/DashboardView.tsx`, `web/modules/dashboard/containers/use-dashboard-data.ts`                                                                                                                                                                                               | The `/dashboard` page of the selected board. Each section container reads its inputs through `use-dashboard-data.ts` and shows its own loading, error and empty state. The header strip at the top of the page shows the title, the sync state and the stale text.                                                   |
-| Frontend shared     | `web/components/ui/button.tsx`, `web/components/ui/hooks/use-app-store.ts`, `web/components/ThemeProvider.tsx`, `web/queries/board-snapshot-queries.ts`                                                                                                                                                                                         | The shadcn primitives and app-wide hooks, the shared components, the queries that two or more modules read (the board snapshot and its SSE stream), and the design tokens in `web/styles/tokens.css`.                                                                                                                |
+| Layer               | Modules                                                                                                                                                                                                                                                                                                                                         | Role                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bootstrap           | `bootstrap/index.ts`, `bootstrap/cli.ts`, `bootstrap/binary-check.ts`, `bootstrap/config.ts`, `bootstrap/reconcile.ts`                                                                                                                                                                                                                          | CLI entry (`doctor`/`uninstall`/boot), informative startup preflight lines (via `services/infra/preflight.ts`), `StartupError` for config failures, config load/bootstrap, boot session reconcile, then wire routes + SSE and start poller/watcher.                                                                                                                                                                         |
+| Routes              | `routes/index.ts`, `routes/cards.route.ts`, `routes/board.route.ts`, `routes/sse.route.ts`, `routes/loopback.ts`                                                                                                                                                                                                                                | Loopback-gated REST router, the hand-rolled SSE broadcast endpoint, and the loopback request guard.                                                                                                                                                                                                                                                                                                                         |
+| Linear + mapping    | `adapters/poller.ts`, `store/mapping.ts`                                                                                                                                                                                                                                                                                                        | GraphQL poll loop and the pure issue-versus-card reconcile mapping.                                                                                                                                                                                                                                                                                                                                                         |
+| Store               | `store/board.store.ts`, `store/board-repository.ts`                                                                                                                                                                                                                                                                                             | Single-writer card store: serialized mutation queue, atomic persist, snapshot ordering.                                                                                                                                                                                                                                                                                                                                     |
+| Services (start)    | `services/orchestration/start-session.ts`, `services/orchestration/steps.ts`, `services/infra/kickoff.ts`                                                                                                                                                                                                                                       | Start-saga runner, its do/undo steps, and the infra kickoff-prompt builder.                                                                                                                                                                                                                                                                                                                                                 |
+| Services (sessions) | `services/orchestration/cleanup.ts`, `services/infra/config-holder.ts`, `services/domain/workspace-paths.ts`                                                                                                                                                                                                                                    | Teardown saga, the orchestration-config holder (routes read config through it, value-free 400 when unset), and the canonical worktree-path builder.                                                                                                                                                                                                                                                                         |
+| Orchestration       | `services/orchestration/boards.ts`, `services/orchestration/orchestrator-session.ts`, `services/orchestration/orchestrator-groups.ts`, `services/orchestration/loop-progress-reader.ts`, `services/orchestration/ship-flow.ts`                                                                                                                  | Board records and policy, the orchestrator lifecycle with its hidden session card, the group create and start rules for orchestrators, the read-only loop file reader, and the ship flow runner.                                                                                                                                                                                                                            |
+| Supervisor          | `services/orchestration/supervisor-registry.ts`, `services/orchestration/supervisor-pass.ts`, `services/orchestration/supervisor-actions.ts`, `services/orchestration/supervisor-limit.ts`, `services/orchestration/supervisor-handoff.ts`, `adapters/power.ts`                                                                                 | One watcher for each live tmux session, the 60 s pass (keep awake, wake check, PR changes, held group starts, budget stop), the planned actions, the usage limit flow, the handoff, and the keep awake holder.                                                                                                                                                                                                              |
+| Orchestrator API    | `routes/orchestrator.route.ts`, `routes/orchestrator.handlers.ts`, `routes/orchestrators.route.ts`, `routes/boards.route.ts`, `routes/board-policy.route.ts`, `routes/loops.route.ts`                                                                                                                                                           | The token-gated orchestrator tool router and its handlers, the user routes for orchestrator records and boards, the policy route, and the loop gate report route. The API section lists every route.                                                                                                                                                                                                                        |
+| Claude accounts     | `orchestration/claude-accounts.ts`, `domain/claude-launch.ts`, `services/orchestration/claude-login.ts`, `services/orchestration/claude-usage.ts`, `services/orchestration/claude-account-ops.ts`, `adapters/claude-cli.ts`, `adapters/claude-login.ts`, `adapters/claude-usage.ts`, `routes/accounts.route.ts`, `src/server/store/data-dir.ts` | Account registry and config dirs (orchestration); the pure launch builder (domain); the CLI login state machine, the usage poll and cache, and the account operations that compose CLI calls (orchestration); the CLI, login-process and usage adapters; their routes; and the data-dir resolver every layer shares.                                                                                                        |
+| Markers             | `adapters/markers/parse.ts`, `adapters/markers/scan-decision.ts`, `adapters/markers/pane-view.ts`, `adapters/markers/watcher.ts`                                                                                                                                                                                                                | Pure marker parser, the pure per-tick decision core, the pane-view helpers, and the I/O-shell pane watcher applying one card decision per tick.                                                                                                                                                                                                                                                                             |
+| Adapters            | `adapters/exec.ts`, `adapters/git.ts`, `adapters/tmux.ts`, `adapters/ttyd.ts`, `adapters/claude-trust.ts`, `adapters/editors.ts`, `adapters/resolve-binary.ts`                                                                                                                                                                                  | The argv-only subprocess chokepoint, the git / tmux / ttyd / claude-trust adapters over it, editor launch, and binary-path resolution.                                                                                                                                                                                                                                                                                      |
+| Shared              | `shared/types.ts`                                                                                                                                                                                                                                                                                                                               | Pure cross-half contracts; `BoardSnapshot` is both the SSE payload and the on-disk board file.                                                                                                                                                                                                                                                                                                                              |
+| Frontend entry      | `web/main.tsx`, `web/lib/app-store.ts`, `web/lib/query-client.ts`, `web/lib/http.ts`                                                                                                                                                                                                                                                            | The provider stack (QueryClientProvider, ThemeProvider, RouterProvider and the splash), the app store for cross-module UI state, the query client, and the HTTP client that returns 4xx and 5xx responses as typed data.                                                                                                                                                                                                    |
+| Frontend routes     | `web/routes/__root.tsx`, `web/routes/board.{-$id}.lazy.tsx`, `web/modules/shell/containers/ShellContainer.tsx`                                                                                                                                                                                                                                  | Hash routes own the URL and its params. The router context gives the query client and the app store to every container. The root route renders the shell view with module views in its slots: the page, the detail panel and the card action dialogs.                                                                                                                                                                       |
+| Frontend modules    | `web/modules/board/views/BoardView.tsx`, `web/modules/board/containers/BoardContainer.tsx`, `web/modules/detail/containers/DetailPanelContainer.tsx`, `web/modules/shell/components/AppSidebar.tsx`                                                                                                                                             | One folder per feature under `web/modules/`, with the layers views, containers, components, hooks, domain and queries. A module never imports a sibling module. [frontend-architecture.md](standards/frontend-architecture.md) has the layer rules.                                                                                                                                                                         |
+| Frontend boards     | `web/modules/boards/views/BoardsView.tsx`, `web/modules/boards/containers/BoardsContainer.tsx`, `web/modules/boards/containers/BoardFormContainer.tsx`, `web/modules/shell/components/SidebarBoards.tsx`, `web/modules/shell/components/SidebarDashboards.tsx`                                                                                  | The boards page (list, create, edit, archive, restore) and the sidebar. The sidebar has a Boards section and a Dashboards section (the boards with a main orchestrator). The path key selects the board on the keyed pages (`/boards/<key>`, `/boards/<key>/inbox` and so on). The `board` search parameter selects it on the other pages. `/sessions` opens the boards list and `/boards/<key>/sessions` opens that board. |
+| Orchestrator centre | `web/modules/orchestrator/views/OrchestratorEntryView.tsx`, `web/modules/orchestrator/views/CentreView.tsx`, `web/modules/orchestrator/containers/SettingsSheetContainer.tsx`, `web/modules/orchestrator/containers/PolicyContainer.tsx`, `web/modules/orchestrator/containers/OrchestratorsContainer.tsx`                                      | The header entry button opens the command centre page of the board. The settings sheet on the centre has the tabs Policy and Orchestrators. The policy form is the only place where a user changes a board policy.                                                                                                                                                                                                          |
+| Frontend dashboard  | `web/routes/dashboard.{-$id}.lazy.tsx`, `web/modules/dashboard/views/DashboardView.tsx`, `web/modules/dashboard/containers/use-dashboard-data.ts`                                                                                                                                                                                               | The `/dashboard` page of the selected board. Each section container reads its inputs through `use-dashboard-data.ts` and shows its own loading, error and empty state. The header strip at the top of the page shows the title, the sync state and the stale text.                                                                                                                                                          |
+| Frontend shared     | `web/components/ui/button.tsx`, `web/components/ui/hooks/use-app-store.ts`, `web/components/ThemeProvider.tsx`, `web/queries/board-snapshot-queries.ts`                                                                                                                                                                                         | The shadcn primitives and app-wide hooks, the shared components, the queries that two or more modules read (the board snapshot and its SSE stream), and the design tokens in `web/styles/tokens.css`.                                                                                                                                                                                                                       |
 
 ### Board split view
 
@@ -160,7 +160,7 @@ Mount prefix: `/api/orchestrator`.
 | GET    | `/api/orchestrator/board-workspace`                | Orchestrator token | Tool `get_board_workspace`: read the board folder, repositories, playbook names and group playbook. |
 | POST   | `/api/orchestrator/boards`                         | Orchestrator token | Tool `create_board`: create a board from a name and answer the key and the link.                    |
 | POST   | `/api/orchestrator/tickets`                        | Orchestrator token | Tool `create_ticket`: create a local ticket marked as created by the caller.                        |
-| PATCH  | `/api/orchestrator/tickets/:id`                    | Orchestrator token | Tool `update_ticket`: change the title or description of a local ticket.                            |
+| PATCH  | `/api/orchestrator/tickets/:id`                    | Orchestrator token | Tool `update_ticket`: change the title or description of a local ticket, or the `blockedBy` list.   |
 | POST   | `/api/orchestrator/tickets/:id/move`               | Orchestrator token | Tool `move_card`: move a card to a column under the manual move rules.                              |
 | POST   | `/api/orchestrator/tickets/:id/comments`           | Orchestrator token | Tool `add_comment`: add a comment to a card, local or on Linear.                                    |
 | POST   | `/api/orchestrator/base-branches`                  | Orchestrator token | Tool `create_base_branch`: create a local base branch in a board repository.                        |
@@ -170,12 +170,13 @@ Mount prefix: `/api/orchestrator`.
 | POST   | `/api/orchestrator/groups/:cardId/approve-roadmap` | Orchestrator token | Tool `approve_roadmap`: tell a group loop that its plan is approved.                                |
 | POST   | `/api/orchestrator/sessions/:cardId/handoff`       | Orchestrator token | Tool `request_handoff`: ask a session loop to hand off its context.                                 |
 | POST   | `/api/orchestrator/sessions/:cardId/resume`        | Orchestrator token | Tool `resume_loop`: resume a loop that `stop_session` or a supervisor give-up stopped.              |
+| POST   | `/api/orchestrator/sessions/:cardId/resume-lost`   | Orchestrator token | Tool `resume_session`: resume a lost session through the Resume saga, refused while memory is low.  |
 | POST   | `/api/orchestrator/sessions/:cardId/stop`          | Orchestrator token | Tool `stop_session`: press Escape in a session pane and park it at Needs input.                     |
 | POST   | `/api/orchestrator/sessions/:cardId/pause`         | Orchestrator token | Tool `pause_card`: stop the processes of a loop in place with a user pause mark.                    |
-| POST   | `/api/orchestrator/sessions/:cardId/unpause`       | Orchestrator token | Tool `resume_card`: continue a paused loop, refused while memory is low.                            |
+| POST   | `/api/orchestrator/sessions/:cardId/unpause`       | Orchestrator token | Tool `resume_card`: continue a paused loop, waits up to 30 minutes while memory is low.             |
 | POST   | `/api/orchestrator/decisions`                      | Orchestrator token | Tool `create_decision_item`: raise a decision item for the user to answer.                          |
 | POST   | `/api/orchestrator/events/wait`                    | Orchestrator token | Tool `wait_for_event`: hold the call until a board event matches or the time limit passes.          |
-| POST   | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `start_ship`: start the ship flow of a finished group card or a launched single card.          |
+| POST   | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `start_ship`: start the ship flow of a finished group card or a finished single card.          |
 | GET    | `/api/orchestrator/groups/:cardId/ship`            | Orchestrator token | Tool `get_ship_state`: read the stored ship flow of a group card.                                   |
 | GET    | `/api/orchestrator/state`                          | Orchestrator token | Tool `read_state`: read the saved state of the calling orchestrator.                                |
 | PUT    | `/api/orchestrator/state`                          | Orchestrator token | Tool `write_state`: replace the saved state of the calling orchestrator.                            |
@@ -183,6 +184,7 @@ Mount prefix: `/api/orchestrator`.
 | GET    | `/api/orchestrator/rulebook`                       | Orchestrator token | Tool `get_rulebook`: read the orchestration rule book.                                              |
 | GET    | `/api/orchestrator/accounts`                       | Orchestrator token | Tool `list_accounts`: list the Claude accounts with state and usage windows, from the cached meter. |
 | POST   | `/api/orchestrator/cards/:cardId/start`            | Orchestrator token | Tool `start_card`: start the session of one ticket card with a playbook and a direction.            |
+| POST   | `/api/orchestrator/cards/:cardId/assign`           | Orchestrator token | Tool `assign_card`: a feature orchestrator takes one card of the main orchestrator into its scope.  |
 | POST   | `/api/orchestrator/releases`                       | Orchestrator token | Tool `release_prep`: create a To Do release card with the next version from the base branch.        |
 
 ### `routes/board.route.ts`
@@ -243,15 +245,16 @@ Mount prefix: `/api`.
 
 Mount prefix: `/api`.
 
-| Method | Path                                        | Auth | Purpose                                                           |
-| ------ | ------------------------------------------- | ---- | ----------------------------------------------------------------- |
-| GET    | `/api/boards/:key/orchestrators`            | User | List the orchestrators of a board with their session views.       |
-| POST   | `/api/boards/:key/orchestrators`            | User | Add an orchestrator record, main or extra.                        |
-| PATCH  | `/api/boards/:key/orchestrators/:id`        | User | Edit the name, scope or policy override of an orchestrator.       |
-| DELETE | `/api/boards/:key/orchestrators/:id`        | User | Remove a stopped orchestrator and revoke its token.               |
-| POST   | `/api/boards/:key/orchestrators/:id/start`  | User | Start the session of a stopped orchestrator.                      |
-| POST   | `/api/boards/:key/orchestrators/:id/stop`   | User | Stop a running orchestrator.                                      |
-| POST   | `/api/boards/:key/orchestrators/:id/resume` | User | Bring an orchestrator back after a lost session or a Claude exit. |
+| Method | Path                                          | Auth | Purpose                                                                                                                                                                                                             |
+| ------ | --------------------------------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/boards/:key/orchestrators`              | User | List the orchestrators of a board with their session views.                                                                                                                                                         |
+| POST   | `/api/boards/:key/orchestrators`              | User | Add an orchestrator record, main or extra.                                                                                                                                                                          |
+| PATCH  | `/api/boards/:key/orchestrators/:id`          | User | Edit the name, scope or policy override of an orchestrator.                                                                                                                                                         |
+| DELETE | `/api/boards/:key/orchestrators/:id`          | User | Remove a stopped orchestrator and revoke its token.                                                                                                                                                                 |
+| POST   | `/api/boards/:key/orchestrators/:id/start`    | User | Start the session of a stopped orchestrator.                                                                                                                                                                        |
+| POST   | `/api/boards/:key/orchestrators/:id/stop`     | User | Stop a running orchestrator.                                                                                                                                                                                        |
+| POST   | `/api/boards/:key/orchestrators/:id/resume`   | User | Bring an orchestrator back after a lost session or a Claude exit.                                                                                                                                                   |
+| PUT    | `/api/boards/:key/cards/:cardId/orchestrator` | User | Move the owner of one card to the named orchestrator in one record write. Refuses a group member with 400 `group-member` and an orchestrator token with 403. Appends `intake_submitted` for a feature orchestrator. |
 
 ### `routes/intake.route.ts`
 
@@ -291,6 +294,7 @@ Mount prefix: `/api`.
 | POST   | `/api/cards/:id/run-claude`          | User | Start Claude in a live session whose terminal is at a shell prompt.                       |
 | POST   | `/api/cards/:id/session/account`     | User | Move a session to another Claude account, or queue the move.                              |
 | PUT    | `/api/cards/:id/session/account-pin` | User | Pin or unpin the Claude account of a session.                                             |
+| PUT    | `/api/cards/:id/blocked-by`          | User | Set or clear the blockers of a ticket card.                                               |
 | POST   | `/api/cards/:id/inbox-dismiss`       | User | Dismiss or restore an Inbox card.                                                         |
 | POST   | `/api/cards/:id/session`             | User | Switch the active session of a card.                                                      |
 | POST   | `/api/cards/:id/open-editor`         | User | Open the workspace of a card in an editor.                                                |
@@ -320,14 +324,6 @@ Mount prefix: `/api`.
 | Method | Path          | Auth | Purpose                                                                     |
 | ------ | ------------- | ---- | --------------------------------------------------------------------------- |
 | GET    | `/api/events` | User | Read the card and hook event log, newest first, or the rows after a cursor. |
-
-### `routes/sessions.route.ts`
-
-Mount prefix: `/api`.
-
-| Method | Path            | Auth | Purpose                                                      |
-| ------ | --------------- | ---- | ------------------------------------------------------------ |
-| GET    | `/api/sessions` | User | List the sessions of a board, only the live ones when asked. |
 
 ### `routes/sse.route.ts`
 
@@ -459,19 +455,19 @@ Mount prefix: `/api`.
 
 Mount prefix: `/api`.
 
-| Method | Path                              | Auth | Purpose                                                                              |
-| ------ | --------------------------------- | ---- | ------------------------------------------------------------------------------------ |
-| GET    | `/api/accounts`                   | User | List the Claude accounts, the active id, the account sessions and the account chain. |
-| PUT    | `/api/accounts/active`            | User | Set the active account, and optionally apply it to running sessions.                 |
-| PUT    | `/api/accounts/chain/order`       | User | Set the order of the account chain.                                                  |
-| PUT    | `/api/accounts/chain/settings`    | User | Save the account chain settings.                                                     |
-| POST   | `/api/accounts/chain/switch-now`  | User | Fail over to the next account of the chain now.                                      |
-| GET    | `/api/accounts/login`             | User | Read the state of the account login.                                                 |
-| POST   | `/api/accounts/login`             | User | Start the login of an account.                                                       |
-| POST   | `/api/accounts/login/code`        | User | Submit the login code.                                                               |
-| DELETE | `/api/accounts/login`             | User | Cancel the login.                                                                    |
-| POST   | `/api/accounts/:id/usage/refresh` | User | Refresh the usage of an account.                                                     |
-| DELETE | `/api/accounts/:id`               | User | Remove an account and log it out.                                                    |
+| Method | Path                              | Auth | Purpose                                                                                                     |
+| ------ | --------------------------------- | ---- | ----------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/accounts`                   | User | List the Claude accounts, the active id, the account sessions, the account chain and `managedDefaultOffer`. |
+| PUT    | `/api/accounts/active`            | User | Set the active account, and optionally apply it to running sessions.                                        |
+| PUT    | `/api/accounts/chain/order`       | User | Set the order of the account chain.                                                                         |
+| PUT    | `/api/accounts/chain/settings`    | User | Save the account chain settings.                                                                            |
+| POST   | `/api/accounts/chain/switch-now`  | User | Fail over to the next account of the chain now.                                                             |
+| GET    | `/api/accounts/login`             | User | Read the state of the account login.                                                                        |
+| POST   | `/api/accounts/login`             | User | Start the login of an account. The body can hold `managedDefault: true`.                                    |
+| POST   | `/api/accounts/login/code`        | User | Submit the login code.                                                                                      |
+| DELETE | `/api/accounts/login`             | User | Cancel the login.                                                                                           |
+| POST   | `/api/accounts/:id/usage/refresh` | User | Refresh the usage of an account.                                                                            |
+| DELETE | `/api/accounts/:id`               | User | Remove an account and log it out.                                                                           |
 
 ### `routes/items.route.ts`
 
@@ -760,8 +756,7 @@ that board. `loops` lists `{ groupId, percent }` for each group card of the boar
 progress is `running`, sorted by `groupId`.
 
 **List routes.** `GET /api/cards?board=&column=&source=&hasSession=` returns `{ cards, total }`
-with the snapshot redaction. `GET /api/sessions?board=&live=` returns `{ sessions }`, and each
-session holds its card id.
+with the snapshot redaction.
 
 **The `board` parameter.** Each collection route takes an optional `board` query parameter. No
 `board` means `LOCAL`, so each request of today returns the same body. A malformed key returns `400`
@@ -797,6 +792,34 @@ team key) returns `400` with only `error`, as the other routes do.
 (`cardSessionsRoot` in `services/orchestration/steps.ts`). A `LOCAL` card keeps
 `Config.workspaceRoot`. The escape check compares the session path with the board folder. The
 viewer allows the folder of each board and the path of each live session.
+
+**Blocked-by relation (LOCAL-147).** A ticket card can hold `blockedBy`, a list of at most 50 card
+ids on its own board. `PUT /api/cards/:id/blocked-by` with `{ blockedBy }` sets the list; an empty list
+clears it. The orchestrator tools `create_ticket` and `update_ticket` take the same field. The pure
+check `services/domain/blocked-by.ts#checkBlockers` refuses before any write: `400`
+`invalid-blocked-card` for a group card, a grouped member or a hidden card; `400` `invalid-blocker` for
+an unknown id, a card on another board, a grouped member or a hidden card; and `400`
+`blocked-by-cycle` when the card blocks itself through any chain, with `reason` naming the chain of
+identifiers (`LOCAL-1 -> LOCAL-2 -> LOCAL-1`). Existing guards answer first on two paths: the user
+route answers `409` for a grouped member (`card-target.ts#actionableCard`), and `update_ticket` answers
+`409` `not-a-ticket` for a group card. A group card can be a blocker. A blocker is done by the
+group dependency rule (`shared/blocked-by.ts#isBlockerDone`): in Done, or with at least one PR and every
+PR merged. A blocker that is no longer in the store is not done, so the card waits.
+
+**Auto start.** `card-move.ts#moveCard` runs `blocked-start.ts#startUnblockedCards` after a move to
+Done. The manual move, the orchestrator `move_card` and the ship flow merge all use `moveCard`. The
+sweep takes each To Do ticket of the board whose blockers are all done and that never started (no
+`startError`, no session), in To Do order, and starts it inside the cap lock: `prepareCardStart`, then
+the memory guard and the cap of the owner policy (the board policy when no orchestrator owns the card)
+with no await before `commitCardStart`, which writes `launch` first, so the card holds a cap slot. The playbook is the first
+that exists of `launch.playbook`, `startIntent.playbook` and the board `groupPlaybook`; the direction is
+`launch.direction`, else `extraDirection`. When the cap or the memory guard refuses, the card stays in To
+Do, the server logs `[blocked-start] <identifier> waits: <reason>`, and a 60 s timer runs the sweep
+again. A memory refusal stops the sweep for that board; a cap refusal goes on to the next card, because
+cards of different owners can have different caps. The next Done on the board also runs the sweep. The
+timer lives in memory, so a restart drops it until the next Done. A card that failed to start or already
+ran a session is left to the user. `start_card` refuses a card with an open blocker with `409`
+`blocked`; the user start dialog does not. The card face chip shows on To Do and Inbox cards only.
 
 ### Items
 
@@ -1277,8 +1300,7 @@ session, sorted by `createdAt`, carrying `id`, `ordinal`, `lost`, `active`, `cre
 explicit object-literal pick per session, never `{ ...s }`, so `hookToken`, `claudeSessionId`,
 `claudeSessions` and `workspacePath` cannot ride along even if the entity grows. `active` is
 computed in the same pick from `card.activeSessionId`, the wire's single source of truth, so it
-cannot disagree with it; the Sessions page needs it because it lists rows without the card. The
-detail panel's switcher and the cleanup modal's plural copy render only when the array holds two or
+cannot disagree with it. The detail panel's switcher and the cleanup modal's plural copy render only when the array holds two or
 more entries.
 
 ### Session Inheritance
@@ -1541,6 +1563,7 @@ legal source column(s), target, and owning code path:
 | Card creation                                                | — (new card)                                                                     | `todo` or `inbox`                                | `createLocalCard` / `createGroupCard` / `newInboxCard` via `store/mapping.ts#applyIssues` |
 | Boot hydration legacy migration                              | `in_planning` (retired)                                                          | `todo` / `in_progress`                           | `board.store.ts#hydrateFromParsed`, one-way, skips `mirrorMemberColumn`                   |
 | Start-saga success                                           | any                                                                              | `in_progress`                                    | `board.store.ts#completeStart` / `#attachExistingSession`                                 |
+| Blocker reaches Done (auto start, LOCAL-147)                 | `todo`, every `blockedBy` blocker done                                           | `in_progress` through the start saga             | `card-move.ts#moveCard` -> `blocked-start.ts#startUnblockedCards`                         |
 | Marker while Parked (LOCAL-17)                               | `MARKER_CONSUMED_SOURCES` (`parked`)                                             | column-preserving (key recorded)                 | `board.store.ts#applyMarker` consume branch                                               |
 | Manual drag into Parked                                      | any (no automatic in-edge exists)                                                | `parked`                                         | `board.store.ts#moveCardManual`, same `isManualMoveAllowed` gate                          |
 | Unwind (LOCAL-17)                                            | group card in any column                                                         | members to `todo` / `inbox`; group card archived | `services/orchestration/unwind.ts#unwindGroup` -> `board.store.ts#unwindGroup`            |
@@ -1792,6 +1815,10 @@ seed-on-first-observation baseline and why it deliberately carries NO flip-back 
 The full column-by-column transition spec behind which triggers move a card INTO an attention
 column lives in [Column Transition Specification](#column-transition-specification) (`BOARD-06`).
 
+#### Pushover values check (LOCAL-168)
+
+The loop agent, not Dispatch, sends the Pushover messages for loop phase notifications. Dispatch only checks that the values exist. `envVaultPresence` in `services/infra/vault.ts` returns a state for each name and never a value. The loop agent runs `with-env.sh`, which loads the values file over the inherited environment. Thus the check uses the same order. The env vault values file decides first, then the process environment, then the env vault schema file. `missingPushover` and `pushoverStartLine` in `services/domain/pushover-check.ts` turn the states into the list of names that are empty or not set and the one start log line. `checkPushover` in `services/orchestration/pushover-watch.ts` makes one check. `startPushoverWatch` runs the start check, writes the one log line and starts an unref 60 second timer. The check makes no network call. The check writes the names to an in-memory field of the store. `pushoverMissing()` reads that field, and the board snapshot sends it as `pushoverMissing`. `shared/attention-queue.ts` builds the derived `pushover_missing` item, which has a fixed id. The server count and the web queue both build it from the same input.
+
 ### Resilience and Reconcile
 
 The backend is restart-safe by design: tmux and ttyd, not the backend process, are the source of
@@ -1823,6 +1850,22 @@ the tmux pane itself is gone it marks the session lost instead of recording a `d
 exists). The `/terminal` route goes through `reconnectTerminal`, which reattaches when the pane is
 live and otherwise marks the session lost and runs the resume saga, so one Reconnect click
 relaunches `claude --resume` in the same worktree.
+
+**Boot resume sweep (LOCAL-155).** Boot reconcile emits its `session_lost` events before the
+supervisor's `session_lost` listener exists, so `bootstrap/index.ts` calls
+`resumeLostAtBoot` (`services/orchestration/supervisor-boot.ts`) at the end of `main()`, in the
+background. It takes the lost cards in In progress and Needs input on a board with
+`supervisor: on`, skips orchestrator cards (their own lifecycle relaunches them), and runs
+`superviseLost` for each, oldest `columnSince` first, one awaited card at a time. Each card is
+checked again just before its turn, so a card moved meanwhile is left alone. A card held by
+`stop_session`, a `usage_stop` or the `budget` is skipped, because only the user or the
+orchestrator resumes it. Before each card the sweep takes a fresh memory reading, because the
+governor has no sample yet at boot and `admitStart` admits on no reading. A failed memory check
+stops the sweep. A card that holds a loop slot (a group, or a card with `launch`) is skipped while
+its board is at the concurrency cap. Each card logs one
+`[supervisor] boot resume <identifier>: <result>` line, and `resumed` means the session is live and
+not at `resume_failed`. Cards in Agent done or a later column stay lost until the user or the
+orchestrator (`resume_session`, which also runs the `resume_loop` cap check) resumes them.
 
 **Bounded consecutive probe-failure ceiling — 3 consecutive detection-tool failures (`RESIL-02`).**
 The same shape as `RESIL-01`, applied to the artifact-detection probes (`adapters/artifact-detect.ts`):
@@ -1945,6 +1988,20 @@ its file exists. Else Resume launches `--continue` and never passes an id that h
 below the hooks floor) records the newest file of the folder after the kickoff and after a Resume.
 `GET /api/cards/:id/resume-target` returns the same choice and writes nothing; the detail panel shows
 it beside the Resume button.
+
+**Resume refuses a missing workspace folder (LOCAL-163).** Before the relaunch path of
+`resumeSession` launches claude, it checks that `card.workspacePath` is a folder. If the folder is
+missing, `resumeSession` launches nothing. It sets the session to `needs_input` with
+`resume_failed`, and `recordResumeFailure` writes `Resume failed: workspace-missing: <path>` and
+emits one `resume_failed` event. The reason: tmux starts a pane in the home folder when its cwd is
+missing, and a continued claude there resumes the newest conversation of a different session. This
+rule applies to the Resume route, Reconnect, the orchestrator `resume_session` tool and the boot
+resume sweep, because all of them go through `resumeSession`. On the boot sweep the supervisor also
+moves the card to Needs input. A reattach to a live tmux session does not launch claude, so it does
+not check the folder. The supervisor relaunch into a live shell-prompt pane has its own check
+(LOCAL-166, see Session Supervisor). `runClaude` has the same check for the Run Claude button and
+the orchestrator in-place relaunch (LOCAL-178): if the folder is missing, it launches nothing,
+moves the card to Needs input with the LOCAL-166 status reason and returns `workspace-missing`.
 
 In Review's opposite in-edge/out-edge asymmetry versus Agent Done, and the full trigger-by-trigger
 spec, are homed in [Column Transition Specification](#column-transition-specification) (`BOARD-06`).
@@ -2597,7 +2654,7 @@ a second one on the card face.
 
 **The session row's render gate is an OR, not the switcher's own `sessionSummaries != null`.**
 The switcher renders only when `sessionSummaries` holds two or more entries. At N=1 the array is
-present (LOCAL-39, for the Sessions page) but the switcher stays hidden, and N=1 is exactly the
+present (LOCAL-39) but the switcher stays hidden, and N=1 is exactly the
 moment a person needs to create session 2. The row now renders when EITHER the
 switcher has something to show OR the button has a reason to exist, so the affordance is reachable
 at N=1 without the switcher's own gate widening.
@@ -2720,8 +2777,9 @@ unless `paneAtPrompt` says the pane's root shell owns the foreground and no star
 same card is in flight (a running claude, a pager, a rc prompt, or a second `send-keys -l`
 interleaving on one shell line is never typed into), `no-session` (400) when the tmux server no
 longer has the session (the seconds before the watcher marks it lost), `legacy` (409) when the
-session lacks the `DISPATCH_SHELL_SESSION` marker, and `account` (409) when the session's recorded
-Claude account no longer resolves, so the handler never falls through to Express's HTML 500.
+session lacks the `DISPATCH_SHELL_SESSION` marker, `account` (409) when the session's recorded
+Claude account no longer resolves, and `workspace-missing` (409) when the card's workspace folder is
+missing, so the handler never falls through to Express's HTML 500.
 Otherwise it types the same launch line a first start would, through `steps.ts#typeLaunchLine`, with
 `--resume <claudeSessionId>` when the hooks channel recorded the conversation id and a NEW
 conversation otherwise (never a guessed `--continue`: measured to refuse with "No conversation found
@@ -2739,6 +2797,16 @@ geometry is required for sane `capture-pane` output BEFORE any client attaches: 
 detached pane has a tiny default size, the claude TUI paints into that cramped geometry, and both
 readiness detection and `DISPATCH_STATUS` marker parsing become unreliable. It is load-bearing, not
 cosmetic.
+
+**A client does not change the window size (`LOCAL-162`).** The tmux default `window-size latest`
+sizes the window to the last client that attached, and the window keeps that size after the client
+detaches. A narrow phone client can then leave the pane at 44 columns. At that width Claude Code
+truncates its status row, `parseStatusLine` does not match, and `contextPercent` stops changing.
+`newSession` and `ensureTerminal` run `set-option -t <name> window-size manual`, so the window stays
+at 200x50 and a smaller ttyd client shows a clipped view of it. `reconnectTerminal` and the
+supervisor pane sample run `widenNarrowWindow`: when `#{window_width}` is below 120, it runs
+`resize-window -x 200 -y 50` once and logs a warning. `resize-window` also sets `window-size
+manual`, so the next probe finds 200 columns.
 
 **The leading `set -g history-limit` rides in the SAME invocation, and the order is load-bearing
 (`TERM-05`).** tmux allocates a pane's history buffer at pane creation, so raising the limit after
@@ -2864,6 +2932,72 @@ subprocess adapters may import only themselves and `shared`.
 `<configDir>/.claude.json` for an added account and into the home file for Default, since Claude
 Code reads the trust map from the config dir it runs under.
 
+#### Managed Default
+
+**Record (2026-10-21, LOCAL-159).** The user can move Default from the home login to a Dispatch
+login. The Dispatch login is a registry account in its own config dir. It stands in for Default.
+Dispatch then tracks its usage and moves its sessions like those of any added account.
+
+**Registry field.** `accounts.json` has an optional `managedDefaultId`. It is the id of the registry
+account that stands in for Default. When the field is absent, Default is the home login
+(`~/.claude`). The server caches the value in memory, loads it at boot and updates it on every
+registry write.
+
+**The offer.** `GET /api/accounts` returns `managedDefaultOffer: true` while `managedDefaultId` is
+absent, the home login is signed in, and no registry account holds the home identity (remove that
+duplicate first). The Accounts page then shows the panel `Move the Default
+account to a Dispatch login` with a `Log in` button. The user cannot dismiss the panel. It goes away
+when the move is done.
+
+**The managed login.** `POST /api/accounts/login` with `{ "managedDefault": true }` starts the login.
+The route refuses the body with 400 `invalid-id` when it also holds `accountId`. It refuses with 409
+`managed-exists` when a managed default exists. The login makes a new config dir like the login of an
+added account. At the end, the signed in identity must match the reference identity: the same
+email, and the same organization when both identities carry one. The reference is the managed
+record for a re-login, else the home identity. Another identity fails with `not-home-identity`
+and the message `Sign in with the same Claude account as your terminal login (<email>).`. The
+server removes the new dir. The `home-login` refusal does not apply in this mode, to a re-login of
+the managed account, or to any login after the move. A re-login whose record was removed during
+the login ends as cancelled. On success, one registry write puts the record at the Default
+position and sets `managedDefaultId`. The active pointer moves to the managed id when it was
+`default`. No running session moves. The chain then forgets its `default` entry and closes an open
+`needs-login:default` decision.
+
+**The mapping.** After the move, these calls use the managed account for a session recorded on
+`default`:
+
+- `resolveLaunchAccount("default")` resolves the managed account. A start, a resume or a move of
+  a session recorded on `default` launches on the managed config dir. A shell that already runs
+  keeps its environment.
+- `getActiveAccountId()` returns the managed id for a stored `default`.
+- `canonicalAccountId()` maps a session recorded on `default` to the managed id where the chain,
+  the supervisor limit wait, the session list and a session move compare accounts. Such a session
+  runs on the same Claude identity, so the same limits apply.
+- The chain order lists the managed id at the Default position and no `default`.
+- The usage poll does not read the home login.
+- `GET /api/accounts` hides the home row. The managed row has `managedDefault: true`, and its meta
+  reads `Default (Dispatch login)`.
+
+**Removal.** The removal of the managed account clears `managedDefaultId` and retags every session
+recorded on it to `default`. Default is the home login again, and the offer shows again. A running
+shell keeps the removed dir in its environment until it relaunches, as for any removed account.
+
+**Identity watch.** After the move, a change of the terminal login records `account_login_changed`
+and marks no session stale. Before the move, the watch works as in Session Account Move. The home
+duplicate check `shadowed-by-home` is off after the move, because the home login is not a chain
+account. The login flow refuses a second record with the managed identity (`duplicate`).
+
+**Headless Claude calls.** `managedClaudeEnv()` returns `{ CLAUDE_CONFIG_DIR: <managed dir> }` when
+a managed default exists, else `{}`. These calls merge it into their env: the connector calls and
+`claude mcp list` (the Granola and Slack rounds), the playbook, group title, meeting draft, Linear
+sync and ticket generators, and Ask. They use the managed default, not the active account, because
+the claude.ai connectors belong to the terminal identity. When the managed dir is missing, the
+calls fall back to the home login.
+
+**Known limit.** Dispatch copies `.claude.json` once from the home login into the managed dir, at
+its first use. A user scope MCP server that the user adds to the terminal login later is not in the
+managed dir. The user must add it there too.
+
 ### Session Account Move
 
 **Record (2026-10-05, LOCAL-80).** This record replaces the earlier rule, under which an account
@@ -2943,7 +3077,9 @@ the user must turn them on.
 `defaultPosition`. The migration from version 1 puts Default first and the added accounts after it
 by creation time. The runtime state is in `chain-state.json` next to it
 (`account-chain-state.ts`): the state, buckets and `limitedUntil` of each account, `inUseSince`, the
-exhausted record, the last 50 moves and `loginExpiryNotified`. A corrupt file reads as empty and does
+exhausted record, the last 50 moves and `loginExpiryNotified`. An account entry also holds the
+`fetchedAt` of its last read and, when above 0, `rejectedReads`. The `decisions` map holds the id of
+each open account decision by cause (see Account decisions). A corrupt file reads as empty and does
 not stop the boot. The settings are in `config.json` under `claudeAccounts`: `autoMove` (default
 false), `thresholdPercent` (default 100, range 50 to 100), `minDwellMinutes` (default 15, range 0 to 240) and `hysteresisPercent` (default 10, range 0 to 50). The config reader clamps a stored value to
 its range.
@@ -2951,9 +3087,19 @@ its range.
 **States.** `account-state.ts#deriveAccountState` gives each account one state. The first
 rule that applies sets the state:
 
+- `shadowed-by-home`: the registry account holds the home login (see Home login duplicate). This
+  state wins over every other state. The entry has no `limitedUntil`. The check is off once Default is managed (see Managed Default).
+- `needs-login`: 2 consecutive reads were `token-rejected` (see Needs login). The state wins over
+  `limited`, `login-expired` and `unknown`. The entry has no `limitedUntil`.
 - `login-expired`: the token read failed (401, 403 or no token) and the folder is logged out.
 - `limited`: a bucket is at or above the threshold, or a limit signal arrived. `limitedUntil` is the
   latest reset of the full buckets, so a full 7 day bucket holds the account until the 7 day reset.
+  A bucket whose reset passed is not full. A stored `limited` state stays until `limitedUntil` only
+  while the reads are not good (rate limited, failed, stale or unavailable). A good read that gives
+  another state replaces it (LOCAL-152). A held `limited` state also ends when the snapshot shows a
+  new period (see Stability). `GET /accounts` and the orchestrator `list_accounts` show a
+  stored `limited` state whose `limitedUntil` passed as `unknown` with no `limitedUntil`
+  (`account-state.ts#expireLimit`).
 - `unknown`: no good read exists, a 401 or 403 read comes from a logged in folder, or a good read
   has no buckets.
 - `near-limit`: a bucket is at 80 percent or more.
@@ -2962,7 +3108,7 @@ rule that applies sets the state:
 **The selection rule.** `account-selection.ts#selectAccount` takes the chain in position order and
 selects the first account whose state is `available`, `near-limit` or `unknown` and whose
 `limitedUntil` is not in the future. When no account qualifies, the chain is exhausted and the
-result is the earliest `limitedUntil`. The selection never takes a `login-expired` account.
+result is the earliest `limitedUntil`. The selection never takes a `login-expired`, `needs-login` or `shadowed-by-home` account.
 
 **Hysteresis.** `account-selection.ts#filterByHysteresis` limits the candidates of a usage trigger.
 The binding bucket of an account is its bucket with the highest percent. A candidate passes only
@@ -2974,8 +3120,10 @@ trigger, the sessions stay on the account in use. If the chain without the filte
 controller records the exhausted chain as before.
 
 **Triggers.** `account-chain.ts` is the controller. It runs one task at a time in a queue. A manual
-switch through `PUT /accounts/active` runs in the same queue, so it never overlaps a chain move. A
-failover starts on these signals for the account in use:
+switch through `PUT /accounts/active` runs in the same queue, so it never overlaps a chain move.
+The route refuses an account in the state `needs-login` with 409 `account-needs-login`. It refuses
+an account in the state `shadowed-by-home` with 409 `account-shadowed-by-home`. A refused switch does
+not change the active account. A failover starts on these signals for the account in use:
 
 1. A usage read at or above the threshold.
 2. A limit surface on the screen of a session of the account in use. A pane scan each 30 s finds
@@ -3032,7 +3180,11 @@ failure does not stop the read. A read without a token sends no request and writ
 
 **Stability.** After a chain move, a usage trigger does not move the sessions again for
 `minDwellMinutes`. Triggers 2 and 3 are hard signals and override the dwell. A limited account stays
-limited until its `limitedUntil`, also when a read before that time is below the threshold. A manual switch through `PUT /accounts/active` ends a running dwell and does not start a new one.
+limited until its `limitedUntil`, also when a read before that time is below the threshold, with one
+exception. `account-state.ts#showsNewPeriod` releases the hold when all of these are true: the
+snapshot is not `stale` and has windows, its `fetchedAt` is later than the stored `fetchedAt` of the
+entry, and every window is below the threshold. One more condition must hold: a window `periodStart`
+is after the stored `fetchedAt`, or no window still resets at the stored `limitedUntil`. A manual switch through `PUT /accounts/active` ends a running dwell and does not start a new one.
 
 **Failover.** With `autoMove` true, the controller sets the pointer, records the move and starts a
 new dwell. Then `session-account-apply.ts#applyAutomaticMove` changes the pending moves. Each
@@ -3061,6 +3213,23 @@ policy. If it does not pass the hysteresis rule, the timer is set again 15 minut
 limited, the timer is set again. A usage read that clears the account does not cancel the timer,
 so a usage read never starts a return.
 
+**Usage limit move (LOCAL-152).** The controller moves only the sessions of the account in use. A
+session on another account, or a session marked stale, gets no chain move. The supervisor covers
+it. When a supervised session stops on the usage limit message, the supervisor reads the chain
+(`account-chain.ts#limitMoveCandidates`) and picks the target with
+`account-selection.ts#pickHeadroomAccount`:
+
+- The target is not the account of the session, and its state is `available` or `near-limit`. A
+  `needs-login` or `shadowed-by-home` account is never a target.
+- Its weekly percent is the highest bucket of a `weekly` kind (`weekly_all`, `weekly_scoped`). An
+  account with no weekly bucket is not a target.
+- The weekly percent is below `thresholdPercent` minus `hysteresisPercent` (90 with the defaults).
+- The account with the lowest weekly percent wins. A tie keeps chain order.
+
+The move uses `session-account-move.ts#moveSessionAccount` with the cause `usage limit`: `/exit` at
+the ready prompt, the account environment, then `--resume` on the same conversation. It does not
+read `autoMove`. A pinned session does not move.
+
 **Timers.** A timer task that fails runs again 15 minutes later. The 30 s scan also runs each timer
 whose time is past, because a timer does not count the time while the computer sleeps. A delay is
 at most 24 days. At boot, the controller sets each timer again from `chain-state.json`, and a timer
@@ -3079,6 +3248,44 @@ still shows a limit surface continues: on the automatic continue line the server
 then `Continue.`; on the options menu it selects the stop option, or the wait option when no stop
 option shows, and then sends `Continue.`. A session with no limit surface on the screen gets no
 key. No key path selects a credits option.
+
+**Home login duplicate.** `account-state.ts#isShadowOfHome` is true when the email of a registry
+account equals the email of the home identity and both organization ids are set and equal. The
+controller checks it at the start of the chain, against the registry `defaultIdentity`, and after
+each identity watch check that reads a logged in home (`account-chain.ts#noteHomeIdentity`). The
+account in use is never shadowed. A failed or logged out home read changes nothing, because the CLI
+reports every failure as logged out. A shadowed account gets
+`shadowed-by-home`, loses its return timer, gets no login decision and is never a return target. A
+registry account that stops matching goes back to `unknown`. The Accounts row shows the badge
+`Same login as Default` and the button `Remove duplicate`. The button removes the account and signs
+out only the config directory of that account.
+
+**Needs login.** `account-state.ts#nextRejectedReads` counts the consecutive `token-rejected` reads
+in the entry field `rejectedReads`. An ok read sets the count to 0. A limit signal never counts,
+because it reuses a cached snapshot. At 2 the account gets `needs-login`. The access token lives 8
+hours and only a CLI launch on the folder renews it, so an idle account reads 401 while its login
+is good. The usage poll marks a 401 or 403 as `token-expired` when the access token `expiresAt`
+passed and the refresh token is not known to be expired (`claude-usage.ts`). A `token-expired` read
+sets the count to 0 and keeps the account `unknown`, so the first launch on it renews the token. A
+429 or a network error keeps the count.
+
+**Account decisions.** `account-decisions.ts` raises the account decisions on the default board
+`LOCAL` with the orchestrator id `dispatch-accounts`. No orchestrator wakes for them. Each has the
+kind `other`. The controller raises one decision for each cause and stores its id in
+`chain-state.json` under `decisions` (`needs-login:<id>` and `exhausted`), so a restart or a later
+read raises no second one. A failed raise leaves the id absent, and the next read tries again.
+
+- The login decision asks the user to log in. Its options are `login` and `later`. The question links
+  to `/#/accounts/<id>`, which opens the login dialog of that account. The answer `login` starts the
+  login for that account. The listener `decision-items.ts#onDecisionAnswered`, registered in
+  `account-chain.ts`, runs it. The login flow repairs only registry accounts, so a `needs-login`
+  decision for `default` cannot start a login until the managed default (Unit B).
+- The exhausted decision names the earliest reset, or says "No reset time is known." Its options are
+  `wait` and `add`. The answer starts no login. The decision closes when the exhausted record clears
+  or a move runs.
+- When the cause ends, the server answers its own item with the passive option and a note
+  (`later` for a login decision, `wait` for the exhausted decision). An item that the user already
+  answered stays as answered. Removing an account closes its open login decision.
 
 **Login expiry.** The usage read also reads `claudeAiOauth.refreshTokenExpiresAt` (epoch ms) from
 the same credential text as the token (`claude-usage.ts#readCredential`). The value stays in memory.
@@ -3927,11 +4134,15 @@ freshness guarantee for the point where a start actually gets requested.
 
 **Wire shape.** `GET /api/system/memory` and the named `memory` frame of `GET /api/stream` carry the same `SystemMemory` body: `{ supported: false }` when there is no sample (Linux, or before the first read), else `{ supported: true, sample, stale }`. The frame is sent on connect after the board and tunnel frames, and to every client after each sample. Memory is not a field of the board snapshot: the snapshot is per board and rebuilt on each board change, while the reading is per machine and changes every 15 seconds.
 
-**Admission gate.** `assertMemoryHeadroom(boardKey)` in the governor checks the latest reading against the board's `memoryFloorMb` and `swapCeilingMb` through the pure `admitStart` (`services/domain/memory-admission.ts`) and throws the 409 `{ error: "memory-pressure", reason }`. The reason is `free memory <n> MB is below the <floor> MB floor` or `swap used <n> MB is above the <ceiling> MB ceiling`, the free-memory check first. No reading or a stale reading admits, so a sampler fault never blocks every start. The gate runs on the human card start, the human group start (`createAndStartGroup`, before the group card exists; `createGroup` itself stays ungated because the orchestrator `create_group` tool creates without starting), the human resume of a lost session (`beginResume`, so the route answers the 409), and the orchestrator `start_card`, `start_group` and `resume_loop` (inside the cap lock, before the cap check). `resumeSession` checks again before it relaunches claude, so a Reconnect on a dead pane does not relaunch under pressure either: the session stays lost and the card shows `Resume failed: <reason>`. The supervisor's `resume` action checks before its shell-prompt relaunch, and its plain resume goes through `resumeSession`; either refusal sets `needs_input` with `resume_failed` and evidence that carries the reason. Nothing retries it when memory recovers.
+**Admission gate.** `assertMemoryHeadroom(boardKey)` in the governor checks the latest reading against the board's `memoryFloorMb` and `swapCeilingMb` through the pure `admitStart` (`services/domain/memory-admission.ts`) and throws the 409 `{ error: "memory-pressure", reason }`. The reason is `free memory <n> MB is below the <floor> MB floor` or `swap used <n> MB is above the <ceiling> MB ceiling`, the free-memory check first. No reading or a stale reading admits, so a sampler fault never blocks every start. The gate runs on the human group start (`createAndStartGroup`, before the group card exists; `createGroup` itself stays ungated because the orchestrator `create_group` tool creates without starting) and the orchestrator `start_card`, `start_group` and `resume_loop` (inside the cap lock, before the cap check). The orchestrator `resume_session` runs `memoryCheck` itself before `beginResume` and answers 409 `{ error: "memory-low", reason }`. The human card start and every resume through `resumeSession` (the human Resume, a Reconnect on a dead pane and the supervisor's plain resume) do not refuse at once (LOCAL-186): `waitForMemory` in `services/orchestration/memory-wait.ts` checks again every 30 seconds for up to 30 minutes. The start saga waits after its in-flight guard is set and before its first step, with the provisioning step `Waiting for memory…`, so the route answers 202 and a second start answers 409. The resume saga waits with the status reason `Waiting for memory…`. After 30 minutes the start fails at the step `checking memory` and the resume shows `Resume failed: <reason> after 30 minutes of retries`, with the session still lost. The supervisor's `resume` action still checks at once before its shell-prompt relaunch; that refusal sets `needs_input` with `resume_failed` and evidence that carries the reason, and nothing retries it when memory recovers. The orchestrator `start_card`, `start_group` and `resume_card` do not refuse with `memory-pressure` either (LOCAL-192): they answer 202 with `waitingForMemory: <reason>`, the two starts wait in the start saga, `resume_card` waits through `waitForMemory` with the status reason `Waiting for memory…` and after 30 minutes shows `Resume failed: <reason> after 30 minutes of retries`, and a failed `start_group` wait records `start_group_failed` with the reason `start failed at checking memory`.
+
+**Release before a memory refusal (LOCAL-211).** When the first memory check fails, `waitForMemory` and the orchestrator `resume_loop` call `releaseForMemory` in `memory-wait.ts` before they queue or refuse. It runs `releaseFinished` in `services/orchestration/floor-release.ts`, which exits Claude in the active session of each finished card on the board, in parallel. A card is finished in Agent done or Done, or when its loop engine is closed, whatever its column (`floorReleasable` in `services/domain/floor-release.ts`). An open engine, a running or stopped ship flow, a paused card, a hidden card, a start in flight, a session already `released` and a pane that is not idle at the Claude prompt keep Claude. A legacy session with no shell under Claude is skipped. Under the card lock the session state becomes `released`, then `/exit` and Enter are typed and the shell prompt must come back in 15 s, or the previous state is restored. While the exit runs, `floorExiting` makes the supervisor hold `released` even though the pane still shows Claude. The tmux session, the pane text, the column and the DONE marker stay, so `start_ship` and Run Claude still work, and `holdsReleased` keeps the supervisor from relaunching Claude. Events are `release_session` with the evidence `memory floor` and a `supervisor_state` row to `released`. When at least one session is released, the check runs every 5 seconds for up to 30 seconds; with none released there is no wait. When memory is still low after that, the 30 minute queue and the `memory-pressure` refusal of `resume_loop` behave as before. Because the release sits in `waitForMemory`, the human card start and the resumes through `resumeSession` also release finished sessions first.
 
 **Pause and unpause.** `services/orchestration/pause-card.ts` stops a loop card in place. `pauseCard` and `unpauseCard` run under the per-card lock (`card-lock.ts#withCardLock`, shared with Run Claude and the account move), so two pauses, two unpauses, or a pause and a relaunch never interleave; a second caller answers 409 `busy`. The lock also answers `busy` for a paused card, so Run Claude, the account move and the orchestrator and user resume-loop paths never type into a stopped pane (resume-loop answers `session-state-refused`, reason `session is paused`), and a stored `needs_input` does not hold against a `paused` detection. `pauseCard` writes the mark first, `paused: { at, by, sessionId, pids, reason, swapMb }` with empty pids (`by` is `memory` or `user`, and only a governor pause writes `swapMb`, the swap reading of that pause), through `markCardPaused`, a compare-and-set that refuses when the card is lost or its active session is not the one pause read. It then sends SIGSTOP to the pane process tree of that session (the pane roots first, then their descendants, with one re-scan for children forked in between), stores the signalled pids with `setPausedPids`, and logs one `supervisor_action` event with `action: "pause"`. When the signal fails or stops nothing, pause continues what it stopped, removes the mark and answers 409 `not-pausable` with reason `process read failed` or `no live session`. A legacy session whose pane root is claude itself has no shell and answers reason `no shell session`, because tmux continues a stopped pane root. `unpauseCard` continues the stored pids first (this works when `ps` or tmux fails and reaches children reparented to pid 1), then the live tree. The pane shell takes the terminal while claude is stopped, so unpause waits up to 1 s for the shell to own the terminal, types `C-u`, `fg` and Enter to the exact target `=<session>:`, and checks within 1 s that the shell let go, with one retry. If the shell still holds the terminal, the mark stays and unpause answers 409 `unpause-incomplete`. With no live pane, unpause only continues the stored pids and clears the mark, and it logs `action: "resume"`. The tree signal skips any per-pid error and never signals pid 0, pid 1, the server or its parent. Whenever the store clears a mark outside unpause (lost session, reset, Done cleanup, unwind), the emitted event carries `pausedPids`, and one listener, `onPausedPidsReleased`, registered in bootstrap before boot reconcile, continues them. Every session kill sends SIGCONT first, to the live tree and to the stored pids of a card paused in that session, because a stopped process ignores SIGHUP and SIGTERM. A start of a new session on a paused card answers 409 `card-paused`. The supervisor reports a paused card as the `paused` state: a lost session wins over paused, the growth clock resets so the pause time does not count as no progress. Paused loops still count in the concurrency cap. `POST /api/cards/:id/pause` and `POST /api/cards/:id/unpause` answer 200 with the redacted card. A repeat answers 409 `already-paused` or `not-paused`, a card that cannot pause answers 409 `{ error: "not-pausable", reason }` (`not a loop`, `orchestrator session`, `start in progress`, `no live session`, `no shell session` or `process read failed`), and an unknown id answers 404.
 
 **Automatic pause and resume.** After each recorded sample, `memoryPauseStep` in the governor builds the candidates from `activeSession` and `pauseRefusal` in `pause-card.ts`: a loop card with a live active session that is memory-paused in any column, or is unpaused, outside Agent done and Done, and passes the pausable rule. A user-paused loop is not a candidate. The step takes the lowest `swapCeilingMb` among the boards of those candidates and passes the reading to the pure `decideMemoryPause` (`services/domain/memory-pause.ts`). When swap used is above that ceiling, it pauses the newest unpaused loop by session start, with the reason `swap used <n> MB is above the <ceiling> MB ceiling`. A pause needs swap to have grown 256 MB past the swap of the last pause in the same run, because SIGSTOP frees no memory and the next reading would otherwise pause every loop in turn. The resume floor is the ceiling minus 1024 MB, and never below half the ceiling. The run ends only when swap falls below the floor; a reading from the floor up to the ceiling keeps the run and resets the low count. Resume needs two readings in a row below the floor; it then continues the memory-paused loop with the oldest session start, with the reason `swap used <n> MB is below <floor> MB`. A loop paused by the user is never resumed by this rule. A refused pause or resume (for example 409 `busy`) does not advance the run, so the next sample tries again, and the governor logs the same refusal once. A 409 `not-pausable` on a pause or `unpause-incomplete` on a resume also puts that card on a 5 minute cooldown: the decision skips it as the pause or resume target, and it still counts for the ceiling. A successful action on the card clears its cooldown. A failed read keeps the previous sample and the run until that sample is stale. A stale reading, no reading at all and Linux fail open: nothing is paused or resumed and the run resets. The run is kept in memory, but each governor mark is in the board store (LOCAL-121). The first fresh reading after a server start rebuilds the run from the candidates that have a `by: memory` mark, through the pure `decideAfterRestart`. If swap is at or under the ceiling, it resumes the governor-paused loop with the oldest session start at once, with the reason `swap used <n> MB is not above the <ceiling> MB ceiling after a restart`. If swap is over the ceiling, the run continues from the highest `swapMb` of those marks (the current reading for a mark without `swapMb`), so a new pause needs 256 MB of growth past that reading. The rebuild runs one time per start, and later readings use the rules above. A user-paused loop is not a candidate, so the rebuild never touches it. The environment variable `DISPATCH_MEMORY_SAMPLE_FILE` is a test seam: when set, `readMemory` reads one sample from that JSON file instead of running `vm_stat`, so a scenario on any platform can drive swap. The reader logs `[memory] sampling from file <path>` once, accepts only a regular file of at most 4096 bytes, and checks the five fields with zod as finite numbers that are not negative.
+
+**Input after a resume (LOCAL-139).** A SIGSTOP of the pane tree and the `fg` of unpause leave the pane tty in the cooked mode of the shell, so Enter reaches claude as a line feed (a new line in the input box, not a submit) and focus and status replies show as text. The pty shim (`bootstrap/pty-shim-setup.ts`) handles SIGCONT: when it owns the foreground of the pane tty, it sets raw mode again (without flushing typed input) and changes the inner pty size by one row and back after 100 ms, then re-syncs the size from the outer terminal, so claude redraws (Node emits `resize` only on a real size change). In the background it does nothing, because `tcsetattr` there stops the shim with SIGTTOU. A pane started before this shim runs the old script until claude relaunches. As a safety net, each successful governor resume emits `resumed` on `memoryEmitter`, and the server subscribes `probeResume` (`services/orchestration/resume-probe.ts`) to it at boot, without waiting for it. The probe runs only for an In Progress card whose session is not in `needs_input` or `permission_prompt`, and it stops when the card is paused again, starts again, or changes its active session, or when the tmux session ends. It waits while the pane is busy or a capture fails (one capture every 5 s, 30 min at most). A pane with an open dialog is skipped (`resume_probe` result `skipped`), because a relaunch would close the dialog. Otherwise it claims the supervisor watcher of the session and the card lock (a held one means a retry after 5 s, 3 attempts, then `resume_probe` `skipped` with reason `supervisor busy`), then types the line `Dispatch resume check: the session continued after a memory pause. ...` through `sendLine`, the reason-returning form of `sendConfirmed`, with a 30 s ready wait and two 30 s confirm windows (60 s in all for the line to reach the transcript). A confirmed line logs `resume_probe` with `result: "confirmed"`. On `not ready` or `not in transcript` it captures the pane again: a busy pane means a turn began, so it logs `unconfirmed` with reason `turn began`, never types the line again and kills nothing. It relaunches only when `paneTtyCooked` reads true, because a healthy REPL always has a raw tty, and the session carries `DISPATCH_SHELL_SESSION`, because a pane rooted at claude always reads as at its prompt. Then it logs a `supervisor_action` with `action: "relaunch"`, `level: "WARN"`, sends SIGHUP to the foreground process group of the pane (never the shell group, never an unsafe pid), waits 10 s for the shell prompt, then sends SIGKILL only if the same group still owns the terminal, waits 5 s more, and runs the supervisor `resume` action, which relaunches `claude --resume <recorded id>` through `runClaude` and types the resume continue line. The probe checks the card again after the job ends. If the shell does not come back, the card goes to Needs Input with `resume_failed`. Other unconfirmed reasons, and a tty that is not cooked, only log the result. User and orchestrator unpause get the shim fix but no probe.
 
 **Known limit.** The gate reads one 15 second sample and does not count the starts it admits, so a burst of starts between two samples can all pass; the concurrency cap still bounds the burst. The supervisor's held-group start skips the group for that pass, with no event. Run Claude on a hand-opened session and the user's resume of a loop at `needs_input` are not gated.
 
@@ -4274,15 +4485,16 @@ since LOCAL-99) goes to `store.startClaudeSession` instead and sets the start th
 "session_id mismatch" log any more: a differing id is a new node, not an error. Nodes are never
 deleted; a conversation Claude refuses on `--resume` is stamped `missingAt` and skipped.
 
-**Messages from other sessions (LOCAL-98).** The boot writes four settings files through
+**Messages from other sessions (LOCAL-98).** The boot writes seven settings files through
 `services/infra/hook-settings.ts`: `hook-settings-accept.json`, `hook-settings-hold.json` and
-`hook-settings-refuse.json`, plus `hook-settings.json` with `Config.crossSessionInbound` (default
-`accept`). The files differ only in `crossSessionInbound`. `buildLaunch` in `steps.ts` is the one
-launch chokepoint: it calls the pure `resolveCrossSessionInbound`
+`hook-settings-refuse.json` for loops, the same three with the `-orchestrator` suffix, plus
+`hook-settings.json` with `Config.crossSessionInbound` (default `accept`). The three files of one
+kind differ only in `crossSessionInbound`. `buildLaunch` in `steps.ts` is the one launch chokepoint:
+it calls the pure `resolveCrossSessionInbound`
 (`services/domain/cross-session-inbound.ts`) and passes the file of the result to `--settings`. The
 start intent value wins. A guarded launch (an orchestrator card, or a start intent playbook whose
 name starts with "Roadmap Loop") then takes the board policy value, or `refuse`. Every other launch
-takes the config value. `PUT /api/config/cross-session-inbound` writes `config.json` and the four
+takes the config value. `PUT /api/config/cross-session-inbound` writes `config.json` and the seven
 files. The next launch reads the new config value from memory, so no restart is needed. The file
 rewrite keeps `hook-settings.json` in step with the config. A running session keeps its file.
 
@@ -4753,7 +4965,7 @@ Each mark names an integration and nothing else, with one case to know: the Gran
 - **Keyboard focus is an outline, never a box-shadow.** The outline focus classes of `components/ui` are the single definition, and `src/web/components/ui/focus-outline.test.ts` enforces them. If an `overflow: hidden` ancestor clips the outline offset, set the offset to 0 at that call site. Do not use a box-shadow, because it looks the same as the selection ring. Lint: `retiredLiteralBan` fails the accent focus shadow value in all of `src`; `designLiteralBan` fails an arbitrary shadow class outside `components/ui`; the style ban fails a `style` prop outside `components/ui`, `modules/*/components/dnd/` and the viewer.
 - **One float shadow token.** `--shadow-float` in `src/web/styles/tokens.css` is the only float shadow. The light block declares it again with a lighter value (decision U1-07). Lint: `retiredLiteralBan` fails the float shadow value in all of `src`; `designLiteralBan` fails an arbitrary shadow class (`shadow-[`) outside `components/ui`. Use `shadow-md`, `shadow-lg` or `shadow-(--shadow-float)`.
 - **One wordmark definition.** `src/web/components/Wordmark.tsx` is the only place that writes the type treatment of the DISPATCH wordmark. Lint: `retiredLiteralBan` fails a `fontWeight` property of 800 in all of `src`; `designLiteralBan` fails `font-extrabold` and `font-[800]` outside `components/ui`.
-- **The looser reading rhythm never enters a board surface.** The `.reading-surface` class lifts `--line-body` from its global value to 1.6 (`src/web/styles/tokens.css`). A board card keeps the global value, so card density does not change. A board file may read `var(--line-body)`, because the card title uses it. Lint: `boardZoneBan`, on `src/web/modules/board/**` only, fails the `reading-surface` class name and a `--line-body` declaration (a `--line-body:` class string or a `"--line-body"` object key). Other modules may use `.reading-surface` (`ModalBody.tsx`, `PanelFrame.tsx`, `BulkConfirmModal.tsx`).
+- **The looser reading rhythm never enters a board surface.** The `.reading-surface` class lifts `--line-body` from its global value to 1.6 (`src/web/styles/tokens.css`). A board card keeps the global value, so card density does not change. A board file may read `var(--line-body)`, because the card title uses it. Lint: `boardZoneBan`, on `src/web/modules/board/**` only, fails the `reading-surface` class name and a `--line-body` declaration (a `--line-body:` class string or a `"--line-body"` object key). Other modules may use `.reading-surface` (`ModalBody.tsx`, `PanelFrame.tsx`).
 
 The lint rules read code, not comments. The old line scan also matched a comment. The invariant gate fails on a retired ID string in this doc (EXTRA), so this record names each check by its description.
 
@@ -4876,12 +5088,22 @@ seven `--src-*` source colors and the "active sidebar row" accent job are ratifi
 **Two custom properties carry the shell's geometry to the detail panel.** `components/ShellFrame.tsx`
 sets `--nav-current` (the live sidebar width: `var(--nav-width)`, `var(--nav-width-collapsed)`, or `0px`
 when the sidebar becomes a phone sheet) with classes on its root element. The hook
-`hooks/use-chrome-top.ts` sets `--chrome-top` (the measured height of the top bar, banner and
-page header) on the same element with `style.setProperty`. The expanded `<aside>` in `components/ui/side-panel.tsx` reads
+`usePublishedHeight` in `hooks/use-published-height.ts` sets `--chrome-top` (the measured height of
+the top bar, banner and page header) on the same element with `style.setProperty`. The expanded `<aside>` in `components/ui/side-panel.tsx` reads
 both: `top: var(--chrome-top)`, `left: var(--nav-current, 0px)` and
 `width: calc(100% - var(--nav-current, 0px))`. The docked (Orca) `<aside>` also subtracts `--orca-nav-width` from `width` and adds it to `left`. Collapsing the sidebar
 shifts the panel by style values alone and never remounts the terminal iframe. Measured at
 1280px with the sidebar expanded: left 520, top 52, width 760, right edge 1280.
+
+**The phone bottom bar publishes its height on the document root.** Below 768px,
+`components/BottomBar.tsx` sits in flow at the end of the content column, so page content never goes
+under it. The same hook sets `--bottom-bar-height` on `document.documentElement`: 64px when the bar
+shows, 0px when it hides on scroll down, and unset on desktop. The root is the target because toasts
+and sheets portal to the body. The toaster and `SelectionBar.tsx` add the variable to their bottom
+offset. At 390px, the spec tests/visual/bottom-bar.spec.ts checks three
+behaviours: the toaster and `SelectionBar.tsx` clear the bar through the variable; the bar hides on
+scroll down, shows on scroll up, and under reduced motion stays shown with no transition; and on a
+touch device the fields of the create ticket dialog and the command palette use 16px text or more.
 
 **The active row carries its own tint.** `AppSidebar.tsx` renders each row as a shadcn
 `SidebarMenuButton`. The active row (`data-active="true"`) takes the tint
@@ -4938,7 +5160,7 @@ palette, n opens New ticket, ? opens the cheat sheet, b opens the palette with t
 (j, k, h, l move the focused card, 1 to 7 move it to a column through the board's own move path;
 Enter stays with the focused card, a role button that opens itself, as the resolver leaves Enter
 to activatable targets);
-`INBOX_SHORTCUTS`; and `SESSIONS_SHORTCUTS`. The inert rule: a plain key never fires while the user types in an input, textarea, select or
+and `INBOX_SHORTCUTS`. The inert rule: a plain key never fires while the user types in an input, textarea, select or
 contentEditable, with a modifier held, outside the owning view, or while a Modal or a row menu is
 open; a meta binding fires only with Cmd or Ctrl and never with Shift. The global keys are also
 inert while the Activity drawer or the nav sheet is open and before setup finishes, and the board
@@ -5027,6 +5249,7 @@ is a behavior change, not a refactor.
    `startQueued`.
    `Board.orchestrators` (an `OrchestratorRecord[]`, LOCAL-91, see
    [Orchestrator Session](#orchestrator-session)) holds `id`, `name`, `role` (`main` or `extra`),
+   `kind` (`board` for the main and `feature` for an extra; a record without `kind` has the kind of its role),
    `scope` (`groupIds` and `ticketIds`), `policyOverride`, `cardId`, `state` (`stopped`, `starting`,
    `running` or `stopping`), `createdAt` and the state fields `stateMarkdown`, `stateUpdatedAt` and
    `handoffReady`. A group card that an orchestrator creates stores `ownerOrchestrator` as provenance only (the
@@ -5086,7 +5309,7 @@ real membership directly, independent of windowing` below for the full envelope 
    `PATCH /orchestrators/:id` answers `200`; `DELETE /orchestrators/:id` answers `204`;
    `POST /orchestrators/:id/start`, `/stop` and `/resume` answer `202` with the transitional record;
    `POST /intake` answers `202` with `{ eventId }`. A refusal is `400` (a body outside the strict
-   schema, `wider-override`, `extra-needs-scope`, `ticket-owned`), `404` `unknown-orchestrator` or
+   schema, `wider-override`, `kind-mismatch`, `ticket-owned`), `404` `unknown-orchestrator` or
    `unknown-board`, or `409` (`main-exists`, `duplicate-id`, `group-owned`, `orchestrator-running`,
    `orchestrator-not-running`, `orchestrator-not-resumable`, `orchestrator-session-live`,
    `no-main-orchestrator`); a start or resume with `supervisor: off` is refused as a policy refusal, and
@@ -5546,7 +5769,7 @@ question; none of them read prose for truth.
   `deadcode` (knip), `replay-gate`, `doc-drift`, `invariants`, `check-hooks` and `test:timing` (all below), run in sequence.
 - **`npm run lint`** and **`npm run lint:typed`**: two ESLint modes. `lint` runs every rule that does not
   need type information, which includes all custom rules, and does not build a TypeScript program.
-  It is the local default and a step of `npm run check`. `lint:typed` sets `DISPATCH_LINT_TYPED=1`,
+  It is the local default and a step of `npm run check`. `lint:typed` runs with a 4 GB Node heap and sets `DISPATCH_LINT_TYPED=1`,
   which adds `recommendedTypeChecked`, the project service and the two type-aware rule overrides.
   The CI check job runs `lint:typed` after `npm run check`. Only `lint:typed` reports unused
   `eslint-disable` directives, because a directive for a type-aware rule looks unused to `lint`, and
@@ -5564,12 +5787,23 @@ question; none of them read prose for truth.
   A slot is the file `~/.dispatch/locks/check-slot-<n>`, which holds the pid of the gate process.
   The gate creates it with a hard link, so it cannot replace a slot that exists. A caller that finds
   no free slot prints the holder pids, then waits. A slot is dead when its pid is not alive, when
-  its content is not a pid, or when it is older than the last boot. A dead slot is removed only
-  while the caller holds the `.reclaim` guard directory with its own token. This prevents the removal
+  its content is not a pid, or when it is older than the last boot. On each poll, a waiting gate
+  reads the state of each holder with `ps`. A holder in state `T` (stopped, for example by a
+  suspend or after a sleep of the Mac) for more than `DISPATCH_CHECK_STOPPED_SECONDS` (default 300)
+  is also dead, and so is a holder in state `Z` (a zombie). `ps` does not give the stop time, so the gate counts the stopped time from its first
+  poll that saw the stop. A holder that runs again resets the count. When the gate frees a slot
+  whose holder is gone or stopped, it writes one line, for example
+  `with-check-slot: released check-slot-0, holder pid 57153 state T stopped 301s, held 57600s`.
+  `held` is the age of the slot file. The gate does not send a signal to a stopped holder. If the
+  holder continues later, its command runs without a slot, and at exit it does not remove the slot
+  of the new holder, because the slot does not hold its pid. A dead slot is removed only
+  while the caller holds the `.reclaim` guard directory with its own token, and only when a second
+  check under the guard finds the same holder pid still dead. This prevents the removal
   of a live slot, except in one race: 3 or more gates that act on a guard older than 60 seconds. The gate sets `DISPATCH_CHECK_SLOT_HELD=1` for its command, so the steps of
   `npm run check` run in the slot of the chain and do not take a second slot. The command runs in
   its own process group, and the gate sends SIGINT, SIGTERM and SIGHUP to the full group. After 5400
-  seconds of waiting, the gate exits with code 75. If it cannot use the lock directory, it exits
+  seconds of waiting, the gate exits with code 75. A gate that waited prints
+  `with-check-slot: acquired` when it takes the slot. If it cannot use the lock directory, it exits
   with code 2. `DISPATCH_CHECK_LOCK_DIR` and `DISPATCH_CHECK_WAIT_SECONDS` change the lock directory
   and the wait limit. Limit: if the gate gets SIGKILL, its command continues to run without a slot.
   For this reason, the Stop hook in `.claude/settings.json` sends SIGTERM at its
@@ -5578,6 +5812,23 @@ question; none of them read prose for truth.
   lets the stop continue. Each gated step has its own wait limit. If the steps before a waiting
   step take more than 30 seconds, the timeout occurs first, and the hook lets the stop continue
   with no report.
+
+  Waiters take a slot in queue order (LOCAL-210). Each waiting gate writes the entry
+  `check-queue/<pid>.json` in the lock directory, with `pid`, `class`, `card` and `arrivedAt`, and
+  writes it again on each poll. The class is `ship` when `DISPATCH_CHECK_CLASS=ship`, else `loop`;
+  the ship flow check sets it. The card is `DISPATCH_CARD_ID`, or null. The order is ship before
+  loop, then arrival time, then pid. A gate takes a slot only when the open slots are more than the
+  live waiters ahead of it. A gate removes the entry of a dead pid, and an entry of a waiter that
+  holds no slot and is older than 15 seconds, so a stopped waiter, a zombie or a reused pid does not
+  block the queue. A stopped waiter that polls again writes its entry back with its first arrival
+  time. A gate removes its own entry at exit. An error in the queue folder costs the order and never
+  fails the gate. Ship checks that arrive one after the other can keep loop gates waiting until
+  their wait limit. The gate writes `check-queue.json` in the lock directory when it registers,
+  takes a slot, removes an entry and exits: `updatedAt`, `holders` (`slot`, `pid`, `class`, `card`)
+  and `queue` (`pid`, `class`, `card`, `arrivedAt`) in take order. The file is a snapshot, so a pid
+  in it can be gone. The slot file keeps its name and its content, so a gate that runs an older copy
+  of the script still works, but it ignores the queue and can take a free slot first.
+
 - **`npm run check:changed`** (`scripts/check-changed.mjs`): the fast check for one agent session.
   It holds one slot for the full run. It selects the files changed since `origin/main`, plus staged,
   unstaged and untracked files, and removes deleted files. It runs `prettier --check` on these
@@ -5911,30 +6162,89 @@ permanently fails)`, which runs the same scenario in the configuration where bot
 
 The scenario tests in `tests/e2e` start sandbox servers with a fake `claude` and a fake `gh`. They are not part of `npm run check`. Run them in this order:
 
-1. Install `tmux` and Node 22.5 or later. Scenario 3 needs the `node:sqlite` module.
+1. Install `tmux` and Node 22.5 or later. The upgrade scenario needs the `node:sqlite` module.
 2. Run `npm run build`. The tests start the built server of this checkout.
-3. For scenarios 2 and 3, build a v4.2.0 checkout and set `DISPATCH_E2E_V420` to its folder. Without a built `dist/` there, these two scenarios skip with a message.
-4. For scenario 2, run `npx playwright install chromium`.
+3. For the parity and upgrade scenarios, build a v4.2.0 checkout and set `DISPATCH_E2E_V420` to its folder. Without a built `dist/` there, these two scenarios skip with a message.
+4. For the parity scenario, run `npx playwright install chromium`.
 5. Optional: set `DISPATCH_E2E_SANDBOX` to the sandbox folder. The default is `.sandbox/e2e` in this checkout, which Git ignores.
 6. Optional: set `DISPATCH_E2E_EVIDENCE` to the folder for run logs, reports and screenshots. The default is `evidence` in the sandbox folder.
-7. Run the three files, or one file:
+7. Run all files, or one file:
 
 ```sh
 env -u NODE_ENV -u CLAUDE_CONFIG_DIR node --import tsx --test tests/e2e/*.e2e.ts
-env -u NODE_ENV -u CLAUDE_CONFIG_DIR node --import tsx --test tests/e2e/scenario-3-upgrade.e2e.ts
+env -u NODE_ENV -u CLAUDE_CONFIG_DIR node --import tsx --test tests/e2e/scenario-LOCAL-93-upgrade.e2e.ts
 ```
 
-Scenario 4 (tests/e2e/scenario-4-no-loop-ship.e2e.ts) proves that a group with no loop files ships through `start_ship` to the bare origin of its sandbox, with the fake `claude` as orchestrator and as group session and with the fake `gh`.
+Run `node scripts/scenario-names.mjs` after you add or rename a scenario file, because the script writes this list from the files.
 
-Scenario 5 (tests/e2e/scenario-5-wake.e2e.ts) proves that the server wakes the orchestrator. The board has one group of two tickets, and the fake orchestrator replays its tool calls under busy status rows and waits under idle rows. The test answers the orchestrator decision item through `POST /api/decisions/:id/answer` and checks that the `Dispatch wake: decision` line reaches the fake in 30 s or less. It then makes the group commit, print the done marker and report Stop, and checks that an Agent done wake line follows at least 20 s after the first, after which the orchestrator calls `start_ship` and the PR merges into the bare origin. The test also checks that every wake line has one confirmed `orchestrator_wake` row and that no wake line or row falls inside a busy status window of the fake. The scenario types no key into any pane, and a static check of its own files enforces that.
+[//]: # "scenario-list:start"
 
-Scenario 6 (tests/e2e/scenario-6-intake-judgment.e2e.ts) proves that the orchestrator judges an intake and starts three loops inside a cap of 2. The board has four tickets (a quick fix, a single feature and two related tickets), the policy **Ask me for each roadmap** and a cap of 2. The fake orchestrator reads the rule book and the playbooks, raises one plan decision item and waits for it. The test answers the plan through `POST /api/decisions/:id/answer`. The orchestrator then calls `start_card` for the quick fix with "Write code directly" and for the single feature with "PRD + Ralph Loop", and creates a group of the two related tickets with "Roadmap Loop". The test checks that the accepted `start_card` and `start_group` rows are in that order, that each card and the group carry their playbook, and that the first `start_group` answers 403 `policy-refused` and starts no session. The test then makes the quick fix card reach Agent done with a Stop hook, which frees a slot, and checks that the second `start_group` starts the group. A watcher checks that no more than 2 cards or groups hold a slot at any time. The scenario types no key into any pane, and a static check of its own files enforces that.
+- tests/e2e/scenario-LOCAL-93-orchestrated.e2e.ts (LOCAL-93)
+- tests/e2e/scenario-LOCAL-93-parity.e2e.ts (LOCAL-93)
+- tests/e2e/scenario-LOCAL-93-upgrade.e2e.ts (LOCAL-93)
+- tests/e2e/scenario-LOCAL-95-no-loop-ship.e2e.ts (LOCAL-95)
+- tests/e2e/scenario-LOCAL-95-wake.e2e.ts (LOCAL-95)
+- tests/e2e/scenario-LOCAL-99-resume-latest.e2e.ts (LOCAL-99)
+- tests/e2e/scenario-LOCAL-103-intake-judgment.e2e.ts (LOCAL-103)
+- tests/e2e/scenario-LOCAL-104-centre.e2e.ts (LOCAL-104)
+- tests/e2e/scenario-LOCAL-109-ship-order.e2e.ts (LOCAL-109)
+- tests/e2e/scenario-LOCAL-110-memory-pause.e2e.ts (LOCAL-110)
+- tests/e2e/scenario-LOCAL-136-user-started-ship.e2e.ts (LOCAL-136)
+- tests/e2e/scenario-LOCAL-150-feature-scope.e2e.ts (LOCAL-150)
+- tests/e2e/scenario-LOCAL-151-engine-close.e2e.ts (LOCAL-151)
+- tests/e2e/scenario-LOCAL-152-limit-account-move.e2e.ts (LOCAL-152)
+- tests/e2e/scenario-LOCAL-153-unit-branch-ship.e2e.ts (LOCAL-153)
+- tests/e2e/scenario-LOCAL-159-account-login-decision.e2e.ts (LOCAL-159)
+- tests/e2e/scenario-LOCAL-159-managed-default.e2e.ts (LOCAL-159)
+- tests/e2e/scenario-LOCAL-163-missing-workspace.e2e.ts (LOCAL-163)
+- tests/e2e/scenario-LOCAL-166-live-missing-workspace.e2e.ts (LOCAL-166)
+- tests/e2e/scenario-LOCAL-168-pushover-attention.e2e.ts (LOCAL-168)
+- tests/e2e/scenario-LOCAL-170-frozen-relaunch.e2e.ts (LOCAL-170)
+- tests/e2e/scenario-LOCAL-171-ship-retry.e2e.ts (LOCAL-171)
+- tests/e2e/scenario-LOCAL-172-promise-close.e2e.ts (LOCAL-172)
+- tests/e2e/scenario-LOCAL-197-live-isolation.e2e.ts (LOCAL-197)
+- tests/e2e/scenario-LOCAL-201-session-release.e2e.ts (LOCAL-201)
+- tests/e2e/scenario-LOCAL-209-worktree-node-modules.e2e.ts (LOCAL-209)
 
-Scenario 6 part B (tests/e2e/scenario-6b-ship-order.e2e.ts) proves the ship order and the release version. The board has a cap of 3, the ship rights **merge** and a sample repository with `package.json` version `1.2.3`. The test calls the orchestrator routes with a minted token and starts a quick fix with "Write code directly", a single feature with "PRD + Ralph Loop" and a group of two tickets, and checks that `start_ship` of the running feature answers 409 `card-not-done`. Each session commits on its branch and sends the done Stop hook, and the feature card carries seeded loop files with every phase passed and a closed engine. The test checks one `agent_done` `group_state` event and one wake line for the feature, and that `get_card_progress` and the card read show its phases. It then ships the quick fix, the feature and the group one at a time and checks that the fake `gh` log creates and merges their PRs in that order and that the bare origin `main` holds the three files. `release_prep` with bump `minor` creates `Release v1.3.0` in To Do, and a second call answers 409 `release-exists`. A watcher checks that no more than 3 cards or groups hold a slot at any time.
+[//]: # "scenario-list:end"
 
-Scenario 8 (tests/e2e/scenario-8-memory-pause.e2e.ts) proves that the memory governor pauses and resumes loops end to end. The sandbox sets `DISPATCH_MEMORY_SAMPLE_FILE` through the `memorySampleFile` option of `startSandbox`, so the test drives swap by rewriting a JSON sample file that the server reads every 15 s. The board has three loops started through `start_card` 2 s apart, a swap ceiling of 8192 MB and the supervisor off. The test sets swap to 9000 MB and checks that only the newest loop gets a `by: "memory"` mark, that one `pause` row carries the reason, and that a child process of its pane is in state T. A rise to 9100 MB, which is under 256 MB of growth, must pause nothing more. The test then pauses the second loop as the user and sets swap to 6000 MB, and checks that the first memory-paused loop resumes with one `resume` row, that none of its processes stay stopped, and that the user-paused loop stays paused through three more readings. The test then sets swap to 9000 MB, checks that the newest loop gets a `by: "memory"` mark again with `swapMb` 9000, and sets swap to 9100 MB. It stops the server and starts a new server on the same data folder, and the tmux sessions continue. Through two readings after the restart, the memory-paused loop stays paused, the user-paused loop stays paused and the oldest loop gets no pause. The test then sets swap to 8000 MB, which is under the ceiling and over the resume floor, and restarts the server again. In 20 s the memory-paused loop must resume with the reason `swap used 8000 MB is not above the 8192 MB ceiling after a restart`, none of its processes stay stopped, and the user-paused loop stays paused. The scenario types no key into any pane.
+The scenario in tests/e2e/scenario-LOCAL-95-no-loop-ship.e2e.ts proves that a group with no loop files ships through `start_ship` to the bare origin of its sandbox, with the fake `claude` as orchestrator and as group session and with the fake `gh`.
 
-The files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
+The scenario in tests/e2e/scenario-LOCAL-95-wake.e2e.ts proves that the server wakes the orchestrator. The board has one group of two tickets, and the fake orchestrator replays its tool calls under busy status rows and waits under idle rows. The test answers the orchestrator decision item through `POST /api/decisions/:id/answer` and checks that the `Dispatch wake: decision` line reaches the fake in 30 s or less. It then makes the group commit, print the done marker and report Stop, and checks that an Agent done wake line follows at least 20 s after the first, after which the orchestrator calls `start_ship` and the PR merges into the bare origin. The test also checks that every wake line has one confirmed `orchestrator_wake` row and that no wake line or row falls inside a busy status window of the fake. The scenario types no key into any pane, and a static check of its own files enforces that.
+
+The scenario in tests/e2e/scenario-LOCAL-103-intake-judgment.e2e.ts proves that the orchestrator judges an intake and starts three loops inside a cap of 2. The board has four tickets (a quick fix, a single feature and two related tickets), the policy **Ask me for each roadmap** and a cap of 2. The fake orchestrator reads the rule book and the playbooks, raises one plan decision item and waits for it. The test answers the plan through `POST /api/decisions/:id/answer`. The orchestrator then calls `start_card` for the quick fix with "Write code directly" and for the single feature with "PRD + Ralph Loop", and creates a group of the two related tickets with "Roadmap Loop". The test checks that the accepted `start_card` and `start_group` rows are in that order, that each card and the group carry their playbook, and that the first `start_group` answers 403 `policy-refused` and starts no session. The test then makes the quick fix card reach Agent done with a Stop hook, which frees a slot, and checks that the second `start_group` starts the group. A watcher checks that no more than 2 cards or groups hold a slot at any time. The scenario types no key into any pane, and a static check of its own files enforces that.
+
+The scenario in tests/e2e/scenario-LOCAL-109-ship-order.e2e.ts proves the ship order and the release version. The board has a cap of 3, the ship rights **merge** and a sample repository with `package.json` version `1.2.3`. The test calls the orchestrator routes with a minted token and starts a quick fix with "Write code directly", a single feature with "PRD + Ralph Loop" and a group of two tickets, and checks that `start_ship` of the running feature answers 409 `card-not-done`. Each session commits on its branch and sends the done Stop hook, and the feature card carries seeded loop files with every phase passed and a closed engine. The test checks one `agent_done` `group_state` event and one wake line for the feature, and that `get_card_progress` and the card read show its phases. It then ships the quick fix, the feature and the group one at a time and checks that the fake `gh` log creates and merges their PRs in that order and that the bare origin `main` holds the three files. `release_prep` with bump `minor` creates `Release v1.3.0` in To Do, and a second call answers 409 `release-exists`. A watcher checks that no more than 3 cards or groups hold a slot at any time.
+
+The scenario in tests/e2e/scenario-LOCAL-110-memory-pause.e2e.ts proves that the memory governor pauses and resumes loops end to end. The sandbox sets `DISPATCH_MEMORY_SAMPLE_FILE` through the `memorySampleFile` option of `startSandbox`, so the test drives swap by rewriting a JSON sample file that the server reads every 15 s. The board has three loops started through `start_card` 2 s apart, a swap ceiling of 8192 MB and the supervisor off. The test sets swap to 9000 MB and checks that only the newest loop gets a `by: "memory"` mark, that one `pause` row carries the reason, and that a child process of its pane is in state T. A rise to 9100 MB, which is under 256 MB of growth, must pause nothing more. The test then pauses the second loop as the user and sets swap to 6000 MB, and checks that the first memory-paused loop resumes with one `resume` row, that none of its processes stay stopped, and that the user-paused loop stays paused through three more readings. The test then sets swap to 9000 MB, checks that the newest loop gets a `by: "memory"` mark again with `swapMb` 9000, and sets swap to 9100 MB. It stops the server and starts a new server on the same data folder, and the tmux sessions continue. Through two readings after the restart, the memory-paused loop stays paused, the user-paused loop stays paused and the oldest loop gets no pause. The test then sets swap to 8000 MB, which is under the ceiling and over the resume floor, and restarts the server again. In 20 s the memory-paused loop must resume with the reason `swap used 8000 MB is not above the 8192 MB ceiling after a restart`, none of its processes stay stopped, and the user-paused loop stays paused. The scenario types no key into any pane.
+
+The scenario in tests/e2e/scenario-LOCAL-153-unit-branch-ship.e2e.ts proves that a finished Roadmap loop group whose two unit branches use the `feat/` prefix, recorded only in the roadmap Status lines with no progress table, ships through `start_ship`: a branch name with a space answers 400 `invalid-branch-name` with no flow, and the two unit branches reach `gh pr create` in stack order and the flow ends `done`.
+
+The scenario in tests/e2e/scenario-LOCAL-151-engine-close.e2e.ts proves that the supervisor closes the engine file of a finished PRD loop with no human Restart. The board has the supervisor on and the ship rights **merge**, and the test starts one "PRD + Ralph Loop" card. The session commits on its branch, and the test seeds a PRD, a state file with `gate=pass` for every phase and an engine file that stays open. The test checks that `get_card_progress` shows `completion: "complete"` with an open engine and that `start_ship` answers 409 `engine-not-closed`. The test then writes a session transcript whose last assistant message ends with the `RALPH COMPLETE` promise and the `DISPATCH_STATUS: DONE` line, and posts the Stop hook with that message and path while the pane shows no promise line. In 60 s the board holds one `close_loop` row with the result `closed`, the engine shows `closed`, `loopProgress.readAt` is not before the Stop hook, and the card has no `resume` row and no `continue` row with the duty `restart`. `start_ship` then answers 202, the fake `gh` log creates and merges one PR, and the bare origin `main` holds the work file. The test does not rename the engine file, and it types no key into any pane.
+
+The scenario in tests/e2e/scenario-LOCAL-136-user-started-ship.e2e.ts proves that a single ticket card that the user started from the board start dialog ships through `start_ship`: the board has the ship rights **merge**, and the test starts ticket card A with `POST /api/cards/:id/start`, the route of the start dialog, not with the orchestrator tool `start_card`. The card read has a session branch and no `launch`. The session commits a work file on that branch, and the Stop hook moves the card to Agent done. `start_ship` with the session branch as the one branch answers 202, the flow ends `done`, the fake `gh` log creates and merges one PR, and the bare origin `main` holds the work file. A second ticket card B that nobody started has no `launch` and no session branch, so `start_ship` answers 400 `not-group-card` and the card has no ship flow. The test types no key into any pane.
+
+The scenario in tests/e2e/scenario-LOCAL-150-feature-scope.e2e.ts proves that a feature orchestrator with an empty scope sees and starts only the ticket that the user assigns to it: the board has a main orchestrator (kind **board**) and an extra orchestrator `feat` (kind **feature**) with no scope, and the test mints both tokens with `POST /api/boards/:key/orchestrators/:id/token` without a start of either orchestrator. One user ticket is in To Do. `list_cards` for `feat` answers `total` 0, and `list_cards` for the main includes the ticket. `start_card` from `feat` on the ticket answers 403 `out-of-scope`, and the card has no `launch` and no session. The user then assigns the ticket to `feat` with `PUT /api/boards/:key/cards/:cardId/orchestrator`, which answers 200 with `changed` true and adds exactly one `intake_submitted` event for `feat` and the ticket. After the assignment, `list_cards` for `feat` answers `total` 1, `start_card` from `feat` answers 202 with the Write code directly playbook, and the card carries `launch.playbook`. `start_card` from the main on the same card then answers 403 `other-owner`. All sandbox folders are under the sandbox root and not under `~/.dispatch`. The test types no key into any pane.
+
+The scenario in tests/e2e/scenario-LOCAL-163-missing-workspace.e2e.ts proves that the boot resume sweep refuses a lost session whose workspace folder is missing (LOCAL-163). The test starts one card with the fake `claude`, sets `supervisor: on`, stops the server, stops the sandbox tmux server and renames the workspace folder of the card. It then boots the server again on the same data folder. The card must show `Resume failed: workspace-missing: <path>`, stay lost, be in Needs input with `resume_failed`, and have exactly one `resume_failed` event. The fake `claude` must record no new launch, and the sandbox tmux server must have no session.
+
+The scenario in tests/e2e/scenario-LOCAL-171-ship-retry.e2e.ts proves that a ship retry reports the failing step, skips a check that already passed and adopts the open PR of the branch (LOCAL-171). The board has the ship rights **merge**, and its repository check command is a script in the sandbox folder, outside the repository, that reads a mode file. The test starts two cards with the orchestrator `start_card` route, so both have a `launch`, and moves both to Agent done. Card A ships three times on the same branch. With the mode `fail`, the first `start_ship` stops at `checking`. The stored reason, the `ship_failure` decision item question and the `ship_stopped` group state hold `step test`, `exit code 3` and the last output line `not ok 1 - the real failure`. With the mode `pass` and failing PR checks, the second `start_ship` stops at `waiting_checks` with one PR, and the check script has run once. With passing PR checks, the third `start_ship` ends `done`: the branch shows `checkSkipped` true, the script does not run again, there is one `ship_check_skipped` group state, the fake `gh` log holds one `pr create`, and the bare origin `main` holds the work file. Card B has an open PR in the fake `gh` state before its first `start_ship`. That one ship ends `done` on the seeded PR with no `pr create` call for the branch. The test types no key into any pane.
+
+The scenario in tests/e2e/scenario-LOCAL-172-promise-close.e2e.ts proves that the supervisor closes the engine of a single PRD loop that has no phases from the promise alone (LOCAL-172). The engine file has the LOCAL-159 shape: the prompt has no "Execute the PRD at" line, and the test seeds no PRD file and no state file. The test checks that `get_card_progress` shows the open engine and that `start_ship` answers 409 `engine-not-closed`. The test then writes a session transcript whose last assistant message ends with `<promise>RALPH COMPLETE local-159</promise>` and the `DISPATCH_STATUS: DONE` line, and posts the Stop hook. In 60 s the board holds one `close_loop` row with the result `closed` and the reason `promise`. The engine file is renamed to its `.done` copy, which holds `closed_reason: promise`. `get_card_progress` shows `engine.closedReason` `promise`, `completion` `complete`, 1 unit done of 1, and a `lastMarker` that starts with `DONE `. `start_ship` then answers 202. The test does not check a push, a PR or a merge. The test does not rename the engine file, and it types no key into any pane.
+
+The scenario in tests/e2e/scenario-LOCAL-201-session-release.e2e.ts proves that the supervisor exits Claude in a finished launched card after the idle period and does not resume it (LOCAL-201). The board has `supervisor: on`, and the server runs with `DISPATCH_RELEASE_AFTER_MS` set to 20 s. The test starts one card with the orchestrator `start_card` route and the playbook `PRD + Ralph Loop`, seeds an open engine, and posts the Stop hook with the promise and the `DISPATCH_STATUS: DONE` line. The card moves to Agent done and its engine closes. After the supervisor shows the session idle, the board holds one `release_session` row with the result `released`, at least 20 s after the `idle` state row. The card then shows the state `released`, the column Agent done and a `lastMarker` that starts with `DONE `. The `pty-shim.py` process and the fake `claude` process of the pane are gone, and the pane runs the shell. The tmux session is live and its pane history still holds the DONE line. `GET /api/boards/<key>/orchestration` shows `runningLoops` 0. After 60 s the board still holds exactly one `release_session` row and no `resume` row after it, and the card is still `released`. The test types no key into any pane.
+
+The scenario in tests/e2e/scenario-LOCAL-166-live-missing-workspace.e2e.ts proves that the supervisor does not relaunch claude in a live shell whose workspace folder is missing (LOCAL-166). The test starts one card with the fake `claude`, renames the workspace folder of the card inside the sandbox, stops the fake `claude` with `C-c` so that the pane is at the shell prompt, and sets `supervisor: on`. The card must be in Needs input with `resume_failed` and the status reason `resume: Resume failed: workspace-missing: <path>`. The card must not be lost, the tmux session must stay live, and the fake `claude` must record no new launch.
+
+The scenario in tests/e2e/scenario-LOCAL-168-pushover-attention.e2e.ts proves that an empty Pushover value gives one attention item and one start log line, and that filled values give neither (LOCAL-168). The test starts one server with `PUSHOVER_USER_KEY` and `PUSHOVER_APP_TOKEN` set to empty strings. The server log must have exactly one `[notify] loop phase notifications are on` line that names both variables. The board snapshot must carry `pushoverMissing` with both names in that order, and `GET /api/boards/counts` must show `attention` 1 for the default board. The test then starts a second server with fake non-empty values. That server log must have no `[notify]` line, the snapshot must have no `pushoverMissing`, and `attention` must be 0. The fake values must appear in neither log, snapshot nor counts.
+
+The scenario in tests/e2e/scenario-LOCAL-170-frozen-relaunch.e2e.ts proves that a session frozen after an idle compaction is relaunched once with resume (LOCAL-170). The sandbox sets `DISPATCH_FROZEN_RELAUNCH_MS` to 20 s through the `env` option of `startSandbox` and a memory sample file with low swap. The board has the supervisor on. The test starts one card with the fake `claude` and posts a `UserPromptSubmit` hook so the card holds the conversation id `conv-frozen`. It then rewrites the scenario file: the pane shows "Compacted while idle", the status line shows context 0 percent, and a `freezeFile` makes the fake hold every `Enter`. `POST /api/sessions/FRZ-1/input` must answer `unconfirmed`, and a `send` row must carry the reason `held in prompt box`. The card must reach the state `frozen` with no new launch and no `relaunch_frozen` row. Then one `relaunch_frozen` row with `result: "stopped"` must appear at least 20 s after `stateSince`. The freeze file must be gone, because the signal ended the fake, and the newest launch line must hold `--resume conv-frozen`. A confirmed `resume` row must follow, and the transcript must hold the resume prompt as a user entry. The card must have exactly one `session_relaunch` event. After a 60 s pause of the server, there must still be one `relaunch_frozen` row and one `session_relaunch` event.
+
+The scenario in tests/e2e/scenario-LOCAL-197-live-isolation.e2e.ts proves that a test process cannot write to the live board (LOCAL-197). A Node test process (`NODE_TEST_CONTEXT` is set) with no `DISPATCH_DIR` uses the data folder `<tmpdir>/dispatch-unisolated-<pid>` and not `~/.dispatch`. The tmux adapter uses the same rule, so that process also gets its own tmux server label. The process deletes the folder when it exits. The first test starts two sandboxes, each with card LIS-1 under the same tmux session name and the supervisor on. It stops the session of one sandbox. That supervisor must record `lost`, and in the other sandbox the card must stay live with no new orchestration event and no `session_lost`, `session_resume`, `resume_failed` or `status_needs_input` event. The second test runs a probe under the Node test runner that imports the store before it calls `isolateEnv()`. Its `HOME/.dispatch` is a link to the data folder of a running sandbox. The probe must open a database under `<tmpdir>/dispatch-unisolated-`, and the sandbox board must get no probe card and no `local_created` event.
+
+The two account scenarios (tests/e2e/scenario-LOCAL-159-account-login-decision.e2e.ts and tests/e2e/scenario-LOCAL-159-managed-default.e2e.ts) have one npm script. Run `npm run build` first, then run `npm run test:e2e:accounts`. The script runs the two files one after the other. The script is not part of `npm run check`.
+
+In the full run, the files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
 ## Orchestration Initiative
 
@@ -5971,6 +6281,12 @@ adds a warning to `loopProgress.warnings`, and the rest of the model still fills
 loop files gives no model, and the card keeps its last stored model. The reader never writes a
 loop file, and no reader error stops the server.
 
+**Closed engine.** The reader reads the `closed_reason` front matter line of a `.done` engine file
+into `engine.closedReason`. The values are `promise`, `close_loop` and `manual`. The value is
+`manual` when the line is missing or unknown, for example in a file that a person renamed by hand.
+A single PRD loop with a closed engine and no phase headings reads as built and complete. When the
+PRD shows phases, the phases decide.
+
 **Report call.** A loop can report a gate result, so that the board shows it at once. A session
 has the variables `DISPATCH_HOOK_PORT` and `DISPATCH_HOOK_TOKEN`. Run this command after each gate
 line (pass or RED attempt) and after each unit boundary commit (`"kind":"unit"`, no `phase`):
@@ -5998,6 +6314,14 @@ card and into `sessionSummaries`. A status line of another format gives no meter
 `Phase <number>` patterns for the loop file modules only, because those words are their input
 format.
 
+**Loop settings.** Boot and the config route also write `hook-settings-<value>-orchestrator.json`
+for each inbound value, which the orchestrator session gets, and every other session gets
+`hook-settings-<value>.json`, which also sets `idleCompaction` and `promptSuggestionEnabled` to
+`false` so that a loop session does not compact while idle and its prompt box never shows a
+suggested `/ship` line (LOCAL-184). Each session start also merges both keys into the
+`settings.json` of the config dir it launches on, which for an added account is the link to the home
+file, so a new account dir has them too (LOCAL-198).
+
 ### Session Supervisor
 
 LOCAL-89 adds the supervisor: server code that watches each Claude session of a board and does
@@ -6017,9 +6341,9 @@ supervisor uses that capture and adds no second capture loop. The registry
 (`supervisor-registry.ts`) keeps one watcher per tmux session name.
 
 **States.** `supervisor-state.ts` (pure) reads the pane, the transcript tail and the loop
-progress and gives one of 12 states: `working`, `idle`, `needs_input`, `permission_prompt`,
+progress and gives one of 14 states: `working`, `idle`, `needs_input`, `permission_prompt`,
 `handoff_ready`, `roadmap_complete`, `usage_limit_dialog`, `usage_limit_wait`, `api_error`,
-`stale`, `lost` and `shell_prompt`. A dialog state needs two captures that agree, and `idle`
+`stale`, `lost`, `shell_prompt`, `paused` and `frozen`. A dialog state needs two captures that agree, and `idle`
 needs three equal samples 60 s apart. Each change is one `supervisor_state` row in
 `orchestration_events` and sets `state`, `stateReason` and `stateSince` on the session. A
 `needs_input` state moves the card to the Needs input column.
@@ -6035,12 +6359,46 @@ action that finds nothing to do, such as an `Escape` already sent, writes no row
   restart has its own.
 - Prompts: the dangerous delete prompt and the held peer message are declined. Any other
   permission prompt gets no key.
-- Loop close: at `roadmap_complete` the engine file is renamed to its `.done` copy.
+- Loop close: at `roadmap_complete` the engine file is renamed to its `.done` copy. The supervisor
+  also closes a single PRD loop whose model has no phases when the last assistant text of the
+  transcript holds `<promise>RALPH COMPLETE <slug></promise>` for the slug of the loop. The
+  supervisor does not read the pane for this, because the loop prompt and the Stop hook message
+  also show the phrase. The close writes `closed_reason`: `close_loop` when the files read
+  complete, else `promise`. When the plugin already removed the engine file, the supervisor writes a closed `.done` file with the slug and the `closed_reason`. The DONE marker guard applies only when the loop engine is closed. A supervisor stop never replaces the DONE marker of an Agent done card whose loop engine is closed.
 - Lost session and shell prompt: a pane whose shell owns the foreground is relaunched with
   `runClaude`; any other case runs the resume saga. The resume prompt is typed only after claude
   takes the foreground, within 60 s. A failed relaunch, a lost session that stays gone, or claude
   that does not start sets `resume_failed`; an unconfirmed resume prompt is recorded as
   unconfirmed.
+- Missing workspace folder before a relaunch (LOCAL-166): before `runClaude` types the launch line
+  into a shell-prompt pane, the supervisor checks that the session root (the session
+  `workspacePath`, else the card `workspacePath`) is a folder. If the folder is missing, the
+  supervisor launches nothing. It sets the session to `needs_input` with `resume_failed`, moves the
+  card to Needs input and records the LOCAL-163 copy as the status reason:
+  `resume: Resume failed: workspace-missing: <path>`. The tmux session stays live, because a
+  detach would leave a tmux session that no card tracks. The card detail shows the copy in an alert
+  above the terminal.
+- Frozen session: the state is `frozen` when the pane shows the line "Compacted while idle" above
+  the input line, the status line shows context 0 percent, the input box holds text, the
+  transcript is known and does not grow, no busy line shows, and the box text stays the same for
+  60 s. The supervisor reads the context percent that the watcher stored. A server restart keeps a
+  stored `frozen` state and its `stateSince` while the pane is unchanged. The supervisor relaunches
+  the session `FROZEN_RELAUNCH_MINUTES` (15) after `stateSince`. A sandbox server reads
+  `DISPATCH_FROZEN_RELAUNCH_MS` instead. `relaunchFrozen` in `supervisor-actions.ts` first checks
+  the live card (same session and tmux name, not paused, no start in flight), the workspace
+  folder (a missing folder fails with `workspace-missing`), the orchestrator state, the memory governor and the shell root of the pane. A blocked relaunch sends no signal.
+  It then stops claude with `endJob` (`end-job.ts`, shared with the resume probe) under the card
+  lock: a hangup, then a kill, to the foreground process group of the pane, never to the group of
+  the root shell. A typed `/exit` would only queue in the box. The relaunch then uses the resume
+  path: `runClaude` types the launch line with `--resume <claudeSessionId>` in the same tmux
+  window, and the supervisor types the loop prompt one time. The relaunch writes one
+  `supervisor_action` row with `action: "relaunch_frozen"`, `result: "stopped"` and `frozenSince`.
+  It writes one `session_relaunch` activity event only after the prompt send. A session gets one
+  relaunch per freeze. A second freeze in the same unit and phase sets `needs_input` with
+  `resume_failed`, which a `frozen` reading does not release. A `frozen` reading releases only a
+  `supervisor_gave_up` hold. While the line stays in a live input box, `send_input` answers
+  `unconfirmed` with the reason `held in prompt box`, and the resume probe treats that reason as a
+  stuck REPL. `relaunchFrozen` is the one function where a check before the relaunch goes.
 - Handoff (`supervisor-handoff.ts`): at `handoffPercent` the session gets the handoff request
   once per crossing, and once more at `handoffHardPercent`; the hard request tells the loop to
   hand off now. At `handoff_ready` the supervisor waits until the pane is ready and not busy (a
@@ -6050,23 +6408,42 @@ action that finds nothing to do, such as an `Escape` already sent, writes no row
 - Usage limit (`supervisor-limit.ts`): both policies select the stop and wait row, else the wait
   here row, and never a credits row. Before each `Enter` the supervisor reads the menu again and
   never presses `Enter` on a credits row. Then policy `stop` sets `needs_input` with
-  `usage_stop`. Policy `wait` continues after the reset time plus 2 minutes; when the engine file
-  says `handoff-pending`, it sends `Escape` at the auto continue notice and starts a fresh session
-  after the reset instead. The timer re-checks at that time that the session is live, has no stop
-  reason, and that its board still has `supervisor: on` and `usageLimit: wait`. A timer delay is
-  capped at the Node timer maximum (2^31 - 1 ms).
+  `usage_stop`. Policy `wait` first runs `supervisor-limit.ts#moveOrWait`. It moves the session to
+  the chain account with the most weekly headroom (see Account Chain, Usage limit move), sends the
+  usage limit continue prompt and records `limit_move` with `from`, `to` and `result`. When the
+  continue is not confirmed after a move, the session gets `needs_input` with
+  `supervisor_gave_up`. When a move answers `busy` and the pane is not ready (for example after a
+  memory resume), the supervisor sends one `C-l` so Claude redraws its screen, and tries once more.
+  It waits for the reset when no account has headroom (`no_headroom`), the session is pinned
+  (`pinned`), the session moved at a limit in the last 30 minutes (`recent_move`), or the move did
+  not settle; the `limit_wait` row carries that `reason`. At the auto continue notice it schedules
+  nothing, because the CLI continues by itself. The wait continues after the reset time plus 2
+  minutes. The timer re-checks at that time that the session is live, still runs on the account
+  it waited on, has no stop reason, and that its board still has `supervisor: on` and
+  `usageLimit: wait`. A timer delay is capped at the Node timer maximum (2^31 - 1 ms). When the
+  engine file says `handoff-pending`, the supervisor sends `Escape` at the auto continue notice, or
+  with no notice on screen only schedules, and starts a fresh session after the reset instead.
+  The CLI can also stop on the limit with no menu. The state is then `usage_limit_wait` when two
+  samples agree that the last assistant text of the transcript is `You've hit your limit`, with
+  or without a kind such as `weekly`, and the session is not busy. The transcript counts because
+  a pane after a memory resume can show no Claude text.
 - The 60 s pass (`supervisor-pass.ts`): it holds the keep awake child, records a
   `machine_wake` row when its timer fires more than 30 s late, records a `pr_state` row for each
   change of the PR list of a group, starts a queued group when each group in `dependsOn` is done
   and the board is under `concurrencyCap`, and sets `needs_input` with `budget` at the next gate
   change after the cost of a group reaches `budgetPerGroup`. The cost of a session is a running
   total: when its status line meter drops (a claude relaunch starts it at 0), the pass adds the
-  last value. The total lives in server memory.
+  last value. The total lives in server memory. Each pass also compares the group cost with
+  `budgetWarnPercent` of the effective budget. At or above it, a card with no mark gets
+  `budgetWarning` and one `supervisor_action` row with `action: "budget_warning"`. The mark clears
+  when the budget is removed, or when the budget or percent changes and the cost is below the new
+  threshold. The attention queue shows one `budget_warning` item per mark, hidden in Done and under
+  a `budget` stop.
 - Group state events (`group-state-events.ts`, `domain/group-state.ts`): `recordGroupState` appends
   one `group_state` row (`{ state, reason }`) for a group card only, never for the orchestrator card
   or a ticket card, and skips a state equal to the last `group_state` row of that card, unless that card's session went back to `working` after it. The writers
   are the `status_agent_done` and `status_needs_input` activity subscription in `bootstrap/index.ts`
-  (`agent_done`, `needs_input`), the ship flow (`shipped`, `ship_stopped`), `recordStartFailure`
+  (`agent_done`, `needs_input`), the ship flow (`shipped`, `ship_stopped`, `ship_check_skipped`), `recordStartFailure`
   (`start_failed`) and the supervisor state change (`loop_error` for `api_error`, `stale`, `lost`
   and `shell_prompt`; `usage_limit` for `usage_limit_dialog` and `usage_limit_wait`).
 - Wake duty (`orchestrator-wake.ts`, `domain/orchestrator-wake.ts`): a running orchestrator gets a
@@ -6095,6 +6472,21 @@ releases it; the 60 s pass clears its reason when a raised or removed budget all
 `resume_failed` hold releases only on a busy sign, so a failed resume is not planned again on
 every sample.
 
+**Engine close on the completion marker.** A finished loop closes its engine without a restart
+(LOCAL-151). A completion signal is a `<promise>RALPH COMPLETE` or `<promise>ROADMAP COMPLETE`
+line, or a `DISPATCH_STATUS: DONE` line. The detector looks for it in the agent lines of the pane
+(a DONE line only in the newest agent block) and, while the engine is open, in the last assistant
+message of the transcript tail, because after a memory pause the pane can show only shell job
+control lines. The signal gives `roadmap_complete` only when the loop progress says
+`completion: complete`, and while the engine is open no hold reason keeps it back. The planner
+then runs the same `close_loop` as after a relaunch, only while the engine is active and not
+closed and never for an orchestrator, and every close attempt refreshes the loop progress at
+once, so `engine.closed` is true for `start_ship` within one sample. A session that stays at
+`roadmap_complete` with an open engine, after a failed rename or a server stop between the state
+write and the rename, gets one more close attempt at most once a minute. A `status_agent_done` activity
+also forces a progress write, so `readAt` is never older than the last DONE marker; a gate line
+changes the state file, which the folder watch reads.
+
 **Keep awake.** `adapters/power.ts` holds one `caffeinate -is -w <server pid>` child while a
 session of a supervised board is live. It spawns the child through `adapters/exec.ts`. The `-w`
 flag ends the child with the server, and shutdown ends it at once.
@@ -6108,9 +6500,21 @@ user route; no orchestrator route or tool changes a policy. The `groupPlaybook` 
 or null) is one of these fields. A save that omits `groupPlaybook` keeps the stored value, and a save
 with null clears it. `wakeMinutes` (whole number, 0 to 1440, else 400 `invalid-wakeMinutes`) is optional
 the same way, and so are `memoryFloorMb` (0 to 65536, default 1024, else 400 `invalid-memoryFloorMb`)
-and `swapCeilingMb` (256 to 65536, default 8192, else 400 `invalid-swapCeilingMb`). The store reads each stored policy as the defaults of `defaultBoardPolicy` with
+and `swapCeilingMb` (256 to 65536, default 8192, else 400 `invalid-swapCeilingMb`). `budgetWarnPercent`
+(whole number, 1 to 99, default 80, else 400 `invalid-budgetWarnPercent`) is optional the same way. The store reads each stored policy as the defaults of `defaultBoardPolicy` with
 the stored values over them, so a board saved before a new field gets its default. A stored policy
 that is JSON `null` or an array reads as the defaults alone.
+
+**Handoff clear and relaunch prompt.** At a handoff the supervisor sends Enter on the typed
+`/clear` when the pane is ready or shows the Claude Code command menu with `/clear` selected, and
+never on another dialog (LOCAL-202). It confirms the clear from the transcript: a new `.jsonl` in
+the same project folder that holds the `/clear` command entry within 10 s. It types `/clear` one more
+time when no confirmation comes, then gives up with step `clear`. The `resume_session` tool relaunches a
+lost card through the `resume` action on a board with the supervisor on, so the supervisor types and
+confirms the resume prompt after claude starts; with the supervisor off the relaunch types nothing. A
+loop whose engine is `handoff-pending` gets the handoff resume prompt instead of the continue line.
+
+**Running count and session release.** LOCAL-201 changes the running count (`runningLoops`). It skips a card in Agent done or Done, and it skips a card whose loop engine is closed. A card with no engine yet still counts. The `get_policy` read and every cap check read this count. The supervisor releases a finished launched card to free memory. The release is due 10 minutes (`RELEASE_AFTER_MS`, or `DISPATCH_RELEASE_AFTER_MS` for the sandbox) after the later of the move to Agent done and the last session state change. These conditions must also hold: the last marker is a DONE marker, the engine is closed or absent, the pane is idle, and no ship flow is running or stopped. The supervisor then types `/exit`, and the session state becomes `released`. The tmux session, the pane, the column and the marker stay. The supervisor kills nothing. A stored `released` holds against every detection until Run Claude or `resume_session` relaunches Claude, a lost tmux session does not resume it, and account moves and pause skip it. `send_prompt` refuses a released session. `resume_session` brings Claude back through `runClaude`, as Run Claude does.
 
 ### Orchestrator Control Surface
 
@@ -6180,6 +6584,19 @@ then listens to the store `orchestration` event until a match or the time limit,
 540 seconds. A `tool_call` row never ends a wait unless `kinds` names it, because every call,
 the wait call included, writes one. An aborted request ends the wait and leaves no listener.
 
+**Machine sleep (LOCAL-189).** A `machine_wake` row that arrives while a wait runs ends that wait,
+also when `kinds` or `cardIds` does not name it, so the orchestrator reads the board again after a
+sleep. A stored row does not end a later wait, so a caller that repeats an old `since` does not loop. The wait
+reads the deadline from the wall clock once per poll interval (1 s), because a Node timer on
+macOS stops while the machine sleeps. When one poll gap is more than the interval plus 30 s, the
+wait ends with `{ timedOut: true, cursor, machineWake: true }`. Before the supervisor types a
+continue line (`restart`, `api_error` or `sleep_cut`), it reads the input box and the transcript
+user entries. When the box holds text that no user entry shows, the supervisor types nothing,
+records the `continue` action with `result: "skipped"` and `reason: "previous line unsent"`, and
+sets `needs_input` with `supervisor_gave_up`. A continue line spends its once per phase slot only
+when `sendConfirmed` confirms it in the transcript, so an unconfirmed `sleep_cut` line can be sent
+again at the next stop in the 2 minutes after the wake.
+
 **Dashboard reads.** Two user routes serve the dashboard. Both take a board key and answer 400
 `invalid-board` for a bad key and 404 `unknown-board` for a key with no board or an archived
 board. `GET /api/boards/:key/orchestration` returns
@@ -6204,19 +6621,35 @@ order. The branch states are `queued`, `merging_main`, `checking`, `pushing`, `w
 `waiting_merge` (with `open_prs`) or `merging` (with `merge`), `verifying`, `merged` and `failed`.
 Each branch must be a loop unit branch or `test/<slug>-specs` (the session branch of the group for a
 group with no loop progress, D-10), with a local `refs/heads/<name>`, and never `main`, `master`,
-`HEAD`, a full ref name or the repository base. The first step checks that the worktree is clean, then runs `git fetch origin`, a checkout with the no-guess option and
+`HEAD`, a full ref name or the repository base. A unit branch is the `Branch` cell of the progress table, else the name in backticks after `branch` in the roadmap unit Status line, and the name schema accepts every name that git accepts as a branch name (the `git check-ref-format` branch rules), up to 255 characters. The first step checks that the worktree is clean, then runs `git fetch origin`, a checkout with the no-guess option and
 a merge of `origin/main` with no edit, and records the merged commit as `checked`. The check
 runs on that commit, the push uses the refspec `<checked>:refs/heads/<name>`, and the merge
-passes gh's match head commit option with it; a resumed flow whose HEAD moved stops. Each gh
+passes gh's match head commit option with it; a resumed flow whose HEAD moved stops. Each branch
+stores `passed`, the commit on which its check last passed. A new flow copies `passed` from the
+previous flow of the same card, repository and branch name. When `checked` equals `passed`, the
+flow does not run the check command, sets `checkSkipped` to true and records one
+`ship_check_skipped` group state (loop cards only). The diff scope check and the prose check still
+run. Each gh
 call names the repository of the `origin` remote (`repo` on the flow; null unless the host is
 `github.com` or `ssh.github.com`, so an SSH host alias, another host or a local path gives none), and
-an open PR is reused only from the same repository, into `main`, at the checked commit. The
-admin merge retry runs only when every violation clause of the merge error (lines split on
+an open PR is reused only from the same repository and into `main`. The push step looks up that
+PR before the push, because the PR list can answer empty right after a push. After the push, the
+flow adopts the PR when its head equals the checked commit (up to 5 reads, then the flow stops).
+When `gh pr create` fails with `already exists` and a `/pull/<n>` URL, the flow adopts `<n>`. A
+closed PR is not adopted, and a new PR opens. The admin merge retry runs only when every violation clause of the merge error (lines split on
 sentence ends, commas and semicolons) matches the signature rule wording `must have verified
 signatures`.
 The flow never rebases and never edits code. Every git and gh call has a time limit (120 s, 300 s
 for fetch and push, 30 min for the check command) and a 64 MiB output buffer, and the diffs run
-with fixed color, prefix and path settings. The runner reads the board policy before each step
+with fixed color, prefix and path settings. The check command gets `DISPATCH_CHECK_WAIT_SECONDS=5400`.
+Its 30 min stop while the slot gate prints its waiting line and start again at the gate's
+`with-check-slot: acquired` line, and the call ends after 5400 s plus 30 min in all. The gate lines
+are never the reason of a failed check. A failed check command stores the reason
+`check command failed at step <step> with exit code <code>:` followed by the last 40 non-empty
+lines of the combined stdout and stderr, capped at 4000 characters. The step is the script of the
+last npm header line `> pkg@ver script`, else the first word of the check command. A timeout
+stores `check command failed: timed out after 30 minutes in the check slot`. The decision item question and the `ship_stopped` group state carry the same
+reason. The runner reads the board policy before each step
 and poll: `none` stops the flow and `open_prs` stops the merges. The runner keeps its board key,
 and a card that is gone stops it with no write; unwind refuses a group whose flow runs with 409
 `ship-running`. A thrown runner is stored as stopped. A refused move to Done after the last merge
@@ -6240,7 +6673,7 @@ reads the identity or writes, `assertAheadAndClean` resolves the base once. The 
 `branch-not-ahead`) and the worktree must be clean (409 `worktree-dirty`). A failed git call of
 these two checks answers 409 `no-workspace`. A group with loop progress keeps the D-8 rules.
 
-**MCP server.** `dispatch mcp` serves the 35 tools over stdio. `bootstrap/cli.ts` reads and checks
+**MCP server.** `dispatch mcp` serves the 37 tools over stdio. `bootstrap/cli.ts` reads and checks
 `DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and
 `bootstrap/mcp-tools.ts` holds the zod input and the description of each tool. The dependency
 cruiser rule `mcp-server-isolated` refuses an import of `routes`, `services`, `store`, `adapters`
@@ -6284,11 +6717,17 @@ ownership source, and `Card.ownerOrchestrator` is provenance only, so a group th
 follows the move. A group or ticket that an extra creates (`create_group`, `create_ticket`) joins that
 extra's scope through `appendToExtraScope`, a queued append that runs no scope or override check, so the
 card write never fails on a stale scope. `create_group` refuses a member outside the scope of the caller
-with 403 `other-owner`, and any hidden orchestrator card as an ineligible member (409). A member follows
+with 403 `other-owner` (403 `out-of-scope` for a feature caller), and any hidden orchestrator card as an ineligible member (409). A member follows
 its group, and a loose ticket follows `scope.ticketIds`, else the main. `scopeTargetOf` in `boards.ts` passes that owner to `checkScope`,
-so a call on a card of another orchestrator answers 403 `other-owner`. A board with no records has no
-owner, and only the board is checked. The ship routes skip the owner check and `mayShip` lets only the
-main start a ship flow (403 `main-only`). The concurrency cap counts the running loops of the whole
+so a call on a card of another orchestrator answers 403 `other-owner`. A feature orchestrator
+(`orchestratorKind` is `feature`) gets 403 `out-of-scope` instead, through `scopeRefusalCode`, for each card it does not own, and
+`list_cards` gives it only its own cards. The tool `assign_card` (`assignCard` with `by: "orchestrator"`) adds a card
+of the main orchestrator to the scope of the calling feature orchestrator; it refuses a call from the board orchestrator with 400
+`not-feature-orchestrator`, a card of another extra with 403 `other-owner`, a group member with 400 `group-member` and a card outside To Do with 409 `not-todo`.
+A board with no records has no
+owner, and only the board is checked. The ship routes skip the owner check for the board orchestrator only, and `mayShip` lets the
+main and a feature orchestrator start a ship flow. A feature orchestrator ships only the cards that it owns (403 `out-of-scope` for
+another card), and a caller with no record gets 403 `main-only`. The concurrency cap counts the running loops of the whole
 board, whoever owns them. A `ticket_proposal` or other decision item about a card goes to the owner of
 that card.
 
@@ -6339,11 +6778,11 @@ the budget per group, the cap on running loops and the usage limit.
 `orchestratorLaunchArgs` in `services/domain/orchestrator-launch.ts`:
 `--model <orchestratorModel of the policy>`, `--mcp-config <file>`, `--strict-mcp-config`,
 `--tools Read Glob Grep`, `--allowedTools mcp__dispatch` (the board tools run without a permission
-dialog), `--permission-mode manual` (a user `defaultMode` cannot widen it) and
-`--disallowedTools Bash Write Edit NotebookEdit`. The `--tools` list is an allowlist of the built-in
+dialog), `--dangerously-skip-permissions` (the session runs unattended, so a permission prompt must
+not stop it) and `--disallowedTools Bash Write Edit NotebookEdit`. The `--tools` list is an allowlist of the built-in
 tools, so a code running tool such as `Monitor` is out, which a deny list alone misses. The configured Settings arguments lose every `--model`,
-`--permission-mode`, `--mcp-config`, tool list and bypass flag first, so the policy values win and no
-bypass flag can reach the session. The orchestrator has the MCP tools and the read-only file tools; it
+`--permission-mode`, `--mcp-config`, tool list and bypass flag first, so the policy values win and the
+argv holds one bypass flag and no permission mode. The orchestrator has the MCP tools and the read-only file tools; it
 cannot run a shell or write a file, so it cannot reach a user route. The MCP config file
 (`<data dir>/orchestrators/<board>-<id>.mcp.json`, directory `0700`, file `0600`) names the `dispatch mcp`
 command and holds no token. The token (`DISPATCH_ORCHESTRATOR_TOKEN`) and `DISPATCH_PORT` go into the
@@ -6395,6 +6834,9 @@ route `/boards/$key/orchestrator/{-$id}` shows it. The entry button is in the pa
 Its label is "Add orchestrator" on a board with no record. Its label is "Orchestrator" on a board with a
 record. It reads only the `Board` that the board list holds.
 
+The tile of a group branch and the detail panel header of a group card show the group cost total from
+`GET /api/boards/:key/orchestration`. The text is "$X of $Y" when the group has a budget. Otherwise it is "$X".
+
 The toolbar of the centre shows one control for the selected record. It is Start on a board with no
 record. It is also Start on a stopped record, unless the session state is `lost` or `shell_prompt`. It is
 Stop on a running record. It is Resume when the session state is `lost` or `shell_prompt`, also on a
@@ -6417,3 +6859,5 @@ The settings sheet on the centre has two tabs:
   `shared/orchestrator-models.ts`, and the route refuses any other model with 400.
 - Orchestrators: the main and the extras, with the form to add an extra, edit its override and move
   groups.
+
+When the engine file of a single PRD loop names no PRD path, the reader finds the PRD by its slug in `.planning/prds/` at the session root or in a repo folder one level below it: the engine slug, or, when the engine names no slug, the card identifier in lowercase and then as written (LOCAL-200).

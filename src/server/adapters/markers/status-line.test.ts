@@ -101,3 +101,25 @@ void test("a long whitespace run in row 1 parses fast", () => {
   assert.equal(parseStatusLine(`Opus · ${" ".repeat(200_000)}x\n`), null);
   assert.ok(performance.now() - startedAt < 200);
 });
+
+void test("row 1 parses plain, with the weekly limit banner, with the update banner and warming up", () => {
+  const second = "GROUP-1  │  feat/x  │  5h 12%  │  7d 40%  │  $1.25\n";
+  const context = (row: string) =>
+    parseStatusLine(`${row}\n${second}`)?.contextPercent;
+  const bar = "Opus 5.5 · high  │  ███████░░░  72%  144k/200k";
+  assert.equal(context(bar), 72);
+  assert.equal(
+    context(
+      `${bar}  You've used 72% of your weekly limit · resets Oct 22 at 12:30`,
+    ),
+    72,
+  );
+  assert.equal(context(`${bar}  ✔ Update installed · /restart to apply`), 72);
+  assert.equal(context("Sonnet 5.5  │  ░░░░░░░░░░  warming up"), null);
+  assert.equal(
+    parseStatusLine(
+      `${bar}  You've used 72% of your weekly limit · resets Oct 22 at 12:30\n${second}`,
+    )?.model,
+    "Opus 5.5",
+  );
+});

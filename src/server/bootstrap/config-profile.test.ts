@@ -6,6 +6,7 @@ import { after, test } from "node:test";
 
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "dispatch-config-profile-"));
 process.env.HOME = home;
+process.env.DISPATCH_DIR = path.join(home, ".dispatch");
 const { CONFIG_PATH } = await import("../services/infra/paths.js");
 assert.ok(CONFIG_PATH.startsWith(home), "CONFIG_PATH escaped the temp HOME");
 const { loadConfig } = await import("./config.js");

@@ -258,6 +258,7 @@ function assertBuilt() {
       .trim();
     throw new Error(
       `refusing to run, \`npm run ${BUILD_SCRIPT}\` failed, so dist/ does not reflect src/:\n${detail || err.message}`,
+      { cause: err },
     );
   }
   if (!existsSync(DIST_ENTRY)) {
@@ -359,7 +360,7 @@ async function runBreakSwNoFetchHandler() {
   }
 
   const original = readFileSync(absPath, "utf8");
-  let tripFired = false;
+  let tripFired;
   try {
     const patched =
       original +
@@ -512,7 +513,7 @@ async function runBreakSwNoCache() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   try {
     writeFileSync(DIST_ENTRY, original.replace(TARGET, REPLACEMENT));
 
@@ -637,7 +638,7 @@ async function runBreakSwDevNoCache() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   try {
     renameSync(absPath, backupPath);
 

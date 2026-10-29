@@ -25,7 +25,11 @@ export interface ItemUpsertResult {
   counts: { inserted: number; updated: number; resolved: number };
 }
 
-const INTERNAL_META_KEYS = new Set(["needsSession", "relevanceReason"]);
+const INTERNAL_META_KEYS = new Set([
+  "needsSession",
+  "relevanceReason",
+  "authorAvatar",
+]);
 
 /**
  * Present an expired snooze as unread.

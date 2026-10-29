@@ -20,12 +20,14 @@ const { seedPlaybooks, createPlaybook } =
   await import("../services/infra/playbooks.js");
 const { setOrchestrationConfig } =
   await import("../services/infra/config-holder.js");
-const { sessionStarter } =
+const { sessionStarter, startSession } =
   await import("../services/orchestration/start-session.js");
+const { steps } = await import("../services/orchestration/steps.js");
 const { tempRepoWithWorkspace } =
   await import("../test-support/git-fixtures.js");
 const { startedGroup } = await import("../test-support/group-fixtures.js");
-const { recordMemory } = await import("../test-support/memory-fixtures.js");
+const { recordMemory, withMemoryFakes } =
+  await import("../test-support/memory-fixtures.js");
 
 const SBX = parseBoardKey("SBX") as BoardKey;
 const OTH = parseBoardKey("OTH") as BoardKey;
@@ -386,44 +388,74 @@ void test("start_card at the cap answers 403 policy-refused, then starts once a 
   await setCap(10);
 });
 
-void test("start_card under memory pressure answers 409 memory-pressure, writes nothing, then starts once memory recovers", async () => {
+const LOW = "free memory 812 MB is below the 1024 MB floor";
+
+void test("start_card under low memory answers 202 at once, waits with Waiting for memory, then runs the saga", async (t) => {
   await setCap(10);
-  const card = await store.createLocalCard(SBX, "memory pressure", "");
-  const startsBefore = starts.length;
+  const card = await store.createLocalCard(SBX, "memory wait", "");
+  t.mock.method(sessionStarter, "start", startSession);
+  const run = t.mock.method(steps[0], "run", () =>
+    Promise.reject(new Error("saga stopped by the test")),
+  );
   recordMemory(812, 1000);
   try {
-    const refused = await startCard(card.id, { playbook: PLAYBOOK });
-    assertRefused(refused, 409, "memory-pressure");
-    assert.equal(
-      refused.reply.body.reason,
-      "free memory 812 MB is below the 1024 MB floor",
-    );
-    assert.equal(starts.length, startsBefore);
-    assert.equal(store.getCard(card.id)?.launch, undefined);
-    assert.equal(store.getCard(card.id)?.ownerOrchestrator, undefined);
+    await withMemoryFakes([812, 2048], async ({ slept, onSleep }) => {
+      const seen: (string | null | undefined)[] = [];
+      onSleep(() => seen.push(store.getCard(card.id)?.provisioningStep));
+      const { reply } = await startCard(card.id, { playbook: PLAYBOOK });
+      assert.equal(reply.status, 202, JSON.stringify(reply.body));
+      assert.equal(reply.body.waitingForMemory, LOW);
+      await waitFor(
+        () => Promise.resolve(!store.isStarting(card.id)),
+        5000,
+        "the start saga to end",
+      );
+      assert.deepEqual(seen, ["Waiting for memory…"]);
+      assert.deepEqual(slept, [30_000]);
+    });
   } finally {
     recordMemory(2048, 1000);
   }
-  const { reply } = await startCard(card.id, { playbook: PLAYBOOK });
-  assert.equal(reply.status, 202, JSON.stringify(reply.body));
+  assert.equal(run.mock.callCount(), 1);
+  assert.equal(store.getCard(card.id)?.launch?.playbook, PLAYBOOK);
 });
 
-void test("start_card checks memory before the concurrency cap", async () => {
+void test("start_card fails at checking memory after 30 minutes with the floor and the last reading", async (t) => {
+  await setCap(10);
+  const card = await store.createLocalCard(SBX, "memory refused", "");
+  t.mock.method(sessionStarter, "start", startSession);
+  const run = t.mock.method(steps[0], "run", () => Promise.resolve());
+  recordMemory(812, 1000);
+  try {
+    await withMemoryFakes([812], async ({ slept }) => {
+      const { reply } = await startCard(card.id, { playbook: PLAYBOOK });
+      assert.equal(reply.status, 202, JSON.stringify(reply.body));
+      await waitFor(
+        () => Promise.resolve(!store.isStarting(card.id)),
+        5000,
+        "the start saga to end",
+      );
+      assert.equal(slept.length, 60);
+    });
+  } finally {
+    recordMemory(2048, 1000);
+  }
+  assert.equal(run.mock.callCount(), 0);
+  const after = store.getCard(card.id);
+  assert.equal(after?.startError?.step, "checking memory");
+  assert.equal(after?.startError?.stderr, `${LOW} after 30 minutes of retries`);
+  assert.equal(after?.tmuxSession, undefined);
+});
+
+void test("start_card at the cap under low memory is refused by the cap and writes nothing", async () => {
   await launchedRunning();
   const loops = (await call("GET", "/orchestrator/policy", TOKEN)).body
     .runningLoops as number;
-  const card = await store.createLocalCard(SBX, "memory before cap", "");
+  const card = await store.createLocalCard(SBX, "memory at cap", "");
   const startsBefore = starts.length;
   try {
     await setCap(loops);
     recordMemory(812, 1000);
-    const pressured = await startCard(card.id, { playbook: PLAYBOOK });
-    assertRefused(pressured, 409, "memory-pressure");
-    assert.equal(
-      pressured.reply.body.reason,
-      "free memory 812 MB is below the 1024 MB floor",
-    );
-    recordMemory(2048, 1000);
     assertRefused(
       await startCard(card.id, { playbook: PLAYBOOK }),
       403,

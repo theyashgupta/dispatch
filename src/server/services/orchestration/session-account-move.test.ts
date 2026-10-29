@@ -1,4 +1,4 @@
-import test from "node:test";
+import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -173,6 +173,48 @@ void test("a shell already at its prompt skips the /exit", async () => {
     (c, i) => i < 2 || i > 4,
   );
   assert.deepEqual(calls(), expected);
+});
+
+void test("a move of a released session at the shell prompt ends the hold with the state working", async () => {
+  const { cardId, sessionId } = await sessionCard("move-released");
+  await store.setSessionStateIfSession(cardId, sessionId, "released");
+  fake.reset({ "at-prompt": "" });
+  assert.equal(await moveSessionAccount(cardId, ACCOUNT_A), "moved");
+  const stored = store
+    .getCard(cardId)
+    ?.sessions?.find((x) => x.id === sessionId)?.state;
+  assert.equal(stored, "working");
+});
+
+void test("a move reads the session state live: a stale first read does not hide a stored released", async () => {
+  const { cardId, sessionId } = await sessionCard("move-stale");
+  await store.setSessionStateIfSession(cardId, sessionId, "released");
+  fake.reset({ "at-prompt": "" });
+  const getCard = store.getCard.bind(store);
+  const spy = mock.method(
+    store,
+    "getCard",
+    (id: string) => {
+      const card = getCard(id)!;
+      return {
+        ...card,
+        sessions: card.sessions!.map((x) => ({
+          ...x,
+          state: "working" as const,
+        })),
+      };
+    },
+    { times: 1 },
+  );
+  try {
+    assert.equal(await moveSessionAccount(cardId, ACCOUNT_A), "moved");
+  } finally {
+    spy.mock.restore();
+  }
+  const stored = store
+    .getCard(cardId)
+    ?.sessions?.find((x) => x.id === sessionId)?.state;
+  assert.equal(stored, "working");
 });
 
 void test("same account returns same and types nothing", async () => {

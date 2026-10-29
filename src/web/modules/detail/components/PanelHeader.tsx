@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import {
   ArrowDown,
   ArrowLeft,
@@ -57,8 +58,10 @@ interface PanelHeaderProps {
   onResumePausedRequest?: (id: string) => void;
   pausePending?: boolean;
   onAskRequest?: (card: CardModel) => void;
+  account?: ReactNode;
   resumeLine?: ResumeLine;
   reviewHeader?: ReviewHeader | null;
+  costLine?: string | null;
 }
 
 const ICON_BUTTON_CLASS = "text-muted-foreground hover:text-muted-foreground";
@@ -86,8 +89,10 @@ export function PanelHeader({
   onResumePausedRequest,
   pausePending = false,
   onAskRequest,
+  account,
   resumeLine,
   reviewHeader,
+  costLine,
 }: PanelHeaderProps) {
   const c = card;
   const unwindIdentifier = c?.source === "group" ? c.identifier : c?.groupId;
@@ -100,12 +105,17 @@ export function PanelHeader({
   const syncLabel = c?.syncing === true ? "Syncing…" : "Sync Linear";
   return (
     <div className="flex flex-wrap items-center justify-between gap-(--space-lg) border-b border-border py-(--space-sm) pr-(--space-lg) pl-(--space-xl)">
-      <div className="flex min-w-0 items-baseline gap-(--space-sm)">
+      <div className="flex min-w-0 flex-1 basis-48 items-baseline gap-(--space-sm)">
         <span className="flex-none font-mono text-xs leading-(--line-label) font-semibold text-muted-foreground">
           {c?.identifier}
         </span>
         {c && <TeamCycleText card={c} />}
         {c && <LinearStateChip card={c} />}
+        {costLine && (
+          <span className="flex-none text-xs text-muted-foreground">
+            {costLine}
+          </span>
+        )}
         <h1
           title={c?.title}
           className="m-0 min-w-0 truncate text-lg font-semibold text-foreground"
@@ -115,6 +125,7 @@ export function PanelHeader({
       </div>
 
       <div className="flex flex-[0_1_auto] flex-wrap items-center justify-end gap-(--space-sm)">
+        {account}
         {resumeLine && <ResumeTargetLine {...resumeLine} />}
         {hasLiveSession && (
           <Button

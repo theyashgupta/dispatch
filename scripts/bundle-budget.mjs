@@ -67,11 +67,6 @@ const BUDGETS = [
     budgetGzipBytes: 5310, // seed: 4828 (the vault page, lazy)
   },
   {
-    label: "assets/sessions-*.js",
-    match: (f) => f.startsWith(`assets${sep}sessions-`) && f.endsWith(".js"),
-    budgetGzipBytes: 3943, // seed: 3584 (re-seeded 2026-09-25 with the sessions toolbar, bulk bar, confirm dialog and keyboard rows)
-  },
-  {
     label: "assets/pull-requests-*.js",
     match: (f) =>
       f.startsWith(`assets${sep}pull-requests-`) && f.endsWith(".js"),

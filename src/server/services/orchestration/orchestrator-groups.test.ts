@@ -392,7 +392,7 @@ const extGroups = () =>
 const scopeOf = (id: string) =>
   store.getBoard(EXT)!.orchestrators.find((r) => r.id === id)!.scope;
 
-void test("create_group refuses a member outside the caller's scope with 403 other-owner, writing nothing", async () => {
+void test("create_group refuses a member outside the caller's scope with 403 out-of-scope, writing nothing", async () => {
   const before = extGroups();
   await assert.rejects(
     createOrchestratorGroup(EXTRA, {
@@ -400,7 +400,7 @@ void test("create_group refuses a member outside the caller's scope with 403 oth
       memberIds: [extOwn.id, extMain.id],
       repos: [{ path: repo, base: "main" }],
     }),
-    (err) => err instanceof ForbiddenError && err.code === "other-owner",
+    (err) => err instanceof ForbiddenError && err.code === "out-of-scope",
   );
   assert.equal(extGroups(), before);
   assert.equal(store.getCard(extMain.id)?.groupId, undefined);
@@ -419,7 +419,7 @@ void test("create_group refuses an orchestrator session card as a member, for th
       memberIds: [hidden.id],
       repos: [{ path: repo, base: "main" }],
     }),
-    (err) => err instanceof ForbiddenError && err.code === "other-owner",
+    (err) => err instanceof ForbiddenError && err.code === "out-of-scope",
   );
   await assert.rejects(
     createOrchestratorGroup(MAIN, {
@@ -461,6 +461,32 @@ void test("two parallel scope appends by one extra keep both ids", async () => {
     appendToExtraScope(EXTRA, "ticketIds", y.id),
   ]);
   assert.deepEqual(scopeOf("extra-1").ticketIds, [...before, x.id, y.id]);
+});
+
+void test("an append is a no-op when another extra already lists the id", async () => {
+  const taken = await store.createLocalCard(EXT, "listed by another", "");
+  const records = store.getBoard(EXT)!.orchestrators;
+  await store.setBoardOrchestrators(EXT, [
+    ...records,
+    {
+      id: "extra-2",
+      name: "Extra 2",
+      role: "extra",
+      scope: { groupIds: [], ticketIds: [taken.id] },
+      policyOverride: {},
+      cardId: null,
+      state: "stopped",
+      createdAt: "2026-10-07T00:00:00.000Z",
+    },
+  ]);
+  try {
+    const before = scopeOf("extra-1").ticketIds;
+    await appendToExtraScope(EXTRA, "ticketIds", taken.id);
+    assert.deepEqual(scopeOf("extra-1").ticketIds, before);
+    assert.deepEqual(scopeOf("extra-2").ticketIds, [taken.id]);
+  } finally {
+    await store.setBoardOrchestrators(EXT, records);
+  }
 });
 
 void test("a user scope edit and an append queued at the same time both land", async () => {

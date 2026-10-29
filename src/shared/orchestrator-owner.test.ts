@@ -1,7 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { OrchestratorRecord } from "./types.js";
-import { cardOwner, groupOwner } from "./orchestrator-owner.js";
+import {
+  cardOwner,
+  groupOwner,
+  isGroupMember,
+  kindLabel,
+  orchestratorKind,
+  scopeLabel,
+} from "./orchestrator-owner.js";
 
 function record(
   id: string,
@@ -77,4 +84,75 @@ void test("ownership: a member follows its group and a loose ticket follows the 
     cardOwner([], { id: "SBX-4", source: "local" }, undefined),
     null,
   );
+});
+
+void test("kind: a record without a stored kind has the kind of its role, a stored kind wins", () => {
+  assert.equal(orchestratorKind(main), "board");
+  assert.equal(orchestratorKind(infra), "feature");
+  assert.equal(orchestratorKind({ ...infra, kind: "board" }), "board");
+});
+
+void test("scope label: a board orchestrator reads Board, a feature orchestrator counts its cards", () => {
+  const feature = (scope: Partial<OrchestratorRecord["scope"]>) =>
+    record("feature", "extra", scope);
+  const cards = [
+    { id: "SBX-9", source: "group" as const },
+    { id: "SBX-3", source: "local" as const },
+    { id: "SBX-4", source: "local" as const },
+  ];
+  assert.equal(scopeLabel(main, cards), "Board");
+  assert.equal(scopeLabel({ ...infra, kind: "board" }, cards), "Board");
+  assert.equal(scopeLabel(feature({}), cards), "Feature, 0 cards");
+  assert.equal(
+    scopeLabel(feature({ ticketIds: ["SBX-3"] }), cards),
+    "Feature, 1 card",
+  );
+  assert.equal(
+    scopeLabel(
+      feature({ groupIds: ["SBX-9"], ticketIds: ["SBX-3", "SBX-4"] }),
+      cards,
+    ),
+    "Feature, 3 cards",
+  );
+  assert.equal(
+    scopeLabel(feature({ groupIds: ["SBX-9"], ticketIds: ["SBX-3"] }), cards),
+    "Feature, 2 cards",
+  );
+});
+
+void test("scope label: a ticket that joined a group is not counted", () => {
+  const cards = [{ id: "SBX-3", source: "local" as const, groupId: "SBX-9" }];
+  assert.equal(
+    scopeLabel(record("f", "extra", { ticketIds: ["SBX-3"] }), cards),
+    "Feature, 0 cards",
+  );
+});
+
+void test("scope label: a group id with no card is not counted", () => {
+  assert.equal(
+    scopeLabel(record("f", "extra", { groupIds: ["SBX-9"] }), []),
+    "Feature, 0 cards",
+  );
+});
+
+void test("scope label: a hidden card is not counted", () => {
+  const cards = [{ id: "SBX-3", source: "orchestrator" as const }];
+  assert.equal(
+    scopeLabel(record("f", "extra", { ticketIds: ["SBX-3"] }), cards),
+    "Feature, 0 cards",
+  );
+});
+
+void test("kind label: Board for a board orchestrator, Feature for a feature orchestrator", () => {
+  assert.equal(kindLabel(main), "Board");
+  assert.equal(kindLabel(infra), "Feature");
+  assert.equal(kindLabel({ ...infra, kind: "board" }), "Board");
+  assert.equal(kindLabel({ ...main, kind: "feature" }), "Feature");
+});
+
+void test("group member: a non-group card with a group id is a member", () => {
+  assert.equal(isGroupMember({ source: "local", groupId: "SBX-9" }), true);
+  assert.equal(isGroupMember({ source: "local" }), false);
+  assert.equal(isGroupMember({ source: "group" }), false);
+  assert.equal(isGroupMember({ source: "group", groupId: "SBX-9" }), false);
 });

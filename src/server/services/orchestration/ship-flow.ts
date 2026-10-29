@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { stripVTControlCharacters } from "node:util";
 import { ENGINE_FILE } from "../domain/loop-progress.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { hasLoopProgress, isLoopCard } from "../../../shared/running-group.js";
@@ -41,17 +42,30 @@ import { createDecisionItem } from "./decision-items.js";
 import { recordGroupState } from "./group-state-events.js";
 import { enforce } from "./orchestrator-groups.js";
 
-export const shipTools: { run: typeof run; pollMs: number } = {
+export const shipTools: {
+  run: typeof run;
+  pollMs: number;
+  headPollMs: number;
+} = {
   run,
   pollMs: 30_000,
+  headPollMs: 2_000,
 };
 
 const DISPATCH_PACKAGE = "@theyashgupta/dispatch";
 const CHECK_TIMEOUT_MS = 30 * 60_000;
+const SLOT_WAIT_SECONDS = 5400;
+const CHECK_TAIL_LINES = 40;
+const CHECK_OUTPUT_KEEP = 262144;
+const REASON_MAX_CHARS = 4000;
+const NPM_HEADER_RE = /^> \S+@\S+ (\S{1,100})/;
+const SLOT_WAITING = "with-check-slot: waiting for a free slot";
+const SLOT_ACQUIRED = "with-check-slot: acquired";
 const CALL_TIMEOUT_MS = 120_000;
 const NETWORK_TIMEOUT_MS = 300_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
 const MAX_POLL_FAILURES = 5;
+const HEAD_READS = 5;
 const PLAIN_BASE_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const FINISHED_STATUSES = new Set(["built, awaiting /ship", "shipped"]);
 const RESERVED_BRANCHES = new Set(["main", "master", "HEAD"]);
@@ -101,16 +115,130 @@ class CardGone extends Error {}
 
 const startingBoards = new Set<string>();
 
-/** The first non-empty line of a failed command's stderr, else of its message. */
-function firstLine(err: unknown): string {
+/** The first non-empty line of a failed command's stderr, else of its message, minus `skip` lines. */
+function firstLine(
+  err: unknown,
+  skip: (line: string) => boolean = () => false,
+): string {
   const e = err as { stderr?: string; message?: string };
-  const text = e.stderr?.trim() ? e.stderr : (e.message ?? String(err));
-  return (
+  const lines = (text: string): string[] =>
     text
       .split("\n")
       .map((l) => l.trim())
-      .find((l) => l !== "") ?? "command failed"
+      .filter((l) => l !== "" && !skip(l));
+  return (
+    lines(e.stderr ?? "")[0] ??
+    lines(e.message ?? String(err))[0] ??
+    "command failed"
   );
+}
+
+/**
+ * The stored reason of a failed check: the failing step, the exit code and the tail of the output.
+ *
+ * @remarks The first stderr line is often a warning, and the end of the output holds the failure.
+ * The tail drops the oldest lines first, so the header and the last line always stay.
+ */
+function checkFailureReason(
+  err: unknown,
+  step: string,
+  streamed: string,
+): string {
+  const e = err as { code?: unknown; stdout?: string; stderr?: string };
+  const text = streamed !== "" ? streamed : (e.stdout ?? "") + (e.stderr ?? "");
+  const header = `check command failed at step ${step} with exit code ${
+    typeof e.code === "number" ? e.code : "unknown"
+  }:`;
+  const lines = stripVTControlCharacters(text)
+    .split("\n")
+    .map((l) => l.trimEnd())
+    .filter((l) => l !== "" && !isSlotLine(l.trim()))
+    .slice(-CHECK_TAIL_LINES);
+  const room = REASON_MAX_CHARS - header.length - 1;
+  while (lines.length > 1 && lines.join("\n").length > room) lines.shift();
+  if (lines.length === 1 && lines[0].length > room) {
+    lines[0] = lines[0].slice(-room);
+  }
+  return lines.length === 0 ? header : `${header}\n${lines.join("\n")}`;
+}
+
+/** Tell if a line is the slot gate's waiting or acquired line. */
+function isSlotLine(line: string): boolean {
+  return line.startsWith(SLOT_WAITING) || line === SLOT_ACQUIRED;
+}
+
+/**
+ * Run the repository check command and stop it after 30 minutes of checking.
+ *
+ * @remarks The 30 minutes pause while the slot gate prints that it waits and start again at its
+ * acquired line, so a wait for a slot that loop gates hold does not count. The call itself ends
+ * after the gate's own wait, which is passed to it, plus 30 minutes.
+ */
+export async function runCheck(
+  worktree: string,
+  argv: string[],
+): Promise<void> {
+  const controller = new AbortController();
+  const startBudget = (): NodeJS.Timeout =>
+    setTimeout(() => controller.abort(), CHECK_TIMEOUT_MS);
+  let timer = startBudget();
+  let combined = "";
+  let step = argv[0] ?? "check";
+  const append = (chunk: string): void => {
+    combined += chunk;
+    if (combined.length > 2 * CHECK_OUTPUT_KEEP) {
+      combined = combined.slice(-CHECK_OUTPUT_KEEP);
+    }
+  };
+  let stdoutPartial = "";
+  const onStdout = (chunk: string): void => {
+    append(chunk);
+    const lines = (stdoutPartial + chunk).split("\n");
+    stdoutPartial = lines.pop() ?? "";
+    for (const line of lines) {
+      const script = NPM_HEADER_RE.exec(line.trim())?.[1];
+      if (script !== undefined) step = script;
+    }
+  };
+  let partial = "";
+  const onStderr = (chunk: string): void => {
+    append(chunk);
+    const lines = (partial + chunk).split("\n");
+    partial = lines.pop() ?? "";
+    for (const line of lines.map((l) => l.trim())) {
+      if (line.startsWith(SLOT_WAITING)) clearTimeout(timer);
+      if (line === SLOT_ACQUIRED) {
+        clearTimeout(timer);
+        timer = startBudget();
+      }
+    }
+  };
+  try {
+    await shipTools.run(
+      "env",
+      [
+        "-u",
+        "NODE_ENV",
+        `DISPATCH_CHECK_WAIT_SECONDS=${SLOT_WAIT_SECONDS}`,
+        "DISPATCH_CHECK_CLASS=ship",
+        ...argv,
+      ],
+      {
+        ...callOptions(worktree, SLOT_WAIT_SECONDS * 1000 + CHECK_TIMEOUT_MS),
+        signal: controller.signal,
+        onStdout,
+        onStderr,
+      },
+    );
+  } catch (err) {
+    throw new ShipStop(
+      controller.signal.aborted
+        ? "check command failed: timed out after 30 minutes in the check slot"
+        : checkFailureReason(err, step, combined),
+    );
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** The exec options of one git or gh call in `cwd`, with a time limit and a 64 MiB buffer. */
@@ -185,7 +313,7 @@ function assertShipBranches(
 /**
  * True for a group card whose loop progress vouches for its branches.
  *
- * @remarks A launched ticket card takes the ahead and clean checks even with Part A progress, because its one
+ * @remarks A single ticket card takes the ahead and clean checks even with Part A progress, because its one
  * unit names no branch and so cannot vouch for the session branch.
  */
 function isGroupLoop(
@@ -219,18 +347,21 @@ function assertNoRunningFlow(boardKey: BoardKey): void {
 }
 
 /**
- * Check the ship preconditions of a loop card in their fixed order, with no git call and no write.
+ * Check the ship preconditions of a group card or a single ticket card in their fixed order, with no git call and no write.
  *
  * @remarks A card whose engine is active and not closed is refused whatever its unit count. A group
- * with no loop progress and every launched ticket card need the Agent done column, and a refusal is
- * a typed error, so a refused call stores no flow.
+ * with no loop progress and every single ticket card need the Agent done column, and a refusal is
+ * a typed error, so a refused call stores no flow. A ticket card with no launch passes only with a
+ * session branch, and never as a group member or a review card, whose branch is not its own work.
  */
 function assertShippable(
   caller: OrchestratorIdentity,
   card: Card,
   { repository, branches }: ShipInput,
 ): ShipFlow["rights"] {
-  if (!isLoopCard(card)) throw new ValidationError("not-group-card");
+  if (!isLoopCard(card) && (!card.branch || card.groupId || card.reviewPr)) {
+    throw new ValidationError("not-group-card");
+  }
   if (
     !mayShip(resolveBoard(caller.boardKey).orchestrators, caller.orchestratorId)
   ) {
@@ -281,7 +412,7 @@ function assertShippable(
  * Throw the typed 409 unless each branch is ahead of its base and the worktree is clean.
  *
  * @remarks Only a card whose loop cannot vouch for its branches runs it: a group with no loop
- * progress or a launched ticket card. The base is `origin/<base>` when that ref exists, because the session
+ * progress or a single ticket card. The base is `origin/<base>` when that ref exists, because the session
  * branch is cut from it, else the local base. It runs before any write, so a refusal stores no flow.
  */
 async function assertAheadAndClean(
@@ -387,6 +518,8 @@ export async function startShip(
       "get-url",
       "origin",
     ]).catch(() => "");
+    const previous =
+      card.shipFlow?.repository === input.repository ? card.shipFlow : null;
     const flow: ShipFlow = {
       state: "running",
       rights,
@@ -403,6 +536,9 @@ export async function startShip(
         admin: false,
         tip: null,
         checked: null,
+        passed:
+          previous?.branches.find((p) => p.name === b.name)?.passed ?? null,
+        checkSkipped: false,
       })),
       failedStep: null,
       reason: null,
@@ -541,7 +677,8 @@ function isDispatchRepo(worktree: string): boolean {
  * Check that the diff holds only this branch, the prose rule and the repository check command.
  *
  * @remarks The branch's own files run from the previous branch's stored tip to this branch's tip
- * before the merge. Only the first branch, which has no previous tip, uses its merge base.
+ * before the merge. Only the first branch, which has no previous tip, uses its merge base. A retry
+ * on the commit that already passed skips only the check command.
  */
 async function check(r: Runner, branch: ShipBranch): Promise<void> {
   const tip = branch.tip ?? (await exec(r, "git", ["rev-parse", "HEAD"]));
@@ -574,22 +711,27 @@ async function check(r: Runner, branch: ShipBranch): Promise<void> {
   }
   const argv = r.checkCommand.split(/\s+/).filter((a) => a !== "");
   if (argv.length === 0) return;
-  try {
-    await shipTools.run(
-      "env",
-      ["-u", "NODE_ENV", ...argv],
-      callOptions(r.worktree, CHECK_TIMEOUT_MS),
+  if (branch.passed != null && branch.passed === branch.checked) {
+    branch.checkSkipped = true;
+    await persist(r);
+    recordGroupState(
+      store.getCard(r.cardId),
+      "ship_check_skipped",
+      `check skipped: ${branch.checked} already passed it`,
     );
-  } catch (err) {
-    throw new ShipStop(`check command failed: ${firstLine(err)}`);
+    return;
   }
+  await runCheck(r.worktree, argv);
+  branch.passed = branch.checked;
+  await persist(r);
 }
 
 /**
  * The number of the open PR the branch can reuse, or null when there is none.
  *
- * @remarks Only a same-repository PR into main whose head is the checked commit counts, so an older
- * PR into another base or a fork PR with the same head name is never adopted.
+ * @remarks Only a same-repository PR into main counts, so a PR into another base or a fork PR with
+ * the same head name is never adopted. The head commit is not compared here: a list read around a
+ * push can answer a stale head, so `waitPrHead` reads it instead.
  */
 async function openPrOf(r: Runner, branch: ShipBranch): Promise<number | null> {
   const out = await exec(
@@ -605,14 +747,13 @@ async function openPrOf(r: Runner, branch: ShipBranch): Promise<number | null> {
       "--state",
       "open",
       "--json",
-      "number,baseRefName,isCrossRepository,headRefOid",
+      "number,baseRefName,isCrossRepository",
     ]),
   );
   const match = (JSON.parse(out) as Record<string, unknown>[]).find(
     (pr) =>
       pr.baseRefName === "main" &&
       pr.isCrossRepository === false &&
-      pr.headRefOid === branch.checked &&
       Number.isSafeInteger(pr.number) &&
       (pr.number as number) > 0,
   );
@@ -620,14 +761,37 @@ async function openPrOf(r: Runner, branch: ShipBranch): Promise<number | null> {
 }
 
 /**
+ * Read the head commit of an adopted PR until it is `expected`; the fifth miss stops the flow.
+ *
+ * @remarks GitHub can answer the previous head for a few seconds after a push.
+ */
+async function waitPrHead(
+  r: Runner,
+  pr: number,
+  expected: string,
+): Promise<void> {
+  for (let read = 1; ; read += 1) {
+    const seen = (await viewPr(r, pr, "headRefOid")).headRefOid;
+    if (seen === expected) return;
+    if (read === HEAD_READS) {
+      throw new ShipStop(
+        `PR ${pr} head is ${String(seen)} after ${HEAD_READS} reads, expected ${expected}`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, shipTools.headPollMs));
+  }
+}
+
+/**
  * Push the branch and open its PR unless a PR is recorded or open for the branch.
  *
- * @remarks A new `start_ship` after a stop has no recorded PR, so it reuses the open PR of the
- * branch, since `gh pr create` refuses a second PR for one head.
+ * @remarks The PR list can answer empty right after a push, so the lookup runs before the push. A
+ * create that still reports an existing PR adopts the PR its message names.
  */
 async function pushAndOpen(r: Runner, branch: ShipBranch): Promise<void> {
   if (branch.checked === null)
     throw new ShipStop("branch moved since the check");
+  const open = branch.pr === null ? await openPrOf(r, branch) : null;
   await exec(
     r,
     "git",
@@ -635,28 +799,42 @@ async function pushAndOpen(r: Runner, branch: ShipBranch): Promise<void> {
     NETWORK_TIMEOUT_MS,
   );
   if (branch.pr !== null) return;
-  const open = await openPrOf(r, branch);
   if (open !== null) {
+    await waitPrHead(r, open, branch.checked);
     branch.pr = open;
     await persist(r);
     return;
   }
-  const url = await exec(
-    r,
-    "gh",
-    ghArgs(r, [
-      "pr",
-      "create",
-      "--base",
-      "main",
-      "--head",
-      branch.name,
-      "--title",
-      branch.title,
-      "--body",
-      branch.body,
-    ]),
-  );
+  let url: string;
+  try {
+    url = await exec(
+      r,
+      "gh",
+      ghArgs(r, [
+        "pr",
+        "create",
+        "--base",
+        "main",
+        "--head",
+        branch.name,
+        "--title",
+        branch.title,
+        "--body",
+        branch.body,
+      ]),
+    );
+  } catch (err) {
+    const named = Number(
+      /already exists[\s\S]*?\/pull\/(\d+)/.exec(
+        (err as { stderr?: string }).stderr ?? "",
+      )?.[1],
+    );
+    if (!Number.isSafeInteger(named) || named <= 0) throw err;
+    await waitPrHead(r, named, branch.checked);
+    branch.pr = named;
+    await persist(r);
+    return;
+  }
   const pr = Number(url.split("\n").at(-1)?.split("/").at(-1));
   if (!Number.isSafeInteger(pr) || pr <= 0) {
     throw new ShipStop(`no PR number in gh output: ${url.slice(0, 200)}`);

@@ -12,6 +12,7 @@ export interface FakeGhScenario {
   prState?: "OPEN" | "CLOSED";
   mergeError?: string;
   adminError?: string;
+  hideOpenPrs?: "always" | "afterPush";
 }
 
 const FAKE_GH_SCRIPT = String.raw`import fs from "node:fs";
@@ -77,6 +78,11 @@ if (verb === "list") {
     ? []
     : Object.entries(state.prs)
         .filter(([, p]) => p.head === head && p.state === "OPEN")
+        .filter(() => scenario.hideOpenPrs !== "always")
+        .filter(
+          ([, p]) =>
+            scenario.hideOpenPrs !== "afterPush" || !p.headRefOid || p.headRefOid === remoteHead(head),
+        )
         .filter(([, p]) => base === undefined || (p.base ?? "main") === base)
         .map(([n, p]) => ({
           number: Number(n),
@@ -93,6 +99,17 @@ if (verb === "view" && (state.failedViews ?? 0) < (scenario.failViews ?? 0)) {
   fail("fake gh: error connecting to api.github.com");
 }
 if (verb === "create") {
+  const head = flag("--head");
+  const base = flag("--base");
+  const twin = Object.entries(state.prs).find(
+    ([, p]) => p.state === "OPEN" && p.head === head && (p.base ?? "main") === (base ?? "main") && p.cross !== true,
+  );
+  if (twin) {
+    fail(
+      'a pull request for branch "' + head + '" into branch "' + (base ?? "main") + '" already exists:\n' +
+        "https://github.com/acme/app/pull/" + twin[0],
+    );
+  }
   const n = state.next++;
   state.prs[n] = { head: flag("--head"), base: flag("--base"), title: flag("--title"), state: "OPEN", polls: 0, mergePolls: 0 };
   save();
@@ -101,6 +118,13 @@ if (verb === "create") {
 }
 const pr = state.prs[number];
 if (!pr) fail("fake gh: no PR " + number);
+if (verb === "view" && flag("--json") === "headRefOid") {
+  pr.headViews = (pr.headViews ?? 0) + 1;
+  save();
+  const stale = pr.headViews <= (pr.staleViews ?? 0);
+  process.stdout.write(JSON.stringify({ headRefOid: stale ? pr.headRefOid : remoteHead(pr.head) }) + "\n");
+  process.exit(0);
+}
 if (verb === "view" && flag("--json") === "state,statusCheckRollup") {
   pr.polls += 1;
   const conclusion =
@@ -153,7 +177,8 @@ function shellQuote(value: string): string {
  * @remarks Each argv is one JSON line in `<dir>/gh-calls.jsonl`; PR numbers and poll counts live
  * in `<dir>/gh-state.json`. A merge squashes the PR head into the local bare `origin` of the
  * calling worktree, so nothing reaches a network remote. A stored PR may set `base`, `cross` and
- * `headRefOid`; the list answers the head commit of `origin` when it sets none.
+ * `headRefOid`; the list answers the head commit of `origin` when it sets none. A head view answers
+ * the stored `headRefOid` for the first `staleViews` reads, then the head commit of `origin`.
  */
 export function writeFakeGh(
   binDir: string,

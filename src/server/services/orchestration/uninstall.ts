@@ -128,7 +128,8 @@ export async function scanFootprint(opts: {
   const regenerables = [
     HOOK_SCRIPT_PATH,
     HOOK_SETTINGS_PATH,
-    ...CROSS_SESSION_INBOUND_VALUES.map(hookSettingsPath),
+    ...CROSS_SESSION_INBOUND_VALUES.map((v) => hookSettingsPath(v)),
+    ...CROSS_SESSION_INBOUND_VALUES.map((v) => hookSettingsPath(v, true)),
     PTY_SHIM_PATH,
     VAULT_RUN_PATH,
     VAULT_GUARD_PATH,

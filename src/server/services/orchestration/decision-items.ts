@@ -7,7 +7,7 @@ import {
   ValidationError,
 } from "../domain/errors.js";
 import type { OrchestratorIdentity } from "../domain/orchestrator-scope.js";
-import { scopeTargetOf } from "./boards.js";
+import { callerPolicy, scopeTargetOf } from "./boards.js";
 
 interface DecisionInput {
   cardId?: string | null | undefined;
@@ -42,6 +42,24 @@ const SERVER_OPTIONS: Partial<
   plan: PLAN_OPTIONS,
 };
 
+const AUTO_APPROVED_KINDS: readonly DecisionItem["kind"][] = [
+  "ticket_proposal",
+  "plan",
+];
+
+const answeredListeners: ((item: DecisionItem) => void)[] = [];
+
+/**
+ * Register a listener that runs after a decision item is answered through `answerDecisionItem`.
+ *
+ * @remarks A listener that throws is logged and never fails the answer.
+ */
+export function onDecisionAnswered(
+  listener: (item: DecisionItem) => void,
+): void {
+  answeredListeners.push(listener);
+}
+
 /**
  * Resolve the orchestrator that owns a decision.
  *
@@ -54,13 +72,15 @@ function ownerOf(caller: OrchestratorIdentity, cardId: string | null): string {
 }
 
 /**
- * Store an open decision item for the caller's board and record `decision_raised`.
+ * Store a decision item for the caller's board and record its event.
  *
  * @remarks
- * The caller checks that `cardId` belongs to the board. The recommended option must be
+ * The caller checks that `cardId` belongs to the board, and the recommended option must be
  * one of the options, else the typed 400 `invalid-recommended-option`. A `roadmap_approval`,
  * `ticket_proposal` or `plan` item gets the server options, so the label the user picks always
- * matches the id the later tool checks.
+ * matches the id the later tool checks. Under roadmapApproval `all` or
+ * `rules` a `ticket_proposal` or `plan` item is stored answered with `approve` and records
+ * `decision_answered`, so the orchestrator never answers its own item.
  */
 export function createDecisionItem(
   caller: OrchestratorIdentity,
@@ -81,19 +101,27 @@ export function createDecisionItem(
   ) {
     throw new ValidationError("invalid-recommended-option");
   }
+  const owner = ownerOf(caller, input.cardId ?? null);
+  const mode = AUTO_APPROVED_KINDS.includes(input.kind)
+    ? callerPolicy({ boardKey: caller.boardKey, orchestratorId: owner })
+        .roadmapApproval
+    : "ask";
+  const autoApprove = mode !== "ask";
+  const createdAt = new Date().toISOString();
+  const note = `Approved by the board policy (roadmapApproval: ${mode}).`;
   const item: DecisionItem = {
     id: randomUUID(),
     boardKey: caller.boardKey,
     cardId: input.cardId ?? null,
-    orchestratorId: ownerOf(caller, input.cardId ?? null),
+    orchestratorId: owner,
     kind: input.kind,
     question: input.question,
     options,
     recommendedOptionId: recommended,
-    state: "open",
-    answer: null,
-    createdAt: new Date().toISOString(),
-    answeredAt: null,
+    state: autoApprove ? "answered" : "open",
+    answer: autoApprove ? { optionId: "approve", note } : null,
+    createdAt,
+    answeredAt: autoApprove ? createdAt : null,
     ...(input.tickets === undefined
       ? {}
       : { proposal: { tickets: input.tickets, usedIndexes: [] } }),
@@ -104,11 +132,12 @@ export function createDecisionItem(
     boardKey: item.boardKey,
     cardId: item.cardId,
     sessionId: null,
-    kind: "decision_raised",
+    kind: autoApprove ? "decision_answered" : "decision_raised",
     data: {
       decisionId: item.id,
       kind: item.kind,
       orchestratorId: item.orchestratorId,
+      ...item.answer,
     },
     ts: item.createdAt,
   });
@@ -146,5 +175,12 @@ export function answerDecisionItem(
     },
     ts: new Date().toISOString(),
   });
+  for (const listener of answeredListeners) {
+    try {
+      listener(answered);
+    } catch (err) {
+      console.warn(`[decision-items] ${(err as Error).message}`);
+    }
+  }
   return answered;
 }

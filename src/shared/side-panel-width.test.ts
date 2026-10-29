@@ -4,9 +4,18 @@ import {
   clampPanelWidth,
   isTapGesture,
   keyboardStepWidth,
+  panelMaxWidth,
   persistedWidthCss,
   startsResizeDrag,
 } from "./side-panel-width.js";
+
+void test("the clamp never lets the panel cover the sidebar", () => {
+  assert.equal(clampPanelWidth(1400, 1280, 240), 1040);
+  assert.equal(clampPanelWidth(1400, 1440, 56), 1296);
+  assert.equal(clampPanelWidth(500, 1280, 240), 500);
+  assert.equal(panelMaxWidth(1366, 240), 1126);
+  assert.equal(keyboardStepWidth("ArrowLeft", 1040, 1280, 240), 1040);
+});
 
 test("the clamp refuses a width below 360 px or above 90 percent of the viewport", () => {
   assert.equal(clampPanelWidth(200, 1440), 360);

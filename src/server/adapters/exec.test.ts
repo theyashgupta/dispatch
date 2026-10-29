@@ -71,3 +71,23 @@ test("a run killed by its timeout rejects with killed set", async () => {
   assert.equal(await killedOf(run("sleep", ["5"], { timeout: 100 })), true);
   assert.equal(await killedOf(run("sh", ["-c", "exit 3"], {})), false);
 });
+
+test("onStderr receives the stderr chunks as strings and stderr is still captured", async () => {
+  const chunks: unknown[] = [];
+  const { stderr } = await run("sh", ["-c", "echo one >&2; echo two >&2"], {
+    onStderr: (chunk) => chunks.push(chunk),
+  });
+  assert.ok(chunks.every((c) => typeof c === "string"));
+  assert.equal(chunks.join(""), "one\ntwo\n");
+  assert.equal(stderr, "one\ntwo\n");
+});
+
+test("onStdout receives the stdout chunks as strings and stdout is still captured", async () => {
+  const chunks: unknown[] = [];
+  const { stdout } = await run("sh", ["-c", "echo one; echo two"], {
+    onStdout: (chunk) => chunks.push(chunk),
+  });
+  assert.ok(chunks.every((c) => typeof c === "string"));
+  assert.equal(chunks.join(""), "one\ntwo\n");
+  assert.equal(stdout, "one\ntwo\n");
+});

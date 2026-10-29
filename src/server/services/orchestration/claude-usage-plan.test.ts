@@ -8,8 +8,13 @@ import { isolateEnv } from "../../test-support/fixtures.js";
 
 const env = isolateEnv();
 const usage = await import("./claude-usage.js");
-const { accountDir, upsertAccount, setActiveAccount } =
-  await import("./claude-accounts.js");
+const {
+  accountDir,
+  adoptManagedDefault,
+  removeAccount,
+  upsertAccount,
+  setActiveAccount,
+} = await import("./claude-accounts.js");
 const { setOrchestrationConfig } = await import("../infra/config-holder.js");
 setOrchestrationConfig({ linearApiKey: "", port: 4700 });
 const { USAGE_REQUEST_LOG_PATH } =
@@ -121,6 +126,39 @@ void test("a 401 re-plans the next read 600 seconds out", async () => {
   assert.ok(plan.nextDueAt >= before + 600_000 * 0.9);
   assert.ok(plan.nextDueAt <= Date.now() + 600_000);
   assert.equal(plan.holdUntil, null);
+});
+
+void test("a 401 is token-expired when the access token expired and the refresh token lives, else token-rejected", async () => {
+  const ADDED = "44444444-4444-4444-8444-444444444444";
+  fs.mkdirSync(accountDir(ADDED), { recursive: true });
+  const write = (oauth: Record<string, number>): void =>
+    fs.writeFileSync(
+      path.join(accountDir(ADDED), ".credentials.json"),
+      JSON.stringify({
+        claudeAiOauth: { accessToken: "sk-ant-oat01-FAKE-IDLE", ...oauth },
+      }),
+    );
+  const errorFor = async (oauth: Record<string, number>): Promise<unknown> => {
+    write(oauth);
+    usage.forgetUsage(ADDED);
+    const snapshot = await usage.refreshUsage(ADDED);
+    assert.equal(snapshot.status, "stale");
+    return snapshot.error;
+  };
+  status = 401;
+  const past = Date.now() - 60_000;
+  const future = Date.now() + 3_600_000;
+  assert.equal(await errorFor({ expiresAt: past }), "token-expired");
+  assert.equal(
+    await errorFor({ expiresAt: past, refreshTokenExpiresAt: future }),
+    "token-expired",
+  );
+  assert.equal(
+    await errorFor({ expiresAt: past, refreshTokenExpiresAt: past }),
+    "token-rejected",
+  );
+  assert.equal(await errorFor({ expiresAt: future }), "token-rejected");
+  assert.equal(await errorFor({}), "token-rejected");
 });
 
 void test("a 429 holds the account for Retry-After plus 900 seconds", async () => {
@@ -249,4 +287,27 @@ void test("an idle account that becomes the active one is read within 300 second
   await usage.runUsageTick(t + 301_000);
   assert.ok(logLines().some((l) => l.account === ADDED));
   await setActiveAccount("default");
+});
+
+void test("the tick never reads Default once a managed default exists", async () => {
+  const MANAGED = "44444444-4444-4444-8444-444444444444";
+  fs.mkdirSync(accountDir(MANAGED), { recursive: true });
+  await adoptManagedDefault({
+    id: MANAGED,
+    email: "managed@example.com",
+    orgId: "org",
+    orgName: "Org",
+    subscriptionType: "max",
+    createdAt: "2026-10-01T00:00:00.000Z",
+    lastLoginAt: "2026-10-01T00:00:00.000Z",
+  });
+  try {
+    await usage.runUsageTick();
+    assert.equal(logLines().filter((l) => l.account === "default").length, 0);
+    assert.equal(hits, 0);
+  } finally {
+    await removeAccount(MANAGED);
+  }
+  await usage.runUsageTick();
+  assert.equal(hits, 1);
 });

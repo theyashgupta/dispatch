@@ -1,0 +1,14 @@
+⏺ Task(Run the phase gates)
+  ⎿  Done (14 tool uses · 61.2k tokens · 8m 12s)
+
+⏺ Starting the next phase.
+
+  ⎿  You've hit your weekly limit · resets Oct 20 at 8:30am (Asia/Calcutta)
+/upgrade or /usage-credits to finish what you’re working on.
+✻ Worked for 9m 41s · done 9:07 AM
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Opus 5.5 · high  │  ███░░░░░░░   27%  272k/1.0M
+  engine  │  GROUP-22  │  thinking  │  Attention-kind  │  7d 100%  │  1h12m  │  +633/-0  │  $6.29
+  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← for agents

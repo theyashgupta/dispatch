@@ -761,7 +761,8 @@ export default tseslint.config(
       "src/web/routeTree.gen.ts",
       ".dependency-cruiser.cjs",
       "eslint-local/**",
-      "scripts/**",
+      "scripts/**/*",
+      "!scripts/*.mjs",
       ".claude/worktrees/**",
       "src/web/public/**",
       ".planning/**",
@@ -791,9 +792,19 @@ export default tseslint.config(
     : []),
 
   {
-    files: [".claude/**/*.mjs", "tests/**/*.mjs"],
+    files: [".claude/**/*.mjs", "tests/**/*.mjs", "scripts/*.mjs"],
     extends: [tseslint.configs.disableTypeChecked],
     languageOptions: { globals: globals.node },
+  },
+
+  {
+    files: ["scripts/*.mjs"],
+    rules: { "no-empty": ["error", { allowEmptyCatch: true }] },
+  },
+
+  {
+    files: ["scripts/terminal-appearance-e2e.mjs"],
+    languageOptions: { globals: globals.browser },
   },
 
   {

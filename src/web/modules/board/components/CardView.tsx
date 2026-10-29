@@ -37,6 +37,8 @@ import { Button } from "@/components/ui/button";
 import { Card, cardVariants } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { isMultiSelectable } from "@/modules/board/domain/drag-selection";
+import { showsSessionRecovery } from "@/modules/board/domain/session-recovery";
+import { BlockedByChip } from "./BlockedByChip";
 import { GroupPrRow } from "./GroupPrRow";
 import { MoveToPicker } from "./MoveToPicker";
 
@@ -60,6 +62,7 @@ interface CardViewProps {
   resumeFailed?: boolean;
   watchdogFired?: boolean;
   resumeFailureCopy?: string;
+  blocker?: { label: string; title: string } | null;
   onSelect?: (id: string) => void;
   onMoveTo?: (cardId: string, column: ColumnId) => void;
   onRetryStart?: (card: CardModel) => void;
@@ -113,6 +116,7 @@ export function CardView({
   resumeFailed = false,
   watchdogFired = false,
   resumeFailureCopy,
+  blocker,
   onSelect,
   onMoveTo,
   onRetryStart,
@@ -125,6 +129,7 @@ export function CardView({
   const showRepo = new Set(prs.map((pr) => pr.repo)).size > 1;
   const selectable = isMultiSelectable(card);
   const needsAttention = getNeedsAttention(card);
+  const showRecovery = showsSessionRecovery(card);
   const priorityDot = isGroup ? undefined : PRIORITY_DOT[card.priority];
   const memberCount = members?.length ?? 0;
   const startError = card.startError;
@@ -143,10 +148,12 @@ export function CardView({
         {`Provisioning${sessionCountSuffix}`}
       </Badge>
     ) : card.sessionLost === true ? (
-      <Badge tone="danger" title={sessionChipTitle("Lost")}>
-        <TriangleAlert aria-hidden="true" />
-        {`Lost${sessionCountSuffix}`}
-      </Badge>
+      showRecovery ? (
+        <Badge tone="danger" title={sessionChipTitle("Lost")}>
+          <TriangleAlert aria-hidden="true" />
+          {`Lost${sessionCountSuffix}`}
+        </Badge>
+      ) : null
     ) : card.tmuxSession != null ? (
       <Badge tone="success" title={sessionChipTitle("Live")}>
         <Activity aria-hidden="true" />
@@ -229,6 +236,9 @@ export function CardView({
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-(--space-xs)">
           <SourceBadge source={card.source ?? "linear"} />
           <LinearStateChip card={card} />
+          {blocker != null && (
+            <BlockedByChip label={blocker.label} title={blocker.title} />
+          )}
           {!isGroup &&
             prs
               .slice(0, PR_CHIP_CAP)
@@ -356,7 +366,7 @@ export function CardView({
         <div className="mt-(--space-xs) text-sm font-semibold text-muted-foreground">
           {card.provisioningStep}
         </div>
-      ) : card.sessionLost === true ? (
+      ) : card.sessionLost === true && showRecovery ? (
         <div className="mt-(--space-xs) flex flex-col gap-(--space-xs)">
           <CardNotice icon>Session lost</CardNotice>
 

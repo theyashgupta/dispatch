@@ -46,6 +46,8 @@ void test("add fills an empty scope and override and refuses each bad field with
   assert.equal(code(addBodySchema, { ...extra, name: "  " }), "invalid-name");
   assert.equal(code(addBodySchema, { ...extra, role: "boss" }), "invalid-role");
   assert.equal(code(addBodySchema, { ...extra, other: 1 }), "unknown-field");
+  assert.equal(code(addBodySchema, { ...extra, kind: "feature" }), undefined);
+  assert.equal(code(addBodySchema, { ...extra, kind: "team" }), "invalid-kind");
 });
 
 void test("the scope and the override refuse an extra key and an out of range value", () => {
@@ -76,4 +78,5 @@ void test("an edit needs one known field", () => {
   assert.equal(code(editBodySchema, { name: "Renamed" }), undefined);
   assert.equal(code(editBodySchema, {}), "empty-patch");
   assert.equal(code(editBodySchema, { role: "main" }), "unknown-field");
+  assert.equal(code(editBodySchema, { kind: "board" }), "unknown-field");
 });

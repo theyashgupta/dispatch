@@ -1,13 +1,15 @@
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import type { Card, Column } from "../../../shared/types.js";
 import { isDemoteEligible } from "../../../shared/demote-eligibility.js";
-import { isHiddenCard } from "../../../shared/hidden-card.js";
 import {
   blocksAgentDoneManualEntry,
   blocksTodoToInProgressManualMove,
   isManualMoveAllowed,
 } from "../../../shared/column-transitions.js";
 import { boardRepository as store } from "../../store/board-repository.js";
-import { ConflictError, ValidationError } from "../domain/errors.js";
+import { ConflictError } from "../domain/errors.js";
+import { startUnblockedCards } from "./blocked-start.js";
+import { actionableCard } from "./card-target.js";
 import { pushColumnChanges } from "./linear-outbound.js";
 
 /**
@@ -42,43 +44,7 @@ function manualMoveTransitionError(card: Card, column: Column): string | null {
   return `moving ${card.column} → ${column} is not an allowed manual transition`;
 }
 
-/**
- * The 409 copy for a grouped member, or null for an ungrouped card or a group card.
- *
- * @remarks A grouped member is never progressed on its own, also before its group starts, because
- * the session and workspace fields live only on the group card.
- */
-export function groupedMemberError(card: Card): string | null {
-  if (card.groupId == null) return null;
-  return `card is grouped under ${card.groupId}, act on the group card`;
-}
-
-/** The card a single-card action targets, or a 400 for an unknown id and a 409 for a grouped member. */
-export function actionableCard(id: string): Card {
-  const card = store.getCard(id);
-  if (!card) throw new ValidationError(`unknown card id: ${id}`);
-  const groupError = groupedMemberError(card);
-  if (groupError != null) throw new ConflictError(groupError);
-  return card;
-}
-
-/**
- * The card a user start or Run Claude targets: `actionableCard`, plus a 409 for a hidden orchestrator card.
- *
- * @remarks Only the orchestrator lifecycle starts or relaunches a hidden card, so its record and
- * token stay in step with the session.
- */
-export function launchableCard(id: string): Card {
-  const card = actionableCard(id);
-  if (isHiddenCard(card)) {
-    throw new ConflictError("orchestrator-card", {
-      reason: "use the orchestrator panel",
-    });
-  }
-  return card;
-}
-
-/** Move a card to a column by hand under the board's manual move rules, then push the change to Linear. */
+/** Move a card to a column by hand under the board's manual move rules, push the change to Linear, and start the cards a move to Done unblocks. */
 export async function moveCard(id: string, column: Column): Promise<void> {
   const card = actionableCard(id);
   const transitionError =
@@ -86,4 +52,7 @@ export async function moveCard(id: string, column: Column): Promise<void> {
     manualMoveTransitionError(card, column);
   if (transitionError != null) throw new ConflictError(transitionError);
   void pushColumnChanges(await store.moveCardManual(id, column));
+  if (column === "done") {
+    void startUnblockedCards(card.boardKey ?? DEFAULT_BOARD_KEY);
+  }
 }

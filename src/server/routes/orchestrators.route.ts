@@ -2,6 +2,7 @@ import { Router } from "express";
 import { resolveBoard } from "../services/orchestration/boards.js";
 import {
   addOrchestrator,
+  assignCard,
   editOrchestrator,
   listOrchestrators,
   removeOrchestrator,
@@ -13,9 +14,12 @@ import { parseBoardKeyParam } from "./boards-schemas.js";
 import { httpErrorHandler, orFail } from "./error-handler.js";
 import {
   addBodySchema,
+  assignBodySchema,
   editBodySchema,
   orchestratorIdSchema,
 } from "./orchestrators-schemas.js";
+import { sessionCardParamsSchema } from "./orchestrator-schemas.js";
+import { refuseOrchestratorToken } from "./orchestrator.route.js";
 import { parseOrThrow } from "./parse-input.js";
 
 export const orchestratorsRouter = Router({ caseSensitive: true });
@@ -92,6 +96,19 @@ orchestratorsRouter.post(
       "[orchestrator] resume failed:",
     );
     res.status(202).json({ orchestrator: record });
+  },
+);
+
+orchestratorsRouter.put(
+  "/boards/:key/cards/:cardId/orchestrator",
+  async (req, res) => {
+    refuseOrchestratorToken(req);
+    const board = resolveBoard(parseBoardKeyParam(req.params.key));
+    const { cardId } = parseOrThrow(sessionCardParamsSchema, req.params);
+    const { orchestratorId } = parseOrThrow(assignBodySchema, req.body);
+    res
+      .status(200)
+      .json(await assignCard(board.key, cardId, orchestratorId, "user"));
   },
 );
 

@@ -60,17 +60,14 @@ function splitCommands(split: CommandContext["split"]): Command[] {
 /**
  * The palette's commands for the selected card, then every page, New ticket, Sync now and the boards.
  *
- * @remarks "Go to Dashboard" follows the nav list, so it shows only when the sidebar row does. Card commands come first, only with a selected card and only where it can take them:
- * Start from To Do, Open terminal with a live session, Move to every column the manual-move
- * rule allows except the card's own, and Clean up from Done. The "Boards" group comes last:
- * "Switch to board" for each board but the selected one once the board list has loaded (`switcher` is given), then
- * "Manage boards" and "Create board" always (U3-10).
+ * @remarks Card commands come first, only for a selected card and only where it can take them. "Go to Board" always shows; "Go to Dashboard" shows only when the current board has a main orchestrator. The "Boards" group comes last.
  */
 export function buildCommands(
   ctx: CommandContext,
   navItems: readonly { page: Page; label: string }[],
   card: Card | null,
   switcher: readonly SwitcherItem[] | null = null,
+  hasMainOrchestrator = false,
 ): Command[] {
   const boards: Command[] = [
     ...(switcher ?? [])
@@ -101,9 +98,12 @@ export function buildCommands(
   ];
   const general: Command[] = [
     ...[
-      ...navItems.filter((item) => item.page !== "dashboard"),
+      { page: "board" as const, label: "Board" },
+      ...navItems,
       { page: "settings" as const, label: "Settings" },
-      ...navItems.filter((item) => item.page === "dashboard"),
+      ...(hasMainOrchestrator
+        ? [{ page: "dashboard" as const, label: "Dashboard" }]
+        : []),
     ].map((item) => ({
       id: `go:${item.page}`,
       label: `Go to ${item.label}`,

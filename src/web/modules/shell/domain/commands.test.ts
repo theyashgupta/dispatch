@@ -51,18 +51,15 @@ function ctx() {
   return { context, calls };
 }
 
-const nav = [
-  { page: "inbox" as const, label: "Inbox" },
-  { page: "board" as const, label: "Board" },
-];
+const nav = [{ page: "inbox" as const, label: "Inbox" }];
 
 const ids = (card: Card | null) =>
   buildCommands(ctx().context, nav, card).map((c) => c.id);
 
 test("with no card only the page commands, New ticket and Sync now appear", () => {
   assert.deepEqual(ids(null), [
-    "go:inbox",
     "go:board",
+    "go:inbox",
     "go:settings",
     "new-ticket",
     "meeting-notes",
@@ -189,6 +186,7 @@ test("the palette has Go to Slack only when the filtered nav list keeps the Slac
       .filter((label) => label.startsWith("Go to"));
   assert.ok(goTo(withSlack).includes("Go to Slack"));
   assert.deepEqual(goTo(withSlack.slice(0, 1)), [
+    "Go to Board",
     "Go to Inbox",
     "Go to Settings",
   ]);
@@ -293,19 +291,37 @@ test("groupCommands splits the Boards group from the ungrouped commands and keep
   );
 });
 
-test("Go to Dashboard shows only when the Dashboard nav row does", () => {
-  const withDashboard = [
-    ...nav,
-    { page: "dashboard" as const, label: "Dashboard" },
-  ];
-  const commands = buildCommands(ctx().context, withDashboard, null);
-  assert.equal(commands.filter((c) => c.id === "go:dashboard").length, 1);
+test("Go to Dashboard shows only when the current board has a main orchestrator", () => {
+  const { context, calls } = ctx();
+  const commands = buildCommands(context, nav, null, null, true);
+  const listed = commands.map((c) => c.id);
+  assert.equal(listed.filter((id) => id === "go:dashboard").length, 1);
+  assert.equal(
+    listed.indexOf("go:dashboard"),
+    listed.indexOf("go:settings") + 1,
+  );
+  const dashboard = commands.find((c) => c.id === "go:dashboard");
+  assert.equal(dashboard?.label, "Go to Dashboard");
+  void dashboard?.run();
+  assert.deepEqual(calls, ["go dashboard"]);
   assert.equal(
     buildCommands(ctx().context, nav, null).some(
       (c) => c.id === "go:dashboard",
     ),
     false,
   );
+});
+
+test("Go to Board always shows and opens the current board", () => {
+  for (const hasMain of [false, true]) {
+    const { context, calls } = ctx();
+    const board = buildCommands(context, nav, null, null, hasMain).find(
+      (c) => c.id === "go:board",
+    );
+    assert.equal(board?.label, "Go to Board");
+    void board?.run();
+    assert.deepEqual(calls, ["go board"]);
+  }
 });
 
 test("the split command opens a closed split when another board exists", () => {

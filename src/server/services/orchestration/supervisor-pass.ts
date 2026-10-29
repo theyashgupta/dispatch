@@ -17,6 +17,7 @@ import {
 } from "./group-launch.js";
 import { groupCost } from "./orchestrator-read.js";
 import { memoryCheck } from "./memory-governor.js";
+import { budgetWarningStep } from "../domain/orchestrator-policy.js";
 
 export interface PassDeps {
   power: PowerHolder;
@@ -150,6 +151,57 @@ async function stopOverBudget(
   }
 }
 
+/** Mark a group once when its cost reaches the warning percent of its budget, and clear the mark by the re-arm rule. */
+async function warnNearBudget(cards: Card[], now: number): Promise<void> {
+  for (const card of cards) {
+    if (card.column === "done") continue;
+    const policy = ownerPolicy(card);
+    if (!policy) continue;
+    const budget = policy.budgetPerGroup;
+    const percent = policy.budgetWarnPercent;
+    const cost = groupCost(card);
+    const step = budgetWarningStep({
+      budget,
+      percent,
+      cost,
+      mark: card.budgetWarning,
+    });
+    if (step === "clear") {
+      await store.setBudgetWarning(card.id, null);
+    } else if (step === "refresh" && card.budgetWarning && budget !== null) {
+      await store.setBudgetWarning(card.id, {
+        ...card.budgetWarning,
+        cost,
+        budget,
+        percent,
+      });
+    } else if (step === "set" && budget !== null) {
+      const ts = new Date(now).toISOString();
+      await store.setBudgetWarning(card.id, { at: ts, cost, budget, percent });
+      store.appendOrchestrationEvent({
+        boardKey: card.boardKey ?? DEFAULT_BOARD_KEY,
+        cardId: card.id,
+        sessionId: card.activeSessionId ?? null,
+        kind: "supervisor_action",
+        data: { action: "budget_warning", cost, budget, percent },
+        ts,
+      });
+    }
+  }
+}
+
+/** Clear the budget warning mark of every group card on a board whose supervisor is off. */
+async function clearUnsupervisedWarnings(): Promise<void> {
+  for (const board of store.listBoards()) {
+    if (board.policy.supervisor === "on") continue;
+    for (const card of store.listCards(board.key)) {
+      if (card.source === "group" && card.budgetWarning) {
+        await store.setBudgetWarning(card.id, null);
+      }
+    }
+  }
+}
+
 /** Hold the keep awake child while a session of a supervised board is live, and prune gone watchers. */
 function syncPowerAndWatchers(deps: PassDeps): void {
   const live = store
@@ -187,7 +239,7 @@ export function initialPassMemory(): PassMemory {
 }
 
 /**
- * Run one supervisor pass: keep awake, wake check, PR changes, held group starts and budget stops.
+ * Run one supervisor pass: keep awake, wake check, PR changes, held group starts, budget stops and budget warnings.
  *
  * @remarks `lateMs` is how much later than 60 s this pass fired; the loop passes it so a test can
  * stand in a slept machine.
@@ -204,6 +256,8 @@ export async function runSupervisorPass(
   recordPrChanges(cards, memory);
   await startHeldGroups(cards, deps);
   await stopOverBudget(cards, memory);
+  await warnNearBudget(cards, now);
+  await clearUnsupervisedWarnings();
 }
 
 /** Start the 60 s supervisor pass and return its stop function, which also ends the keep awake child. */

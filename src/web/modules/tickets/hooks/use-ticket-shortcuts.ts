@@ -1,15 +1,13 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import {
   bindShortcuts,
+  isEditableRole,
   resolveShortcut,
 } from "../../../../shared/shortcuts.js";
 import type { Card } from "../../../../shared/types.js";
 import { isWebUrl } from "../../../../shared/web-url.js";
 import { ticketActionsFor } from "@/modules/tickets/domain/ticket-actions";
-import {
-  isEditableRole,
-  TICKET_SHORTCUTS,
-} from "@/modules/tickets/domain/ticket-keys";
+import { TICKET_SHORTCUTS } from "@/modules/tickets/domain/ticket-keys";
 
 interface TicketShortcutOptions {
   scopeId: string;
