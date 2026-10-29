@@ -6362,6 +6362,10 @@ action that finds nothing to do, such as an `Escape` already sent, writes no row
   takes the foreground, within 60 s. A failed relaunch, a lost session that stays gone, or claude
   that does not start sets `resume_failed`; an unconfirmed resume prompt is recorded as
   unconfirmed.
+- Busy relaunch on a finished card (LOCAL-193): when `runClaude` answers `busy` and the card is in
+  Agent done with a DONE marker, the supervisor records the `resume` action with result `skipped`
+  and reason `run claude busy on a finished card`. The card stays in Agent done with its DONE
+  marker, and the session does not get `resume_failed`, so `start_ship` can still ship the card.
 - Missing workspace folder before a relaunch (LOCAL-166): before `runClaude` types the launch line
   into a shell-prompt pane, the supervisor checks that the session root (the session
   `workspacePath`, else the card `workspacePath`) is a folder. If the folder is missing, the
