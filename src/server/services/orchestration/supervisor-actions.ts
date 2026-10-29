@@ -1,6 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
+import { DONE_MARKER_PREFIX } from "../../../shared/marker-key.js";
 import { isHiddenCard } from "../../../shared/hidden-card.js";
 import type { Card, Session } from "../../../shared/types.js";
 import { boardRepository as store } from "../../store/board-repository.js";
@@ -185,6 +186,20 @@ function resumeBlocked(card: Card, withMemory = true): string | null {
 }
 
 /**
+ * Whether the live card sits in Agent done with its DONE marker.
+ *
+ * @remarks A busy relaunch on such a card must not move it to Needs input, because
+ * `start_ship` then refuses the finished card.
+ */
+function finishedCard(card: Card): boolean {
+  const live = store.getCard(card.id);
+  return (
+    live?.column === "agent_done" &&
+    live.lastMarker?.startsWith(DONE_MARKER_PREFIX) === true
+  );
+}
+
+/**
  * Bring claude back in a lost or shell-prompt session, then send the resume prompt.
  *
  * @remarks A pane whose shell owns the foreground is relaunched with `runClaude`, since the resume
@@ -231,6 +246,14 @@ async function resume(
     const blocked = resumeBlocked(card);
     if (blocked !== null) return failed(blocked);
     const outcome = await deps.relaunch(card.id);
+    if (outcome === "busy" && finishedCard(card)) {
+      record(card, session, {
+        action: "resume",
+        result: "skipped",
+        reason: "run claude busy on a finished card",
+      });
+      return null;
+    }
     if (outcome !== "launched") return failed(`run claude ${outcome}`);
   } else {
     await deps.resume(card.id);
