@@ -298,6 +298,8 @@ On a board with the supervisor on, the supervisor types the resume prompt once t
 - 409 `memory-low`: memory on this Mac is low. Wait for the next wake.
 - 400 `invalid-identifier`: the card id is not a ticket id. Raise a decision item.
 - 403 `policy-refused`: the cap is reached. Wait until a loop finishes.
+- A card whose session state is `released`: Claude exited after DONE to free memory. `resume_session` brings Claude back in the live session, then send_input.
+- 409 `revive-failed`: Claude did not start in the released session. Use `read_pane_tail`, then raise a decision item.
 
 ### Loop count
 
