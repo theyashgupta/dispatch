@@ -115,6 +115,7 @@ src/web/modules/board/components/SearchField.tsx	bg-[color-mix(in_srgb,var(--bad
 src/web/modules/board/components/SearchField.tsx	max-h-[360px]	one-off pixel geometry without a token step
 src/web/modules/board/components/SearchField.tsx	text-[color-mix(in_srgb,var(--badge-state)_35%,var(--text))]	tint of a signal token, pending a Badge tone or tint token
 src/web/modules/board/components/SearchField.tsx	w-[clamp(280px,60vw,360px)]	viewport or container relative size
+src/web/modules/board/components/SelectionBar.tsx	bottom-[calc(var(--space-xl)+var(--bottom-bar-height,0px))]	viewport or container relative size
 src/web/modules/board/components/SelectionBar.tsx	max-w-[calc(100vw_-_2*var(--space-lg))]	viewport or container relative size
 src/web/modules/board/components/StatusPillSwitcher.tsx	bg-[color-mix(in_srgb,var(--badge-state)_16%,var(--surface-column))]	tint of a signal token, pending a Badge tone or tint token
 src/web/modules/board/components/StatusPillSwitcher.tsx	text-[color-mix(in_srgb,var(--badge-state)_35%,var(--text))]	tint of a signal token, pending a Badge tone or tint token
@@ -161,6 +162,7 @@ src/web/modules/detail/components/PanelFrame.tsx	flex-[0_1_auto]	flex shorthand
 src/web/modules/detail/components/PanelFrame.tsx	h-[calc(100dvh_-_var(--chrome-top,var(--page-header-height)))]	viewport or container relative size
 src/web/modules/detail/components/PanelFrame.tsx	left-[calc(var(--nav-current,0px)_+_var(--orca-nav-width))]	viewport or container relative size
 src/web/modules/detail/components/PanelFrame.tsx	max-h-[40%]	viewport or container relative size
+src/web/modules/detail/components/PanelFrame.tsx	max-w-[calc(100vw_-_var(--nav-current,0px))]	viewport or container relative size
 src/web/modules/detail/components/PanelFrame.tsx	top-[var(--chrome-top,var(--page-header-height))]	one-off pixel geometry without a token step
 src/web/modules/detail/components/PanelFrame.tsx	transition-[translate]	transition property list, no value
 src/web/modules/detail/components/PanelFrame.tsx	w-[calc(100%_-_var(--nav-current,0px)_-_var(--orca-nav-width))]	viewport or container relative size
@@ -184,13 +186,13 @@ src/web/modules/orchestrator/components/ExtraFormDialog.tsx	max-h-[calc(100dvh-2
 src/web/modules/orchestrator/components/MoveGroupsDialog.tsx	max-h-[calc(100dvh-2rem)]	viewport or container relative size
 src/web/modules/orchestrator/components/SelectField.tsx	max-w-[calc(100vw-2rem)]	viewport or container relative size
 src/web/modules/playbooks/components/PlaybookEditorDialog.tsx	max-h-[80vh]	viewport or container relative size
-src/web/modules/sessions/components/SessionsBulkBar.tsx	max-w-[calc(100vw_-_2*var(--space-lg))]	viewport or container relative size
 src/web/modules/settings/components/CrossSessionInboundSection.tsx	max-w-[calc(100vw-2rem)]	viewport or container relative size
 src/web/modules/settings/components/SettingsSidebar.tsx	max-w-[80vw]	viewport or container relative size
 src/web/modules/settings/components/UpdatesSection.tsx	[overflow-wrap:anywhere]	CSS property with no Tailwind utility
 src/web/modules/setup/components/SetupDialog.tsx	max-h-[calc(100vh-2rem)]	viewport or container relative size
 src/web/modules/setup/components/SetupDialog.tsx	max-w-[min(45rem,calc(100%-2rem))]	viewport or container relative size
 src/web/modules/shell/components/AppSidebar.tsx	tracking-[0.04em]	tracking token lands in LOCAL-144
+src/web/modules/shell/components/BottomBar.tsx	transition-[height]	transition property list, no value
 src/web/modules/shell/components/CheatSheet.tsx	grid-cols-[repeat(auto-fit,minmax(150px,1fr))]	grid track template
 src/web/modules/shell/components/CheatSheet.tsx	max-h-[70vh]	viewport or container relative size
 src/web/modules/shell/components/CheatSheet.tsx	max-w-[760px]	one-off pixel geometry without a token step
@@ -202,6 +204,7 @@ src/web/modules/shell/components/ShellFrame.tsx	[--nav-current:0px]	scoped custo
 src/web/modules/shell/components/ShellFrame.tsx	[--nav-current:var(--nav-width)]	scoped custom property set from tokens
 src/web/modules/shell/components/ShellFrame.tsx	[--nav-current:var(--nav-width-collapsed)]	scoped custom property set from tokens
 src/web/modules/shell/components/SidebarBoards.tsx	tracking-[0.04em]	tracking token lands in LOCAL-144
+src/web/modules/shell/components/SidebarDashboards.tsx	tracking-[0.04em]	tracking token lands in LOCAL-144
 src/web/modules/shell/containers/ShellContainer.tsx	[--sidebar-width-icon:var(--nav-width-collapsed)]	scoped custom property set from tokens
 src/web/modules/shell/containers/ShellContainer.tsx	[--sidebar-width:var(--nav-width)]	scoped custom property set from tokens
 src/web/modules/today/components/EntryRow.tsx	leading-[normal]	one-off pixel geometry without a token step
@@ -214,6 +217,7 @@ src/web/modules/workspaces/components/WorkspaceSection.tsx	[overflow-wrap:anywhe
 src/web/modules/workspaces/components/WorkspaceSection.tsx	grid-rows-[0fr]	grid track template
 src/web/modules/workspaces/components/WorkspaceSection.tsx	grid-rows-[1fr]	grid track template
 src/web/modules/workspaces/components/WorkspaceSection.tsx	transition-[grid-template-rows,visibility]	transition property list, no value
+src/web/styles/globals.css	font-size: max(16px, 1em)	iOS focus-zoom floor for coarse pointers, 16px is the platform threshold
 src/web/terminal.html	#0b0c0e	standalone xterm page, loads no tokens.css
 src/web/terminal.html	#111111	standalone xterm page, loads no tokens.css
 src/web/terminal.html	#2a2c30	standalone xterm page, loads no tokens.css
