@@ -1744,6 +1744,7 @@ function assertBuilt() {
     throw new Error(
       `refusing to run — \`npm run ${BUILD_SERVER_SCRIPT}\` failed, so dist/ does not reflect ` +
         `src/ and any result would describe code you are not running:\n${detail || err.message}`,
+      { cause: err },
     );
   }
   if (!existsSync(DIST_ENTRY)) {
@@ -6084,8 +6085,7 @@ function enumerateCleanupBranchesFromSource() {
   for (const method of CLEANUP_TERMINAL_METHODS) {
     const lineRe = new RegExp(`\\bstore\\.${method}\\s*\\(`, "g");
     strippedLines.forEach((line, idx) => {
-      let m;
-      while ((m = lineRe.exec(line)) !== null) {
+      while (lineRe.exec(line) !== null) {
         hits.push({ method, line: idx + 1 });
       }
     });
@@ -9955,7 +9955,7 @@ async function checkInheritParentIntact(built) {
     }
   }
 
-  let childHasSession = false;
+  let childHasSession;
   try {
     await execFileP("tmux", [
       "has-session",
@@ -10000,7 +10000,7 @@ async function checkInheritParentIntact(built) {
     );
   }
 
-  let parentHasSession = false;
+  let parentHasSession;
   try {
     await execFileP("tmux", ["has-session", "-t", "=dsp-" + built.identifier]);
     parentHasSession = true;
@@ -12608,7 +12608,6 @@ async function checkParityRow9Moves(built) {
       `row 9 moves (inbox family): the throwaway demote-eligible card could not enter inbox — POST /move returned ${enterInbox.status} (body=${JSON.stringify(enterInbox.body)}), expected 204; the 6 from="inbox" pairs cannot be driven without this precondition`,
     );
   } else {
-    throwawayColumn = "inbox";
     const inboxTargets = MOVABLE_COLUMNS.filter(
       (c) => c !== "inbox" && c !== "todo",
     );
@@ -12641,8 +12640,6 @@ async function checkParityRow9Moves(built) {
       violations.push(
         `row 9 moves (inbox->todo): expected LEGAL (204), got ${promote.status} (body=${JSON.stringify(promote.body)})`,
       );
-    } else {
-      throwawayColumn = "todo";
     }
   }
 
@@ -17018,7 +17015,7 @@ async function checkVaultResidualDemo(built) {
  * skipping: a check that quietly no-ops is worse than a failing one.
  */
 async function resolveRealClaudeBinary(violations) {
-  let resolved = "";
+  let resolved;
   try {
     const { stdout } = await execFileP("sh", ["-c", "command -v claude"]);
     resolved = stdout.trim();

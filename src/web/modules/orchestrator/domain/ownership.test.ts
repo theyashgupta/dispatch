@@ -171,7 +171,7 @@ test("table rows show the main scope text, the owned groups and the narrowed fie
     id: "main",
     name: "Main orchestrator",
     role: "Main",
-    scope: "Each group that no extra owns",
+    scope: "Board",
     owns: "GROUP-12, GROUP-13, GROUP-16",
     policy: "Board policy",
     lastWake: "None",
@@ -180,11 +180,22 @@ test("table rows show the main scope text, the owned groups and the narrowed fie
     id: "extra-1",
     name: "Extra orchestrator 1",
     role: "Extra",
-    scope: "GROUP-14, GROUP-15",
+    scope: "Feature, 2 cards",
     owns: "GROUP-14, GROUP-15",
     policy: "Loops at once: 1",
     lastWake: "None",
   });
+});
+
+test("table rows do not count a stale scope id, a group member or a hidden card", () => {
+  const stale: OwnerRecord = {
+    ...extraTwo,
+    scope: {
+      groupIds: ["GROUP-16", "GROUP-GONE"],
+      ticketIds: ["LOCAL-5", "LOCAL-6", "HID-1"],
+    },
+  };
+  assert.equal(orchestratorRows([stale], cards)[0]?.scope, "Feature, 2 cards");
 });
 
 test("the last wake label reads reasons and a 24-hour time, or None", () => {

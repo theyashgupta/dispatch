@@ -29,7 +29,7 @@ import { DISPATCH_DIR, PTY_SHIM_PATH } from "../services/infra/paths.js";
  * would emit a partial marker instead of stripping it.
  */
 const PTY_SHIM_SCRIPT = String.raw`#!/usr/bin/env python3
-import os, sys, pty, select, signal, fcntl, termios, tty
+import os, sys, pty, select, signal, fcntl, termios, tty, struct, time
 
 MARKERS = (b'\x1b[?2026h', b'\x1b[?2026l')
 PREFIX = b'\x1b[?2026'
@@ -65,6 +65,22 @@ try:
     old = termios.tcgetattr(0); tty.setraw(0)
 except termios.error:
     pass
+
+def resume(*_):
+    prev = signal.signal(signal.SIGTTOU, signal.SIG_IGN)
+    try:
+        if os.tcgetpgrp(0) != os.getpgrp(): return
+        tty.setraw(0, termios.TCSANOW)
+        w = fcntl.ioctl(0, termios.TIOCGWINSZ, b'\0' * 8)
+        rows, cols = struct.unpack('HHHH', w)[:2]
+        fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack('HHHH', max(rows - 1, 1), cols, 0, 0))
+        time.sleep(0.1)
+        sync_size()
+    except (OSError, termios.error):
+        pass
+    finally:
+        signal.signal(signal.SIGTTOU, prev)
+if old is not None: signal.signal(signal.SIGCONT, resume)
 
 pending = b''
 try:

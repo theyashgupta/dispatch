@@ -315,6 +315,7 @@ function assertBuilt() {
       .trim();
     throw new Error(
       `refusing to run — \`npm run ${BUILD_SCRIPT}\` failed, so dist/ does not reflect src/:\n${detail || err.message}`,
+      { cause: err },
     );
   }
   if (!existsSync(DIST_ENTRY)) {
@@ -357,6 +358,7 @@ function buildOldReleaseWorktree() {
     throw new Error(
       `could not create a worktree at ${OLD_RELEASE_TAG} (${OLD_RELEASE_COMMIT}) — the comparison ` +
         `build needs the published tag, this refuses to substitute a stand-in:\n${detail || err.message}`,
+      { cause: err },
     );
   }
   const headCommit = execFileSync("git", ["rev-parse", "--short", "HEAD"], {
@@ -388,6 +390,7 @@ function buildOldReleaseWorktree() {
       .trim();
     throw new Error(
       `could not build ${OLD_RELEASE_TAG} in the throwaway worktree (npm ci may need network on a cold cache):\n${detail || err.message}`,
+      { cause: err },
     );
   }
   const entry = join(treeRoot, "dist", "server", "bootstrap", "index.js");
@@ -1156,8 +1159,8 @@ async function main() {
   let server = null;
   let chromeChild = null;
   let cdp = null;
-  let readings = null;
-  let portsHeld = false;
+  let readings;
+  let portsHeld;
 
   try {
     const fixtures = legacy

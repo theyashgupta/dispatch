@@ -62,7 +62,7 @@ export function clock(
   return `${formatter(timeZone, "weekday").format(date)} ${time}`;
 }
 
-/** Finds the account with an id; the default id also matches the account flagged as the default. */
+/** Finds the account with an id; the default id also matches the home or managed Default row. */
 export function accountFor(
   accounts: readonly ClaudeAccountSummary[],
   accountId: string,
@@ -70,7 +70,7 @@ export function accountFor(
   return (
     accounts.find((a) => a.id === accountId) ??
     (accountId === DEFAULT_CLAUDE_ACCOUNT_ID
-      ? accounts.find((a) => a.isDefault)
+      ? accounts.find((a) => a.isDefault || a.managedDefault === true)
       : undefined)
   );
 }

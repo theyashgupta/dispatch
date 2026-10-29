@@ -3,6 +3,7 @@ import { COMMENT_BODY_MAX } from "../../shared/comment-body.js";
 import {
   ACCOUNT_ID_MAX,
   BOARD_NAME_MAX,
+  BLOCKED_BY_MAX,
   CARD_ID_MAX,
   DECISION_ID_RE,
   DECISION_LABEL_MAX,
@@ -80,7 +81,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "list_cards",
     description:
-      "List the cards on your board. You can filter by column, source or text.",
+      "List the cards on your board. You can filter by column, source or text. For a feature orchestrator, the list has only the cards assigned to you.",
     input: {
       column: columnField.optional(),
       source: z.string().min(1).optional(),
@@ -168,10 +169,11 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "create_ticket",
     description:
-      "Create a local ticket from one entry of a ticket proposal that the user approved. A proposal that is open, rejected or unknown, and an entry that is already used, are refused.",
+      "Create a local ticket from one entry of a ticket proposal that the user approved. A proposal that is open, rejected or unknown, and an entry that is already used, are refused. Pass blockedBy with card ids on this board to start the ticket on its own when every blocker reaches Done; a cycle is refused.",
     input: {
       proposalItemId: z.string().regex(DECISION_ID_RE),
       index: z.number().int().min(0),
+      blockedBy: z.array(looseId).max(BLOCKED_BY_MAX).optional(),
     },
     method: "POST",
     path: "/tickets",
@@ -201,11 +203,12 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "update_ticket",
     description:
-      "Change the title or the description of a ticket. Text that holds the status marker is refused.",
+      "Change the title or the description of a local ticket, or set blockedBy (card ids on this board, an empty list clears it) on any ticket. Text that holds the status marker is refused.",
     input: {
       ...idParam,
       title: titleField.optional(),
       description: descriptionField.optional(),
+      blockedBy: z.array(looseId).max(BLOCKED_BY_MAX).optional(),
     },
     method: "PATCH",
     path: "/tickets/:id",
@@ -256,7 +259,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "start_group",
     description:
-      "Start the session of a group card. A group that is already started is refused.",
+      "Start the session of a group card. A group that is already started is refused. While memory is low the reply carries waitingForMemory and the start waits up to 30 minutes for memory, with the card at Waiting for memory.",
     input: idParam,
     method: "POST",
     path: "/groups/:id/start",
@@ -297,6 +300,14 @@ export const MCP_TOOLS: readonly McpTool[] = [
     path: "/sessions/:cardId/resume",
   },
   {
+    name: "resume_session",
+    description:
+      "Resume a card whose session is lost after a restart or a reboot, the way the Resume button does. On a board with the supervisor on, the supervisor types the resume prompt of the card once the session is live and confirms it in the transcript; with the supervisor off the resumed session gets no prompt, so send a continue line with send_input. Refused with session-live, no-lost-session, start-in-flight, invalid-identifier, memory-low, or the cap refusal of resume_loop.",
+    input: cardIdParam,
+    method: "POST",
+    path: "/sessions/:cardId/resume-lost",
+  },
+  {
     name: "stop_session",
     description:
       "Stop the session of a card. A card outside your board is refused.",
@@ -314,7 +325,8 @@ export const MCP_TOOLS: readonly McpTool[] = [
   },
   {
     name: "resume_card",
-    description: "Resume a paused loop. Refused while memory is low.",
+    description:
+      "Resume a paused loop. While memory is low the call answers 202 with waitingForMemory and the card shows Waiting for memory; the loop resumes when memory frees, else the card shows Resume failed with the reason after 30 minutes.",
     input: cardIdParam,
     method: "POST",
     path: "/sessions/:cardId/unpause",
@@ -322,7 +334,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "start_ship",
     description:
-      "Start the ship steps of a finished group card, or of a finished single card that start_card started, for its branches in stack order. A single card ships its session branch from Agent done. A board with no ship rights is refused. A card in Done, or a card whose ship flow is done, is refused with already-shipped.",
+      "Start the ship steps of a finished group card, or of a finished single card, whoever started it, for its branches in stack order. A single card ships its session branch from Agent done. A board with no ship rights is refused. A card in Done, or a card whose ship flow is done, is refused with already-shipped.",
     input: {
       ...cardIdParam,
       repository: z.string().min(1),
@@ -453,7 +465,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "start_card",
     description:
-      "Start the session of one ticket card with a playbook and a direction, the way the start dialog does. Omit repos to use the stored workspace of the card, else the board repositories with their base branch. A stored workspace with no repository counts as none, and a board with no repository answers no-repositories. A group card, a running card, a card in Done or Inbox, the Board Orchestrator playbook and a start at the concurrency cap are refused. Pass account, an account id from list_accounts or default, to start on that account; an unknown account is refused with unknown-account. Omit it to use the active account.",
+      "Start the session of one ticket card with a playbook and a direction, the way the start dialog does. Omit repos to use the stored workspace of the card, else the board repositories with their base branch. A stored workspace with no repository counts as none, and a board with no repository answers no-repositories. A group card, a running card, a card in Done or Inbox, the Board Orchestrator playbook and a start at the concurrency cap are refused. While memory is low the reply carries waitingForMemory and the start waits up to 30 minutes for memory, with the card at Waiting for memory. Pass account, an account id from list_accounts or default, to start on that account; an unknown account is refused with unknown-account. Omit it to use the active account. A feature orchestrator can start only its assigned cards; a card that is not assigned to it is refused with out-of-scope.",
     input: {
       ...cardIdParam,
       playbook: z.string().min(1).max(200),
@@ -464,5 +476,13 @@ export const MCP_TOOLS: readonly McpTool[] = [
     },
     method: "POST",
     path: "/cards/:cardId/start",
+  },
+  {
+    name: "assign_card",
+    description:
+      "Assign one card to you. Use it only when a direction that the user typed in your terminal names the card. Only a feature orchestrator can use it, and only for a card that the main orchestrator owns. A card of another feature orchestrator is refused with other-owner, a member of a group with group-member, and a call from the board orchestrator with not-feature-orchestrator. Only a card in To Do is accepted; another column is refused with not-todo.",
+    input: { ...cardIdParam },
+    method: "POST",
+    path: "/cards/:cardId/assign",
   },
 ];

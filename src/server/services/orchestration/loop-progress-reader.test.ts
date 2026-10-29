@@ -1,6 +1,6 @@
-import test, { after, afterEach } from "node:test";
+import test, { after, afterEach, type TestContext } from "node:test";
 import assert from "node:assert/strict";
-import {
+import fs, {
   appendFileSync,
   chmodSync,
   cpSync,
@@ -13,10 +13,17 @@ import {
   utimesSync,
   writeFileSync,
 } from "node:fs";
+import { EventEmitter } from "node:events";
+import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
-import type { Card, Column, LoopProgress } from "../../../shared/types.js";
+import type {
+  ActivityEvent,
+  Card,
+  Column,
+  LoopProgress,
+} from "../../../shared/types.js";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { fakeBoardRepository } from "../../test-support/fake-board-repository.js";
 import { materializeLoopFixture } from "../../test-support/loop-fixtures.js";
@@ -89,7 +96,10 @@ interface Recorded {
   at: number;
   cardId: string;
   progress: LoopProgress;
+  force: boolean;
 }
+
+const activity = new EventEmitter();
 
 function installRepo(
   getCard: () => Card,
@@ -108,8 +118,10 @@ function installRepo(
         const stored = recorded.at(-1)?.progress;
         return stored ? { ...getCard(), loopProgress: stored } : getCard();
       },
-      setLoopProgress: async (cardId, progress) => {
-        recorded.push({ at: Date.now(), cardId, progress });
+      on: activity.on.bind(activity),
+      off: activity.off.bind(activity),
+      setLoopProgress: async (cardId, progress, force = false) => {
+        recorded.push({ at: Date.now(), cardId, progress, force });
         await onSet?.();
       },
     }),
@@ -712,6 +724,23 @@ void test("a single read of a closed loop reads the renamed .done engine file", 
   assert.deepEqual(progress.warnings, []);
 });
 
+void test("a single read of a closed loop with no PRD path reads complete", async () => {
+  const root = emptyTemp();
+  mkdirSync(join(root, ".claude"), { recursive: true });
+  writeFileSync(
+    join(root, ".claude/ralph-loop.local.md.done"),
+    '---\nactive: true\niteration: 1\nsession_id: x\ncompletion_promise: "RALPH COMPLETE local-159"\nclosed_reason: promise\n---\nExecute LOCAL-159 per the ralph-loop skill. Unit A: PRD .planning/prds/local-159-unit-a.md. When done output the phrase RALPH COMPLETE local-159 wrapped in promise tags.\n',
+  );
+  const progress = await readLoopProgress(root, { single: true });
+  assert.ok(progress);
+  assert.equal(progress.slug, "local-159");
+  assert.equal(progress.engine?.closed, true);
+  assert.equal(progress.engine?.closedReason, "promise");
+  assert.equal(progress.completion, "complete");
+  assert.equal(progress.summary.unitsDone, 1);
+  assert.equal(progress.summary.unitsTotal, 1);
+});
+
 void test("a read without single stays null for a root with no ledger", async () => {
   assert.equal(await readLoopProgress(singleRoot()), null);
 });
@@ -805,4 +834,214 @@ void test("a ticket card with no launch stores nothing", async () => {
   installRepo(() => launchedCard(root, false), recorded);
   await refreshLoopProgress("card-1");
   assert.equal(recorded.length, 0);
+});
+
+let nextEventId = 1;
+
+function doneEvent(cardId: string): ActivityEvent {
+  return {
+    id: nextEventId++,
+    cardId,
+    type: "status_agent_done",
+    fromCol: null,
+    toCol: null,
+    reason: null,
+    source: null,
+    ts: new Date().toISOString(),
+  };
+}
+
+void test("a DONE marker on a loop card forces a write with a newer readAt and the same files", async () => {
+  const root = singleRoot();
+  const recorded: Recorded[] = [];
+  installRepo(() => launchedCard(root, true), recorded);
+  const stop = startLoopProgressReader({ intervalMs: 60_000, debounceMs: 50 });
+  try {
+    await waitFor(() => recorded.length >= 1);
+    const first = recorded[0];
+    assert.equal(first?.force, false);
+    const firstReadAt = first?.progress.readAt ?? "";
+    await waitFor(() => new Date().toISOString() > firstReadAt);
+    const emittedAt = new Date().toISOString();
+    activity.emit("activity", doneEvent("card-1"));
+    await waitFor(() => recorded.some((entry) => entry.force));
+    const forced = recorded.find((entry) => entry.force);
+    assert.ok((forced?.progress.readAt ?? "") >= emittedAt);
+    assert.ok((forced?.progress.readAt ?? "") > firstReadAt);
+    assert.deepEqual(forced?.progress.units, first?.progress.units);
+  } finally {
+    stop();
+  }
+});
+
+void test("a DONE marker on a card that is not a loop card stores nothing", async () => {
+  const root = singleRoot();
+  const recorded: Recorded[] = [];
+  installRepo(() => launchedCard(root, false), recorded);
+  const stop = startLoopProgressReader({ intervalMs: 60_000, debounceMs: 50 });
+  try {
+    activity.emit("activity", doneEvent("card-1"));
+    await sleep(300);
+    assert.equal(recorded.length, 0);
+  } finally {
+    stop();
+  }
+});
+
+void test("after the stop function a DONE marker triggers no read", async () => {
+  const root = singleRoot();
+  const recorded: Recorded[] = [];
+  installRepo(() => launchedCard(root, true), recorded);
+  const stop = startLoopProgressReader({ intervalMs: 60_000, debounceMs: 50 });
+  await waitFor(() => recorded.length >= 1);
+  stop();
+  const count = recorded.length;
+  activity.emit("activity", doneEvent("card-1"));
+  await sleep(300);
+  assert.equal(recorded.length, count);
+});
+
+void test("a gate line in a single PRD loop updates the phase gate and readAt", async () => {
+  const root = singleRoot();
+  const recorded: Recorded[] = [];
+  installRepo(() => launchedCard(root, true), recorded);
+  const stop = startLoopProgressReader({ intervalMs: 60_000, debounceMs: 50 });
+  try {
+    await waitFor(() => recorded.length >= 1);
+    await sleep(200);
+    const before = recorded.length;
+    appendFileSync(
+      join(root, SINGLE_DIR, "state.md"),
+      "phase 2 Two GREEN 2026-10-11T06:00:00Z gate=pass\n",
+    );
+    await waitFor(() => recorded.length > before);
+    const first = recorded[0]?.progress;
+    const last = recorded.at(-1)?.progress;
+    assert.deepEqual(
+      last?.units[0]?.phases.map((phase) => phase.gate),
+      ["pass", "pass", "pending"],
+    );
+    assert.ok((last?.readAt ?? "") > (first?.readAt ?? ""));
+  } finally {
+    stop();
+  }
+});
+
+void test("a unit state folder under the card identifier slug reads its gate lines", async () => {
+  const root = partialRoot();
+  const expected = await readLoopProgress(root);
+  assert.ok(expected);
+  assert.ok(gates(expected, 2).includes("pass"));
+  renameSync(
+    join(root, UNIT_2_DIR),
+    join(root, "dispatch/.planning/group-1-unit-2"),
+  );
+  const missing = await readLoopProgress(root);
+  assert.ok(missing?.warnings.includes(`${UNIT_2_STATE}: missing`));
+  const progress = await readLoopProgress(root, { identifier: "GROUP-1" });
+  assert.ok(progress);
+  assert.deepEqual(gates(progress, 2), gates(expected, 2));
+  assert.ok(!progress.warnings.includes(`${UNIT_2_STATE}: missing`));
+});
+
+void test("a refresh of a group card reads the unit state under its identifier slug", async () => {
+  const root = partialRoot();
+  renameSync(
+    join(root, UNIT_2_DIR),
+    join(root, "dispatch/.planning/group-1-unit-2"),
+  );
+  const recorded: Recorded[] = [];
+  installRepo(() => groupCard(root, "in_progress"), recorded);
+  await refreshLoopProgress("card-1");
+  const progress = recorded.at(-1)?.progress;
+  assert.ok(progress);
+  assert.ok(gates(progress, 2).includes("pass"));
+  assert.ok(!progress.warnings.includes(`${UNIT_2_STATE}: missing`));
+});
+
+interface FakeWatch {
+  dir: string;
+  fire: () => void;
+}
+
+/**
+ * Replaces `fs.watch` with a fake that records each watched folder, and returns the records and the restore function.
+ *
+ * @remarks The reader imports `watch` as a named binding, so `syncBuiltinESMExports` must push the mock into that binding and back.
+ */
+function fakeWatcher(t: TestContext): {
+  watches: FakeWatch[];
+  restore: () => void;
+} {
+  const watches: FakeWatch[] = [];
+  const watchMock = t.mock.method(
+    fs,
+    "watch",
+    (dir: string, _options: unknown, listener: () => void) => {
+      watches.push({ dir, fire: listener });
+      return Object.assign(new EventEmitter(), { close: () => undefined });
+    },
+  );
+  syncBuiltinESMExports();
+  return {
+    watches,
+    restore: () => {
+      watchMock.mock.restore();
+      syncBuiltinESMExports();
+    },
+  };
+}
+
+async function fireAndWaitForRead(
+  watches: FakeWatch[],
+  dir: string,
+  recorded: Recorded[],
+): Promise<void> {
+  const watch = watches.find((candidate) => candidate.dir === dir);
+  assert.ok(watch, `no watch on ${dir}`);
+  const before = recorded.length;
+  watch.fire();
+  await waitFor(() => recorded.length > before, 1000);
+}
+
+void test("a write in the identifier unit folder and in the roadmap slug folder each trigger a refresh", async (t) => {
+  const root = partialRoot();
+  const aliasDir = join(root, "dispatch/.planning/group-1-unit-2");
+  cpSync(join(root, UNIT_2_DIR), aliasDir, { recursive: true });
+  const fake = fakeWatcher(t);
+  const recorded: Recorded[] = [];
+  installRepo(() => groupCard(root, "in_progress"), recorded);
+  const stop = startLoopProgressReader({ intervalMs: 60_000, debounceMs: 20 });
+  try {
+    await waitFor(() =>
+      fake.watches.some((candidate) => candidate.dir === aliasDir),
+    );
+    await fireAndWaitForRead(fake.watches, aliasDir, recorded);
+    await fireAndWaitForRead(fake.watches, join(root, UNIT_2_DIR), recorded);
+  } finally {
+    stop();
+    fake.restore();
+  }
+});
+
+void test("a single PRD card adds no identifier folder watch", async (t) => {
+  const root = singleRoot();
+  mkdirSync(join(root, "repo/.planning/group-1-unit-1"), { recursive: true });
+  const fake = fakeWatcher(t);
+  const recorded: Recorded[] = [];
+  installRepo(() => launchedCard(root, true), recorded);
+  const stop = startLoopProgressReader({ intervalMs: 60_000, debounceMs: 20 });
+  try {
+    const stateDir = join(root, SINGLE_DIR);
+    await waitFor(() =>
+      fake.watches.some((candidate) => candidate.dir === stateDir),
+    );
+    assert.ok(
+      !fake.watches.some((candidate) => candidate.dir.includes("group-1")),
+    );
+    await fireAndWaitForRead(fake.watches, stateDir, recorded);
+  } finally {
+    stop();
+    fake.restore();
+  }
 });

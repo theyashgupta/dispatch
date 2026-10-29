@@ -1,5 +1,6 @@
 import { LOGIN_EXPIRY_WARN_MS } from "../../../../shared/account-chain.js";
 import type {
+  ClaudeAccountSummary,
   ClaudeUsageSnapshot,
   ClaudeUsageWindow,
 } from "../../../../shared/types.js";
@@ -84,9 +85,6 @@ export interface Pacing {
   capped: boolean;
 }
 
-const HOUR_MS = 60 * 60 * 1000;
-const DAY_MS = 24 * HOUR_MS;
-
 /**
  * Return the instant a snapshot's percentages were measured, the only honest anchor for elapsed time.
  *
@@ -153,61 +151,6 @@ export function pacingFor(
 }
 
 /**
- * Build the one projection line under a bar.
- *
- * @remarks A date for the spend budget, a countdown for rolling windows, the "lasts" variant
- * when the projection is capped at the period end, and a plain "reached" line at 100% used.
- * @returns Null when there is no projection (under 1% elapsed).
- */
-export function projectionCopy(
-  usageWindow: ClaudeUsageWindow,
-  pacing: Pacing,
-  now: number = Date.now(),
-): string | null {
-  if (pacing.exhaustsAt === null) return null;
-  const spend = usageWindow.kind === "spend";
-  if (usageWindow.percent >= 100) {
-    return spend ? "Credit used up" : "Limit reached";
-  }
-  if (pacing.capped) {
-    return spend
-      ? "At this rate, credit lasts the month"
-      : "At this rate, limit holds until reset";
-  }
-  if (spend) {
-    const date = new Date(pacing.exhaustsAt).toLocaleDateString(undefined, {
-      month: "short",
-      day: "numeric",
-    });
-    return `At this rate, credit runs out on ${date}`;
-  }
-  const countdown = formatReset(new Date(pacing.exhaustsAt).toISOString(), now);
-  return countdown === "soon"
-    ? "At this rate, limit hits soon"
-    : `At this rate, limit hits in ${countdown}`;
-}
-
-/**
- * Describe the raw numbers behind a badge: used, elapsed, and burn rate per hour (session) or per day.
- */
-export function paceTitle(
-  usageWindow: ClaudeUsageWindow,
-  pacing: Pacing,
-): string {
-  const parts = [
-    `Used ${usageWindow.percent}%`,
-    `Elapsed ${Math.round(pacing.percentElapsed)}%`,
-  ];
-  if (pacing.elapsedMs > 0) {
-    const perDay = usageWindow.kind !== "session";
-    const rate =
-      (usageWindow.percent / pacing.elapsedMs) * (perDay ? DAY_MS : HOUR_MS);
-    parts.push(`${rate.toFixed(1)}%/${perDay ? "day" : "hour"}`);
-  }
-  return parts.join(" · ");
-}
-
-/**
  * Return the one line of copy for a usage snapshot that is not plain numbers, or null when it is `ok`.
  */
 export function statusCopy(usage: ClaudeUsageSnapshot): string | null {
@@ -271,6 +214,94 @@ export function chipState(
     tone: toneFor(tightest.percent),
     summary: `${tightest.percent}% used${reset ? `, resets ${reset}` : ""}`,
     label: `${tightest.percent}%`,
+  };
+}
+
+export function findWindow(
+  usage: ClaudeUsageSnapshot,
+  kind: string,
+): ClaudeUsageWindow | null {
+  return usage.windows.find((w) => w.kind === kind) ?? null;
+}
+
+export function popoverWindows(
+  usage: ClaudeUsageSnapshot,
+): ClaudeUsageWindow[] {
+  return [findWindow(usage, "session"), findWindow(usage, "weekly_all")].filter(
+    (w): w is ClaudeUsageWindow => w !== null,
+  );
+}
+
+const PACE_SEVERITY: Record<PaceState, number> = {
+  "on-track": 0,
+  ahead: 1,
+  "will-run-out": 2,
+};
+
+const CLOCK_FORMAT: Intl.DateTimeFormatOptions = {
+  hour: "numeric",
+  minute: "2-digit",
+};
+
+/**
+ * Pick the one status line under the popover bars: login, limit, usage status, then worst pace.
+ *
+ * @remarks Pace comes from the session and weekly windows only, because those are the two bars the popover shows.
+ * @returns Null when there is nothing to say.
+ */
+export function accountStateLine(
+  account: ClaudeAccountSummary,
+  now: number = Date.now(),
+): { text: string; tone: UsageTone | "muted" } | null {
+  const { usage } = account;
+  const loginAt = usage.loginExpiresAt ? Date.parse(usage.loginExpiresAt) : NaN;
+  if (
+    account.state === "login-expired" ||
+    account.state === "needs-login" ||
+    loginAt < now
+  ) {
+    return { text: "Login expired, sign in again", tone: "down" };
+  }
+  if (account.state === "limited") {
+    const at = account.limitedUntil ? Date.parse(account.limitedUntil) : NaN;
+    if (Number.isNaN(at) || at <= now) return { text: "Limited", tone: "down" };
+    const clock =
+      new Date(at).toDateString() !== new Date(now).toDateString()
+        ? new Date(at).toLocaleString(undefined, {
+            weekday: "short",
+            ...CLOCK_FORMAT,
+          })
+        : new Date(at).toLocaleTimeString(undefined, CLOCK_FORMAT);
+    return { text: `Limited until ${clock}`, tone: "down" };
+  }
+  const copy = statusCopy(usage);
+  if (copy !== null) {
+    return {
+      text: copy,
+      tone: usage.status === "unavailable" ? "muted" : "stale",
+    };
+  }
+  const pacedAt = pacedAtFor(usage);
+  if (pacedAt !== null) {
+    let worst: PaceState | null = null;
+    for (const w of popoverWindows(usage)) {
+      const state = pacingFor(w, pacedAt)?.state;
+      if (
+        state !== undefined &&
+        (worst === null || PACE_SEVERITY[state] > PACE_SEVERITY[worst])
+      ) {
+        worst = state;
+      }
+    }
+    if (worst !== null) {
+      return { text: PACE_BADGE[worst].label, tone: PACE_BADGE[worst].tone };
+    }
+  }
+  const fetchedAt = usage.fetchedAt ? Date.parse(usage.fetchedAt) : NaN;
+  if (Number.isNaN(fetchedAt)) return null;
+  return {
+    text: `Checked ${new Date(fetchedAt).toLocaleTimeString(undefined, CLOCK_FORMAT)}`,
+    tone: "muted",
   };
 }
 

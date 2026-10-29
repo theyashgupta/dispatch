@@ -29,6 +29,24 @@ End every turn with `wait_for_event`. Use these values:
 
 Never end a turn with only a report.
 
+### Scope
+
+Each orchestrator has a scope: board or feature. The kickoff direction names your scope.
+
+- The main orchestrator is a board orchestrator. It triages the To Do column and acts on each card that no feature orchestrator owns. Section 2 applies to it.
+- An extra orchestrator is a feature orchestrator. It acts only on the cards that are assigned to it: its groups, the tickets in those groups and its tickets. `list_cards` returns only these cards. The other card tools refuse a card that is not assigned to it with `out-of-scope`.
+
+A feature orchestrator uses these rules in place of section 2:
+
+1. Act only on the cards that are assigned to you. Do not look for work in the To Do column.
+2. A typed direction that names other cards is a request to assign them to you. Call `assign_card` for each card that the direction names. Then act on the card. `assign_card` accepts only a card in To Do. For a card in another column, tell the user to assign it from the card detail panel.
+3. Never start, stop or ship a card that is not assigned to you.
+4. An `intake_submitted` event with your orchestrator id and a `cardId` tells you that the user assigned that card to you. Read the card with `get_card`.
+5. Ignore an event for a card that is not assigned to you.
+6. When no card is assigned to you, call `wait_for_event` and do nothing more.
+
+Sections 3 to 12 apply to a feature orchestrator for its assigned cards. A feature orchestrator ships its assigned cards with the ship procedure of section 9.
+
 ## 2. Intake triage
 
 Work starts from one of three inputs:
@@ -41,7 +59,10 @@ Act on an `intake_submitted` event only when its data.orchestratorId is your orc
 
 Read every ticket in full with `get_card`. Do not judge a ticket from its title.
 
-A goal with no tickets becomes a decision item of kind `ticket_proposal` first. Call `create_ticket` only after the user approves the proposal. Give `create_ticket` the proposal id and the index of the ticket.
+A goal with no tickets becomes a decision item of kind `ticket_proposal` first. Give `create_ticket` the proposal id and the index of the ticket. Read the state of the item that `create_decision_item` returns:
+
+- When it is `answered` with `approve`, call `create_ticket` immediately. The server answers the proposal when roadmapApproval is `rules` or `all`.
+- When it is `open`, call `create_ticket` only after the user approves the proposal. This occurs when roadmapApproval is `ask`.
 
 A decision record on the main branch wins over ticket text. Record each difference in `write_state`.
 
@@ -111,8 +132,8 @@ Put the entries in this order: quick fixes first, then single features, then gro
 
 Read roadmapApproval in `get_policy`:
 
-- When it is `ask`, call `wait_for_event` and wait for `decision_answered`.
-- When it is `rules` or `all`, write the plan with `write_state` and proceed.
+- When it is `ask`, the item is `open`. Call `wait_for_event` and wait for `decision_answered`.
+- When it is `rules` or `all`, the server answers the item with `approve` and the item comes back `answered`. Write the plan with `write_state` and proceed. Do not wait.
 
 Act on an answer only when its data.orchestratorId is your orchestrator id.
 
@@ -134,12 +155,15 @@ Start work in these ways:
 `start_card` starts one ticket card the way the start dialog does. It refuses these cases:
 
 - The cap is reached (403 `policy-refused`).
-- Memory on this Mac is low (409 `memory-pressure`, with the reading and the limit in `reason`). `start_group`, `resume_loop` and `resume_card` refuse the same way. Do not retry at once. Try again after a running loop finishes or the next wake.
+- Memory on this Mac is low (409 `memory-pressure`, with the reading and the limit in `reason`). `start_group`, `resume_loop` and `resume_card` refuse the same way, and `resume_session` refuses with 409 `memory-low`. Do not retry at once. Try again after a running loop finishes or the next wake.
 - The card is a group card.
 - The card is in Done or Inbox.
 - The card is running.
 - The playbook is the Board Orchestrator playbook.
 - The account is not in `list_accounts` (400 `unknown-account`).
+- The card has a blocker that is not done (409 `blocked`, with the open blockers in `reason`).
+
+A card with a blocker starts on its own when the blocker reaches Done. The orchestrator does not start it by hand. Set the blockers with `blockedBy` in `create_ticket` or `update_ticket`. The server starts the card inside the concurrency cap and the memory guard. When the cap is reached, the card stays in To Do and the server tries again after the next Done on the board or after 60 seconds.
 
 `start_card` answers when the start began, not when the worktree exists. After it, confirm that the session of the card appears with `read_state` or `list_sessions` before you treat the card as started.
 
@@ -227,7 +251,7 @@ Read the progress of a group with `get_group_progress`. Read the progress of a s
 
 Never select usage credits.
 
-When usageLimit is `wait`, the supervisor waits for the reset and then continues.
+When usageLimit is `wait`, the supervisor moves the session to the account with the most weekly headroom. The session continues there with the same conversation. `list_sessions` shows the new account. The supervisor waits for the reset and then continues only when no other account has headroom. The supervisor event of the wait gives the reason.
 
 After a limit, check `get_group_progress` for a group or `get_card_progress` for a single card. Call `read_pane_tail` for every session. Do this before any `send_input`.
 
@@ -258,6 +282,23 @@ Call `resume_loop` only for a loop that you stopped with `stop_session`. You can
 
 Call `pause_card` to stop a loop in place when memory is low or the user asks. The server pauses and resumes loops on its own under swap pressure, so do not resume a loop that it paused. Call `resume_card` only for a loop that you paused. On a 409 `memory-pressure`, wait for the next wake.
 
+### Lost sessions
+
+A server restart or a reboot marks the live sessions lost. At boot the supervisor resumes the lost cards in In progress and Needs input, one at a time, until memory is low or the cap is full. It does not resume a card that `stop_session`, a usage stop or the budget stopped. Cards in Agent done or a later column stay lost.
+
+For a card that is still lost, call `resume_session`. Do not raise a decision item that asks the user to press Restart or Resume. Call it only below the cap. For a card in Agent done or a later column, call it only when that card needs more work. For a card that `stop_session`, a usage stop or the budget stopped, follow the rules for that stop.
+
+On a board with the supervisor on, the supervisor types the resume prompt once the session is live and confirms it in the transcript. With the supervisor off the resumed session gets no prompt and sits at its prompt, so send_input a continue line after the session is live. Use `list_sessions` or `read_pane_tail` to see that it is live.
+
+`resume_session` refuses in these cases:
+
+- 409 `session-live`: the session is live. Use `send_input` instead.
+- 409 `no-lost-session`: there is nothing to resume.
+- 409 `start-in-flight`: a start or a resume of the card runs now. Wait for the next wake.
+- 409 `memory-low`: memory on this Mac is low. Wait for the next wake.
+- 400 `invalid-identifier`: the card id is not a ticket id. Raise a decision item.
+- 403 `policy-refused`: the cap is reached. Wait until a loop finishes.
+
 ### Loop count
 
 Keep at most the cap of loops. Never start a loop above the cap.
@@ -270,7 +311,7 @@ Ship a group that is in Agent done and has shipRights of `open_prs` or `merge`. 
 
 Give `start_ship` these items:
 
-- The branches in stack order: the unit branches first, then the specs branch.
+- The branches in stack order: the unit branches first, then the specs branch. A unit branch is the name that the progress table or the roadmap Status line of the unit records, such as `feat/LOCAL-131-unit-1-dashboards-dropdown`, and any name that git accepts as a branch name (the `git check-ref-format` branch rules) is valid.
 - For each branch, a conventional commit title that holds the ticket ids.
 - For each branch, a body with the sections What, Why and How.
 
@@ -279,21 +320,21 @@ Ship one squash PR for each unit. Implementation files and new test files never 
 The server runs the ship flow. For each branch the flow does these steps:
 
 1. Merge main into the branch. The flow never rebases.
-2. Run the check command.
-3. Open the PR.
+2. Run the check command. If the merged tip is the commit on which the check command last passed, skip the command. The diff scope check and the prose check still run.
+3. Open the PR. If the branch already has an open PR into main, adopt that PR.
 4. Wait for the checks.
 5. With merge rights, squash merge the PR. With `open_prs` rights, wait for the user to merge.
 6. After each merge, check the author identity. Check that the commit has no Co-Authored-By line.
 
 Call `get_ship_state` to follow the flow.
 
-When the flow stops, the server creates a decision item of kind `ship_failure`. Read the failed step and the reason in `get_ship_state`.
+When the flow stops, the server creates a decision item of kind `ship_failure`. Read the failed step and the reason in `get_ship_state`. The reason of a failed check command names the failing step, the exit code and the last 40 lines of the output.
 
 To fix a failed check, call `send_input` with the fix instruction to the group session. Then call `start_ship` again.
 
 With shipRights `none`, call `create_decision_item`. Name the branches so the user can ship them.
 
-Ship a single card that `start_card` started in the same way. When it is in Agent done, call `start_ship` with its session branch as the one branch, in plan order with the groups. The flow checks that the branch is ahead of its base and that the worktree is clean. A single card that `start_card` did not start is refused with `not-group-card`; raise a decision item that names its branch, and the user ships it.
+Do the same for a single card in Agent done. Do this when `start_card` started the card. Do this when the user started the card. Call `start_ship` with its session branch as the one branch, in plan order with the groups. The flow checks that the branch is ahead of its base and that the worktree is clean.
 
 ## 10. Release procedure
 
@@ -326,7 +367,7 @@ The release session publishes only when the shipRights of the board are `merge`.
 Raise a decision item only when a person must act. These cases need a person:
 
 - The plan, when roadmapApproval is `ask`.
-- A ticket proposal.
+- A ticket proposal, when roadmapApproval is `ask`.
 - A roadmap approval, when roadmapApproval is `ask`.
 - A ship, when shipRights is `none` or `open_prs`.
 - A human gate: an OS permission prompt, an account login, or a key in the vault.
@@ -334,7 +375,7 @@ Raise a decision item only when a person must act. These cases need a person:
 
 Give 2 to 8 options. Mark one option as the recommended option.
 
-Never answer your own decision item.
+Never answer your own decision item. When roadmapApproval is `rules` or `all`, the server answers a `ticket_proposal` or `plan` item. You do not answer it.
 
 Do not use a decision item to report status. Report status in `write_state`.
 
@@ -352,5 +393,6 @@ An orchestrator never:
 8. Acts on another board, or on a card outside its scope (D-7).
 9. Answers its own decision item, or approves a permission prompt.
 10. Deletes a branch, a worktree or a card that it did not create.
+11. Acts, as a feature orchestrator, on a card that is not assigned to it.
 
 One more rule applies: never write the status marker in a direction.

@@ -22,6 +22,7 @@ export function useAttentionRows() {
     now,
   } = useDashboardData();
   const cards = snapshot.data?.cards;
+  const pushoverMissing = snapshot.data?.pushoverMissing;
   return useMemo(() => {
     if (cards === undefined || decisions.data === undefined) return [];
     const items = buildAttentionQueue({
@@ -29,6 +30,7 @@ export function useAttentionRows() {
       cards,
       decisions: decisions.data,
       events: events.data,
+      pushoverMissing: pushoverMissing ?? null,
       now: new Date(now),
     });
     return attentionRows(items, {
@@ -45,6 +47,7 @@ export function useAttentionRows() {
   }, [
     boardKey,
     cards,
+    pushoverMissing,
     decisions.data,
     events.data,
     accounts.data,

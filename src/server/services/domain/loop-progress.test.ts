@@ -1,9 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { LoopProgress } from "../../../shared/types.js";
+import { parsePrdEngine } from "./prd-progress.js";
 import {
   buildLoopProgress,
   buildPrdProgress,
+  closedEngineText,
   type PrdProgressInput,
   parseAttemptLines,
   parseEngineFile,
@@ -13,6 +15,7 @@ import {
   parseStateLines,
   phaseDir,
   unitFilePaths,
+  withClosedReason,
 } from "./loop-progress.js";
 
 const READ_AT = "2026-10-06T12:00:00.000Z";
@@ -342,6 +345,74 @@ void test("a progress file reports a missing table and malformed rows", () => {
   const parsed = parseProgressFile(table);
   assert.deepEqual([...parsed.units.keys()], [1]);
   assert.deepEqual(parsed.warnings, ["malformed row 5", "malformed row 6"]);
+});
+
+void test("a roadmap Status line branch names the unit branch when the ledger has no units table", () => {
+  const unit = (n: number, title: string, branch: string) =>
+    `### Unit ${n}: ${title}\n- **Status:** built, awaiting /ship (branch \`${branch}\`, 8073bafe, 676d3279)\n`;
+  const result = build({
+    roadmapText: [
+      unit(
+        1,
+        "Dashboards dropdown",
+        "feat/LOCAL-131-unit-1-dashboards-dropdown",
+      ),
+      unit(2, "Remove sessions", "feat/LOCAL-132-unit-2-remove-sessions"),
+      unit(3, "Remove workspace", "feat/LOCAL-134-unit-3-remove-workspace"),
+      unit(4, "Remove activity", "feat/LOCAL-130-unit-4-remove-activity"),
+    ].join(""),
+    progressText:
+      "Roadmap: /x/ROADMAP.md, slug s\n\n## Unit statuses\n- Unit 1: committed 048f1d0d\n- Unit 2: committed 5755e79d\n- Unit 3: committed 69690ba8\n- Unit 4: committed 7b5f9c0a\n",
+  });
+  assert.deepEqual(
+    result.units.map((u) => u.branch),
+    [
+      "feat/LOCAL-131-unit-1-dashboards-dropdown",
+      "feat/LOCAL-132-unit-2-remove-sessions",
+      "feat/LOCAL-134-unit-3-remove-workspace",
+      "feat/LOCAL-130-unit-4-remove-activity",
+    ],
+  );
+});
+
+void test("a progress table branch wins over a roadmap Status line branch", () => {
+  const result = build({
+    roadmapText:
+      "### Unit 1: A\n- **Status:** built, awaiting /ship (branch `feat/X-1-unit-1-status`, abc1234)\n",
+    progressText:
+      "| Unit | Status | Branch |\n| - | - | - |\n| 1 | committed abc1234 | feat/X-1-unit-1-table |\n",
+  });
+  assert.equal(result.units[0]?.branch, "feat/X-1-unit-1-table");
+});
+
+void test("an empty or dash progress table branch cell falls back to the roadmap Status line branch", () => {
+  const result = build({
+    roadmapText: [
+      "### Unit 1: A\n- **Status:** built, awaiting /ship (branch `feat/X-1-unit-1-status`, abc1234)\n",
+      "### Unit 2: B\n- **Status:** built, awaiting /ship (branch `feat/X-2-unit-2-status`, abc1234)\n",
+    ].join(""),
+    progressText:
+      "| Unit | Status | Branch |\n| - | - | - |\n| 1 | committed abc1234 |  |\n| 2 | committed abc1234 | - |\n",
+  });
+  assert.deepEqual(
+    result.units.map((u) => u.branch),
+    ["feat/X-1-unit-1-status", "feat/X-2-unit-2-status"],
+  );
+});
+
+void test("a roadmap Status line keeps branch null without a parenthesised backtick branch", () => {
+  const result = build({
+    roadmapText: [
+      "### Unit 1: A\n- **Status:** built, awaiting /ship (branch x, commits a, b)\n",
+      "### Unit 2: B\n- **Status:** built, awaiting /ship, old branch `feat/old` dropped\n",
+      "### Unit 3: C\n- **Status:** built, awaiting /ship\n",
+    ].join(""),
+    progressText: "Roadmap: /x/R.md, slug s\n",
+  });
+  assert.deepEqual(
+    result.units.map((u) => u.branch),
+    [null, null, null],
+  );
 });
 
 void test("an engine with front matter and no active field gives a warning", () => {
@@ -702,6 +773,42 @@ void test("a closed engine with no gate lines gives not started", () => {
   assert.equal(result.engine?.closed, true);
 });
 
+void test("a closed engine with no PRD file reads built and complete", () => {
+  const result = buildPrdProgress(
+    prdInput({
+      prdFile: null,
+      prdText: null,
+      engine: { text: ENGINE_ACTIVE, closed: true },
+    }),
+  );
+  assert.equal(result.units[0]?.status, "built, awaiting /ship");
+  assert.equal(result.completion, "complete");
+  assert.equal(result.summary.unitsDone, 1);
+  assert.equal(result.summary.unitsTotal, 1);
+});
+
+void test("an open engine with no PRD file reads running, not complete", () => {
+  const result = buildPrdProgress(
+    prdInput({
+      prdFile: null,
+      prdText: null,
+      engine: { text: ENGINE_ACTIVE, closed: false },
+    }),
+  );
+  assert.equal(result.completion, "running");
+});
+
+void test("a closed engine with phases read stays in progress while a phase is pending", () => {
+  const result = buildPrdProgress(
+    prdInput({
+      stateText: "phase 1 One GREEN 2026-10-11T04:00:00Z gate=pass\n",
+      engine: { text: ENGINE_ACTIVE, closed: true },
+    }),
+  );
+  assert.equal(result.units[0]?.status, "in progress");
+  assert.notEqual(result.completion, "complete");
+});
+
 void test("a PRD with no phase headings gives a warning and a null total", () => {
   const result = buildPrdProgress(prdInput({ prdText: "# Only a title\n" }));
   assert.equal(result.units[0]?.phaseTotal, null);
@@ -739,4 +846,72 @@ void test("the model has no roadmap file and carries the PRD file", () => {
   assert.equal(result.slug, "demo-feature");
   assert.equal(result.units[0]?.prdPath, PRD_FILE);
   assert.equal(result.readAt, PRD_READ_AT);
+});
+
+const FENCED = "---\nactive: true\niteration: 2\n---\nbody line\n";
+
+void test("withClosedReason inserts the reason before the second fence and keeps the body", () => {
+  assert.equal(
+    withClosedReason(FENCED, "promise"),
+    "---\nactive: true\niteration: 2\nclosed_reason: promise\n---\nbody line\n",
+  );
+});
+
+void test("withClosedReason replaces an existing closed_reason line", () => {
+  const text = "---\nactive: true\nclosed_reason: promise\n---\nbody\n";
+  assert.equal(
+    withClosedReason(text, "close_loop"),
+    "---\nactive: true\nclosed_reason: close_loop\n---\nbody\n",
+  );
+});
+
+void test("withClosedReason returns text without a front matter unchanged", () => {
+  assert.equal(withClosedReason("no fences\n", "promise"), "no fences\n");
+  assert.equal(
+    withClosedReason("---\nactive: true\n", "promise"),
+    "---\nactive: true\n",
+  );
+});
+
+void test("a closed engine file reports the closed_reason it holds", () => {
+  for (const reason of ["promise", "close_loop"]) {
+    const text = `---\nactive: true\nclosed_reason: ${reason}\n---\nbody`;
+    assert.equal(parseEngineFile(text, true).engine?.closedReason, reason);
+  }
+});
+
+void test("a closed engine file with no or an unknown closed_reason reports manual", () => {
+  assert.equal(parseEngineFile(FENCED, true).engine?.closedReason, "manual");
+  assert.equal(
+    parseEngineFile("---\nactive: true\nclosed_reason: other\n---\nbody", true)
+      .engine?.closedReason,
+    "manual",
+  );
+});
+
+void test("an open engine file has no closedReason key", () => {
+  const text = "---\nactive: true\nclosed_reason: promise\n---\nbody";
+  assert.equal(
+    "closedReason" in (parseEngineFile(text, false).engine ?? {}),
+    false,
+  );
+});
+
+void test("closedEngineText parses as a closed engine with the reason and the session id", () => {
+  const text = closedEngineText("local-172", "sess-1", "promise");
+  const { engine } = parseEngineFile(text, true);
+  assert.equal(engine?.active, false);
+  assert.equal(engine?.closed, true);
+  assert.equal(engine?.closedReason, "promise");
+  assert.equal(engine?.sessionId, "sess-1");
+  assert.equal(parsePrdEngine(text).slug, "local-172");
+});
+
+void test("closedEngineText leaves the session id null when none is given", () => {
+  const { engine } = parseEngineFile(
+    closedEngineText("local-172", null, "close_loop"),
+    true,
+  );
+  assert.equal(engine?.sessionId, null);
+  assert.equal(engine?.closedReason, "close_loop");
 });

@@ -220,6 +220,7 @@ for (const expected of VIEWS) {
       boardKey: DEFAULT_BOARD_KEY,
       cards: [card],
       decisions: [],
+      pushoverMissing: null,
       now: new Date("2026-10-08T00:00:00Z"),
     });
     assert.deepEqual(

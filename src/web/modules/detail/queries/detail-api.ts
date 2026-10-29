@@ -1,4 +1,4 @@
-import type { LinearComment } from "../../../../shared/types.js";
+import type { BoardKey, LinearComment } from "../../../../shared/types.js";
 import { http, httpError } from "@/lib/http";
 
 /**
@@ -109,4 +109,72 @@ export function setCardLinearState(
   stateId: string,
 ): Promise<LinearActionResult> {
   return linearAction(id, "linear-state", { stateId });
+}
+
+type SetBlockedByResult =
+  | { ok: true }
+  | { ok: false; status: number; error: string | null; reason: string | null };
+
+/**
+ * Replace a card's blockers: PUT /api/cards/:id/blocked-by.
+ *
+ * @remarks
+ * A refusal resolves as typed data, with the server's `reason` read from the failure body.
+ * `status` is 0 when the request never got an answer.
+ */
+export async function setCardBlockedBy(
+  id: string,
+  blockedBy: string[],
+): Promise<SetBlockedByResult> {
+  try {
+    const result = await http(
+      `/api/cards/${encodeURIComponent(id)}/blocked-by`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ blockedBy }),
+      },
+    );
+    if (result.ok) return { ok: true };
+    const reason = (result.body as { reason?: unknown } | null)?.reason;
+    return {
+      ok: false,
+      status: result.status,
+      error: result.error,
+      reason: typeof reason === "string" ? reason : null,
+    };
+  } catch {
+    return { ok: false, status: 0, error: null, reason: null };
+  }
+}
+
+type SetCardOrchestratorResult =
+  { ok: true } | { ok: false; status: number; error: string | null };
+
+/**
+ * Move a card to an orchestrator: PUT /api/boards/:board/cards/:id/orchestrator.
+ *
+ * @remarks
+ * A refusal resolves as typed data, with the server's `error` code read from the failure body.
+ * `status` is 0 when the request never got an answer.
+ */
+export async function setCardOrchestrator(
+  board: BoardKey,
+  id: string,
+  orchestratorId: string,
+): Promise<SetCardOrchestratorResult> {
+  try {
+    const result = await http(
+      `/api/boards/${encodeURIComponent(board)}/cards/${encodeURIComponent(id)}/orchestrator`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orchestratorId }),
+      },
+    );
+    if (result.ok) return { ok: true };
+    return { ok: false, status: result.status, error: result.error };
+  } catch {
+    return { ok: false, status: 0, error: null };
+  }
 }

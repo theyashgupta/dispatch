@@ -2,9 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { ChainAccountState } from "../../../shared/types.js";
 import {
+  type BucketedCandidate,
   type ChainCandidate,
   filterByHysteresis,
   passesHysteresis,
+  pickHeadroomAccount,
   selectAccount,
 } from "./account-selection.js";
 
@@ -194,4 +196,171 @@ void test("filterByHysteresis keeps passing accounts, and with hysteresis 0 retu
     ["low"],
   );
   assert.deepEqual(filterByHysteresis(chain, 90, 0), chain);
+});
+
+type Bucket = BucketedCandidate["buckets"][number];
+
+const entry = (
+  id: string,
+  state: ChainAccountState,
+  buckets: Bucket[],
+): BucketedCandidate => ({
+  id,
+  state,
+  limitedUntil: null,
+  buckets,
+});
+
+const weekly = (percent: number): Bucket => ({
+  kind: "weekly_all",
+  percent,
+  resetsAt: null,
+});
+
+void test("pickHeadroomAccount excludes the session's own account", () => {
+  const chain = [entry("a", "available", [weekly(5)])];
+  assert.equal(pickHeadroomAccount(chain, "a", 100, 10), null);
+  assert.equal(pickHeadroomAccount(chain, "b", 100, 10), "a");
+});
+
+void test("pickHeadroomAccount keeps only available and near-limit accounts", () => {
+  for (const state of STATES) {
+    const pick = pickHeadroomAccount(
+      [entry("t", state, [weekly(13)])],
+      "from",
+      100,
+      10,
+    );
+    assert.equal(
+      pick,
+      state === "available" || state === "near-limit" ? "t" : null,
+      state,
+    );
+  }
+});
+
+void test("pickHeadroomAccount drops an account with no weekly bucket", () => {
+  const chain = [
+    entry("none", "available", []),
+    entry("session", "available", [
+      { kind: "session", percent: 1, resetsAt: null },
+    ]),
+  ];
+  assert.equal(pickHeadroomAccount(chain, "from", 100, 10), null);
+});
+
+void test("pickHeadroomAccount keeps 89 and drops 90 at the default threshold and hysteresis", () => {
+  const at = (percent: number) =>
+    pickHeadroomAccount(
+      [entry("t", "available", [weekly(percent)])],
+      "from",
+      100,
+      10,
+    );
+  assert.equal(at(89), "t");
+  assert.equal(at(90), null);
+  assert.equal(at(100), null);
+  assert.equal(
+    pickHeadroomAccount(
+      [entry("t", "available", [weekly(70)])],
+      "from",
+      80,
+      10,
+    ),
+    null,
+  );
+});
+
+void test("pickHeadroomAccount binds on the highest weekly bucket and ignores other windows", () => {
+  const chain = [
+    entry("scoped", "available", [
+      weekly(20),
+      { kind: "weekly_scoped", percent: 95, resetsAt: null },
+    ]),
+    entry("other", "available", [
+      { kind: "session", percent: 99, resetsAt: null },
+      weekly(40),
+    ]),
+  ];
+  assert.equal(pickHeadroomAccount(chain, "from", 100, 10), "other");
+});
+
+void test("pickHeadroomAccount picks the lowest weekly percent and keeps chain order on a tie", () => {
+  const chain = [
+    entry("b", "available", [weekly(40)]),
+    entry("c", "near-limit", [weekly(13)]),
+    entry("d", "available", [weekly(13)]),
+  ];
+  assert.equal(pickHeadroomAccount(chain, "from", 100, 10), "c");
+  assert.equal(pickHeadroomAccount([...chain].reverse(), "from", 100, 10), "d");
+});
+
+void test("pickHeadroomAccount returns null for an empty chain", () => {
+  assert.equal(pickHeadroomAccount([], "from", 100, 10), null);
+});
+
+void test("selectAccount never picks needs-login, and earliestReset ignores it", () => {
+  const stuck: ChainCandidate = {
+    id: "stuck",
+    state: "needs-login",
+    limitedUntil: null,
+  };
+  assert.deepEqual(selectAccount([stuck], NOW), {
+    exhausted: true,
+    earliestReset: null,
+  });
+  assert.deepEqual(
+    selectAccount(
+      [
+        stuck,
+        { id: "b", state: "limited", limitedUntil: untilAt("future", 1) },
+      ],
+      NOW,
+    ),
+    { exhausted: true, earliestReset: untilAt("future", 1) },
+  );
+  assert.deepEqual(
+    selectAccount(
+      [stuck, { id: "c", state: "available", limitedUntil: null }],
+      NOW,
+    ),
+    { exhausted: false, id: "c" },
+  );
+});
+
+void test("pickHeadroomAccount refuses a needs-login account", () => {
+  const chain = [entry("t", "needs-login", [weekly(5)])];
+  assert.equal(pickHeadroomAccount(chain, "from", 100, 10), null);
+});
+
+void test("selectAccount and pickHeadroomAccount refuse shadowed-by-home, and earliestReset ignores it", () => {
+  const shadow: ChainCandidate = {
+    id: "shadow",
+    state: "shadowed-by-home",
+    limitedUntil: null,
+  };
+  assert.deepEqual(selectAccount([shadow], NOW), {
+    exhausted: true,
+    earliestReset: null,
+  });
+  assert.deepEqual(
+    selectAccount(
+      [
+        shadow,
+        { id: "b", state: "limited", limitedUntil: untilAt("future", 1) },
+        { id: "c", state: "available", limitedUntil: null },
+      ],
+      NOW,
+    ),
+    { exhausted: false, id: "c" },
+  );
+  assert.equal(
+    pickHeadroomAccount(
+      [entry("s", "shadowed-by-home", [weekly(5)])],
+      "from",
+      100,
+      10,
+    ),
+    null,
+  );
 });

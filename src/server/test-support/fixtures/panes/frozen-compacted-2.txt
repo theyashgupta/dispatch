@@ -1,0 +1,9 @@
+⏺ DISPATCH_STATUS: DONE - LOCAL-159 units A and B committed
+  Both units are committed on LOCAL-159 and the checks are green.
+✻ Compacted while idle
+
+❯ Dispatch wake: Agent done for LOCAL-159
+
+  Opus 5.5 · high  │  ░░░░░░░░░░    0%  0/1.0M
+  LOCAL-159  │  LOCAL-159  │  thinking  │  5h 40%  │  7d 61%  │  3h12m  │  $12.34
+  ⏵⏵ bypass permissions on

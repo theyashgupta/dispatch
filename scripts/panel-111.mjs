@@ -261,6 +261,7 @@ function assertBuilt() {
       .trim();
     throw new Error(
       `refusing to run, \`npm run ${BUILD_SCRIPT}\` failed, so dist/ does not reflect src/:\n${detail || err.message}`,
+      { cause: err },
     );
   }
   if (!existsSync(DIST_ENTRY)) {
@@ -608,7 +609,7 @@ async function runBreakServeInRoot() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(VIEWER_ROUTE_PATH, original);
   try {
     writeFileSync(
@@ -906,7 +907,7 @@ async function runBreakBoundaryRejections() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(VIEWER_ROUTE_PATH, original);
   try {
     writeFileSync(
@@ -1016,7 +1017,7 @@ async function runBreakSizeCap() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(VIEWER_ROUTE_PATH, original);
   try {
     writeFileSync(
@@ -1204,7 +1205,7 @@ async function runBreakStaleWorktreeRoot() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(VIEWER_ROUTE_PATH, original);
   try {
     writeFileSync(
@@ -1403,7 +1404,7 @@ async function runBreakAuthGate() {
         `false "the check cannot fail".`,
     );
   }
-  let tripFired = false;
+  let tripFired;
   registerRestore(LOOPBACK_DIST_PATH, original);
   try {
     // Prepend `return true;` to the body instead of truncating the file: everything after the

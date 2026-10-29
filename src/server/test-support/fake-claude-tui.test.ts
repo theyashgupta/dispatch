@@ -634,7 +634,7 @@ void test(
 );
 
 void test(
-  "the second-claim fixture run by a second extra is refused with other-owner and starts nothing",
+  "the second-claim fixture run by a second extra is refused with out-of-scope and starts nothing",
   { timeout: 60000 },
   async () => {
     const CLM = parseBoardKey("CLM") as BoardKey;
@@ -681,7 +681,7 @@ void test(
       ],
     );
     assert.equal(lines[0]?.isError, true);
-    assert.match(String(lines[0]?.excerpt), /other-owner/);
+    assert.match(String(lines[0]?.excerpt), /out-of-scope/);
     assert.equal(JSON.stringify(store.getCard(group)), before);
   },
 );
@@ -1196,6 +1196,29 @@ void test("auth status answers a logged out identity and exits instead of openin
   assert.deepEqual(JSON.parse(out.stdout), { loggedIn: false });
 });
 
+void test("auth status prints the fake login of the config dir and logout removes it", async () => {
+  const dir = fs.mkdtempSync(path.join(env.root, "auth-login-"));
+  const bin = writeFakeClaudeTui(dir);
+  const configDir = path.join(dir, "config");
+  fs.mkdirSync(configDir);
+  const identity = { loggedIn: true, email: "a@example.com", orgId: "org-a" };
+  fs.writeFileSync(
+    path.join(configDir, ".fake-login"),
+    JSON.stringify(identity),
+  );
+  const status = () =>
+    run(bin, ["auth", "status", "--json"], {
+      timeout: 5000,
+      env: { CLAUDE_CONFIG_DIR: configDir },
+    });
+  assert.deepEqual(JSON.parse((await status()).stdout), identity);
+  await run(bin, ["auth", "logout"], {
+    timeout: 5000,
+    env: { CLAUDE_CONFIG_DIR: configDir },
+  });
+  assert.deepEqual(JSON.parse((await status()).stdout), { loggedIn: false });
+});
+
 void test("mcp list answers no configured servers and exits instead of opening the TUI", async () => {
   const dir = fs.mkdtempSync(path.join(env.root, "mcp-"));
   const bin = writeFakeClaudeTui(dir);
@@ -1238,3 +1261,20 @@ void test(
     }
   },
 );
+
+void test("a typed /exit prints the goodbye line and ends the fake with code 0", async () => {
+  const dir = fs.mkdtempSync(path.join(env.root, "exit-"));
+  const bin = writeFakeClaudeTui(dir);
+  const child = spawnPiped(bin, []);
+  let out = "";
+  child.stdout?.on("data", (chunk: Buffer) => {
+    out += chunk.toString();
+  });
+  const exited = new Promise<number | null>((resolve) =>
+    child.once("exit", resolve),
+  );
+  await until(() => out.includes("❯ "));
+  child.stdin?.write("/exit\r");
+  assert.equal(await exited, 0);
+  assert.ok(out.includes("> /exit\n  ⎿  Goodbye!"));
+});

@@ -248,6 +248,7 @@ function assertBuilt() {
       .trim();
     throw new Error(
       `refusing to run, \`npm run ${BUILD_SCRIPT}\` failed, so dist/ does not reflect src/:\n${detail || err.message}`,
+      { cause: err },
     );
   }
   if (!existsSync(DIST_ENTRY)) {
@@ -2764,7 +2765,7 @@ async function runBreakRhythm() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(DETAIL_PANEL_PATH, original);
   try {
     writeFileSync(DETAIL_PANEL_PATH, original.replace(RHYTHM_BREAK_TARGET, ""));
@@ -3342,7 +3343,7 @@ async function runBreakElevation() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(DETAIL_PANEL_PATH, original);
   try {
     writeFileSync(
@@ -3628,7 +3629,7 @@ async function measureAndAssertControl(
 
 async function checkStates(violations) {
   const MAX_ATTEMPTS = 3;
-  let lastErr = null;
+  let lastErr;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const attemptViolations = [];
     try {
@@ -4040,7 +4041,7 @@ async function runBreakStates() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(RESIZE_HANDLE_PATH, original);
   try {
     writeFileSync(

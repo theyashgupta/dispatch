@@ -2,11 +2,13 @@ import type { EventEmitter } from "node:events";
 import type { CardSearchResult } from "../../shared/search.js";
 import type {
   AccountEventType,
+  PushoverGap,
   ActivityEvent,
   ArchiveBoardResult,
   ArchivedGroup,
   Board,
   BoardPolicy,
+  BudgetWarning,
   OrchestratorRecord,
   BoardKey,
   BoardPatch,
@@ -47,6 +49,7 @@ import { store, type ReservedSession } from "./board.store.js";
 
 export {
   BoardUnavailableError,
+  compareTodoOrder,
   redactArchivedGroup,
   redactCard,
   type ReservedSession,
@@ -76,6 +79,8 @@ export interface BoardRepository {
     cursors: Record<string, SourceCursor>,
   ): Promise<void>;
   setEnabledSources(ids: string[]): void;
+  setPushoverMissing(names: readonly string[], now?: Date): void;
+  pushoverMissing(): PushoverGap | null;
   setSyncUnreachable(flag: boolean): Promise<void>;
   trackedIssueIds(
     scope: BoardScope,
@@ -105,7 +110,11 @@ export interface BoardRepository {
     sinceId: number,
     limit: number,
   ): ActivityEvent[];
-  setLoopProgress(cardId: string, progress: LoopProgress): Promise<void>;
+  setLoopProgress(
+    cardId: string,
+    progress: LoopProgress,
+    force?: boolean,
+  ): Promise<void>;
   appendOrchestrationEvent(
     e: Omit<OrchestrationEvent, "id">,
   ): OrchestrationEvent;
@@ -287,6 +296,7 @@ export interface BoardRepository {
     reason: string,
     cardId?: string | null,
   ): Promise<void>;
+  recordSessionRelaunch(cardId: string, reason: string): Promise<void>;
   listArchive(board: BoardKey): ArchivedGroup[];
   getArchived(archiveId: string): ArchivedGroup | undefined;
   archiveDueForDelete(
@@ -391,6 +401,8 @@ export interface BoardRepository {
     id: string,
     queue: { startQueued: boolean; dependsOn?: string[] },
   ): Promise<void>;
+  setBlockedBy(id: string, ids: string[]): Promise<void>;
+  setBudgetWarning(id: string, warning: BudgetWarning | null): Promise<void>;
   setOrchestratorFields(
     id: string,
     fields: Pick<

@@ -96,6 +96,7 @@ test("supervisor actions use the map and unknown ones fall back", () => {
       event(6, "supervisor_action", "c14", { action: "budget_release" }),
       event(7, "supervisor_action", "c14", { action: "needs_input" }),
       event(8, "supervisor_action", "c14", { action: "mystery" }),
+      event(9, "supervisor_action", "c14", { action: "budget_warning" }),
     ]).reverse(),
     [
       "sent one continue prompt to GROUP-14",
@@ -106,7 +107,20 @@ test("supervisor actions use the map and unknown ones fall back", () => {
       "released the budget stop of GROUP-14",
       "moved GROUP-14 to Needs input",
       "mystery on GROUP-14",
+      "warned that GROUP-14 is near its budget",
     ],
+  );
+});
+
+test("a relaunch_frozen action reads as a relaunch of the group", () => {
+  assert.deepEqual(
+    texts([
+      event(1, "supervisor_action", "c14", {
+        action: "relaunch_frozen",
+        result: "stopped",
+      }),
+    ]),
+    ["relaunched frozen GROUP-14 with resume"],
   );
 });
 
@@ -236,6 +250,7 @@ test("a group_state event reads as the Supervisor, the group id and the state la
     "start_failed",
     "shipped",
     "ship_stopped",
+    "ship_check_skipped",
     "loop_error",
     "usage_limit",
     "mystery",
@@ -253,6 +268,7 @@ test("a group_state event reads as the Supervisor, the group id and the state la
       "GROUP-14 failed to start",
       "GROUP-14 shipped",
       "GROUP-14 ship stopped",
+      "GROUP-14 skipped a repeated check",
       "GROUP-14 loop error",
       "GROUP-14 hit a usage limit",
       "GROUP-14 mystery",

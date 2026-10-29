@@ -46,6 +46,7 @@ const GROUP_STATE_LABELS: Record<GroupState, string> = {
   start_failed: "failed to start",
   shipped: "shipped",
   ship_stopped: "ship stopped",
+  ship_check_skipped: "skipped a repeated check",
   loop_error: "loop error",
   usage_limit: "hit a usage limit",
 };
@@ -56,10 +57,12 @@ const SUPERVISOR_ACTIONS: Record<string, (g: string) => string> = {
   limit_escape: (g) => `left the usage limit prompt of ${g}`,
   answer_prompt: (g) => `answered a prompt of ${g}`,
   resume: (g) => `resumed ${g}`,
+  relaunch_frozen: (g) => `relaunched frozen ${g} with resume`,
   handoff_request: (g) => `requested a handoff from ${g}`,
   handoff_cancel: (g) => `cancelled the handoff of ${g}`,
   close_loop: (g) => `closed the loop of ${g}`,
   budget_release: (g) => `released the budget stop of ${g}`,
+  budget_warning: (g) => `warned that ${g} is near its budget`,
   needs_input: (g) => `moved ${g} to Needs input`,
   start_group: (g) => `started ${g}`,
   start_group_failed: (g) => `could not start ${g}`,
@@ -80,11 +83,13 @@ const GROUP_STATE_TONES: Record<string, ActivityTone> = {
   usage_limit: "warn",
   agent_done: "ok",
   shipped: "ok",
+  ship_check_skipped: "ok",
 };
 
 const ACTION_TONES: Record<string, ActivityTone> = {
   start_group_failed: "danger",
   needs_input: "warn",
+  budget_warning: "warn",
 };
 
 function toneFrom(

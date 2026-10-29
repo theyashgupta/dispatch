@@ -76,15 +76,31 @@ void test("the rule book names release_prep, list_accounts and start_ship for a 
     "Release playbook",
     "send_input",
     "Never choose usage credits",
-    "Ship a single card that `start_card` started",
+    "Do the same for a single card in Agent done.",
+    "Do this when the user started the card.",
   ]) {
     assert.ok(markdown.includes(text), text);
   }
-  for (const text of ["works on group cards only", "has no release tool"]) {
+  for (const text of [
+    "works on group cards only",
+    "has no release tool",
+    "that `start_card` did not start is refused",
+  ]) {
     assert.equal(markdown.includes(text), false, text);
   }
 });
 
 void test("the rule book tells the orchestrator to read get_policy before it sends the ship rights to the release session", () => {
   assert.ok(markdown.includes("call `get_policy`. Then call `send_input`"));
+});
+
+void test("the rule book holds the feature orchestrator scope rules", () => {
+  for (const text of [
+    "### Scope",
+    "A feature orchestrator uses these rules in place of section 2:",
+    "Never start, stop or ship a card that is not assigned to you.",
+    "11. Acts, as a feature orchestrator, on a card that is not assigned to it.",
+  ]) {
+    assert.ok(markdown.includes(text), text);
+  }
 });

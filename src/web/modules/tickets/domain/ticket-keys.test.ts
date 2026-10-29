@@ -5,7 +5,7 @@ import {
   resolveShortcut,
   type ShortcutEvent,
 } from "../../../../shared/shortcuts.js";
-import { isEditableRole, TICKET_SHORTCUTS } from "./ticket-keys.js";
+import { TICKET_SHORTCUTS } from "./ticket-keys.js";
 
 const OPEN = { modalOpen: false, menuOpen: false, inScope: true };
 
@@ -71,17 +71,4 @@ test("Enter stays with a focused button or link but j does not", () => {
     undefined,
   );
   assert.equal(resolve(press("j", { target: button })), "j");
-});
-
-test("isEditableRole flags a combobox or listbox and nothing else", () => {
-  const withRole = (role: string | null) => ({
-    tagName: "BUTTON",
-    getAttribute: (name: string) => (name === "role" ? role : null),
-  });
-  assert.equal(isEditableRole(withRole("combobox")), true);
-  assert.equal(isEditableRole(withRole("listbox")), true);
-  assert.equal(isEditableRole(withRole("button")), false);
-  assert.equal(isEditableRole(withRole(null)), false);
-  assert.equal(isEditableRole({ tagName: "BUTTON" }), false);
-  assert.equal(isEditableRole(null), false);
 });

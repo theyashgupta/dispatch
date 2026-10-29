@@ -20,6 +20,7 @@ const { CREDITS_OPTION } = await import("../domain/limit-surface.js");
 const { supervisePane } = await import("./supervisor-registry.js");
 const {
   LOOP_PROGRESS,
+  readJsonl,
   SBX,
   setupSupervisedBoard,
   startSupervised,
@@ -391,7 +392,7 @@ void test(
       ],
     });
     const timers: (() => void)[] = [];
-    await escapeLimit(s.card(), s.session(), {
+    await escapeLimit(s.card(), s.session(), "", {
       now: () => new Date(2026, 9, 6, 22, 0).getTime(),
       schedule: (run) => {
         timers.push(run);
@@ -487,6 +488,7 @@ const SHORT_TIMING = {
   readyMs: 5_000,
   engineMs: 1_500,
   cancelWindowMs: 5 * 60_000,
+  clearMs: 1_000,
   pollMs: 100,
 };
 
@@ -531,6 +533,102 @@ void test(
     assert.equal(s.session().state, "needs_input");
     assert.equal(s.session().stateReason, "supervisor_gave_up");
     assert.equal(s.session().transcriptPath, s.first);
+  },
+);
+
+const clearsTyped = (s: Awaited<ReturnType<typeof loopSession>>) =>
+  s
+    .keys()
+    .map((k) => String(k.key))
+    .filter((k) => k.startsWith("char:"))
+    .map((k) => k.slice(5))
+    .join("")
+    .split("/clear").length - 1;
+
+void test(
+  "the command menu over the typed /clear gets Enter and the clear is confirmed in the new transcript",
+  { skip: !hasTmux },
+  async () => {
+    const s = await loopSession("handoff-menu", "handoff-pending");
+    await s.setScenario({ slashMenu: true });
+    const ok = await runFreshSession(s.card(), s.session(), SHORT_TIMING);
+    assert.equal(ok, true);
+    assert.equal(clearsTyped(s), 1);
+    const fresh = s.session().transcriptPath!;
+    assert.notEqual(fresh, s.first);
+    assert.ok(
+      readJsonl(fresh).some((e) =>
+        (e.message as { content: string }).content.startsWith(
+          "<command-name>/clear</command-name>",
+        ),
+      ),
+    );
+    assert.equal(s.userTexts(fresh).length, 1);
+    assert.deepEqual(
+      handoffActions(s).map((e) => [e.data.result, e.data.sessionId]),
+      [["confirmed", path.basename(fresh, ".jsonl")]],
+    );
+  },
+);
+
+void test(
+  "a dropped /clear is typed once more and the clear is confirmed",
+  { skip: !hasTmux },
+  async () => {
+    const s = await loopSession("handoff-drop-one", "handoff-pending");
+    await s.setScenario({ dropClears: 1 });
+    const ok = await runFreshSession(s.card(), s.session(), SHORT_TIMING);
+    assert.equal(ok, true);
+    assert.equal(clearsTyped(s), 2);
+    assert.deepEqual(
+      handoffActions(s).map((e) => [e.data.result, e.data.sessionId]),
+      [["confirmed", path.basename(s.session().transcriptPath!, ".jsonl")]],
+    );
+  },
+);
+
+void test(
+  "two dropped /clear end at unconfirmed clear",
+  { skip: !hasTmux },
+  async () => {
+    const s = await loopSession("handoff-drop-two", "handoff-pending");
+    await s.setScenario({ dropClears: 5 });
+    const ok = await runFreshSession(s.card(), s.session(), SHORT_TIMING);
+    assert.equal(ok, false);
+    assert.equal(clearsTyped(s), 2);
+    assert.deepEqual(
+      handoffActions(s).map((e) => [e.data.result, e.data.step]),
+      [["unconfirmed", "clear"]],
+    );
+    assert.equal(s.session().state, "needs_input");
+    assert.equal(s.session().stateReason, "supervisor_gave_up");
+    assert.equal(s.session().transcriptPath, s.first);
+  },
+);
+
+void test(
+  "a jsonl that already held a /clear entry before the handoff does not count as the clear",
+  { skip: !hasTmux },
+  async () => {
+    const s = await loopSession("handoff-pre-clear", "handoff-pending");
+    fs.writeFileSync(
+      path.join(s.project, "pre-clear.jsonl"),
+      JSON.stringify({
+        type: "user",
+        message: {
+          role: "user",
+          content: "<command-name>/clear</command-name>",
+        },
+      }) + "\n",
+    );
+    await s.setScenario({ dropClears: 5 });
+    const ok = await runFreshSession(s.card(), s.session(), SHORT_TIMING);
+    assert.equal(ok, false);
+    assert.equal(clearsTyped(s), 2);
+    assert.deepEqual(
+      handoffActions(s).map((e) => [e.data.result, e.data.step]),
+      [["unconfirmed", "clear"]],
+    );
   },
 );
 
