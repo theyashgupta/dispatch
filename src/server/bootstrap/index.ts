@@ -88,7 +88,10 @@ import {
 import { startCleanupScheduler } from "../services/orchestration/cleanup-scheduler.js";
 import { startPendingMoveSweep } from "../services/orchestration/session-account-apply.js";
 import { startLoopProgressReader } from "../services/orchestration/loop-progress-reader.js";
-import { settleTransientRecords } from "../services/orchestration/orchestrator-session.js";
+import {
+  relaunchStaleTokenSessions,
+  settleTransientRecords,
+} from "../services/orchestration/orchestrator-session.js";
 import {
   supervisePane,
   superviseLost,
@@ -532,6 +535,11 @@ export async function main(opts: MainOptions = {}): Promise<{ port: number }> {
   startMemoryGovernor();
   void resumeLostAtBoot().catch((err: unknown) => {
     console.warn(`[supervisor] boot resume failed: ${(err as Error).message}`);
+  });
+  void relaunchStaleTokenSessions().catch((err: unknown) => {
+    console.warn(
+      `[orchestrator] boot token relaunch failed: ${(err as Error).message}`,
+    );
   });
   return { port };
 }
