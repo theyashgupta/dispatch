@@ -553,7 +553,7 @@ export interface Card {
   memberIds?: string[];
   /**
    * Member-only: the owning group card's id. Non-null means this card renders ONLY nested
-   * inside its group (never as a top-level board/Orca entry) and is inert to every single-card
+   * inside its group (never as a top-level board entry) and is inert to every single-card
    * action route (`groupedMemberError`, Task 4) — session/workspace fields live exclusively on
    * the group card.
    */

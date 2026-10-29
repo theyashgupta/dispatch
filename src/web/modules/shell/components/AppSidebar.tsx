@@ -36,15 +36,12 @@ export interface AppSidebarProps {
   counts: NavCounts;
   sync: SyncSnapshot;
   accountSlot?: ReactNode;
-  activityUnseen: boolean;
-  activityOpen: boolean;
   carousel: boolean;
   boards: SidebarBoardsData;
   dashboards: SidebarDashboardsData;
   hasMainOrchestrator: boolean;
   onNavigate: (page: Page) => void;
   onOpenCreateTicket: () => void;
-  onOpenActivity: () => void;
 }
 
 export function AppSidebar({
@@ -53,15 +50,12 @@ export function AppSidebar({
   counts,
   sync,
   accountSlot,
-  activityUnseen,
-  activityOpen,
   carousel,
   boards,
   dashboards,
   hasMainOrchestrator,
   onNavigate,
   onOpenCreateTicket,
-  onOpenActivity,
 }: AppSidebarProps) {
   const { state, isMobile } = useSidebar();
   const collapsed = state === "collapsed" && !isMobile;
@@ -155,11 +149,8 @@ export function AppSidebar({
           accountSlot={accountSlot}
           collapsed={collapsed}
           canToggle={canToggle}
-          activityUnseen={activityUnseen}
-          activityOpen={activityOpen}
           onNavigate={onNavigate}
           onOpenCreateTicket={onOpenCreateTicket}
-          onOpenActivity={onOpenActivity}
         />
       </nav>
     </Sidebar>

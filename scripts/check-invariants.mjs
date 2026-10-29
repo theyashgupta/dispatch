@@ -358,50 +358,6 @@ const PANEL_CONTRACT = [
     "previousQuery?.queryKey[2] === id ? previous : []",
   ],
   [
-    join(
-      "src",
-      "web",
-      "modules",
-      "workspace",
-      "components",
-      "WorkspaceNav.tsx",
-    ),
-    'aria-label="Tickets"',
-  ],
-  [
-    join(
-      "src",
-      "web",
-      "modules",
-      "workspace",
-      "domain",
-      "workspace-choices.ts",
-    ),
-    'key: "dsp.workspaceGroup", allowed: ["workspace"], fallback: "status",',
-  ],
-  [
-    join(
-      "src",
-      "web",
-      "modules",
-      "workspace",
-      "domain",
-      "workspace-choices.ts",
-    ),
-    'key: "dsp.workspaceSubgroup", allowed: ["status", "workspace"], fallback: "none",',
-  ],
-  [
-    join(
-      "src",
-      "web",
-      "modules",
-      "workspace",
-      "domain",
-      "workspace-choices.ts",
-    ),
-    'key: "dsp.workspaceSort", allowed: ["title"], fallback: "id",',
-  ],
-  [
     join("src", "web", "components", "ui", "hooks", "use-shortcuts.ts"),
     '[role="checkbox"]',
   ],
@@ -416,10 +372,10 @@ const PANEL_CONTRACT = [
 ];
 
 /**
- * Report every detail panel, Workspace and shortcut contract literal that is missing from its file.
+ * Report every detail panel and shortcut contract literal that is missing from its file.
  *
  * @remarks PANEL-03 and the Unit 3 parity contracts (iframe sandbox and src, the selectors that
- * `scripts/panel-mount-92.mjs` reads, stored choice keys, the shortcut gates, the 200 ms clear)
+ * `scripts/panel-mount-92.mjs` reads, the shortcut gates, the 200 ms clear)
  * have no other committed guard. Whitespace is collapsed before the match, so a prettier reflow
  * never trips it.
  * @returns One line per missing file or missing literal.

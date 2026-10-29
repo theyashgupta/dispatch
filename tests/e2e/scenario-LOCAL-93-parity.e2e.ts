@@ -36,7 +36,6 @@ const ROUTE_ALLOWED_EXTRA: Record<
 const SHADCN_RESTYLE =
   "LOCAL-74 to LOCAL-77: shadcn restyle (custom selects, buttons, inputs, badges)";
 const PIXEL_ATTRIBUTION: Record<string, string> = {
-  "/activity": SHADCN_RESTYLE,
   "/ask": SHADCN_RESTYLE,
   "/errors": SHADCN_RESTYLE,
   "/inbox": SHADCN_RESTYLE,
@@ -45,7 +44,6 @@ const PIXEL_ATTRIBUTION: Record<string, string> = {
   "/slack": SHADCN_RESTYLE,
   "/tickets": SHADCN_RESTYLE,
   "/today": SHADCN_RESTYLE,
-  "/workspace": SHADCN_RESTYLE,
   "/workspaces": SHADCN_RESTYLE,
   "/flow": SHADCN_RESTYLE,
   "/board":
@@ -115,7 +113,7 @@ function judgeRoute(
   return { attribution, verdict: pixelsOk && requestsOk ? "pass" : "FAIL" };
 }
 
-const REMOVED_ROUTES = new Set(["/sessions"]);
+const REMOVED_ROUTES = new Set(["/sessions", "/workspace", "/activity"]);
 const note = makeNote("local-93-parity");
 
 /**
