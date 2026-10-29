@@ -249,7 +249,7 @@ test("closePanel clears the selection, the pin and hydrating; deselect clears on
   assert.equal(store.getState().pinnedHydrating, false);
 });
 
-test("pageChanged closes the panel off Workspace and the group start off Board", () => {
+test("pageChanged closes the panel on every page and the group start off Board", () => {
   const members = [card("a"), card("b")];
   const store = createAppStore({
     selectedCardId: "c1",
@@ -262,11 +262,6 @@ test("pageChanged closes the panel off Workspace and the group start off Board",
   assert.equal(store.getState().pinned, null);
   assert.equal(store.getState().pinnedHydrating, false);
   assert.equal(store.getState().groupStart, null);
-
-  const docked = createAppStore({ selectedCardId: "c1", groupStart: members });
-  docked.pageChanged("workspace");
-  assert.equal(docked.getState().selectedCardId, "c1");
-  assert.equal(docked.getState().groupStart, null);
 
   const board = createAppStore({ selectedCardId: "c1", groupStart: members });
   board.pageChanged("board");

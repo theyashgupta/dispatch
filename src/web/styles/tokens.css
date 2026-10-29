@@ -179,7 +179,7 @@
   --panel-width: 480px; /* desktop default; swapped per breakpoint below */
   --drawer-width: 360px; /* activity drawer; narrower than the panel — swapped per breakpoint below */
   --board-gutter-lg: 24px; /* wider board gutter at >=1600px (large displays) */
-  --orca-nav-width: 280px; /* Orca side-nav fixed width; not resizable this phase */
+  --orca-nav-width: 280px; /* settings sidebar fixed width and the docked panel offset; not resizable */
 }
 
 /* Light theme. The html element carries data-theme with the resolved value;

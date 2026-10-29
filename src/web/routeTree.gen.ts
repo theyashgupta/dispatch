@@ -45,8 +45,6 @@ const TicketsChar123IdChar125LazyRouteImport =
   createFileRoute('/tickets/{-$id}')()
 const TodayChar123IdChar125LazyRouteImport = createFileRoute('/today/{-$id}')()
 const VaultChar123IdChar125LazyRouteImport = createFileRoute('/vault/{-$id}')()
-const WorkspaceChar123IdChar125LazyRouteImport =
-  createFileRoute('/workspace/{-$id}')()
 const WorkspacesChar123IdChar125LazyRouteImport =
   createFileRoute('/workspaces/{-$id}')()
 
@@ -189,14 +187,6 @@ const VaultChar123IdChar125LazyRoute =
   } as any).lazy(() =>
     import('./routes/vault.{-$id}.lazy').then((d) => d.Route),
   )
-const WorkspaceChar123IdChar125LazyRoute =
-  WorkspaceChar123IdChar125LazyRouteImport.update({
-    id: '/workspace/{-$id}',
-    path: '/workspace/{-$id}',
-    getParentRoute: () => rootRouteImport,
-  } as any).lazy(() =>
-    import('./routes/workspace.{-$id}.lazy').then((d) => d.Route),
-  )
 const WorkspacesChar123IdChar125LazyRoute =
   WorkspacesChar123IdChar125LazyRouteImport.update({
     id: '/workspaces/{-$id}',
@@ -266,7 +256,6 @@ export interface FileRoutesByFullPath {
   '/tickets/{-$id}': typeof TicketsChar123IdChar125LazyRoute
   '/today/{-$id}': typeof TodayChar123IdChar125LazyRoute
   '/vault/{-$id}': typeof VaultChar123IdChar125LazyRoute
-  '/workspace/{-$id}': typeof WorkspaceChar123IdChar125LazyRoute
   '/workspaces/{-$id}': typeof WorkspacesChar123IdChar125LazyRoute
   '/boards/': typeof BoardsIndexRoute
   '/boards/$key/settings': typeof BoardsKeySettingsRoute
@@ -295,7 +284,6 @@ export interface FileRoutesByTo {
   '/tickets/{-$id}': typeof TicketsChar123IdChar125LazyRoute
   '/today/{-$id}': typeof TodayChar123IdChar125LazyRoute
   '/vault/{-$id}': typeof VaultChar123IdChar125LazyRoute
-  '/workspace/{-$id}': typeof WorkspaceChar123IdChar125LazyRoute
   '/workspaces/{-$id}': typeof WorkspacesChar123IdChar125LazyRoute
   '/boards': typeof BoardsIndexRoute
   '/boards/$key/settings': typeof BoardsKeySettingsRoute
@@ -325,7 +313,6 @@ export interface FileRoutesById {
   '/tickets/{-$id}': typeof TicketsChar123IdChar125LazyRoute
   '/today/{-$id}': typeof TodayChar123IdChar125LazyRoute
   '/vault/{-$id}': typeof VaultChar123IdChar125LazyRoute
-  '/workspace/{-$id}': typeof WorkspaceChar123IdChar125LazyRoute
   '/workspaces/{-$id}': typeof WorkspacesChar123IdChar125LazyRoute
   '/boards/': typeof BoardsIndexRoute
   '/boards/$key/settings': typeof BoardsKeySettingsRoute
@@ -356,7 +343,6 @@ export interface FileRouteTypes {
     | '/tickets/{-$id}'
     | '/today/{-$id}'
     | '/vault/{-$id}'
-    | '/workspace/{-$id}'
     | '/workspaces/{-$id}'
     | '/boards/'
     | '/boards/$key/settings'
@@ -385,7 +371,6 @@ export interface FileRouteTypes {
     | '/tickets/{-$id}'
     | '/today/{-$id}'
     | '/vault/{-$id}'
-    | '/workspace/{-$id}'
     | '/workspaces/{-$id}'
     | '/boards'
     | '/boards/$key/settings'
@@ -414,7 +399,6 @@ export interface FileRouteTypes {
     | '/tickets/{-$id}'
     | '/today/{-$id}'
     | '/vault/{-$id}'
-    | '/workspace/{-$id}'
     | '/workspaces/{-$id}'
     | '/boards/'
     | '/boards/$key/settings'
@@ -444,7 +428,6 @@ export interface RootRouteChildren {
   TicketsChar123IdChar125LazyRoute: typeof TicketsChar123IdChar125LazyRoute
   TodayChar123IdChar125LazyRoute: typeof TodayChar123IdChar125LazyRoute
   VaultChar123IdChar125LazyRoute: typeof VaultChar123IdChar125LazyRoute
-  WorkspaceChar123IdChar125LazyRoute: typeof WorkspaceChar123IdChar125LazyRoute
   WorkspacesChar123IdChar125LazyRoute: typeof WorkspacesChar123IdChar125LazyRoute
   BoardsIndexRoute: typeof BoardsIndexRoute
   BoardsKeySettingsRoute: typeof BoardsKeySettingsRoute
@@ -596,13 +579,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof VaultChar123IdChar125LazyRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/workspace/{-$id}': {
-      id: '/workspace/{-$id}'
-      path: '/workspace/{-$id}'
-      fullPath: '/workspace/{-$id}'
-      preLoaderRoute: typeof WorkspaceChar123IdChar125LazyRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/workspaces/{-$id}': {
       id: '/workspaces/{-$id}'
       path: '/workspaces/{-$id}'
@@ -668,7 +644,6 @@ const rootRouteChildren: RootRouteChildren = {
   TicketsChar123IdChar125LazyRoute: TicketsChar123IdChar125LazyRoute,
   TodayChar123IdChar125LazyRoute: TodayChar123IdChar125LazyRoute,
   VaultChar123IdChar125LazyRoute: VaultChar123IdChar125LazyRoute,
-  WorkspaceChar123IdChar125LazyRoute: WorkspaceChar123IdChar125LazyRoute,
   WorkspacesChar123IdChar125LazyRoute: WorkspacesChar123IdChar125LazyRoute,
   BoardsIndexRoute: BoardsIndexRoute,
   BoardsKeySettingsRoute: BoardsKeySettingsRoute,

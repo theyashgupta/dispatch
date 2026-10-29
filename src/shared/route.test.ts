@@ -54,7 +54,6 @@ test("the route table holds exactly the shell and source pages", () => {
     "tickets",
     "today",
     "vault",
-    "workspace",
     "workspaces",
   ]);
   assert.equal(parseRoute("#/workspaces").page, "workspaces");
@@ -65,6 +64,11 @@ test("the route table holds exactly the shell and source pages", () => {
   });
 });
 
+test("the removed workspace page parses to the board", () => {
+  assert.deepEqual(parseRoute("#/workspace"), { page: "board" });
+  assert.deepEqual(parseRoute("#/workspace/X"), { page: "board" });
+});
+
 test("a hash without the slash still parses", () => {
   assert.deepEqual(parseRoute("#inbox"), { page: "inbox" });
 });
@@ -73,7 +77,6 @@ test("routeHash round-trips every valid hash", () => {
   for (const hash of [
     "#/board",
     "#/inbox",
-    "#/workspace",
     "#/settings",
     "#/settings/vault",
     "#/activity",

@@ -2456,7 +2456,7 @@ identity-stable across four separate mutations:
   that query makes `takeover` true, which makes `effectiveFullscreen` true, so the guard fails via
   its `!effectiveFullscreen` term. The panel is `100vw` there, so there is no width to trade — this
   is intended behavior, not a defect, and the
-  breakpoint was deliberately not lowered to add one. In DOCKED (Orca) mode the handle is absent
+  breakpoint was deliberately not lowered to add one. In DOCKED mode (unreachable since the Workspace page was removed) the handle is absent
   at every width instead, via the guard's `!docked` term — `takeover` is `false` in docked mode
   regardless of viewport, so `effectiveFullscreen`/`CAROUSEL_QUERY` play no part there. Second, at
   `>=1024px` in the undocked panel the handle DID render but declared no
@@ -2516,7 +2516,7 @@ alongside open/close, fullscreen and resize. The script (changed U2-16) runs the
 fullscreen, resize, close and reopen, 5 route changes on Board, Board to Workspace, card switch,
 session switch, 4 route changes on Workspace, a system theme flip to light and back (CDP media
 emulation, the `8-theme-light` and `8-theme-dark` rows), then Workspace to Board, which it asserts
-as an R-12 panel close and does not measure.
+as an R-12 panel close and does not measure. The script predates the Workspace page removal.
 
 **The handle is also a keyboard-operable `role="separator"`.** It declares
 `aria-orientation="vertical"`, is focusable (`tabIndex={0}`), and reports
@@ -2535,7 +2535,7 @@ not render below `CAROUSEL_QUERY`, for the same reason the touch discussion abov
 forces the panel to `100vw`, so there is no width left to trade — a deliberate non-fix, not a gap
 to close.
 
-**Docked (Orca) mode is a SECOND style-only derivation of the same `<aside>`, re-deriving `PANEL-03`
+**Docked mode is a SECOND style-only derivation of the same `<aside>`, re-deriving `PANEL-03`
 for a second surface.** `position` stays `fixed` in BOTH modes; only the `top`, `left`, `width`, `height`,
 `border-l`, `translate` and `transition` classes branch on the `docked` prop, the exact same category of change
 the fullscreen precedent above already proved remount-free; a `position` mode switch was deliberately
@@ -2544,8 +2544,8 @@ close `X`, and the fullscreen toggle are conditionally UNMOUNTED when docked —
 are stateless, decorative siblings outside the iframe subtree, never the terminal itself; the
 docked-and-empty-selection state (centered "Select a ticket" copy) renders only when
 `docked && card == null`, so the card-present subtree — and the terminal's position in it — is
-identical in both modes. The Orca side nav (`web/modules/workspace/`) never renders a terminal: it holds
-zero imports of `TerminalRegion` or `<iframe>`, is pure navigation chrome, and drives
+identical in both modes. No page reaches docked mode since the Workspace page was removed (`docked` is `false`); the code stays until a follow-up removes it. The side nav of that page (`web/modules/workspace/`, removed) never rendered a terminal: it held
+zero imports of `TerminalRegion` or `<iframe>`, was pure navigation chrome, and drove
 the SAME `selectedCardId` the board/inbox views already write to. The ensure-terminal spawn guard
 below stays a single ref BY CONSTRUCTION: one `selectedCardId`, one hoisted panel, means "the same
 card open in both views at once" is structurally impossible, so no per-card guard `Map` is needed — a
@@ -5064,7 +5064,7 @@ the columns exactly as before, so the detail panel's PANEL-03 no-remount rule is
 slot list is sidebar, `banner`, `header` per page, `content`, `detail`. The sync strip and its mode
 control are gone: pages are chosen by hash route, parsed by `parseRoute` in `src/shared/route.ts`
 and owned by TanStack Router on hash history (`src/web/routes/`); `src/web/main.tsx` remembers the last route under
-`dsp.route` and maps the legacy `dsp.view` value once on first load. The sidebar dimensions
+`dsp.route`. An unknown or old hash opens the board; `initialHash` takes the current hash, then the stored route, then the board. The sidebar dimensions
 (`--nav-width`, `--nav-width-collapsed`), the page header height (`--page-header-height`), the
 seven `--src-*` source colors and the "active sidebar row" accent job are ratified in
 `docs/standards/design-contract.md`.
@@ -5081,7 +5081,7 @@ seven `--src-*` source colors and the "active sidebar row" accent job are ratifi
 sets `--nav-current` (the live sidebar width: `var(--nav-width)`, `var(--nav-width-collapsed)`, or `0px`
 when the sidebar becomes a phone sheet) with classes on its root element. The hook
 `usePublishedHeight` in `hooks/use-published-height.ts` sets `--chrome-top` (the measured height of
-the top bar, banner and page header) on the same element with `style.setProperty`. The docked (Orca) `PanelFrame.tsx` reads
+the top bar, banner and page header) on the same element with `style.setProperty`. The docked (Orca) `PanelFrame.tsx`, unreachable until a follow-up removes it, reads
 both: `top: var(--chrome-top)`, `left: calc(var(--nav-current, 0px) + var(--orca-nav-width))` and
 `width: calc(100% - var(--nav-current, 0px) - var(--orca-nav-width))`, so collapsing the sidebar
 shifts the docked panel by style values alone and never remounts the terminal iframe. Measured at
@@ -5162,7 +5162,7 @@ The palette (`modules/shell/components/CommandPalette.tsx`) is a shadcn `Dialog`
 Escape and focus trap come from Radix; its commands come from `buildCommands` in
 `src/web/modules/shell/domain/commands.ts`, which calls the handlers that `ShellContainer.tsx` passes in. The cheat sheet renders the four tables, so a binding
 cannot ship without its row. The sidebar sits above the detail panel scrim, and a change to any
-page other than Workspace closes the undocked panel, so one sidebar click navigates.
+page closes the panel, so one sidebar click navigates.
 
 **Flow page.** `modules/flow/containers/FlowContainer.tsx` draws the work pipeline on the client only, from the
 board stream (`items`, `cards`, `enabledSources`, `syncedAt`, `pollIntervalMs`,
@@ -5953,7 +5953,7 @@ switch-sockets` (a pid-scoped, `ESTABLISHED`-only, bounded poll-to-zero proof th
   iframe expando, and the dispatch-side upstream socket's LOCAL ephemeral port — never the dispatch
   server's own pid, which stays constant across a real remount and is demonstrated dead by its own
   `--dead-signal-demo` mode). Covers all five forbidden mount events plus the newly-named
-  card-switch-while-open case, and the one legitimate re-point (session switch). Since U2-16 it also runs a route change loop on Board and Workspace and a system theme flip.
+  card-switch-while-open case, and the one legitimate re-point (session switch). Since U2-16 it also runs a route change loop on Board and Workspace (a page since removed) and a system theme flip.
 - **`node scripts/panel-98.mjs`** (`npm run panel-98`, Phase 98, PRLINK-01/02/03/06) - a CDP
   structural/DOM instrument, deliberately OUTSIDE `npm run check` (it boots a real sandboxed
   dispatch server and requires the live `com.dispatch.app` service stopped for its duration). Five

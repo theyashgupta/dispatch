@@ -189,7 +189,7 @@ export function createAppStore(initial: Partial<AppState> = {}) {
     },
     pageChanged: (page: Page): void =>
       set({
-        ...(page !== "workspace" ? CLOSED_PANEL : {}),
+        ...CLOSED_PANEL,
         ...(page !== "board" ? { groupStart: null } : {}),
       }),
 

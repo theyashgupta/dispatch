@@ -141,7 +141,6 @@ const PAGE_TITLES: Record<Page, string> = {
   board: "Board",
   inbox: "Inbox",
   tickets: "Tickets",
-  workspace: "Workspace",
   settings: "Settings",
   activity: "Activity",
   accounts: "Accounts and Usage",
