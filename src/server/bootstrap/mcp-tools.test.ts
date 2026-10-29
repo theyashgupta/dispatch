@@ -7,6 +7,7 @@ import { MCP_TOOLS, splitInput, type McpTool } from "./mcp-tools.js";
 const EXPECTED = [
   "add_comment",
   "approve_roadmap",
+  "assign_card",
   "create_base_branch",
   "create_board",
   "create_decision_item",
@@ -32,6 +33,7 @@ const EXPECTED = [
   "request_handoff",
   "resume_card",
   "resume_loop",
+  "resume_session",
   "send_input",
   "start_card",
   "start_group",
@@ -55,7 +57,7 @@ const accepts = (name: string, input: unknown) =>
   assert.equal(z.object(byName(name).input).safeParse(input).success, true);
 
 describe("mcp tool table", () => {
-  it("holds exactly the 35 tools", () => {
+  it("holds exactly the 37 tools", () => {
     assert.deepEqual(MCP_TOOLS.map((t) => t.name).sort(), EXPECTED);
   });
 
@@ -157,6 +159,7 @@ describe("mcp tool table", () => {
       list_accounts: "/accounts",
       get_rulebook: "/rulebook",
       start_card: `/cards/${id}/start`,
+      assign_card: `/cards/${id}/assign`,
       create_ticket: "/tickets",
       release_prep: "/releases",
       update_ticket: `/tickets/${id}`,
@@ -170,6 +173,7 @@ describe("mcp tool table", () => {
       approve_roadmap: `/groups/${id}/approve-roadmap`,
       request_handoff: `/sessions/${id}/handoff`,
       resume_loop: `/sessions/${id}/resume`,
+      resume_session: `/sessions/${id}/resume-lost`,
       stop_session: `/sessions/${id}/stop`,
       pause_card: `/sessions/${id}/pause`,
       resume_card: `/sessions/${id}/unpause`,

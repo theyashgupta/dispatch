@@ -13,6 +13,18 @@ import type {
 } from "../../../../shared/types.js";
 import { prFailureText } from "./pr-error-copy.js";
 
+export type ReviewStep = "loading" | "card" | "start";
+
+const STEP_LABEL: Record<ReviewStep, string> = {
+  loading: "Reading pull request",
+  card: "Opening review card",
+  start: "Opening Start dialog",
+};
+
+export function reviewButtonLabel(step: ReviewStep | null): string {
+  return step === null ? "Review with Claude" : STEP_LABEL[step];
+}
+
 export interface ReviewFlowDeps {
   currentBoard: BoardKey;
   loadDetail: () => Promise<ProviderResult<{ detail: PrDetail }>>;
@@ -22,6 +34,7 @@ export interface ReviewFlowDeps {
   openStart: (request: StartRequest) => void;
   openCard: (cardId: string) => void;
   notice: (text: string) => void;
+  onStep?: (step: ReviewStep) => void;
 }
 
 /**
@@ -38,16 +51,19 @@ export async function reviewPullRequestWithAgent(
   row: Pick<PrRow, "repo" | "number">,
 ): Promise<void> {
   try {
+    deps.onStep?.("loading");
     const loaded = await deps.loadDetail();
     if (!loaded.ok) {
       deps.notice(prFailureText(loaded.error, loaded.message, loaded.ssoUrl));
       return;
     }
+    deps.onStep?.("card");
     const card = await deps.openReviewCard();
     if (!card.ok) {
       deps.notice(prFailureText(card.error, card.message, card.ssoUrl));
       return;
     }
+    deps.onStep?.("start");
     if (card.boardKey !== deps.currentBoard) {
       await deps.switchBoard(card.boardKey);
     }

@@ -195,12 +195,15 @@ const REFUSALS: Record<string, string> = {
   "unknown-orchestrator": "that orchestrator no longer exists",
   "unknown-board": "that board no longer exists",
   "unknown-card": "that card no longer exists",
+  "group-member":
+    "a card in a group follows its group, assign the group instead",
   "duplicate-id": "an orchestrator with this id already exists",
   "main-exists": "this board already has a main orchestrator",
   "extra-needs-main": "the main orchestrator has to exist first",
   "main-has-scope": "the main orchestrator cannot have a group or a ticket",
   "main-has-override": "the main orchestrator cannot have a policy override",
-  "extra-needs-scope": "an extra orchestrator needs a group or a ticket",
+  "kind-mismatch":
+    "a main orchestrator is board scoped and an extra orchestrator is feature scoped",
   "group-owned": "another extra orchestrator owns one of the groups",
   "ticket-owned": "another extra orchestrator owns one of the tickets",
   "wider-override": "an override is wider than the board policy",
@@ -210,6 +213,7 @@ const REFUSALS: Record<string, string> = {
   "invalid-orchestrator-id": "that orchestrator id is not valid",
   "invalid-name": "the name has to be 1 to 60 characters",
   "invalid-role": "the role has to be main or extra",
+  "invalid-kind": "the kind has to be board or feature",
   "invalid-groupIds": "the group list is not valid",
   "invalid-ticketIds": "the ticket list is not valid",
   "invalid-card-id": "that card id is not valid",
@@ -232,6 +236,8 @@ const REFUSALS: Record<string, string> = {
     "the swap ceiling has to be a whole number from 256 to 65536",
   "invalid-budgetPerGroup":
     "the budget has to be an amount above 0 and at most 100000",
+  "invalid-budgetWarnPercent":
+    "the budget warning has to be a whole number from 1 to 99",
   "invalid-policy": "the policy has a field that is not valid",
   "unknown-field": "the request has a field that is not allowed",
   "invalid-body": "the request is not valid",

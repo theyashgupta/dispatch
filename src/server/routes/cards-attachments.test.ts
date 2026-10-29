@@ -9,6 +9,7 @@ import { DEFAULT_BOARD_KEY } from "../../shared/board-key.js";
 import type { Card } from "../../shared/types.js";
 
 process.env.HOME = await fsp.mkdtemp(path.join(os.tmpdir(), "dsp-att-"));
+process.env.DISPATCH_DIR = path.join(process.env.HOME, ".dispatch");
 const { cardsRouter } = await import("./cards.route.js");
 const { store } = await import("../store/board.store.js");
 const { BoardUnavailableError } = await import("../store/board-repository.js");

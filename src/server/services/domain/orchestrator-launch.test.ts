@@ -9,6 +9,7 @@ import {
   orchestratorLaunchArgs,
   orchestratorMcpConfig,
   orchestratorSessionEnv,
+  scopeBlock,
 } from "./orchestrator-launch.js";
 
 const input = {
@@ -153,4 +154,28 @@ void test("the session env carries the token and the port as text", () => {
     DISPATCH_ORCHESTRATOR_TOKEN: "t0k",
     DISPATCH_PORT: "4700",
   });
+});
+
+void test("the board scope block keeps the To Do triage of section 2", () => {
+  const block = scopeBlock("board");
+  assert.match(block, /^Scope: board\./);
+  assert.match(block, /Triage the To Do column as section 2/);
+  assert.doesNotMatch(block, /assign_card/);
+});
+
+void test("the feature scope block replaces section 2 with the assigned card rules", () => {
+  const block = scopeBlock("feature");
+  assert.match(block, /^Scope: feature\./);
+  assert.match(block, /Section 2 of the rule book does not apply to you/);
+  assert.match(block, /Act only on the cards that are assigned to you/);
+  assert.match(block, /Do not look for work in the To Do column/);
+  assert.match(block, /names other cards is a request to assign them to you/);
+  assert.match(block, /Call assign_card/);
+  assert.match(
+    block,
+    /Never start, stop or ship a card that is not assigned to you/,
+  );
+  assert.match(block, /When no card is assigned to you, call wait_for_event/);
+  assert.match(block, /Ship your assigned cards/);
+  assert.match(block, /Ignore an event for a card that is not assigned to you/);
 });

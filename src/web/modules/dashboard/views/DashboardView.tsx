@@ -6,7 +6,6 @@ import { HeaderStripContainer } from "@/modules/dashboard/containers/HeaderStrip
 import { LeftStripContainer } from "@/modules/dashboard/containers/LeftStripContainer";
 import { NextStepContainer } from "@/modules/dashboard/containers/NextStepContainer";
 import { ProgressContainer } from "@/modules/dashboard/containers/ProgressContainer";
-import { ShipContainer } from "@/modules/dashboard/containers/ShipContainer";
 import { TicketsContainer } from "@/modules/dashboard/containers/TicketsContainer";
 
 export function DashboardView() {
@@ -28,7 +27,6 @@ export function DashboardView() {
         </div>
         <div className="flex min-w-0 flex-col gap-(--space-lg) lg:col-start-1 lg:row-span-5 lg:row-start-4">
           <TicketsContainer />
-          <ShipContainer />
         </div>
         <div className="min-w-0 lg:col-start-2 lg:row-start-4">
           <NextStepContainer />

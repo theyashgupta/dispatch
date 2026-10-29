@@ -56,6 +56,7 @@ const SERVER: Record<string, ServerSide> = {
     params: schemas.sessionCardParamsSchema,
     body: schemas.startCardBodySchema,
   },
+  assign_card: { params: schemas.sessionCardParamsSchema },
   send_input: {
     params: schemas.sessionCardParamsSchema,
     body: schemas.sendInputBodySchema,
@@ -69,6 +70,7 @@ const SERVER: Record<string, ServerSide> = {
     body: schemas.handoffBodySchema,
   },
   resume_loop: { params: schemas.sessionCardParamsSchema },
+  resume_session: { params: schemas.sessionCardParamsSchema },
   stop_session: { params: schemas.sessionCardParamsSchema },
   pause_card: { params: schemas.sessionCardParamsSchema },
   resume_card: { params: schemas.sessionCardParamsSchema },
@@ -126,10 +128,12 @@ const VALID: Record<string, Record<string, unknown>> = {
     folder: "/f",
     repos: [{ path: "/r", base: "main" }],
   },
+  assign_card: { cardId: ID },
   send_input: { cardId: ID, text: "go" },
   approve_roadmap: { cardId: ID, decisionIds: ["d-1"] },
   request_handoff: { cardId: ID, hard: true },
   resume_loop: { cardId: ID },
+  resume_session: { cardId: ID },
   stop_session: { cardId: ID },
   pause_card: { cardId: ID },
   resume_card: { cardId: ID },
@@ -223,6 +227,7 @@ const REFUSED: [string, Record<string, unknown>][] = [
       direction: "d".repeat(limits.DIRECTION_MAX + 1),
     },
   ],
+  ["assign_card", { cardId: "" }],
   ["send_input", { cardId: ID, text: "" }],
   [
     "send_input",
@@ -232,6 +237,7 @@ const REFUSED: [string, Record<string, unknown>][] = [
   ["approve_roadmap", { cardId: ID, decisionIds: ["bad id!"] }],
   ["request_handoff", { cardId: ID, hard: "yes" }],
   ["resume_loop", { cardId: "" }],
+  ["resume_session", { cardId: "" }],
   ["stop_session", { cardId: "" }],
   ["pause_card", { cardId: "" }],
   ["resume_card", { cardId: "" }],
@@ -243,6 +249,22 @@ const REFUSED: [string, Record<string, unknown>][] = [
   [
     "start_ship",
     { cardId: ID, repository: "/r", branches: [{ ...BRANCH, name: "-x" }] },
+  ],
+  [
+    "start_ship",
+    { cardId: ID, repository: "/r", branches: [{ ...BRANCH, name: "a b" }] },
+  ],
+  [
+    "start_ship",
+    { cardId: ID, repository: "/r", branches: [{ ...BRANCH, name: "feat/" }] },
+  ],
+  [
+    "start_ship",
+    { cardId: ID, repository: "/r", branches: [{ ...BRANCH, name: "x.lock" }] },
+  ],
+  [
+    "start_ship",
+    { cardId: ID, repository: "/r", branches: [{ ...BRANCH, name: "a@{b" }] },
   ],
   [
     "start_ship",
@@ -367,6 +389,19 @@ describe("mcp tool table against the server schemas", () => {
       PLAN_ENTRY,
       { ...PLAN_ENTRY, ref: "Calendar sync", order: 2, size: "large" },
     ]);
+    assert.equal(mcpAccepts(tool, input), true, "mcp");
+    assert.equal(serverAccepts(tool, input), true, "server");
+  });
+
+  it("start_ship: a feature branch name passes the MCP and the server schema", () => {
+    const tool = byName("start_ship");
+    const input = {
+      cardId: ID,
+      repository: "/r",
+      branches: [
+        { ...BRANCH, name: "feat/LOCAL-131-unit-1-dashboards-dropdown" },
+      ],
+    };
     assert.equal(mcpAccepts(tool, input), true, "mcp");
     assert.equal(serverAccepts(tool, input), true, "server");
   });

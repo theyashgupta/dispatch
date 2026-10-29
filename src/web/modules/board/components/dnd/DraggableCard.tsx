@@ -34,6 +34,7 @@ interface DraggableCardProps {
   onRetryStart: (card: CardModel) => void;
   onRestart: (card: CardModel) => void;
   resume: (id: string) => Promise<ResumeOutcome>;
+  blocker?: { label: string; title: string } | null;
 }
 
 export function DraggableCard({
@@ -49,6 +50,7 @@ export function DraggableCard({
   onRetryStart,
   onRestart,
   resume,
+  blocker,
 }: DraggableCardProps) {
   const [hover, setHover] = useState(false);
   const [pressed, setPressed] = useState(false);
@@ -97,6 +99,7 @@ export function DraggableCard({
       onToggleExpand={() => setExpanded((v) => !v)}
       members={members}
       isCarousel={isCarousel}
+      blocker={blocker}
       onMoveTo={onMoveTo}
       onRetryStart={onRetryStart}
       onRestart={onRestart}

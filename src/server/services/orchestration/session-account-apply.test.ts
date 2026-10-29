@@ -16,9 +16,11 @@ const env = isolateEnv();
 const fake = installFakeTmux(env);
 
 const { store } = await import("../../store/board.store.js");
-const { upsertAccount, accountDir } = await import("./claude-accounts.js");
+const { adoptManagedDefault, removeAccount, upsertAccount, accountDir } =
+  await import("./claude-accounts.js");
 const {
   applyAccountChoice,
+  applyAutomaticMove,
   moveOrQueue,
   runPendingMove,
   startPendingMoveSweep,
@@ -161,6 +163,19 @@ void test("all moves a session on the cancelled limit screen with a hook limit a
   );
   const calls = fs.readFileSync(path.join(fake.state, "calls.log"), "utf8");
   assert.equal(calls.includes("Continue."), false);
+});
+
+void test("an automatic move of a session with a hook limit and no surface on the pane sends Continue.", async () => {
+  const hooked = await sessionCard("ap-auto-hook", IDLE_PANE);
+  recordTurnEvent(hooked.cardId, hooked.sessionId, "StopFailure", "rate_limit");
+  const result = await applyAutomaticMove("default", ACCOUNT_A);
+  assert.deepEqual(result.moved, [hooked]);
+  assert.equal(
+    sessionOf(hooked.cardId, hooked.sessionId)?.claudeAccountId,
+    ACCOUNT_A,
+  );
+  const calls = fs.readFileSync(path.join(fake.state, "calls.log"), "utf8");
+  assert.equal(calls.includes("Continue."), true);
 });
 
 void test("none touches no tmux session", async () => {
@@ -431,6 +446,47 @@ void test("removing the target account clears the pending moves that name it", a
   assert.equal(
     sessionOf(b.cardId, b.sessionId)?.pendingClaudeAccountId,
     ACCOUNT_B,
+  );
+});
+
+const MANAGED = "55555555-5555-4555-8555-555555555555";
+const managedRecord = {
+  id: MANAGED,
+  email: "managed@example.com",
+  orgId: "org",
+  orgName: "Org",
+  subscriptionType: "max",
+  createdAt: "2026-10-01T00:00:00.000Z",
+  lastLoginAt: "2026-10-01T00:00:00.000Z",
+};
+
+void test("a session recorded on default lists as the managed account once one exists", async () => {
+  const old = await sessionCard("ls-managed-old");
+  const own = await sessionCard("ls-managed-own", undefined, MANAGED);
+  await adoptManagedDefault(managedRecord);
+  try {
+    const list = await listAccountSessions();
+    const accountOf = (s: { sessionId: string }) =>
+      list.find((e) => e.sessionId === s.sessionId)?.accountId;
+    assert.equal(accountOf(old), MANAGED);
+    assert.equal(accountOf(own), MANAGED);
+  } finally {
+    await removeAccount(MANAGED);
+  }
+});
+
+void test("removing the managed account retags its sessions to default", async () => {
+  const onManaged = await sessionCard("rm-managed-on", undefined, MANAGED);
+  const onA = await sessionCard("rm-managed-a", undefined, ACCOUNT_A);
+  await adoptManagedDefault(managedRecord);
+  assert.deepEqual(await removeAccountAndLogout(MANAGED), { ok: true });
+  assert.equal(
+    sessionOf(onManaged.cardId, onManaged.sessionId)?.claudeAccountId,
+    "default",
+  );
+  assert.equal(
+    sessionOf(onA.cardId, onA.sessionId)?.claudeAccountId,
+    ACCOUNT_A,
   );
 });
 

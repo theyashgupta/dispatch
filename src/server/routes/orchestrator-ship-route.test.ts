@@ -556,12 +556,65 @@ void test("start_ship answers 202 for a launched ticket card with Part A progres
   );
 });
 
-void test("start_ship answers 400 not-group-card for a ticket card with no launch", async () => {
+void test("start_ship answers 202 for a ticket card the user started from the board and the flow merges one PR", async () => {
   await setPolicy({ shipRights: "merge" });
-  const card = await launchedTicket("agent_done", { launched: false });
+  const card = await launchedTicket("agent_done", {
+    launched: false,
+    tree: await freshTree("user-started-tree"),
+  });
+  assert.equal(card.launch, undefined);
   const reply = await shipOf(card, card.id);
+  assert.equal(reply.status, 202, JSON.stringify(reply.body));
+  await waitFor(
+    () => Promise.resolve(store.getCard(card.id)?.shipFlow?.state === "done"),
+    30_000,
+    "flow done",
+  );
+  const flow = store.getCard(card.id)?.shipFlow as ShipFlow;
+  assert.equal(flow.branches.length, 1);
+  assert.equal(flow.branches[0]?.state, "merged");
+  assert.notEqual(flow.branches[0]?.pr, null);
+});
+
+void test("start_ship answers 400 not-group-card for a ticket card with no launch and no session branch", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const card = await store.createLocalCard(SBX, "no session", "");
+  await store.setCardWorkspace(card.id, {
+    folder: stack.ws,
+    repos: [{ path: stack.repo, base: "main" }],
+  });
+  const reply = await shipOf(store.getCard(card.id)!, card.id);
   assert.equal(reply.status, 400);
   assert.equal(reply.body.error, "not-group-card");
+  assert.equal(store.getCard(card.id)?.shipFlow, undefined);
+});
+
+void test("start_ship refuses a user-started ticket card in Done with already-shipped and in Inbox with card-not-done", async () => {
+  await setPolicy({ shipRights: "merge" });
+  for (const [column, error] of [
+    ["done", "already-shipped"],
+    ["inbox", "card-not-done"],
+  ] as const) {
+    const card = await launchedTicket("agent_done", { launched: false });
+    await store.moveCardManual(card.id, column);
+    assert.equal(store.getCard(card.id)?.column, column);
+    const reply = await shipOf(card, card.id);
+    assert.equal(reply.status, 409, column);
+    assert.equal(reply.body.error, error, column);
+    assert.equal(store.getCard(card.id)?.shipFlow, undefined);
+  }
+});
+
+void test("start_ship answers 403 policy-refused for a user-started ticket card when ship rights are none", async () => {
+  const card = await launchedTicket("agent_done", { launched: false });
+  await setPolicy({ shipRights: "none" });
+  try {
+    const reply = await shipOf(card, card.id);
+    assert.equal(reply.status, 403);
+    assert.equal(reply.body.error, "policy-refused");
+  } finally {
+    await setPolicy({ shipRights: "merge" });
+  }
   assert.equal(store.getCard(card.id)?.shipFlow, undefined);
 });
 
@@ -672,6 +725,8 @@ const doneFlow = (branchName: string): ShipFlow => ({
       admin: false,
       tip: null,
       checked: null,
+      passed: null,
+      checkSkipped: false,
     },
   ],
   failedStep: null,
@@ -804,4 +859,54 @@ void test("start_ship does not refuse already-shipped for a card whose done flow
   assert.equal(reply.status, 202, JSON.stringify(reply.body));
   assert.equal((reply.body.flow as ShipFlow).repository, stack.repo);
   await settled(card);
+});
+
+void test("a feature orchestrator ships a group that it owns, and another feature orchestrator gets out-of-scope", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const card = await finishedGroup();
+  const before = structuredClone(store.getBoard(SBX)!.orchestrators);
+  const feature = (id: string, groupIds: string[]) => ({
+    id,
+    name: id,
+    role: "extra" as const,
+    kind: "feature" as const,
+    scope: { groupIds, ticketIds: [] },
+    policyOverride: {},
+    cardId: null,
+    state: "stopped" as const,
+    createdAt: "2026-10-07T00:00:00.000Z",
+  });
+  try {
+    await store.setBoardOrchestrators(SBX, [
+      ...before,
+      feature("feat-a", [card.id]),
+      feature("feat-b", []),
+    ]);
+    const tokenOf = async (id: string) =>
+      (await raw("POST", `/boards/SBX/orchestrators/${id}/token`)).body
+        .token as string;
+    const tree = await freshTree("feature-tree");
+    await store.setLoopProgress(card.id, {
+      ...FINISHED,
+      units: FINISHED.units.map((u) => ({ ...u, branch: tree })),
+    });
+    const body = { repository: stack.repo, branches: [branch(tree)] };
+    const route = `/orchestrator/groups/${card.id}/ship`;
+    const denied = await raw("POST", route, body, await tokenOf("feat-b"));
+    assert.equal(denied.status, 403, JSON.stringify(denied.body));
+    assert.equal(denied.body.error, "out-of-scope");
+    assert.equal(store.getCard(card.id)?.shipFlow, undefined);
+    const allowed = await raw("POST", route, body, await tokenOf("feat-a"));
+    assert.equal(allowed.status, 202, JSON.stringify(allowed.body));
+    const flow = allowed.body.flow as ShipFlow;
+    assert.equal(flow.orchestratorId, "feat-a");
+    assert.equal(flow.rights, "merge");
+    await waitFor(
+      () => Promise.resolve(store.getCard(card.id)?.shipFlow?.state === "done"),
+      30_000,
+      "flow done",
+    );
+  } finally {
+    await store.setBoardOrchestrators(SBX, before);
+  }
 });

@@ -12,6 +12,7 @@ import {
   ValidationError,
 } from "../domain/errors.js";
 import type { OrchestratorIdentity } from "../domain/orchestrator-scope.js";
+import { assertBlockers, checkCardBlockedBy } from "./card-blocked-by.js";
 import { moveCard } from "./card-move.js";
 import { postComment, type OutboundDeps } from "./linear-outbound.js";
 import { appendToExtraScope } from "./orchestrator-session.js";
@@ -37,7 +38,7 @@ function liveCard(id: string): Card {
  */
 export async function createOrchestratorTicket(
   caller: OrchestratorIdentity,
-  input: { proposalItemId: string; index: number },
+  input: { proposalItemId: string; index: number; blockedBy?: string[] },
 ): Promise<Card> {
   const item = store.getDecisionItem(input.proposalItemId);
   if (item?.boardKey !== caller.boardKey) {
@@ -55,6 +56,10 @@ export async function createOrchestratorTicket(
   }
   const entry = item.proposal.tickets[input.index];
   if (entry === undefined) throw new ValidationError("invalid-index");
+  const blockers =
+    input.blockedBy === undefined
+      ? []
+      : assertBlockers(caller.boardKey, input.blockedBy);
   if (!store.useProposalIndex(item.id, input.index)) {
     throw new ConflictError("proposal-index-used");
   }
@@ -71,29 +76,36 @@ export async function createOrchestratorTicket(
   await store.setOrchestratorFields(card.id, {
     createdByOrchestrator: caller.orchestratorId,
   });
+  if (blockers.length > 0) await store.setBlockedBy(card.id, blockers);
   await appendToExtraScope(caller, "ticketIds", card.id);
   return liveCard(card.id);
 }
 
 /**
- * Change the title or description of a local ticket.
+ * Change the title or description of a local ticket, or the blockers of any ticket.
  *
- * @remarks A group card is not a ticket. Any other non-local card is owned by its source, so the
- * edit belongs there.
+ * @remarks A group card is not a ticket. Any other non-local card is owned by its source, so a
+ * text edit belongs there. The blockers are checked before any write, so a refused list writes
+ * nothing, and the text is written before them so a missing card writes nothing either.
  */
 export async function updateTicket(
   card: Card,
-  patch: { title?: string; description?: string },
+  patch: { title?: string; description?: string; blockedBy?: string[] },
 ): Promise<Card> {
   if (card.source === "group") throw new ConflictError("not-a-ticket");
-  if (card.source !== "local") {
+  const { blockedBy, ...text } = patch;
+  const hasText = text.title !== undefined || text.description !== undefined;
+  if (hasText && card.source !== "local") {
     throw new ConflictError("linear-card", {
       reason: "linear card: edit in Linear",
     });
   }
-  if (!(await store.updateLocalCardText(card.id, patch))) {
+  const blockers =
+    blockedBy === undefined ? undefined : checkCardBlockedBy(card, blockedBy);
+  if (hasText && !(await store.updateLocalCardText(card.id, text))) {
     throw new NotFoundError("unknown-card");
   }
+  if (blockers !== undefined) await store.setBlockedBy(card.id, blockers);
   return liveCard(card.id);
 }
 

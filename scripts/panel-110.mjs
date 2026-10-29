@@ -370,6 +370,7 @@ function assertBuilt() {
       .trim();
     throw new Error(
       `refusing to run, \`npm run ${BUILD_SCRIPT}\` failed, so dist/ does not reflect src/:\n${detail || err.message}`,
+      { cause: err },
     );
   }
   if (!existsSync(DIST_ENTRY)) {
@@ -1156,6 +1157,7 @@ function decryptPushBody(body, subscriberKeys) {
   } catch (err) {
     throw new Error(
       `decryptPushBody: AES-128-GCM tag verification failed (stage: tag verification): ${err.message}`,
+      { cause: err },
     );
   }
 
@@ -1275,7 +1277,7 @@ function verifyVapidAuthorization(headerValue, endpointOrigin) {
     return problems;
   }
 
-  let valid = false;
+  let valid;
   try {
     valid = verifySignature(
       "sha256",
@@ -1536,7 +1538,7 @@ async function runBreakNeedsInputTriggerFires() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(PARSE_TS_PATH, original);
   try {
     writeFileSync(
@@ -1766,7 +1768,7 @@ async function runBreakPushEnvelopeDecrypts() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(PUSH_SEND_TS_PATH, original);
   try {
     writeFileSync(
@@ -1921,7 +1923,7 @@ async function runBreakAgentDoneNoPush() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(BOOTSTRAP_INDEX_TS_PATH, original);
   try {
     writeFileSync(
@@ -2130,7 +2132,7 @@ async function runBreakMultiDevicePrune() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(PUSH_SEND_TS_PATH, original);
   try {
     writeFileSync(
@@ -2347,7 +2349,7 @@ async function runBreakPerOriginDeepLink() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(PUSH_SEND_TS_PATH, original);
   try {
     writeFileSync(
@@ -2518,7 +2520,7 @@ async function runBreakDeepLinkParamOpensCard() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(APP_TSX_PATH, original);
   try {
     writeFileSync(
@@ -2716,7 +2718,7 @@ async function runBreakTagRenotifyReplace() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(SW_PATH, original);
   try {
     writeFileSync(
@@ -3064,7 +3066,7 @@ async function runBreakNotificationclickFocusOrOpen() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(SW_PATH, original);
   try {
     writeFileSync(
@@ -3392,7 +3394,7 @@ async function runBreakNeedsInputDelivers() {
     );
   }
 
-  let tripFired = false;
+  let tripFired;
   registerRestore(PUSH_SEND_TS_PATH, original);
   try {
     writeFileSync(

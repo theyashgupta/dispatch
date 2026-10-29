@@ -1,24 +1,18 @@
-import { Play, RotateCw } from "lucide-react";
+import { RotateCw } from "lucide-react";
 import type { Card as CardModel } from "../../../../shared/types.js";
 import { Button } from "@/components/ui/button";
-import { runClaudeBlockedTitle } from "@/modules/detail/domain/pause-copy";
+import { terminalReady } from "@/modules/detail/domain/session-flow";
 import { PanelAlert, PanelMonoNotice } from "./PanelNotice";
 
 interface TerminalRegionProps {
   card: CardModel;
   onReconnect: (id: string) => void;
-  onRunClaude: (id: string) => void;
 }
 
-export function TerminalRegion({
-  card,
-  onReconnect,
-  onRunClaude,
-}: TerminalRegionProps) {
+export function TerminalRegion({ card, onReconnect }: TerminalRegionProps) {
   const c = card;
-  const blocked = runClaudeBlockedTitle(c);
   return (
-    <div className="mx-(--space-xl) mt-0 mb-(--space-xl) flex min-h-60 flex-auto flex-col border-t border-border pt-(--space-lg)">
+    <div className="mx-(--space-xl) my-(--space-sm) flex min-h-60 flex-auto flex-col">
       <div className="flex min-h-0 flex-auto flex-col overflow-hidden rounded-md border border-border bg-background">
         {c.terminalError != null ? (
           <div className="scroll-stable-y flex min-h-0 flex-auto flex-col gap-(--space-lg) overflow-y-auto p-(--space-xl)">
@@ -47,30 +41,13 @@ export function TerminalRegion({
               Reconnect
             </Button>
           </div>
-        ) : c.ttydPort != null && c.activeSessionId != null ? (
-          <>
-            <div className="flex flex-none justify-end border-b border-border px-(--space-sm) py-(--space-xs)">
-              <span title={blocked ?? undefined} className="flex">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-auto min-h-8 shrink whitespace-normal"
-                  disabled={blocked !== null}
-                  aria-label={blocked ? `Run Claude. ${blocked}` : undefined}
-                  onClick={() => onRunClaude(c.id)}
-                >
-                  <Play className="size-3" aria-hidden="true" />
-                  Run Claude
-                </Button>
-              </span>
-            </div>
-            <iframe
-              src={`/sessions/${c.activeSessionId}/terminal/`}
-              title={`Live terminal for ${c.identifier}`}
-              sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
-              className="min-h-0 w-full flex-auto border-0"
-            />
-          </>
+        ) : terminalReady(c) ? (
+          <iframe
+            src={`/sessions/${c.activeSessionId}/terminal/`}
+            title={`Live terminal for ${c.identifier}`}
+            sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+            className="min-h-0 w-full flex-auto border-0"
+          />
         ) : (
           <div className="p-(--space-xl) text-sm text-muted-foreground">
             Connecting to terminal…

@@ -138,3 +138,16 @@ export function resolveShortcut(
   }
   return bindings.find((b) => b.meta !== true && b.key === event.key) ?? null;
 }
+
+const EDITABLE_ROLES = new Set(["combobox", "listbox"]);
+
+/**
+ * Tell whether a focused element is a combobox or listbox.
+ *
+ * @remarks
+ * The shared resolver treats only fields as editable, but a Radix Select trigger is a button with
+ * the combobox role, so a key typed there must not act on the cursor row.
+ */
+export function isEditableRole(target: ShortcutEvent["target"]): boolean {
+  return EDITABLE_ROLES.has(target?.getAttribute?.("role") ?? "");
+}

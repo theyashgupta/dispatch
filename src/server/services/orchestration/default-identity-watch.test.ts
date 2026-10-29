@@ -14,6 +14,8 @@ const { store } = await import("../../store/board.store.js");
 const accounts = await import("./claude-accounts.js");
 const ops = await import("./claude-account-ops.js");
 const watch = await import("./default-identity-watch.js");
+const { startAccountChain, whenChainIdle } = await import("./account-chain.js");
+const { readChainState } = await import("./account-chain-state.js");
 await store.load();
 
 const ACCOUNT_A = "11111111-1111-4111-8111-111111111111";
@@ -165,4 +167,68 @@ void test("the watch timer checks and stops", async () => {
   }
   stop();
   assert.equal(staleOf(s), true);
+});
+
+void test("a check hands the home login to the chain, which shadows the account with the same login and keeps it through a failed read", async () => {
+  const SHADOW_ID = "55555555-5555-4555-8555-555555555555";
+  await accounts.upsertAccount({
+    id: SHADOW_ID,
+    email: "shadow@example.com",
+    orgId: "org-s",
+    orgName: "Org",
+    subscriptionType: "max",
+    createdAt: "2026-10-01T00:00:00.000Z",
+    lastLoginAt: "2026-10-01T00:00:00.000Z",
+  });
+  const stop = await startAccountChain({ scanMs: 0 });
+  assert.equal((await readChainState()).accounts[SHADOW_ID], undefined);
+  setHome(read({ email: "shadow@example.com", orgId: "org-s" }));
+  await watch.checkDefaultIdentity();
+  await whenChainIdle();
+  assert.equal(
+    (await readChainState()).accounts[SHADOW_ID]?.state,
+    "shadowed-by-home",
+  );
+  setHome(read({ email: "shadow@example.com", orgId: "" }));
+  await watch.checkDefaultIdentity();
+  await whenChainIdle();
+  assert.equal(
+    (await readChainState()).accounts[SHADOW_ID]?.state,
+    "shadowed-by-home",
+  );
+  setHome(read({ loggedIn: false, email: "", orgId: "" }));
+  await watch.checkDefaultIdentity();
+  await whenChainIdle();
+  assert.equal(
+    (await readChainState()).accounts[SHADOW_ID]?.state,
+    "shadowed-by-home",
+  );
+  stop();
+});
+
+void test("with a managed default a home change records the event and marks nothing stale", async () => {
+  const MANAGED = "66666666-6666-4666-8666-666666666666";
+  await accounts.adoptManagedDefault({
+    id: MANAGED,
+    email: "managed@example.com",
+    orgId: "org-m",
+    orgName: "Org",
+    subscriptionType: "max",
+    createdAt: "2026-10-01T00:00:00.000Z",
+    lastLoginAt: "2026-10-01T00:00:00.000Z",
+  });
+  try {
+    const s = await sessionCard("w-managed");
+    const before = changedEvents().length;
+    setHome(read({ email: "moved@example.com", orgId: "org-moved" }));
+    await watch.checkDefaultIdentity();
+    assert.equal(staleOf(s), false);
+    assert.equal(changedEvents().length, before + 1);
+    assert.deepEqual(await accounts.readDefaultIdentity(), {
+      email: "moved@example.com",
+      orgId: "org-moved",
+    });
+  } finally {
+    await accounts.removeAccount(MANAGED);
+  }
 });

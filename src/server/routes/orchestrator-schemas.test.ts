@@ -271,9 +271,22 @@ void test("shipBodySchema", () => {
     [withBranches([branch, branch]), "invalid-branches"],
     [withBranches([{ ...branch, name: "a..b" }]), "invalid-branch-name"],
     [withBranches([{ ...branch, name: "-x" }]), "invalid-branch-name"],
+    [withBranches([{ ...branch, name: "a b" }]), "invalid-branch-name"],
+    [withBranches([{ ...branch, name: "feat/" }]), "invalid-branch-name"],
+    [withBranches([{ ...branch, name: "x.lock" }]), "invalid-branch-name"],
+    [withBranches([{ ...branch, name: "a@{b" }]), "invalid-branch-name"],
     [withBranches([{ ...branch, title: "" }]), "invalid-title"],
     [withBranches([{ ...branch, title: MARKER }]), MARKER_CODE],
     [withBranches([{ ...branch, body: "" }]), "invalid-body"],
     [withBranches([{ ...branch, body: "b".repeat(20001) }]), "invalid-body"],
   ]);
+});
+
+void test("shipBodySchema keeps a slashed branch name as given", () => {
+  const name = "feat/LOCAL-131-unit-1-dashboards-dropdown";
+  const parsed = s.shipBodySchema.parse({
+    repository: "/r",
+    branches: [{ name, title: "t", body: "b" }],
+  });
+  assert.equal(parsed.branches[0].name, name);
 });
