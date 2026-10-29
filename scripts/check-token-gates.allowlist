@@ -208,11 +208,6 @@ src/web/modules/shell/components/SidebarDashboards.tsx	tracking-[0.04em]	trackin
 src/web/modules/shell/containers/ShellContainer.tsx	[--sidebar-width-icon:var(--nav-width-collapsed)]	scoped custom property set from tokens
 src/web/modules/shell/containers/ShellContainer.tsx	[--sidebar-width:var(--nav-width)]	scoped custom property set from tokens
 src/web/modules/today/components/EntryRow.tsx	leading-[normal]	one-off pixel geometry without a token step
-src/web/modules/workspace/components/OrcaGroupSection.tsx	bg-[color-mix(in_srgb,var(--badge-state)_16%,var(--surface-column))]	tint of a signal token, pending a Badge tone or tint token
-src/web/modules/workspace/components/OrcaGroupSection.tsx	text-[color-mix(in_srgb,var(--badge-state)_35%,var(--text))]	tint of a signal token, pending a Badge tone or tint token
-src/web/modules/workspace/components/OrcaGroupSection.tsx	tracking-[0.04em]	tracking token lands in LOCAL-144
-src/web/modules/workspace/components/OrcaSubgroupSection.tsx	bg-[color-mix(in_srgb,var(--badge-state)_16%,var(--surface-column))]	tint of a signal token, pending a Badge tone or tint token
-src/web/modules/workspace/components/OrcaSubgroupSection.tsx	text-[color-mix(in_srgb,var(--badge-state)_35%,var(--text))]	tint of a signal token, pending a Badge tone or tint token
 src/web/modules/workspaces/components/WorkspaceSection.tsx	[overflow-wrap:anywhere]	CSS property with no Tailwind utility
 src/web/modules/workspaces/components/WorkspaceSection.tsx	grid-rows-[0fr]	grid track template
 src/web/modules/workspaces/components/WorkspaceSection.tsx	grid-rows-[1fr]	grid track template
