@@ -82,9 +82,9 @@ const record = (role: OrchestratorRecord["role"]): OrchestratorRecord => ({
 });
 
 const withOrchestrators = [
-  { ...boards[0]!, orchestrators: [record("main")] },
-  { ...boards[1]!, orchestrators: [record("main")] },
-  { ...boards[2]!, orchestrators: [record("extra")] },
+  { ...boards[0], orchestrators: [record("main")] },
+  { ...boards[1], orchestrators: [record("main")] },
+  { ...boards[2], orchestrators: [record("extra")] },
   { key: "ZED" as BoardKey, name: "Zed", archived: false, orchestrators: [] },
   {
     key: "BEE" as BoardKey,
