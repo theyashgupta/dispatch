@@ -26,7 +26,16 @@ test("a settings hash keeps its tab as the id", () => {
 });
 
 test("empty, bare and unknown hashes map to the board with no id", () => {
-  for (const hash of ["", "#", "#/", "#/nope", "#nope", "#/nope/123"]) {
+  for (const hash of [
+    "",
+    "#",
+    "#/",
+    "#/nope",
+    "#nope",
+    "#/nope/123",
+    "#/activity",
+    "#/activity/123",
+  ]) {
     assert.deepEqual(parseRoute(hash), { page: "board" });
   }
 });
@@ -34,7 +43,6 @@ test("empty, bare and unknown hashes map to the board with no id", () => {
 test("the route table holds exactly the shell and source pages", () => {
   assert.deepEqual([...PAGES].sort(), [
     "accounts",
-    "activity",
     "archive",
     "ask",
     "board",
@@ -79,7 +87,6 @@ test("routeHash round-trips every valid hash", () => {
     "#/inbox",
     "#/settings",
     "#/settings/vault",
-    "#/activity",
     "#/accounts",
     "#/playbooks",
     "#/vault",

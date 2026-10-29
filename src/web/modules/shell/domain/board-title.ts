@@ -7,7 +7,6 @@ export const BOARD_PAGES: readonly Page[] = [
   "tickets",
   "workspaces",
   "flow",
-  "activity",
   "archive",
   "dashboard",
   "orchestrator",

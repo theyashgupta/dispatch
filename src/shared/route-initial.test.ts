@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { initialHash } from "./route.js";
 
 test("a present hash wins over everything stored", () => {
-  assert.equal(initialHash("#/inbox", "#/activity"), "#/inbox");
+  assert.equal(initialHash("#/inbox", "#/archive"), "#/inbox");
 });
 
 test("an empty hash falls back to the remembered route", () => {
@@ -18,7 +18,7 @@ test("an old workspace or orca hash opens the board", () => {
 });
 
 test("a stored route still wins over an empty hash", () => {
-  assert.equal(initialHash("#/", "#/activity"), "#/activity");
+  assert.equal(initialHash("#/", "#/archive"), "#/archive");
 });
 
 test("a stored route that does not parse falls back to the board", () => {
@@ -40,7 +40,7 @@ test("a current hash keeps its board query", () => {
 
 test("a current hash with an id keeps the id and the query", () => {
   assert.equal(
-    initialHash("#/inbox/abc?board=ACME", "#/activity"),
+    initialHash("#/inbox/abc?board=ACME", "#/archive"),
     "#/inbox/abc?board=ACME",
   );
 });

@@ -5,7 +5,6 @@ export const PAGES = [
   "inbox",
   "tickets",
   "settings",
-  "activity",
   "accounts",
   "playbooks",
   "vault",
