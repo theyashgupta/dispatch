@@ -6762,7 +6762,7 @@ record is `stopped`, and with 409 `orchestrator-session-live` while the tmux ses
 open. At boot `settleTransientRecords` moves each `starting` or `stopping` record to `running` while its
 hidden tmux session is open (the supervisor then classifies the session), else to `stopped` with its
 token revoked. The session is probed by `card.tmuxSession`, else by the name the start saga gives it
-(`dsp-<branch or identifier>`), because a first start writes `tmuxSession` only once claude is ready. The supervisor applies the effective policy of the owner (`ownerPolicy`) to each loop:
+(`dsp-<branch or identifier>`), because a first start writes `tmuxSession` only once claude is ready. After the server listens, `relaunchStaleTokenSessions` reads `DISPATCH_ORCHESTRATOR_TOKEN` from the tmux environment of each open orchestrator session where claude runs. When that token is missing, unknown, revoked or of another orchestrator, it presses `Escape`, types `/exit`, waits for the shell prompt and relaunches claude through `runClaude`, which gives the shell a fresh token and resumes the recorded conversation. The MCP server reads its token only when claude starts, so a running claude cannot get a fresh token without a relaunch. Each relaunch writes one `supervisor_action` event with `action: "orchestrator_relaunch"`, the `reason` and the `result`. A session at its shell prompt makes no tool call and stays as it is. The supervisor applies the effective policy of the owner (`ownerPolicy`) to each loop:
 the budget per group, the cap on running loops and the usage limit.
 
 **Launch limits.** When the card is hidden, `buildLaunch` in `steps.ts` adds the arguments of
