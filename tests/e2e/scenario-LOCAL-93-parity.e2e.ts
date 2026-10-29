@@ -36,17 +36,14 @@ const ROUTE_ALLOWED_EXTRA: Record<
 const SHADCN_RESTYLE =
   "LOCAL-74 to LOCAL-77: shadcn restyle (custom selects, buttons, inputs, badges)";
 const PIXEL_ATTRIBUTION: Record<string, string> = {
-  "/activity": SHADCN_RESTYLE,
   "/ask": SHADCN_RESTYLE,
   "/errors": SHADCN_RESTYLE,
   "/inbox": SHADCN_RESTYLE,
   "/meetings": SHADCN_RESTYLE,
   "/pull-requests": SHADCN_RESTYLE,
-  "/sessions": SHADCN_RESTYLE,
   "/slack": SHADCN_RESTYLE,
   "/tickets": SHADCN_RESTYLE,
   "/today": SHADCN_RESTYLE,
-  "/workspace": SHADCN_RESTYLE,
   "/workspaces": SHADCN_RESTYLE,
   "/flow": SHADCN_RESTYLE,
   "/board":
@@ -116,9 +113,14 @@ function judgeRoute(
   return { attribution, verdict: pixelsOk && requestsOk ? "pass" : "FAIL" };
 }
 
+const REMOVED_ROUTES = new Set(["/sessions", "/workspace", "/activity"]);
 const note = makeNote("local-93-parity");
 
-/** Read the page routes of v4.2.0 as hash fragments from its generated route tree. */
+/**
+ * Read the page routes of v4.2.0 as hash fragments from its generated route tree.
+ *
+ * @remarks A route in {@link REMOVED_ROUTES} is skipped: it no longer renders a page.
+ */
 function oldRoutes(): string[] {
   const tree = fs.readFileSync(
     path.join(RELEASE_V420, "src/web/routeTree.gen.ts"),
@@ -128,7 +130,9 @@ function oldRoutes(): string[] {
   for (const m of tree.matchAll(/fullPath: '([^']+)'/g)) {
     paths.add(m[1].replace("/{-$id}", ""));
   }
-  return [...paths].filter((p) => p !== "" && p !== "/").sort();
+  return [...paths]
+    .filter((p) => p !== "" && p !== "/" && !REMOVED_ROUTES.has(p))
+    .sort();
 }
 
 /** Build the request key used for comparison: the method and the path, with no query. */
