@@ -991,6 +991,12 @@ void test("a retry on the merged tip whose check passed skips the check command 
   assert.equal(check.runs(), 1);
   assert.equal(flow.branches[0]?.checkSkipped, true);
   assert.equal(flow.branches[0]?.passed, flow.branches[0]?.checked);
+  const gh = ghCalls(stack);
+  assert.equal(gh.filter((a) => a[1] === "create").length, 1);
+  assert.deepEqual(
+    gh.filter((a) => a[1] === "merge").map((a) => a[2]),
+    [String(flow.branches[0]?.pr)],
+  );
   assert.deepEqual(groupStatesOf(stack.card.id), [
     "ship_stopped",
     "ship_check_skipped",
@@ -2074,6 +2080,37 @@ for (const state of ["checking", "merging", "waiting_merge"] as const) {
     assert.deepEqual(ghCalls(stack), []);
   });
 }
+
+void test("a resumed flow at checking on a commit that passed skips the check and adopts the open PR", async () => {
+  const check = countingCheck();
+  const stack = await newStack({ checkCommand: check.command });
+  const tip = await gitOutput(stack.worktree, "rev-parse", "unit-1");
+  await gitOutput(stack.worktree, "checkout", "-q", "unit-1");
+  await gitOutput(stack.worktree, "push", "-q", "origin", "unit-1");
+  seedPr(stack, "unit-1", {});
+  await storeRunning(stack, {
+    state: "checking",
+    tip,
+    checked: tip,
+    passed: tip,
+  });
+  resumeShipFlows();
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.equal(check.runs(), 0);
+  assert.equal(flow.branches[0]?.checkSkipped, true);
+  assert.equal(flow.branches[0]?.pr, 7);
+  const gh = ghCalls(stack);
+  assert.equal(gh.filter((a) => a[1] === "create").length, 0);
+  assert.deepEqual(
+    gh.filter((a) => a[1] === "merge").map((a) => a[2]),
+    ["7"],
+  );
+  assert.equal(
+    calls.some((c) => c.cmd === "env"),
+    false,
+  );
+});
 
 void test("a resumed flow whose board rights fell to open_prs waits for the user merge and does not merge", async () => {
   await setPolicy({ shipRights: "open_prs" });
