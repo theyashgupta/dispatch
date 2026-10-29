@@ -18,6 +18,10 @@ import {
   SidebarBoards,
   type SidebarBoardsData,
 } from "@/modules/shell/components/SidebarBoards";
+import {
+  SidebarDashboards,
+  type SidebarDashboardsData,
+} from "./SidebarDashboards";
 import { SidebarFooterActions } from "@/modules/shell/components/SidebarFooterActions";
 import {
   navGroups,
@@ -36,6 +40,8 @@ export interface AppSidebarProps {
   activityOpen: boolean;
   carousel: boolean;
   boards: SidebarBoardsData;
+  dashboards: SidebarDashboardsData;
+  hasMainOrchestrator: boolean;
   onNavigate: (page: Page) => void;
   onOpenCreateTicket: () => void;
   onOpenActivity: () => void;
@@ -51,6 +57,8 @@ export function AppSidebar({
   activityOpen,
   carousel,
   boards,
+  dashboards,
+  hasMainOrchestrator,
   onNavigate,
   onOpenCreateTicket,
   onOpenActivity,
@@ -124,11 +132,23 @@ export function AppSidebar({
                     collapsed
                     onNavigate={onNavigate}
                   />
+                  {hasMainOrchestrator ? (
+                    <NavRow
+                      page="dashboard"
+                      label="Dashboards"
+                      active={current === "dashboard"}
+                      collapsed
+                      onNavigate={onNavigate}
+                    />
+                  ) : null}
                 </SidebarMenu>
               </SidebarGroup>
             </>
           ) : (
-            <SidebarBoards {...boards} />
+            <>
+              <SidebarBoards {...boards} />
+              <SidebarDashboards {...dashboards} />
+            </>
           )}
         </SidebarContent>
 

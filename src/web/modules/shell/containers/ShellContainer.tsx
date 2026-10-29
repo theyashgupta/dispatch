@@ -76,7 +76,10 @@ import { Toaster } from "@/components/ui/sonner";
 import { ActivityDrawer } from "@/modules/shell/components/ActivityDrawer";
 import { CheatSheet } from "@/modules/shell/components/CheatSheet";
 import { ShellFrame } from "@/modules/shell/components/ShellFrame";
-import { switcherItems } from "@/modules/shell/domain/board-switcher";
+import {
+  dashboardItems,
+  switcherItems,
+} from "@/modules/shell/domain/board-switcher";
 import { boardPageTitle } from "@/modules/shell/domain/board-title";
 import { BOARDS_GROUP, buildCommands } from "@/modules/shell/domain/commands";
 import { NAV_ITEMS, visibleNavItems } from "../../../../shared/nav-items.js";
@@ -205,6 +208,15 @@ export function ShellContainer({
     boardList !== undefined
       ? switcherItems(boardList.boards, counts.data?.counts, boardKey)
       : null;
+  const dashboardRows =
+    boardList !== undefined
+      ? dashboardItems(boardList.boards, counts.data?.counts, {
+          page: routePage,
+          board: boardKey,
+        })
+      : null;
+  const boardHasMain =
+    dashboardRows?.some((row) => row.key === boardKey) ?? false;
   const boardName =
     boardItems !== null && boardItems.length > 1
       ? (boardItems.find((item) => item.selected)?.name ?? null)
@@ -227,6 +239,13 @@ export function ShellContainer({
   const openBoard = useCallback(
     (key: BoardKey) => {
       void router.navigate({ href: pageLocation({ page: "board" }, key) });
+    },
+    [router],
+  );
+
+  const openDashboard = useCallback(
+    (key: BoardKey) => {
+      void router.navigate({ href: pageLocation({ page: "dashboard" }, key) });
     },
     [router],
   );
@@ -362,13 +381,9 @@ export function ShellContainer({
     () => slackRows(hideDisabledSlack(items, enabledSources ?? [])),
     [items, enabledSources],
   );
-  const hasMainOrchestrator =
-    boardList?.boards
-      .find((b) => b.key === boardKey)
-      ?.orchestrators.some((r) => r.role === "main") ?? false;
   const navItems = useMemo(
-    () => visibleNavItems(NAV_ITEMS, enabledSources ?? [], hasMainOrchestrator),
-    [enabledSources, hasMainOrchestrator],
+    () => visibleNavItems(NAV_ITEMS, enabledSources ?? []),
+    [enabledSources],
   );
 
   useShortcuts(
@@ -403,7 +418,7 @@ export function ShellContainer({
           boardKey,
           cards: board.cards,
           decisions: decisions.data,
-          pushoverMissing: board.pushoverMissing,
+          pushoverMissing: board.pushoverMissing ?? null,
           now: new Date(nowMs()),
         }).length;
   const meetingItems = items.filter((item) => item.source === "meeting");
@@ -462,6 +477,7 @@ export function ShellContainer({
     navItems,
     selectedCardOf(board.cards, selectedCardId, pinned),
     boardItems,
+    boardHasMain,
   );
   return (
     <SidebarProvider
@@ -511,6 +527,8 @@ export function ShellContainer({
           onCreate: openCreateBoard,
           onRetry: () => void list.refetch(),
         }}
+        dashboards={{ items: dashboardRows, onOpenDashboard: openDashboard }}
+        hasMainOrchestrator={boardHasMain}
         pageTitle={boardPageTitle(
           route.page,
           PAGE_TITLES[route.page],

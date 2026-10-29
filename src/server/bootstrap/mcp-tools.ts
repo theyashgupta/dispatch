@@ -259,7 +259,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "start_group",
     description:
-      "Start the session of a group card. A group that is already started is refused.",
+      "Start the session of a group card. A group that is already started is refused. While memory is low the reply carries waitingForMemory and the start waits up to 30 minutes for memory, with the card at Waiting for memory.",
     input: idParam,
     method: "POST",
     path: "/groups/:id/start",
@@ -302,7 +302,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "resume_session",
     description:
-      "Resume a card whose session is lost after a restart or a reboot, the way the Resume button does. The resumed session gets no kickoff prompt; send a continue line with send_input after it is live. Refused with session-live, no-lost-session, start-in-flight, invalid-identifier, memory-low, or the cap refusal of resume_loop.",
+      "Resume a card whose session is lost after a restart or a reboot, the way the Resume button does; it also brings Claude back in a released session. On a board with the supervisor on, the supervisor types the resume prompt of the card once the session is live and confirms it in the transcript; with the supervisor off the resumed session gets no prompt, so send a continue line with send_input. Refused with session-live, no-lost-session, start-in-flight, invalid-identifier, memory-low, revive-failed, or the cap refusal of resume_loop.",
     input: cardIdParam,
     method: "POST",
     path: "/sessions/:cardId/resume-lost",
@@ -325,7 +325,8 @@ export const MCP_TOOLS: readonly McpTool[] = [
   },
   {
     name: "resume_card",
-    description: "Resume a paused loop. Refused while memory is low.",
+    description:
+      "Resume a paused loop. While memory is low the call answers 202 with waitingForMemory and the card shows Waiting for memory; the loop resumes when memory frees, else the card shows Resume failed with the reason after 30 minutes.",
     input: cardIdParam,
     method: "POST",
     path: "/sessions/:cardId/unpause",
@@ -464,7 +465,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "start_card",
     description:
-      "Start the session of one ticket card with a playbook and a direction, the way the start dialog does. Omit repos to use the stored workspace of the card, else the board repositories with their base branch. A stored workspace with no repository counts as none, and a board with no repository answers no-repositories. A group card, a running card, a card in Done or Inbox, the Board Orchestrator playbook and a start at the concurrency cap are refused. Pass account, an account id from list_accounts or default, to start on that account; an unknown account is refused with unknown-account. Omit it to use the active account. A feature orchestrator can start only its assigned cards; a card that is not assigned to it is refused with out-of-scope.",
+      "Start the session of one ticket card with a playbook and a direction, the way the start dialog does. Omit repos to use the stored workspace of the card, else the board repositories with their base branch. A stored workspace with no repository counts as none, and a board with no repository answers no-repositories. A group card, a running card, a card in Done or Inbox, the Board Orchestrator playbook and a start at the concurrency cap are refused. While memory is low the reply carries waitingForMemory and the start waits up to 30 minutes for memory, with the card at Waiting for memory. Pass account, an account id from list_accounts or default, to start on that account; an unknown account is refused with unknown-account. Omit it to use the active account. A feature orchestrator can start only its assigned cards; a card that is not assigned to it is refused with out-of-scope.",
     input: {
       ...cardIdParam,
       playbook: z.string().min(1).max(200),

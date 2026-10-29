@@ -133,7 +133,7 @@ Only you can change the policy. The orchestrator reads it. No tool can change it
 Notes on the fields:
 
 - **Roadmap approval** controls how the orchestrator approves the plan of a loop. With **Ask me for each roadmap**, the `approve_roadmap` tool needs your approve answer on a decision item of that group. With the two other values, the tool call is allowed. With **Approve when the rules pass, else ask**, the playbook judges the rules.
-- **Memory floor and swap ceiling.** Dispatch reads the memory of this Mac every 15 seconds. When free memory is below the board's memory floor (default 1024 MB) or swap used is above its swap ceiling (default 8192 MB), Dispatch refuses a card start, a group start, a resume of a lost session and the orchestrator tools that start or resume a loop. The refusal names the reading and the limit, for example "free memory 812 MB is below the 1024 MB floor". A group that waits in the queue starts when memory recovers. On Linux there is no reading and nothing is refused. Set the two limits with **Free memory floor (MB)** and **Swap ceiling (MB)**, which are next to **Loops at once** on the **Policy** tab. A start, a group start or a resume that Dispatch refuses for memory shows the reason in the usual place for that action. See also "Memory and paused loops".
+- **Memory floor and swap ceiling.** Dispatch reads the memory of this Mac every 15 seconds. When free memory is below the board's memory floor (default 1024 MB) or swap used is above its swap ceiling (default 8192 MB), Dispatch refuses a group start and the orchestrator tools that start or resume a loop. A card start and a resume of a lost session wait instead: Dispatch reads the memory again every 30 seconds for up to 30 minutes, the card shows "Waiting for memory…", and the start or the resume continues when memory recovers. After 30 minutes it fails with the reason, for example "free memory 812 MB is below the 1024 MB floor after 30 minutes of retries". The refusal names the reading and the limit, for example "free memory 812 MB is below the 1024 MB floor". A group that waits in the queue starts when memory recovers. On Linux there is no reading and nothing is refused. Set the two limits with **Free memory floor (MB)** and **Swap ceiling (MB)**, which are next to **Loops at once** on the **Policy** tab. A start, a group start or a resume that Dispatch refuses for memory shows the reason in the usual place for that action. See also "Memory and paused loops".
 - **Loops at once** is the concurrency cap. It covers groups and the ticket cards that the orchestrator starts. Dispatch refuses the orchestrator tools that start a group or a card above the cap. A card or group in Agent done frees its slot. A group that waits for its dependencies stays queued. The supervisor starts it when the dependencies are done and a slot is free.
 - **Loop model**: The model and effort of the sessions of a group. When you choose a model, Dispatch starts each group session with that model and effort, and it ignores any model or effort in the Settings Claude arguments. When you choose **Session settings**, Dispatch uses the Settings.
 - **Group playbook**: the playbook of a group that the orchestrator creates without one. When the playbook no longer exists, the group starts with no playbook. When the stored name is not in the list of playbooks, the select shows it as "<name> (not found)", and **Save policy** keeps the name.
@@ -191,6 +191,7 @@ The orchestrator node of the command centre shows the state of the session as a 
 - **Needs input**, **Permission prompt**, **Usage limit dialog** and **Waiting for usage reset**. The session waits. Open the **Terminal** tab.
 - **Session lost** and **Claude exited**. The session ended. **Resume** shows.
 - **Frozen after compaction**. Claude stopped after an idle compaction. See [A frozen session](#a-frozen-session).
+- **Released**. Claude exited on purpose after the loop finished, to free memory. The card keeps its column, its marker and its terminal text. **Run Claude** starts Claude again.
 
 When the orchestrator waits at its prompt, Dispatch wakes it. Dispatch types one line that starts with "Dispatch wake:" when you answer its decision item, when one of its groups reaches Agent done, needs input, fails to start, ships, stops its ship flow, hits a loop error or a usage limit, and when the **Wake timer (minutes)** of the policy runs out. Dispatch never types while the orchestrator works, types at most one line in 20 seconds, and never wakes a stopped orchestrator.
 
@@ -281,7 +282,7 @@ The loop also reports each phase gate and unit gate to Dispatch. The report uses
 
 ## The dashboard
 
-Open the dashboard from the sidebar row **Dashboard** (group **Work**), or from the palette command **Go to Dashboard**. The sidebar row and the palette command show only when the board has a main orchestrator. The dashboard shows the board that is selected in the **Boards** section.
+Open the dashboard from the row of the board in the **Dashboards** section of the sidebar, or from the palette command **Go to Dashboard**. The **Dashboards** section lists only boards that have a main orchestrator. In the collapsed sidebar, the **Dashboards** icon opens the dashboard of the current board. The icon and the palette command show only when the current board has a main orchestrator. The dashboard shows the board that is selected in the **Boards** section.
 
 The page has the title "Project map" on a dot-grid background. Each section shows its own loading state and its own error. A section error has the button **Try again**. The other sections stay.
 
@@ -331,7 +332,9 @@ When the connection to the server drops, the dashboard keeps the last data. The 
 
 Dispatch reads the memory of a Mac every 15 seconds. The reading shows as the memory line at the top of **Progress per group** on the dashboard (see "The dashboard"). Off macOS there is no reading, so the line is hidden. When 60 seconds pass without a new reading, the line adds "(stale)".
 
-The two limits are **Free memory floor (MB)** (0 to 65536, where 0 turns the floor off) and **Swap ceiling (MB)** (256 to 65536). Set them on the **Policy** tab (see "Board policy"). When a card start, a group start or a resume is refused for memory, Dispatch shows the reason, for example "free memory 812 MB is below the 1024 MB floor".
+The two limits are **Free memory floor (MB)** (0 to 65536, where 0 turns the floor off) and **Swap ceiling (MB)** (256 to 65536). Set them on the **Policy** tab (see "Board policy"). When a group start is refused for memory, or a card start or a resume still has no memory after 30 minutes, Dispatch shows the reason, for example "free memory 812 MB is below the 1024 MB floor".
+
+When free memory is below the floor and a start or a resume must wait or be refused, Dispatch first stops Claude in each finished session on the board. A finished session is a card in **Agent done** or **Done**, or a card whose loop has closed. Dispatch does not stop a loop that still runs, a card that waits for a ship fix, or a paused card. The card keeps its terminal text and its column, its session badge shows **Released**, and you can still ship it or choose **Run Claude**. Dispatch then waits up to 30 seconds for memory to come back before it waits longer or refuses.
 
 To stop a loop by hand:
 
@@ -875,7 +878,7 @@ Every seeded playbook has one input: the extra direction. It is the optional tex
 - **File:** `prd-ralph-loop.md`
 - **When to use:** a ticket whose scope is not settled and that needs a phased PRD and a loop.
 - **Inputs:** the extra direction.
-- **What it does:** it tells Claude to use the grill-me skill to test the scope until the requirements stop changing. Then it tells Claude to use the write-prd skill to write a phased `PRD.md`. Then it tells Claude to use the ralph-loop skill to run the PRD phase by phase. Claude uses the QA subagent mode unless the PRD is trivial. Claude passes the path of the PRD from the write-prd step to the ralph-loop step.
+- **What it does:** it tells Claude to use the grill-me skill to test the scope until the requirements stop changing. Then it tells Claude to use the write-prd skill to write a phased `PRD.md`. Then it tells Claude to use the ralph-loop skill to run the PRD phase by phase. Claude uses the QA subagent mode unless the PRD is trivial. Claude passes the path of the PRD from the write-prd step to the ralph-loop step. Each phase, also a review phase or a fix phase, must have its own `## Phase <N>` section in `analogues.md`. If the section is missing, the gate stops before it runs other checks.
 
 ### Superpowers
 

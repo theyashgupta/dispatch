@@ -208,7 +208,7 @@ async function main() {
   await stop(child);
   seedCards(dataDir);
   child = boot(dataDir);
-  let exitCode = 1;
+  let exitCode;
   try {
     await waitForReady();
     const reader = frameReader(await fetch(`${BASE}/api/stream`));

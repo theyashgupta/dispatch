@@ -867,3 +867,13 @@ void test("onPausedPidsReleased with the real kill and ps continues a stopped pr
     child.kill("SIGKILL");
   }
 });
+
+void test("pause of a loop card whose active session is released is 409 not-pausable with session released and signals nothing", async () => {
+  loopCard({ sessions: [{ ...session, state: "released" }] });
+  const err = await refusal(pauseCard("card-1", { by: "user", reason: "r" }));
+  assert.equal(err.code, "not-pausable");
+  assert.deepEqual(err.details, { reason: "session released" });
+  assert.deepEqual(signals, []);
+  assert.equal(events.length, 0);
+  assert.equal(cards.get("card-1")?.paused ?? null, null);
+});

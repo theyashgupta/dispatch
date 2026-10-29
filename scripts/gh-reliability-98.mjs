@@ -140,9 +140,6 @@ const ARTIFACT_DETECT_INTERVAL_MS = 10_000;
 /** Mirrors `PROBE_FAILURE_CEILING` (`artifact-detect.ts`): a strike count at or above this clears
  * `prs`; the negative-cache legs prove a cached skip never advances this counter. */
 const PROBE_FAILURE_CEILING = 3;
-/** Mirrors `NEGATIVE_CACHE_TTL_MS` (`gh-reliability.ts`): far longer than any wait window below,
- * so a cache armed on tick 1 is still live for every later tick this harness observes. */
-const NEGATIVE_CACHE_TTL_MS = 600_000;
 /**
  * How long a leg sleeps to observe exactly `n` tick firings: `(n - 1)` full intervals plus one
  * settle margin, timed to land after tick #n but strictly before tick #(n + 1) would fire (the
@@ -327,6 +324,7 @@ function assertBuilt() {
       .trim();
     throw new Error(
       `refusing to run, \`npm run ${BUILD_SCRIPT}\` failed, so dist/ does not reflect src/:\n${detail || err.message}`,
+      { cause: err },
     );
   }
   if (!existsSync(DIST_ENTRY_ABS)) {
@@ -355,7 +353,7 @@ function buildNoGhPath(home) {
   const shadowRoot = join(home, "path-shadow-no-gh");
   const out = [];
   dirs.forEach((dir, i) => {
-    let entries = [];
+    let entries;
     try {
       entries = readdirSync(dir);
     } catch {
@@ -555,7 +553,7 @@ function fmtStat(s) {
 /** T-98-06: assert the HARNESS's own shell-visible `gh` is still the real binary, never the
  * shim, the shim only ever rides a CHILD server process's own `env.PATH`. */
 function assertHarnessGhIsReal(label) {
-  let resolved = "";
+  let resolved;
   try {
     resolved = execFileSync("sh", ["-c", "command -v gh || true"], {
       encoding: "utf8",
@@ -2364,7 +2362,7 @@ async function main() {
   let chromeChild = null;
   let chromeUserDataDir = null;
   let cdp = null;
-  let portsHeld = false;
+  let portsHeld;
   let breakResult = null;
   const tmuxSpawned = [];
 

@@ -24,7 +24,11 @@ const { boardsRouter } = await import("./boards.route.js");
 const { groupStarter } =
   await import("../services/orchestration/orchestrator-groups.js");
 const { createPlaybook } = await import("../services/infra/playbooks.js");
-const { recordMemory } = await import("../test-support/memory-fixtures.js");
+const { memoryReading, recordMemory, withMemoryFakes } =
+  await import("../test-support/memory-fixtures.js");
+const { startGroup } =
+  await import("../services/orchestration/group-launch.js");
+const { steps } = await import("../services/orchestration/steps.js");
 
 const SBX = parseBoardKey("SBX") as BoardKey;
 const OTH = parseBoardKey("OTH") as BoardKey;
@@ -466,26 +470,81 @@ void test("start_group at the cap is refused with the reason and writes nothing"
   assert.equal(store.getCard(card.id)?.tmuxSession, undefined);
 });
 
-void test("start_group under memory pressure answers 409 memory-pressure, starts nothing, then starts once memory recovers", async () => {
+void test("start_group under high swap answers 202 at once, waits with Waiting for memory, then runs the saga", async (t) => {
   await setPolicy({ concurrencyCap: 10, budgetPerGroup: null });
   const card = await newGroup();
-  const startsBefore = starts.length;
+  t.mock.method(groupStarter, "start", startGroup);
+  const run = t.mock.method(steps[0], "run", () =>
+    Promise.reject(new Error("saga stopped by the test")),
+  );
   recordMemory(2048, 9000);
   try {
-    const { reply } = await call(`/groups/${card.id}/start`);
-    assert.equal(reply.status, 409, JSON.stringify(reply.body));
-    assert.deepEqual(reply.body, {
-      error: "memory-pressure",
-      reason: "swap used 9000 MB is above the 8192 MB ceiling",
-    });
-    assert.equal(starts.length, startsBefore);
-    assert.equal(store.getCard(card.id)?.tmuxSession, undefined);
+    await withMemoryFakes(
+      [memoryReading(2048, 9000), memoryReading(2048, 1000)],
+      async ({ slept, onSleep }) => {
+        const seen: (string | null | undefined)[] = [];
+        onSleep(() => seen.push(store.getCard(card.id)?.provisioningStep));
+        const { reply, row } = await call(`/groups/${card.id}/start`);
+        assert.equal(reply.status, 202, JSON.stringify(reply.body));
+        assert.deepEqual(reply.body, {
+          started: true,
+          waitingForMemory: "swap used 9000 MB is above the 8192 MB ceiling",
+        });
+        assert.equal(row.data.result, "started");
+        await waitFor(
+          () => Promise.resolve(!store.isStarting(card.id)),
+          5000,
+          "the start saga to end",
+        );
+        assert.deepEqual(seen, ["Waiting for memory…"]);
+        assert.deepEqual(slept, [30_000]);
+      },
+    );
   } finally {
     recordMemory(2048, 1000);
   }
-  const { reply } = await call(`/groups/${card.id}/start`);
-  assert.equal(reply.status, 202, JSON.stringify(reply.body));
-  assert.equal(starts.length, startsBefore + 1);
+  assert.equal(run.mock.callCount(), 1);
+});
+
+void test("start_group fails at checking memory after 30 minutes and records the failure", async (t) => {
+  await setPolicy({ concurrencyCap: 10, budgetPerGroup: null });
+  const card = await newGroup();
+  t.mock.method(groupStarter, "start", startGroup);
+  const run = t.mock.method(steps[0], "run", () => Promise.resolve());
+  const failures = () =>
+    store
+      .listOrchestrationEvents(SBX, 0, 10_000)
+      .filter(
+        (e) =>
+          e.cardId === card.id &&
+          (e.data as { action?: string }).action === "start_group_failed",
+      );
+  recordMemory(812, 1000);
+  try {
+    await withMemoryFakes([812], async ({ slept }) => {
+      const { reply } = await call(`/groups/${card.id}/start`);
+      assert.equal(reply.status, 202, JSON.stringify(reply.body));
+      await waitFor(
+        () => Promise.resolve(failures().length > 0),
+        5000,
+        "the start failure event",
+      );
+      assert.equal(slept.length, 60);
+    });
+  } finally {
+    recordMemory(2048, 1000);
+  }
+  assert.equal(run.mock.callCount(), 0);
+  assert.deepEqual(failures()[0]?.data, {
+    action: "start_group_failed",
+    reason: "start failed at checking memory",
+  });
+  const after = store.getCard(card.id);
+  assert.equal(
+    after?.startError?.stderr,
+    "free memory 812 MB is below the 1024 MB floor after 30 minutes of retries",
+  );
+  assert.equal(after?.tmuxSession, undefined);
 });
 
 void test("start_group over budget is refused with the budget reason", async () => {

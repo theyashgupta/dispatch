@@ -74,6 +74,7 @@ function pausable(card: Card): { session: LiveSession } | { reason: string } {
     return { reason: "not a loop" };
   if (store.isStarting(card.id)) return { reason: "start in progress" };
   const session = activeSession(card);
+  if (session?.state === "released") return { reason: "session released" };
   return session ? { session } : { reason: NO_LIVE_SESSION };
 }
 

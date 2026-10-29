@@ -84,6 +84,7 @@ const STATUS_PROTOCOL = [
   `- When blocked and needing human input: DISPATCH_STATUS: NEEDS_INPUT - <one-line reason>`,
   `- When the task is complete: DISPATCH_STATUS: DONE - <one-line summary>`,
   `- Before calling a tool that pauses for the user (AskUserQuestion, ExitPlanMode, or any action needing approval), print the NEEDS_INPUT line above as your entire reply first, then call the tool.`,
+  `- NEEDS_INPUT is only for a blocking question that a person must answer, never for a progress note, a slot wait or a running check; WORKING is the line for those.`,
 ];
 
 const VAULT_FLAG_DASH = "-".repeat(2);

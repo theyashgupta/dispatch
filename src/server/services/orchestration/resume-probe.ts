@@ -42,7 +42,7 @@ export const probeTools: {
   shellRoot: (name: string) => Promise<boolean>;
   hasSession: typeof hasSession;
   send: typeof sendLine;
-  resume: (card: Card, session: Session, evidence: string) => Promise<void>;
+  resume: (card: Card, session: Session, evidence: string) => Promise<unknown>;
   watcher: typeof ensureWatcher;
   kill: (pid: number, signal: "SIGHUP" | "SIGKILL") => void;
   sleep: (ms: number) => Promise<void>;

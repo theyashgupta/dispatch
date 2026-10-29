@@ -272,6 +272,7 @@ function assertBuilt() {
       .trim();
     throw new Error(
       `refusing to run, \`npm run ${BUILD_SCRIPT}\` failed, so dist/ does not reflect src/:\n${detail || err.message}`,
+      { cause: err },
     );
   }
   if (!existsSync(DIST_ENTRY)) {
@@ -1537,7 +1538,7 @@ async function runBreakQueryParam() {
   // rather than being confused for one this break caused.
   assertBuilt();
 
-  let tripFired = false;
+  let tripFired;
 
   /**
    * A Ctrl-C during the minutes-long patched rebuild is the likeliest interrupt, and Node's
@@ -1681,7 +1682,7 @@ async function main() {
 
   const violations = [];
   let ctx = null;
-  let portsHeld = false;
+  let portsHeld;
   let breakResult = null;
 
   // "query-param" stands its own sandbox up and down (possibly several times, to rebuild between

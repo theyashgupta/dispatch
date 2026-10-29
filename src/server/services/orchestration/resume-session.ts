@@ -22,7 +22,7 @@ import { continueSession } from "./pause-card.js";
 import { registerHookToken } from "./hook-tokens.js";
 import { REATTACH_STATUS_CLEAR_MS } from "./start-session.js";
 import { ensureTerminal } from "./terminal.js";
-import { assertMemoryHeadroom, memoryCheck } from "./memory-governor.js";
+import { waitForMemory } from "./memory-wait.js";
 
 const ACCOUNT_STEP = "resolving Claude account";
 const MEMORY_STEP = "checking memory";
@@ -61,12 +61,8 @@ async function refuseMissingWorkspace(
   console.error(`[resume] refused for card ${cardId} (workspace missing)`);
 }
 
-/**
- * Refuse a resume with the 409 `memory-pressure` when memory is low, else relaunch the session in
- * the background.
- */
+/** Relaunch a lost session in the background; the resume saga waits for memory when it is low. */
 export function beginResume(card: Card): void {
-  assertMemoryHeadroom(card.boardKey ?? DEFAULT_BOARD_KEY);
   void resumeSession(card.id);
 }
 
@@ -175,7 +171,15 @@ export async function resumeSession(cardId: string): Promise<void> {
       await refuseMissingWorkspace(cardId, sessionId, card.workspacePath);
       return;
     }
-    const memory = memoryCheck(card.boardKey ?? DEFAULT_BOARD_KEY);
+    let waited = false;
+    const memory = await waitForMemory(
+      card.boardKey ?? DEFAULT_BOARD_KEY,
+      () => {
+        waited = true;
+        return store.setStatusReason(cardId, "Waiting for memory…");
+      },
+    );
+    if (waited) await store.setStatusReason(cardId, null);
     if (!memory.ok)
       throw new StartStepError(MEMORY_STEP, memory.reason, "config");
     const recorded = card.sessions?.find((s) => s.id === sessionId);
