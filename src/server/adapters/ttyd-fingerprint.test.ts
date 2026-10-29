@@ -74,7 +74,11 @@ void test("the instance key follows DISPATCH_DIR, so two instances under one HOM
     (
       await run(process.execPath, ["--import", "tsx", "-e", script], {
         cwd: process.cwd(),
-        env: { ...(process.env as Record<string, string>), DISPATCH_DIR: dir },
+        env: {
+          ...(process.env as Record<string, string>),
+          DISPATCH_DIR: dir,
+          NODE_TEST_CONTEXT: "",
+        },
       })
     ).stdout.trim();
   const home = await keyFor("");

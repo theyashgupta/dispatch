@@ -3,17 +3,23 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
+import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { isolateEnv } from "../../test-support/fixtures.js";
 
 const env = isolateEnv();
 const { seedPlaybooks, loadPlaybooks, hasDispatchMarker } =
   await import("./playbooks.js");
+const { buildKickoff } = await import("./kickoff.js");
 after(() => env.cleanup());
 
 const playbooksDir = path.join(env.dispatchDir, "playbooks");
 const fixturePath = path.join(
   import.meta.dirname,
   "../../test-support/fixtures/playbooks/board-orchestrator-v450.md",
+);
+const prdFixturePath = path.join(
+  import.meta.dirname,
+  "../../test-support/fixtures/playbooks/prd-ralph-loop-v460.md",
 );
 const sha256 = (text: string): string =>
   createHash("sha256").update(text, "utf8").digest("hex");
@@ -163,6 +169,59 @@ void test("a v4.5.0 Board Orchestrator file is rewritten with the current seed",
   write("board-orchestrator", old);
   await seedPlaybooks();
   assert.equal(read("board-orchestrator"), currentOrchestrator);
+});
+
+const ANALOGUE_RULE = [
+  "Every phase of the PRD, a review phase or a fix phase included, needs its own `## Phase <N>` section in analogues.md before its gate runs.",
+  "Write this rule into the PRD.md.",
+  "A gate stops on a missing section before any other check runs, and its message names the phase number and the analogues.md path.",
+];
+
+void test("the PRD + Ralph Loop body holds the analogue rule for every phase", () => {
+  const prd = all.find((p) => p.slug === "prd-ralph-loop");
+  assert.ok(prd);
+  for (const part of ANALOGUE_RULE) assert.ok(prd.body.includes(part), part);
+  assert.doesNotMatch(prd.body, /\u2014/);
+});
+
+void test("the kickoff of a PRD + Ralph Loop card holds the analogue rule before the status protocol", () => {
+  const prd = all.find((p) => p.slug === "prd-ralph-loop");
+  assert.ok(prd);
+  const kickoff = buildKickoff(
+    {
+      id: "LOCAL-7",
+      boardKey: DEFAULT_BOARD_KEY,
+      issueId: "LOCAL-7",
+      identifier: "LOCAL-7",
+      title: "Feature",
+      description: "Build it.",
+      priority: 0,
+      column: "todo",
+      updatedAt: "",
+      source: "local",
+    },
+    "",
+    ["repo"],
+    { playbookBody: prd.body },
+  );
+  const status = kickoff.indexOf("## Status protocol (required)");
+  for (const part of ANALOGUE_RULE) {
+    const at = kickoff.indexOf(part);
+    assert.ok(at > 0 && at < status, part);
+  }
+});
+
+void test("a v4.6.0 PRD + Ralph Loop file is rewritten with the current seed", async () => {
+  const old = fs
+    .readFileSync(prdFixturePath, "utf8")
+    .replace("{double-hyphen}", "-".repeat(2));
+  assert.equal(
+    sha256(old),
+    "4502b55abb166b936fdb7dcf8397ba5f6c0b833338804d15600426d4acf05fb6",
+  );
+  write("prd-ralph-loop", old);
+  await seedPlaybooks();
+  assert.equal(read("prd-ralph-loop"), currentPrd);
 });
 
 void test("an edited seed file stays byte for byte", async () => {

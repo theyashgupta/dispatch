@@ -28,6 +28,7 @@ const TIMING_FILES = [
   "src/server/services/orchestration/run-claude.test.ts",
   "src/server/services/orchestration/session-account-move.test.ts",
   "src/server/services/orchestration/session-account-restart.test.ts",
+  "src/server/services/orchestration/session-release.test.ts",
   "src/server/services/orchestration/start-session-reattach.test.ts",
   "src/server/services/orchestration/steps.test.ts",
   "src/server/services/orchestration/supervisor-actions.test.ts",

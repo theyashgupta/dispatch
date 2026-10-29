@@ -39,20 +39,23 @@ async function isKnownAccount(accountId: string): Promise<boolean> {
 
 async function planSessions(): Promise<PlanSession[]> {
   return Promise.all(
-    store.sessionsWithTmux(ALL_BOARDS).map(async ({ card, session }) => {
-      const target = `=${session.tmuxSession}`;
-      const alive = await hasSession(target);
-      return {
-        cardId: card.id,
-        sessionId: session.id,
-        accountId: canonicalAccountId(session.claudeAccountId),
-        lost: !alive,
-        legacy: alive && !(await sessionEnvHas(target, SHELL_SESSION_ENV)),
-        turn: alive
-          ? await liveTurnState(card.id, session.id, session.tmuxSession)
-          : "unknown",
-      } satisfies PlanSession;
-    }),
+    store
+      .sessionsWithTmux(ALL_BOARDS)
+      .filter(({ session }) => session.state !== "released")
+      .map(async ({ card, session }) => {
+        const target = `=${session.tmuxSession}`;
+        const alive = await hasSession(target);
+        return {
+          cardId: card.id,
+          sessionId: session.id,
+          accountId: canonicalAccountId(session.claudeAccountId),
+          lost: !alive,
+          legacy: alive && !(await sessionEnvHas(target, SHELL_SESSION_ENV)),
+          turn: alive
+            ? await liveTurnState(card.id, session.id, session.tmuxSession)
+            : "unknown",
+        } satisfies PlanSession;
+      }),
   );
 }
 

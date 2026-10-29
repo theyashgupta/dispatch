@@ -410,7 +410,7 @@ export interface Card {
    */
   sessionCount?: number;
   /**
-   * Per-session digest for the detail panel's switcher and the Sessions page.
+   * Per-session digest for the detail panel's switcher.
    *
    * @remarks NON-SECRET like `sessionCount`: built only by `redactCard` through a field pick, so
    * no credential or pane content rides along. Absent when the card owns no session record,
@@ -2137,7 +2137,8 @@ export type SupervisorState =
   | "frozen"
   | "lost"
   | "shell_prompt"
-  | "paused";
+  | "paused"
+  | "released";
 
 export type SupervisorStateReason =
   | "usage_stop"

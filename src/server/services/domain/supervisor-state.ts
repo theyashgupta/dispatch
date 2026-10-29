@@ -232,6 +232,24 @@ export function inputBoxText(pane: string): string {
   return boxTextAt(lines, inputLineAt(lines));
 }
 
+/**
+ * Return the input box text that no transcript user entry shows, or null when the box is empty or sent.
+ *
+ * @remarks Compares the first 40 characters with white space removed, as the send check does for a
+ * held line, because the box wraps long lines.
+ */
+export function unsentBoxText(
+  pane: string,
+  userTexts: readonly string[],
+): string | null {
+  const box = inputBoxText(pane);
+  const head = box.replace(/\s+/g, "").slice(0, 40);
+  if (head === "") return null;
+  return userTexts.some((t) => t.replace(/\s+/g, "").includes(head))
+    ? null
+    : box;
+}
+
 function boxTextAt(lines: readonly string[], inputAt: number): string {
   if (inputAt < 0) return "";
   const parts = [lines[inputAt].slice(lines[inputAt].indexOf("❯") + 1)];

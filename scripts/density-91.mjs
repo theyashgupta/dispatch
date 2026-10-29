@@ -276,6 +276,7 @@ function assertBuilt() {
     throw new Error(
       `refusing to run — \`npm run ${BUILD_SCRIPT}\` failed, so dist/ does not reflect src/ and ` +
         `any reading would describe a UI you are not running:\n${detail || err.message}`,
+      { cause: err },
     );
   }
   if (!existsSync(DIST_ENTRY)) {
@@ -827,8 +828,8 @@ async function main() {
   let server = null;
   let chromeChild = null;
   let cdp = null;
-  let readings = null;
-  let portsHeld = false;
+  let readings;
+  let portsHeld;
   let chipViolations = [];
 
   try {

@@ -288,7 +288,7 @@ A server restart or a reboot marks the live sessions lost. At boot the superviso
 
 For a card that is still lost, call `resume_session`. Do not raise a decision item that asks the user to press Restart or Resume. Call it only below the cap. For a card in Agent done or a later column, call it only when that card needs more work. For a card that `stop_session`, a usage stop or the budget stopped, follow the rules for that stop.
 
-A resumed session gets no kickoff prompt and sits at its prompt, so send_input a continue line after the session is live. Use `list_sessions` or `read_pane_tail` to see that it is live.
+On a board with the supervisor on, the supervisor types the resume prompt once the session is live and confirms it in the transcript. With the supervisor off the resumed session gets no prompt and sits at its prompt, so send_input a continue line after the session is live. Use `list_sessions` or `read_pane_tail` to see that it is live.
 
 `resume_session` refuses in these cases:
 
@@ -298,6 +298,8 @@ A resumed session gets no kickoff prompt and sits at its prompt, so send_input a
 - 409 `memory-low`: memory on this Mac is low. Wait for the next wake.
 - 400 `invalid-identifier`: the card id is not a ticket id. Raise a decision item.
 - 403 `policy-refused`: the cap is reached. Wait until a loop finishes.
+- A card whose session state is `released`: Claude exited after DONE to free memory. `resume_session` brings Claude back in the live session, then send_input.
+- 409 `revive-failed`: Claude did not start in the released session. Use `read_pane_tail`, then raise a decision item.
 
 ### Loop count
 

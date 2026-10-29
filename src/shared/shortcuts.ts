@@ -63,12 +63,6 @@ export const INBOX_SHORTCUTS: readonly ShortcutEntry[] = [
   { key: "r", label: "Restore" },
 ];
 
-export const SESSIONS_SHORTCUTS: readonly ShortcutEntry[] = [
-  { key: "j", label: "Next session" },
-  { key: "k", label: "Previous session" },
-  { key: "Enter", label: "Open" },
-];
-
 /**
  * Attach handlers to a shortcut table, dropping entries without one.
  *
