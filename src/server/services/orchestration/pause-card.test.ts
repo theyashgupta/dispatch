@@ -1,5 +1,8 @@
 import test, { afterEach, beforeEach } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import type {
   Card,
   OrchestrationEvent,
@@ -48,6 +51,7 @@ let promptTargets: string[];
 let killed: [number, string][];
 let sleeps: number;
 let shell: boolean;
+let lockDir: string;
 
 beforeEach(() => {
   cards = new Map();
@@ -62,6 +66,10 @@ beforeEach(() => {
   killed = [];
   sleeps = 0;
   shell = true;
+  lockDir = fs.mkdtempSync(path.join(os.tmpdir(), "pause-card-locks-"));
+  pauseTools.checkLockDir = lockDir;
+  pauseTools.readTable = () =>
+    Promise.resolve(parseProcessTable(`${JOB} ${SHELL}\n${GRAND} ${JOB}`));
   pauseTools.kill = (pid, signal) => {
     killed.push([pid, signal]);
   };
@@ -123,6 +131,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  fs.rmSync(lockDir, { recursive: true, force: true });
   Object.assign(pauseTools, realTools);
   setBoardRepository(store);
 });
@@ -197,6 +206,26 @@ void test("pause refuses a card with no live session", async () => {
   assert.deepEqual(err.details, { reason: "no live session" });
   assert.deepEqual(signals, []);
   assert.equal(cards.get("card-1")?.paused, undefined);
+});
+
+void test("pause refuses while a process in the card tree holds the check slot", async () => {
+  loopCard();
+  fs.writeFileSync(path.join(lockDir, "check-slot-0"), `${GRAND}\n`);
+  const err = await refusal(pauseCard("card-1", { by: "user", reason: "r" }));
+  assert.equal(err.code, "not-pausable");
+  assert.deepEqual(err.details, {
+    reason: `pid ${GRAND} holds the check slot`,
+  });
+  assert.deepEqual(signals, []);
+  assert.equal(cards.get("card-1")?.paused, undefined);
+});
+
+void test("pause proceeds while a process outside the card tree holds the check slot", async () => {
+  loopCard();
+  fs.writeFileSync(path.join(lockDir, "check-slot-0"), `${OTHER}\n`);
+  const paused = await pauseCard("card-1", { by: "user", reason: "r" });
+  assert.equal(paused.paused?.by, "user");
+  assert.deepEqual(signals, [[[SHELL], "SIGSTOP"]]);
 });
 
 void test("pause accepts a launched ticket card", async () => {
