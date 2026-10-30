@@ -66,6 +66,7 @@
   --font-display: 22px; /* wordmark, startup-error title */
   --font-page-title: 26px;
   --font-rail-headline: 18px;
+  --font-mono-size: var(--font-micro); /* machine values: IDs, costs, times */
 
   --weight-regular: 400;
   --weight-medium: 500; /* column headers, panel section labels, sidebar sync status text */
@@ -75,6 +76,9 @@
   --line-label: 1.4;
   --line-heading: 1.3;
   --line-display: 1.2;
+
+  --tracking-label: 0.04em; /* uppercase and small labels */
+  --tracking-display: 0.18em; /* wordmark */
 
   /* Font stacks. */
   --font-ui: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -116,6 +120,12 @@
   --status-ok: #3fb950;
   --status-stale: #ef8e3b;
   --status-down: #e5484d;
+  /* Session status palette */
+  --status-running: #5e6ad2;
+  --status-idle: #8a8f98;
+  --status-waiting: #ef8e3b;
+  --status-stopped: #3fb950;
+  --status-errored: #e5484d;
   --ok-soft: color-mix(in srgb, var(--status-ok) 16%, transparent);
   --warn-soft: color-mix(in srgb, var(--status-stale) 16%, transparent);
   --danger-soft: color-mix(in srgb, var(--status-down) 16%, transparent);
@@ -135,29 +145,44 @@
      same value in both themes. */
   --editor-vscode: #007acc;
 
+  /* Syntax highlight palette for the markdown viewer (rehype-highlight hljs-* classes), built from the signal-palette hues. */
+  --hl-keyword: #a371f7;
+  --hl-string: #3fb950;
+  --hl-number: #d9b23c;
+  --hl-comment: #8a8f98;
+  --hl-title: #6ea8fe;
+  --hl-attr: #ef8e3b;
+
   /* Motion (v3.4), CSS-only transition/animation durations and easings, so the
      prefers-reduced-motion kill-switch above reaches every motion this phase
-     ships - see docs/standards/design-contract.md ## Motion. */
-  --motion-panel-open: 200ms;
-  --motion-panel-close: 150ms;
-  --motion-card-move: 150ms;
-  --motion-count-change: 120ms;
-  --motion-splash-in: 400ms;
-  --motion-splash-out: 300ms;
+     ships - see docs/standards/design-contract.md ## Motion. Duration scale and
+     the one named curve; loop lengths stay literal. */
+  --motion-instant: 80ms;
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-slow: 400ms;
+  --easing-standard: cubic-bezier(0, 0, 0.58, 1);
+  --motion-panel-open: var(--motion-base);
+  --motion-panel-close: var(--motion-fast);
+  --motion-card-move: var(--motion-fast);
+  --motion-count-change: var(--motion-fast);
+  --motion-splash-in: var(--motion-slow);
+  --motion-splash-out: var(--motion-base);
   --motion-flow-pulse: 1s;
   --motion-node-breathe: 2.4s;
-  --easing-enter: ease-out;
+  --motion-status-pulse: 2.4s;
+  --easing-enter: var(--easing-standard);
   --easing-exit: ease-in;
-  --motion-hover: 120ms;
-  --motion-press: 80ms;
+  --motion-hover: var(--motion-fast);
+  --motion-press: var(--motion-instant);
   --hover-transition:
     background-color var(--motion-hover) var(--easing-enter),
     border-color var(--motion-hover) var(--easing-enter),
     color var(--motion-hover) var(--easing-enter),
     box-shadow var(--motion-hover) var(--easing-enter);
   --resize-handle-transition:
-    border-left-color 80ms var(--easing-enter),
-    border-right-color 80ms var(--easing-enter);
+    border-left-color var(--motion-instant) var(--easing-enter),
+    border-right-color var(--motion-instant) var(--easing-enter);
 
   /* State palette (v3.4), hover/pressed colors as color-mix() formulas over
      base surface tokens, never a resolved hex, so the single-source
@@ -177,9 +202,8 @@
   /* Dimensions */
   --stripe-width: 3px;
   --panel-width: 480px; /* desktop default; swapped per breakpoint below */
-  --drawer-width: 360px; /* activity drawer; narrower than the panel — swapped per breakpoint below */
   --board-gutter-lg: 24px; /* wider board gutter at >=1600px (large displays) */
-  --orca-nav-width: 280px; /* Orca side-nav fixed width; not resizable this phase */
+  --orca-nav-width: 280px; /* settings sidebar fixed width and the docked panel offset; not resizable */
 }
 
 /* Light theme. The html element carries data-theme with the resolved value;
@@ -211,6 +235,9 @@
   --col-parked: color-mix(in srgb, #b08968 90%, black);
   --status-ok: color-mix(in srgb, #3fb950 54%, black);
   --status-stale: color-mix(in srgb, #ef8e3b 52%, black);
+  --status-idle: color-mix(in srgb, #8a8f98 92%, black);
+  --status-waiting: color-mix(in srgb, #ef8e3b 78%, black);
+  --status-stopped: color-mix(in srgb, #3fb950 80%, black);
   --src-github: color-mix(in srgb, #79c0ff 48%, black);
   --src-linear: color-mix(in srgb, #8b93ff 56%, black);
   --src-slack: color-mix(in srgb, #4ac78f 48%, black);
@@ -219,6 +246,14 @@
   --src-calendar: color-mix(in srgb, #efb14a 46%, black);
   --src-agent: color-mix(in srgb, #4fd1c5 46%, black);
   --editor-vscode: #007acc;
+
+  /* Syntax highlight colours, each 4.5:1 or more on every light surface tier. */
+  --hl-keyword: #7551b2;
+  --hl-string: #287633;
+  --hl-number: #7a6422;
+  --hl-comment: #63676d;
+  --hl-title: #44689d;
+  --hl-attr: #945825;
   --scrim: rgba(15, 17, 21, 0.4);
   --edge-highlight: rgba(255, 255, 255, 0.7);
   --shadow-float: 0 6px 16px rgba(15, 17, 21, 0.16);
@@ -239,7 +274,6 @@
 @media (max-width: 767px) {
   :root {
     --panel-width: 100vw;
-    --drawer-width: 100vw;
     /* 56px costs a card row below 768px but zero rows at the three wider
        breakpoints, so the page header only shrinks back to 44px here (the rule the
        sync strip established before it retired). */
@@ -380,6 +414,17 @@ body {
   }
   50% {
     box-shadow: 0 0 0 2px var(--accent-soft);
+  }
+}
+@keyframes status-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 1px
+      color-mix(in srgb, var(--status-running) 55%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 3px
+      color-mix(in srgb, var(--status-running) 20%, transparent);
   }
 }
 @keyframes flow-pulse {

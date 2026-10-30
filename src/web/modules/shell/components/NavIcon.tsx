@@ -1,5 +1,4 @@
 import {
-  Activity,
   Archive,
   ClipboardList,
   Gauge,
@@ -10,7 +9,6 @@ import {
   LayoutGrid,
   MessageCircleQuestion,
   Network,
-  PanelLeft,
   Settings,
   Sun,
   Users,
@@ -26,8 +24,6 @@ export const NAV_ICON: Record<Page, ComponentType<{ size?: number }>> = {
   inbox: Inbox,
   ask: MessageCircleQuestion,
   board: Kanban,
-  workspace: PanelLeft,
-  activity: Activity,
   tickets: sourceMark("linear"),
   accounts: Users,
   playbooks: ClipboardList,

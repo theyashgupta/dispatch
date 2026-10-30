@@ -90,6 +90,7 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --radius-md: var(--radius);
+  --spacing: 4px;
   --color-destructive-text: var(--destructive-text);
   --color-destructive-fill: var(--destructive-fill);
   --color-on-danger: var(--on-danger);
@@ -116,6 +117,8 @@
   --text-base--line-height: var(--line-body);
   --text-lg: var(--font-heading);
   --text-lg--line-height: var(--line-heading);
+  --text-mono: var(--font-mono-size);
+  --text-mono--line-height: var(--line-label);
   --font-weight-normal: var(--weight-regular);
   --font-weight-medium: var(--weight-medium);
   --font-weight-semibold: var(--weight-semibold);
@@ -127,6 +130,8 @@
   --shadow-card-attention-float: var(--shadow-ring-attention-float);
   --shadow-card-multi-float: var(--shadow-ring-multi-float);
   --shadow-glow-current: var(--glow-current);
+  --animate-status-pulse: status-pulse var(--motion-status-pulse)
+    var(--easing-standard) infinite;
   --default-transition-duration: var(--motion-hover);
   --default-transition-timing-function: var(--easing-enter);
 }
