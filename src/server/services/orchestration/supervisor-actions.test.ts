@@ -517,6 +517,40 @@ void test(
 );
 
 void test(
+  "a finished card whose session exits and whose relaunch answers busy stays in Agent done with its DONE marker",
+  { skip: !hasTmux },
+  async () => {
+    const loop = await loopCard("resume-busy-done", {}, true);
+    await store.applyMarker(
+      loop.card().id,
+      loop.session().id,
+      "agent_done",
+      undefined,
+      "DONE built",
+      "status_agent_done",
+    );
+    await runActions(
+      loop.card(),
+      loop.session(),
+      [{ kind: "resume" }],
+      "tmux: pane at shell prompt",
+      deps({
+        relaunch: () => Promise.resolve("busy"),
+        atShellPrompt: () => Promise.resolve(true),
+      }),
+    );
+    assert.equal(loop.userTexts().length, 0);
+    assert.equal(loop.card().column, "agent_done");
+    assert.equal(loop.card().lastMarker, "DONE built");
+    assert.notEqual(loop.session().stateReason, "resume_failed");
+    assert.deepEqual(
+      loop.actions().map((e) => [e.data.action, e.data.result, e.data.reason]),
+      [["resume", "skipped", "run claude busy on a finished card"]],
+    );
+  },
+);
+
+void test(
   "a session at the shell prompt whose workspace folder is missing is not relaunched and sets needs_input with workspace-missing",
   { skip: !hasTmux },
   async () => {

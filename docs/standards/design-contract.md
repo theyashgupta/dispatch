@@ -46,6 +46,11 @@ own rendered content — never copied from these products.
 headline of a rail card. Both use `--weight-semibold`. The section labels of the dashboard use
 `--font-micro` (11px) in upper case with wide tracking.
 
+**Record, 2026-10-17 (GROUP-25 Unit 2, LOCAL-144).** Two tracking tokens replace the raw tracking
+values: `--tracking-label` is 0.04em, for uppercase and small labels, and `--tracking-display` is
+0.18em, for the wordmark. A component consumes them as `tracking-(--tracking-label)`. No raw
+tracking bracket remains.
+
 ## Weight
 
 | Token or rule                                                                                    | Value | Checked at                                | Note                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -63,6 +68,10 @@ badges, and anything else deliberately bold today) are unchanged.
 
 Monospace's role: a semantic signal for identifiers, playbook names, and machine output — never
 decoration.
+
+**Record, 2026-10-17 (GROUP-25 Unit 2, LOCAL-144).** The mono size role `--font-mono-size` is
+`--font-micro` (11px). It is exposed as the `text-mono` utility with the `--line-label` line
+height, so it renders the same as `text-xs`. The centre tile identifier uses it.
 
 ## Spacing rhythm
 
@@ -229,6 +238,24 @@ The Pull Requests patch view (LOCAL-45) colors an added line with the text color
 `Chip` tone uses (`--status-ok`) and a removed line with the danger tone's text color
 (`--destructive-text`); hunk headers use `--text-muted` and context lines `--text`. No new token:
 a diff line means "added" or "removed", the same meaning those two chip tones already carry.
+
+## Session status colours
+
+Five tokens colour every session state in the session badge and the centre tiles.
+
+| Token              | Dark      | Light                | States                                                                                                             |
+| ------------------ | --------- | -------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `--status-running` | `#5e6ad2` | `theme neutral`      | `working`, `handoff_ready`; centre Running                                                                         |
+| `--status-idle`    | `#8a8f98` | `92% mix with black` | `idle`, `paused`, `usage_limit_wait`; centre Planned, Shipped; orchestrator Stopped, Stopping                      |
+| `--status-waiting` | `#ef8e3b` | `78% mix with black` | `needs_input`, `permission_prompt`, `usage_limit_dialog`, `stale`; centre Needs input, Usage limit, Budget reached |
+| `--status-stopped` | `#3fb950` | `80% mix with black` | `roadmap_complete`; centre Agent done                                                                              |
+| `--status-errored` | `#e5484d` | `theme neutral`      | `api_error`, `lost`, `shell_prompt`; centre Resume failed                                                          |
+
+The session badge and the centre tiles read these five tokens, each state keeps the tone group it had before, and a running centre tile pulses through `animate-status-pulse`, which the global reduced-motion rule stops.
+
+`scripts/contrast-113.mjs` measures each token as a 3:1 mark on every tier and as a 35% ink on a 16% tint of itself. The badge renders a 12% tint, which only raises contrast.
+
+`--status-stopped` marks a session that finished its work (`roadmap_complete`, centre Agent done); a stopped or stopping orchestrator keeps the idle group, because every state keeps the tone group it had before this change.
 
 ## Source colors
 
@@ -514,6 +541,16 @@ spread and back. The node uses the animation only through the Tailwind `motion-s
 (`prefers-reduced-motion: no-preference`). The `prefers-reduced-motion: reduce` block in
 `tokens.css` stays the only reduced-motion block; it also stops this animation. The line numbers
 of that block in the `reduced-motion-mechanism` row above are history.
+
+**Record, 2026-10-17 (GROUP-25 Unit 2, LOCAL-144).** The duration scale is `--motion-instant` 80ms,
+`--motion-fast` 120ms, `--motion-base` 200ms and `--motion-slow` 400ms. The one named curve is
+`--easing-standard`, `cubic-bezier(0, 0, 0.58, 1)`, which is the CSS definition of `ease-out`, so
+enter timing is unchanged. `--easing-enter` reads it, and `--easing-exit` stays `ease-in`. Each role
+reads one step: press is instant; hover, count-change, panel-close and card-move are fast;
+panel-open and splash-out are base; splash-in is slow. Three durations change: panel-close and
+card-move go from 150ms to 120ms, and splash-out goes from 300ms to 200ms. This record supersedes
+the 150ms and 300ms values in the table above for those three rows. Loop lengths stay literals:
+`--motion-flow-pulse` 1s, `--motion-node-breathe` 2.4s and `--motion-status-pulse` 2.4s.
 
 ## Chrome dimensions
 
