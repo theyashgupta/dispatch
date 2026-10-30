@@ -90,6 +90,7 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
   --radius-md: var(--radius);
+  --spacing: 4px;
   --color-destructive-text: var(--destructive-text);
   --color-destructive-fill: var(--destructive-fill);
   --color-on-danger: var(--on-danger);
