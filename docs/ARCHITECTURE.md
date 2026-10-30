@@ -6238,6 +6238,8 @@ The scenario in tests/e2e/scenario-LOCAL-197-live-isolation.e2e.ts proves that a
 
 The two account scenarios (tests/e2e/scenario-LOCAL-159-account-login-decision.e2e.ts and tests/e2e/scenario-LOCAL-159-managed-default.e2e.ts) have one npm script. Run `npm run build` first, then run `npm run test:e2e:accounts`. The script runs the two files one after the other. The script is not part of `npm run check`.
 
+The three engine close scenarios (tests/e2e/scenario-LOCAL-93-orchestrated.e2e.ts, tests/e2e/scenario-LOCAL-151-engine-close.e2e.ts and tests/e2e/scenario-LOCAL-172-promise-close.e2e.ts) have one npm script. Run `npm run build` first, then run `npm run test:e2e:engine-close`. The script runs the three files one after the other. The script is not part of `npm run check`.
+
 In the full run, the files run in parallel. Each sandbox server claims one port from 48931 to 48939 with a lock file in the sandbox folder, so two files never share a port. The harness refuses to boot while a Dispatch service answers on port 4700, and it removes every `DISPATCH_`, `CLAUDE_` and `ANTHROPIC_` variable from the server environment.
 
 ## Orchestration Initiative
