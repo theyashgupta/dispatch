@@ -80,6 +80,8 @@ says the scale is 4/8/16/24/32/48 and unchanged; it supersedes no table row. Mea
 browser on the landed source: an archive row reads padding 8px 12px and the archive section reads
 gap 12px; the toast reads padding 8px 12px 8px 16px and gap 12px.
 
+**Record, 2026-10-17 (GROUP-25 Unit 1, LOCAL-143).** The Tailwind spacing base is 4px (`--spacing: 4px` in the `globals.css` theme block), so a numeric spacing utility and a named step give the same size: `p-1` is `--space-xs`, `p-2` is `--space-sm`, `p-3` is `--space-md`, `p-4` is `--space-lg`, `p-6` is `--space-xl`, `p-8` is `--space-2xl` and `p-12` is `--space-3xl`. Numeric utilities are the canonical form for layout spacing. A `-(--space-*)` utility stays valid and needs no rewrite. The base is a px value like every other token, so layout spacing does not follow a root font size other than 16px. `scripts/check-token-gates.mjs` runs in `npm run check` and fails on four raw-value classes in `src/web` outside `tokens.css`: a colour literal in CSS, an arbitrary bracket value in a class string, a raw font size, and a raw `ms` or `cubic-bezier` value. Each value that existed when the gate landed is listed in `scripts/check-token-gates.allowlist` with its exact path, its exact text and a reason; an entry that matches nothing fails the gate.
+
 The rule that changes: reading surfaces (detail panel body, modal body) get asymmetric padding
 with more vertical rhythm than horizontal; scan surfaces (board, cards, sidebar) keep symmetric
 tight padding exactly as today. The underlying 4/8/16/24/32/48 spacing scale itself is unchanged —
