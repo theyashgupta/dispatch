@@ -6,7 +6,7 @@ import type {
   Session,
 } from "../../../shared/types.js";
 import {
-  MEMORY_RESUME_LINE,
+  RESUME_PROBE_LINE,
   isDispatchLine,
 } from "../../../shared/dispatch-lines.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
@@ -162,7 +162,7 @@ afterEach(() => {
 void test("a probe that is confirmed records one confirmed event and changes nothing", async () => {
   loopCard();
   await probeResume("card-1");
-  assert.deepEqual(sentLines, [MEMORY_RESUME_LINE]);
+  assert.deepEqual(sentLines, [RESUME_PROBE_LINE]);
   assert.deepEqual(probeEvents(), [
     { action: "resume_probe", result: "confirmed" },
   ]);
@@ -488,5 +488,5 @@ void test("a second probe of the same card during the busy wait does nothing", a
 });
 
 void test("the resume line counts as a Dispatch line", () => {
-  assert.equal(isDispatchLine(MEMORY_RESUME_LINE), true);
+  assert.equal(isDispatchLine(RESUME_PROBE_LINE), true);
 });

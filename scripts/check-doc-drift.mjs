@@ -221,6 +221,8 @@ const LOOP_FORMAT_FILES = [
   /^src\/server\/routes\/orchestrator-sessions-route\.test\.ts$/,
   /^src\/server\/routes\/loop-engine-close-route\.test\.ts$/,
   /^src\/server\/routes\/orchestrator-card-progress-route\.test\.ts$/,
+  /^src\/server\/services\/domain\/loop-completion(\.test)?\.ts$/,
+  /^src\/server\/services\/orchestration\/hook-events\.test\.ts$/,
 ];
 const LOOP_FORMAT_PATTERNS = new Set([
   "ROADMAP",

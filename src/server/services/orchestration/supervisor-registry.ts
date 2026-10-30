@@ -114,7 +114,7 @@ async function atShellPrompt(watcher: SupervisorWatcher): Promise<boolean> {
   return paneAtPrompt(`${target}:`).catch(() => false);
 }
 
-type Change = Pick<Detection, "state" | "evidence" | "promptKind">;
+type Change = Pick<Detection, "state" | "evidence" | "promptKind" | "doneLine">;
 
 /** Write one state change and its event; resolves the previous state, or undefined when refused. */
 async function recordTransition(
@@ -169,7 +169,10 @@ function loopOf(card: Card, now: number): LoopFacts | null {
   if (!isLoopCard(card) || progress === undefined) return null;
   const { currentUnit, currentPhase } = progress.summary;
   return {
-    engineActive: progress.engine?.active === true && !progress.engine.closed,
+    engineActive:
+      progress.engine?.active === true &&
+      !progress.engine.closed &&
+      progress.engine.keptOpen !== true,
     handoffPending: progress.engine?.handoffPending === true,
     unitPhase: `${currentUnit ?? "none"}/${currentPhase?.number ?? "none"}`,
   };
@@ -235,6 +238,7 @@ async function act(
     from,
     to: change.state,
     ...(change.promptKind ? { promptKind: change.promptKind } : {}),
+    doneLine: change.doneLine,
     loop: loopOf(card, now),
     usageLimit: ownerPolicy(card)?.usageLimit ?? "wait",
     wokeAt: lastWakeAt,
@@ -335,6 +339,7 @@ export async function supervisePane(
         ? "complete"
         : (card.loopProgress?.completion ?? null),
       engineOpen,
+      slug: card.loopProgress?.slug ?? null,
       transcript,
       memory: watcher.memory,
     });
@@ -354,11 +359,16 @@ export async function supervisePane(
       );
     if (changed)
       watcher.plan = await act(card, session, detection, watcher.plan, now);
-    if (changed && detection.state === "roadmap_complete")
+    if (
+      changed &&
+      detection.state === "roadmap_complete" &&
+      detection.doneLine === true
+    )
       watcher.closeTriedAt = now;
     if (
       !changed &&
       detection.state === "roadmap_complete" &&
+      detection.doneLine === true &&
       engineOpen &&
       now - watcher.closeTriedAt >= CLOSE_RETRY_MS
     ) {

@@ -31,15 +31,11 @@ const realTools = { ...governorTools };
 let cards: Map<string, Card>;
 let paused: [string, { by: PausedBy; reason: string }][];
 let resumed: [string, { reason: string }][];
-let probed: string[];
-const onResumed = (id: string): number => probed.push(id);
 
 beforeEach(async () => {
   cards = new Map();
   paused = [];
   resumed = [];
-  probed = [];
-  memoryEmitter.on("resumed", onResumed);
   setBoardRepository(
     fakeBoardRepository({
       getBoard: () => undefined,
@@ -56,7 +52,6 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-  memoryEmitter.off("resumed", onResumed);
   Object.assign(governorTools, realTools);
   setBoardRepository(store);
 });
@@ -278,34 +273,24 @@ test("two readings below ceiling minus 1024 resume a memory-paused card and one 
   ]);
 });
 
-test("a resume decision probes the resumed card once", async (t) => {
+test("a resume decision emits nothing on the memory emitter, because unpause itself starts the probe", async (t) => {
   t.mock.method(console, "info", () => {});
   recordTools();
-  loopCard("old", "2026-10-13T08:00:00.000Z", { paused: MEMORY_MARK });
-  await step(7000);
-  assert.deepEqual(probed, []);
-  await step(7000);
-  assert.deepEqual(probed, ["old"]);
-});
-
-test("a pause decision does not probe", async (t) => {
-  t.mock.method(console, "info", () => {});
-  recordTools();
-  loopCard("old", "2026-10-13T08:00:00.000Z");
-  await step(9000);
-  assert.deepEqual(probed, []);
-});
-
-test("a refused resume does not probe", async (t) => {
-  t.mock.method(console, "info", () => {});
-  t.mock.method(console, "warn", () => {});
-  recordTools();
-  governorTools.unpauseCard = () =>
-    Promise.reject(new ConflictError("unpause-incomplete"));
-  loopCard("stuck", "2026-10-13T08:00:00.000Z", { paused: MEMORY_MARK });
-  await step(7000);
-  await step(7000);
-  assert.deepEqual(probed, []);
+  const emitted: string[] = [];
+  const listen = (id: string): number => emitted.push(id);
+  memoryEmitter.on("resumed", listen);
+  try {
+    loopCard("old", "2026-10-13T08:00:00.000Z", { paused: MEMORY_MARK });
+    await step(7000);
+    await step(7000);
+    assert.deepEqual(
+      resumed.map(([id]) => id),
+      ["old"],
+    );
+    assert.deepEqual(emitted, []);
+  } finally {
+    memoryEmitter.off("resumed", listen);
+  }
 });
 
 test("a user-paused card is never resumed", async (t) => {

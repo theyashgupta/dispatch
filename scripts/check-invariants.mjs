@@ -122,7 +122,7 @@ const ATTENTION_FIELDS = ["startError", "sessionLost", "cleanupBlocked"];
 const ATTENTION_EXPORTS = ["needsAttention", "attentionTitle"];
 
 /**
- * The twenty `--col-*`/`--prio-*`/`--status-*`/`--src-*` custom-property names `NEW-24` requires present
+ * The twenty-five `--col-*`/`--prio-*`/`--status-*`/`--src-*` custom-property names `NEW-24` requires present
  * in {@link TOKENS_PATH} with a hex value. Named here rather than derived, so a silently emptied
  * or renamed token is itself a detectable defect, not an empty denylist: the missing-subject
  * sentinel in `checkStatusColorSingleSource` fires per absent name. The hex VALUES themselves are
@@ -143,6 +143,11 @@ const STATUS_COLOR_PALETTE_TOKENS = [
   "--status-ok",
   "--status-stale",
   "--status-down",
+  "--status-running",
+  "--status-idle",
+  "--status-waiting",
+  "--status-stopped",
+  "--status-errored",
   "--src-github",
   "--src-linear",
   "--src-slack",
@@ -1114,15 +1119,13 @@ function checkSourceAccentMechanism() {
  * consumed by `ColumnHeader.tsx`, `SearchField.tsx` and `StatusPillSwitcher.tsx` (columns) and `CardView.tsx`
  * itself (priority). A gate that only fenced literals would pass unchanged against a build that
  * deleted either map and inlined its `var()` strings by hand.
- * @remarks All twenty {@link STATUS_COLOR_PALETTE_TOKENS} names must be present in `tokens.css`
+ * @remarks All twenty-five {@link STATUS_COLOR_PALETTE_TOKENS} names must be present in `tokens.css`
  * with a hex value; any absent one is a named missing-subject sentinel violation, never a silently
  * shrunk denylist.
  * @remarks The literal scan covers `.ts`/`.tsx`/`.css`/`.html` under `src/web`, since a
  * stylesheet can reintroduce a palette hex just as easily as a component (a `.css`-blind walk
- * passed while `viewer.css` carried `#ef8e3b`). Two exemptions: {@link TOKENS_PATH} itself (the
- * palette's single legitimate home) and `viewer.css`'s `hl`-prefixed custom properties, whose
- * values carry syntax-HIGHLIGHT meaning, not status meaning; that file's `#ef8e3b` collision
- * with the stale/high value is coincidental hue reuse, documented in `docs/ARCHITECTURE.md`.
+ * passed while `viewer.css` carried `#ef8e3b`). One exemption: {@link TOKENS_PATH} itself, the
+ * palette's single legitimate home, which also holds the viewer's syntax-highlight colours.
  * BREAK EVIDENCE for all three legs (literal reintroduction, deleted palette declaration, renamed
  * `COLUMN_ACCENT`) is recorded in
  * `.planning/phases/114-board-density-states-motion-accents/114-MEASUREMENTS.md` under
@@ -1158,14 +1161,10 @@ function checkStatusColorSingleSource() {
     namesByValue.get(value).push(name);
   }
 
-  const viewerCssPath = join(WEB_DIR, "viewer", "viewer.css");
-  const hlVarRe = new RegExp(`^\\s*${"-".repeat(2)}hl-[a-z]+\\s*:`);
   for (const file of walkSrc(WEB_DIR, /\.(ts|tsx|css|html)$/)) {
     if (file === TOKENS_PATH) continue;
-    const isViewerCss = file === viewerCssPath;
     const lines = readFileSync(file, "utf8").split("\n");
     lines.forEach((line, i) => {
-      if (isViewerCss && hlVarRe.test(line)) return;
       const lower = line.toLowerCase();
       for (const [value, names] of namesByValue) {
         if (lower.includes(value)) {

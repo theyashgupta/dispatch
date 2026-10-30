@@ -14,6 +14,7 @@ import { cardOf, readJsonl, writeRunLog } from "./harness/board-reads.js";
 import {
   EVIDENCE_DIR,
   MINUTE,
+  SANDBOX_ROOT,
   makeNote,
   startSandbox,
   waitFor,
@@ -241,7 +242,7 @@ async function startCard(sb: Sandbox, token: string): Promise<Card> {
     direction: "Build it.",
     account: "default",
   });
-  assert.equal(started.status, 202);
+  assert.equal(started.status, 202, JSON.stringify(started.body));
   const card = await waitFor(
     async () => {
       const read = await cardOf(sb, BOARD, CARD);
@@ -393,9 +394,9 @@ const closeRows = (events: OrchestrationEventRow[]): OrchestrationEventRow[] =>
   );
 
 /**
- * Post the DONE Stop hook with a transcript and check that the supervisor closes the engine, with no restart, within 60 s.
+ * Post the DONE Stop hook with a transcript and check that the engine closes, with no restart, within 60 s.
  *
- * @remarks The pane never shows the promise line, so only the transcript tail can tell the supervisor that the loop is complete.
+ * @remarks The pane never shows the promise line, so the DONE marker of the Stop hook closes the engine of the complete loop.
  */
 async function assertSupervisorCloses(
   sb: Sandbox,
@@ -536,7 +537,7 @@ function writeQaFile(sb: Sandbox, e: Evidence): void {
 }
 
 /**
- * Run a finished PRD loop card from its start to the merged ship with the engine file closed by the supervisor alone.
+ * Run a finished PRD loop card from its start to the merged ship with the engine file closed by Dispatch alone.
  *
  * @remarks The only inputs after the orchestrator start are orchestrator routes called with its token, the Stop hook of the session, a
  * transcript file, and git and file writes in the session folder. The test never renames the engine file.
@@ -558,7 +559,25 @@ void test(
   "scenario-LOCAL-151-engine-close: the supervisor closes the engine of a finished PRD loop from the transcript tail, and start_ship then merges it",
   { timeout: 20 * MINUTE },
   async () => {
-    const sb = await startSandbox({ name: "local-151-engine-close" });
+    const sample = path.join(
+      SANDBOX_ROOT,
+      "local-151-engine-close-memory-sample.json",
+    );
+    fs.mkdirSync(SANDBOX_ROOT, { recursive: true });
+    fs.writeFileSync(
+      sample,
+      JSON.stringify({
+        freeMb: 4096,
+        compressorMb: 500,
+        swapUsedMb: 0,
+        swapTotalMb: 12288,
+        load1: 2,
+      }),
+    );
+    const sb = await startSandbox({
+      name: "local-151-engine-close",
+      memorySampleFile: sample,
+    });
     try {
       await runScenario(sb);
     } finally {
