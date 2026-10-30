@@ -1,6 +1,5 @@
-import { BoardContainer } from "@/modules/board/containers/BoardContainer";
-import { SearchContainer } from "@/modules/board/containers/SearchContainer";
+import { BoardSplitContainer } from "@/modules/board/containers/BoardSplitContainer";
 
 export function BoardView() {
-  return <BoardContainer search={<SearchContainer />} />;
+  return <BoardSplitContainer />;
 }

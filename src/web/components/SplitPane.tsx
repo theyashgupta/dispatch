@@ -21,6 +21,9 @@ interface SplitPaneProps {
   only?: "list" | "detail";
 }
 
+export const RESIZE_HANDLE_CLASS =
+  "[transition:var(--hover-transition)] data-[separator=active]:bg-primary data-[separator=hover]:bg-(--hover-resize-handle)";
+
 const PANE = "flex h-full min-h-0 min-w-0 flex-col";
 
 function storeWidthNextFrame(
@@ -63,7 +66,7 @@ export function SplitPane({ list, detail, only }: SplitPaneProps) {
         >
           <div className={PANE}>{list}</div>
         </ResizablePanel>
-        <ResizableHandle className="[transition:var(--hover-transition)] data-[separator=active]:bg-primary data-[separator=hover]:bg-(--hover-resize-handle)" />
+        <ResizableHandle className={RESIZE_HANDLE_CLASS} />
         <ResizablePanel minSize={240}>
           <div className={PANE}>{detail}</div>
         </ResizablePanel>

@@ -118,9 +118,10 @@ export function DetailPanelContainer() {
   const pathname = useLocation({ select: (l) => l.pathname });
   const routePage = routeFromMatch(leaf, pathname).page;
   const docked = false;
-  const boardKey = useAppStore(appStore, (s) => s.board);
+  const storeBoard = useAppStore(appStore, (s) => s.board);
+  const splitBoard = useAppStore(appStore, (s) => s.splitBoard);
   const board = useBoardSnapshot(
-    boardKey,
+    storeBoard,
     useAppStore(appStore, (s) => s.doneLimit),
   );
   const selectedCardId = useAppStore(appStore, (s) => s.selectedCardId);
@@ -129,12 +130,16 @@ export function DetailPanelContainer() {
   const pinFetchErrorState = useAppStore(appStore, (s) => s.pinFetchError);
   const pinFetch = useAppStore(appStore, (s) => s.pinFetch);
   const { data: accountsData } = useAccountsQuery();
-  const { data: activityEvents } = useActivityFeedQuery(boardKey, {
-    refetchOnMount: false,
-  });
 
   const cards = board?.cards;
   const card = selectedCardOf(cards, selectedCardId, pinned);
+  const boardKey =
+    splitBoard !== null && card?.boardKey === splitBoard
+      ? splitBoard
+      : storeBoard;
+  const { data: activityEvents } = useActivityFeedQuery(boardKey, {
+    refetchOnMount: false,
+  });
   const inWindow = cards?.some((c) => c.id === selectedCardId) === true;
   const members =
     card == null || card.source !== "group"
@@ -209,17 +214,23 @@ export function DetailPanelContainer() {
 
   const open = card != null;
 
-  const selectedBoardRef = useRef(boardKey);
+  const selectedBoardRef = useRef(storeBoard);
+  const splitBoardRef = useRef(splitBoard);
   const routePageRef = useRef(routePage);
   useEffect(() => {
-    selectedBoardRef.current = boardKey;
+    selectedBoardRef.current = storeBoard;
+    splitBoardRef.current = splitBoard;
     routePageRef.current = routePage;
   });
   const cardId = card?.id;
   const cardBoard = card?.boardKey;
   useEffect(() => {
     if (cardId === undefined) return;
-    const target = cardBoardSwitch(cardBoard, selectedBoardRef.current);
+    const target = cardBoardSwitch(
+      cardBoard,
+      selectedBoardRef.current,
+      splitBoardRef.current,
+    );
     if (target === null) return;
     void router.navigate({
       ...boardSwitchTarget(routePageRef.current, target),

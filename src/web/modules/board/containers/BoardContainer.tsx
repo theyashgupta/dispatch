@@ -42,6 +42,7 @@ import {
 } from "../../../../shared/start-request.js";
 import { COLUMNS } from "../../../../shared/types.js";
 import type {
+  BoardKey,
   BoardSnapshot,
   Card,
   Column as ColumnId,
@@ -91,6 +92,7 @@ import {
 } from "@/modules/board/queries/board-queries";
 import {
   latestBoard,
+  useBoardLiveUpdates,
   useBoardSnapshotQuery,
 } from "@/queries/board-snapshot-queries";
 import {
@@ -100,6 +102,10 @@ import {
 
 export interface BoardContainerProps {
   search?: React.ReactNode;
+  actions?: React.ReactNode;
+  boardKey?: BoardKey;
+  pane?: "primary" | "secondary";
+  active?: boolean;
 }
 
 const NO_CARDS: Card[] = [];
@@ -110,10 +116,32 @@ function isColumn(id: unknown): id is ColumnId {
   return typeof id === "string" && (COLUMNS as readonly string[]).includes(id);
 }
 
-export function BoardContainer({ search }: BoardContainerProps) {
+function SecondaryBoardStream({
+  boardKey,
+  doneLimit,
+}: {
+  boardKey: BoardKey;
+  doneLimit: number;
+}) {
+  const { appStore } = useRouteContext({ from: "__root__" });
+  useBoardLiveUpdates(boardKey, doneLimit, {
+    onBoardUpdate: (snapshot) => appStore.boardUpdated(snapshot.cards),
+  });
+  return null;
+}
+
+export function BoardContainer({
+  search,
+  actions,
+  boardKey: boardKeyProp,
+  pane = "primary",
+  active = true,
+}: BoardContainerProps) {
   const { appStore } = useRouteContext({ from: "__root__" });
   const router = useRouter();
-  const boardKey = useAppStore(appStore, (s) => s.board);
+  const storeBoard = useAppStore(appStore, (s) => s.board);
+  const boardKey = boardKeyProp ?? storeBoard;
+  const scopeId = pane === "secondary" ? "board-page-split" : "board-page";
   const doneLimit = useAppStore(appStore, (s) => s.doneLimit);
   const storeSelectedId = useAppStore(appStore, (s) => s.selectedCardId);
   const pinned = useAppStore(appStore, (s) => s.pinned);
@@ -238,14 +266,14 @@ export function BoardContainer({ search }: BoardContainerProps) {
   }
 
   useEffect(() => {
-    if (selectedIds.size === 0 || groupStartOpen) return;
+    if (!active || selectedIds.size === 0 || groupStartOpen) return;
     function onKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape" && !event.defaultPrevented)
         setSelectedIds(new Set());
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [selectedIds.size, groupStartOpen]);
+  }, [active, selectedIds.size, groupStartOpen]);
 
   const justDroppedRef = useRef(false);
 
@@ -368,7 +396,8 @@ export function BoardContainer({ search }: BoardContainerProps) {
   };
   useShortcuts(bindShortcuts(BOARD_SHORTCUTS, boardRuns), {
     menuOpen: groupStartOpen || selectedCardId != null,
-    scopeId: "board-page",
+    scopeId,
+    enabled: active,
   });
 
   function retryStart(card: Card) {
@@ -497,6 +526,9 @@ export function BoardContainer({ search }: BoardContainerProps) {
 
   return (
     <>
+      {pane === "secondary" && (
+        <SecondaryBoardStream boardKey={boardKey} doneLimit={doneLimit} />
+      )}
       <DndContext
         sensors={sensors}
         accessibility={{ announcements }}
@@ -511,7 +543,9 @@ export function BoardContainer({ search }: BoardContainerProps) {
         }}
       >
         <BoardLayout
+          id={scopeId}
           search={search}
+          actions={actions}
           pills={
             isCarousel ? (
               <StatusPillSwitcher
@@ -578,11 +612,13 @@ export function BoardContainer({ search }: BoardContainerProps) {
           }
         />
       </DndContext>
-      <SelectionBar
-        count={selectedIds.size}
-        onStartGroup={() => onGroupStartRequest(groupMembers())}
-        onClear={() => setSelectedIds(new Set())}
-      />
+      {active && (
+        <SelectionBar
+          count={selectedIds.size}
+          onStartGroup={() => onGroupStartRequest(groupMembers())}
+          onClear={() => setSelectedIds(new Set())}
+        />
+      )}
       {failedMove != null && (
         <FailedMoveAlert
           count={failedMove.count}

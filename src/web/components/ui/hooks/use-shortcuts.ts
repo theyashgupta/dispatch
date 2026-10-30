@@ -17,16 +17,16 @@ export const MODAL_SELECTOR =
  */
 export function useShortcuts(
   bindings: readonly ShortcutBinding[],
-  options: { menuOpen: boolean; scopeId: string },
+  options: { menuOpen: boolean; scopeId: string; enabled?: boolean },
 ): void {
-  const { menuOpen, scopeId } = options;
+  const { menuOpen, scopeId, enabled = true } = options;
   const bindingsRef = useRef(bindings);
   useLayoutEffect(() => {
     bindingsRef.current = bindings;
   });
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || event.repeat) return;
+      if (!enabled || event.defaultPrevented || event.repeat) return;
       const target = event.target instanceof HTMLElement ? event.target : null;
       if (
         !event.metaKey &&
@@ -62,5 +62,5 @@ export function useShortcuts(
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [menuOpen, scopeId]);
+  }, [menuOpen, scopeId, enabled]);
 }

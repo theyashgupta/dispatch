@@ -7,7 +7,7 @@ import { useBoardRecordQuery } from "@/modules/orchestrator/queries/orchestrator
 
 export function OrchestratorEntryContainer() {
   const { appStore } = useRouteContext({ from: "__root__" });
-  const boardKey = useAppStore(appStore, (s) => s.board);
+  const boardKey = useAppStore(appStore, (s) => s.activeBoard ?? s.board);
   const navigate = useNavigate();
   const entry = entryModel(useBoardRecordQuery(boardKey).data ?? null);
   if (entry === null) return null;
