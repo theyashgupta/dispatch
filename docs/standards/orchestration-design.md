@@ -792,3 +792,13 @@ Change: `start_ship` also ships a single ticket card that the user started from 
 Change: rule book section 9 tells the orchestrator to ship a single card in Agent done through `start_ship`, whoever started it.
 
 Reason: `start_ship` refused LOCAL-126, a card in Agent done with a commit on its branch that the user started from the board, so the orchestrator could not finish its plan.
+
+### LOCAL-187
+
+Date: 2026-10-22.
+
+Change: the supervisor plans the close loop action on `roadmap_complete` only when the same detection saw a `DISPATCH_STATUS: DONE` line in the newest agent block of the pane (the whole visible transcript when no `⏺` line shows) or in the transcript tail. A completion promise alone gives `roadmap_complete` ("Roadmap done") and closes nothing. The once-a-minute close retry needs the same DONE line. This amends the D-3 row "Close a finished loop" and the LOCAL-109 change that a single PRD loop that prints its promise gets the close loop action.
+
+Change: every Dispatch close writes the reason `done_marker`. The reasons `close_loop` and `promise` stay readable in older `.done` files.
+
+Reason: on 2026-10-22 the supervisor closed the LOCAL-170 loop file on the promise while the session still merged main and reran its last gate (LOCAL-187).

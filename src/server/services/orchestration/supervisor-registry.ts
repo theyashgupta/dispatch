@@ -114,7 +114,7 @@ async function atShellPrompt(watcher: SupervisorWatcher): Promise<boolean> {
   return paneAtPrompt(`${target}:`).catch(() => false);
 }
 
-type Change = Pick<Detection, "state" | "evidence" | "promptKind">;
+type Change = Pick<Detection, "state" | "evidence" | "promptKind" | "doneLine">;
 
 /** Write one state change and its event; resolves the previous state, or undefined when refused. */
 async function recordTransition(
@@ -238,6 +238,7 @@ async function act(
     from,
     to: change.state,
     ...(change.promptKind ? { promptKind: change.promptKind } : {}),
+    doneLine: change.doneLine,
     loop: loopOf(card, now),
     usageLimit: ownerPolicy(card)?.usageLimit ?? "wait",
     wokeAt: lastWakeAt,
@@ -358,11 +359,16 @@ export async function supervisePane(
       );
     if (changed)
       watcher.plan = await act(card, session, detection, watcher.plan, now);
-    if (changed && detection.state === "roadmap_complete")
+    if (
+      changed &&
+      detection.state === "roadmap_complete" &&
+      detection.doneLine === true
+    )
       watcher.closeTriedAt = now;
     if (
       !changed &&
       detection.state === "roadmap_complete" &&
+      detection.doneLine === true &&
       engineOpen &&
       now - watcher.closeTriedAt >= CLOSE_RETRY_MS
     ) {
