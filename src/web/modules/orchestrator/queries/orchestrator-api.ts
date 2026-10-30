@@ -2,11 +2,10 @@ import type { PolicyPayload } from "@/modules/orchestrator/domain/policy-form";
 import type {
   Board,
   BoardKey,
-  OrchestratorConversation,
   OrchestratorScope,
   OrchestratorPolicyOverride,
 } from "../../../../shared/types.js";
-import { http, httpError, type ApiFailure } from "@/lib/http";
+import { http, type ApiFailure } from "@/lib/http";
 import type { ScopeStep } from "@/modules/orchestrator/domain/ownership";
 import {
   refusalReason,
@@ -78,18 +77,6 @@ export async function getOrchestrators(
     );
   }
   return result.data.orchestrators;
-}
-
-/** Read the conversation of one orchestrator: GET /api/boards/:key/orchestrators/:id/conversation. */
-export async function getOrchestratorConversation(
-  board: BoardKey,
-  id: string,
-): Promise<OrchestratorConversation> {
-  const result = await http<OrchestratorConversation>(
-    `${boardUrl(board)}/${encodeURIComponent(id)}/conversation`,
-  );
-  if (!result.ok) throw httpError("getOrchestratorConversation", result);
-  return result.data;
 }
 
 /** Add the main orchestrator record of a board: POST /api/boards/:key/orchestrators. */

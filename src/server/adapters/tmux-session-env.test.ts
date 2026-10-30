@@ -40,6 +40,14 @@ void test(
         false,
         "the exact-match target never reaches a prefixed sibling",
       );
+      assert.equal(
+        await tmux.sessionEnvValue(`=${name}`, "CLAUDE_CONFIG_DIR"),
+        dir,
+      );
+      assert.equal(
+        await tmux.sessionEnvValue(`=${prefixed}`, "CLAUDE_CONFIG_DIR"),
+        undefined,
+      );
 
       await tmux.setSessionEnv(`=${name}`, "CLAUDE_CONFIG_DIR", undefined);
       assert.equal(

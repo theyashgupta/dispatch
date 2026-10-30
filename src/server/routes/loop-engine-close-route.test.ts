@@ -263,7 +263,7 @@ const closedEvents = (card: Card) =>
 const ownRoot = (name: string) =>
   fs.mkdtempSync(path.join(stack.root, `${name}-`));
 
-void test("a finished single PRD loop whose promise is only in the transcript is closed, so start_ship answers 202", async () => {
+void test("a finished single PRD loop whose promise and DONE line are only in the transcript is closed, so start_ship answers 202", async () => {
   await enableSupervisor();
   const card = await launchedTicket();
   const engine = await superviseFinishedLoop(card, stack.ws, {
@@ -274,13 +274,13 @@ void test("a finished single PRD loop whose promise is only in the transcript is
   assert.equal(reply.status, 202, JSON.stringify(reply.body));
 
   assert.equal(closedEvents(card).length, 1);
-  assert.equal(closedEvents(card)[0]?.data.reason, "close_loop");
+  assert.equal(closedEvents(card)[0]?.data.reason, "done_marker");
   await sampleThrice(card, 4);
   assert.equal(closeLoopEvents(card).length, 1);
   const progress = store.getCard(card.id)?.loopProgress;
   assert.equal(progress?.completion, "complete");
   assert.equal(progress?.engine?.closed, true);
-  assert.equal(progress?.engine?.closedReason, "close_loop");
+  assert.equal(progress?.engine?.closedReason, "done_marker");
   assert.equal(fs.existsSync(engine), false);
   assert.equal(fs.existsSync(`${engine}.done`), true);
   await waitFor(
@@ -410,7 +410,7 @@ async function superviseLoopWithoutPrdPath(
   return engine;
 }
 
-void test("a single PRD loop with no PRD path in its prompt is closed on the promise in the transcript", async () => {
+void test("a single PRD loop with no PRD path in its prompt is closed on the promise and the DONE line in the transcript", async () => {
   await enableSupervisor();
   const ws = ownRoot("ws-unvouched");
   const card = await launchedTicket(ws);
@@ -422,15 +422,15 @@ void test("a single PRD loop with no PRD path in its prompt is closed on the pro
 
   assert.equal(fs.existsSync(engine), false);
   const done = fs.readFileSync(`${engine}.done`, "utf8");
-  assert.match(done, /^closed_reason: promise$/m);
+  assert.match(done, /^closed_reason: done_marker$/m);
   assert.match(done, /wrapped in promise tags\.\n$/);
   const events = closeLoopEvents(card);
   assert.equal(events.length, 1);
   assert.equal(events[0]?.data.result, "closed");
-  assert.equal(events[0]?.data.reason, "promise");
+  assert.equal(events[0]?.data.reason, "done_marker");
   const stored = store.getCard(card.id)?.loopProgress?.engine;
   assert.equal(stored?.closed, true);
-  assert.equal(stored?.closedReason, "promise");
+  assert.equal(stored?.closedReason, "done_marker");
 });
 
 void test("a single PRD loop with no PRD path keeps its engine open when the promise is for another slug", async () => {
@@ -452,7 +452,7 @@ void test("a single PRD loop with no PRD path keeps its engine open when the pro
   assert.equal(closeLoopEvents(card).length, 0);
 });
 
-void test("a loop whose engine file the plugin already removed is closed on the promise", async () => {
+void test("a loop whose engine file the plugin already removed is closed on the promise and the DONE line", async () => {
   await enableSupervisor();
   const ws = ownRoot("ws-plugin-removed");
   const card = await launchedTicket(ws);
@@ -467,11 +467,11 @@ void test("a loop whose engine file the plugin already removed is closed on the 
   await sampleThrice(card);
 
   const done = fs.readFileSync(`${engine}.done`, "utf8");
-  assert.match(done, /^closed_reason: promise$/m);
+  assert.match(done, /^closed_reason: done_marker$/m);
   assert.match(done, /^active: false$/m);
   const stored = store.getCard(card.id)?.loopProgress;
   assert.equal(stored?.engine?.closed, true);
-  assert.equal(stored?.engine?.closedReason, "promise");
+  assert.equal(stored?.engine?.closedReason, "done_marker");
   assert.equal(stored?.completion, "complete");
   const events = closeLoopEvents(card);
   assert.equal(events.length, 1);
@@ -479,4 +479,50 @@ void test("a loop whose engine file the plugin already removed is closed on the 
   const reply = await shipOf(card);
   assert.notEqual(reply.body.error, "engine-not-closed");
   assert.notEqual(reply.body.error, "loop-not-finished");
+});
+
+void test("a finished loop whose engine file is deleted with no promise and no DONE line still answers 409 engine-not-closed", async () => {
+  const ws = ownRoot("ws-deleted-open");
+  const card = await launchedTicket(ws);
+  const engine = seedFinishedLoop(ws);
+  await refreshLoopProgress(card.id);
+  assert.equal(store.getCard(card.id)?.loopProgress?.engine?.active, true);
+  fs.unlinkSync(engine);
+  await refreshLoopProgress(card.id);
+
+  const progress = store.getCard(card.id)?.loopProgress;
+  assert.equal(progress?.engine?.active, true);
+  assert.equal(progress?.engine?.closed, false);
+  const reply = await shipOf(card);
+  assert.equal(reply.status, 409, JSON.stringify(reply.body));
+  assert.equal(reply.body.error, "engine-not-closed");
+  assert.equal(fs.existsSync(`${engine}.done`), false);
+});
+
+void test("a finished loop whose transcript has the promise but no DONE line keeps its engine open, so start_ship answers 409 engine-not-closed", async () => {
+  await enableSupervisor();
+  const ws = ownRoot("ws-promise-only");
+  const card = await launchedTicket(ws);
+  const engine = seedFinishedLoop(ws);
+  await refreshLoopProgress(card.id);
+  await store.setTranscriptPath(
+    card.id,
+    sessionOf(card).id,
+    seedTranscript(
+      "sess-promise-only",
+      `Both phases are green.\n<promise>${PROMISE}</promise>`,
+    ),
+  );
+  await sampleThrice(card);
+
+  const progress = store.getCard(card.id)?.loopProgress;
+  assert.equal(progress?.completion, "complete");
+  assert.equal(progress?.engine?.closed, false);
+  assert.equal(closeLoopEvents(card).length, 0);
+  assert.equal(fs.existsSync(engine), true);
+  assert.equal(fs.existsSync(`${engine}.done`), false);
+  const reply = await shipOf(card);
+  assert.equal(reply.status, 409, JSON.stringify(reply.body));
+  assert.equal(reply.body.error, "engine-not-closed");
+  assert.equal(store.getCard(card.id)?.shipFlow, undefined);
 });

@@ -1,5 +1,5 @@
 import type { LoopProgress } from "../../../shared/types.js";
-import { loopFilePath } from "./loop-progress.js";
+import { loopFilePath, parseEngineFile } from "./loop-progress.js";
 
 const PLANNING = ".planning/";
 const PLANNING_AT = /(^|\/)\.planning\//;
@@ -86,5 +86,29 @@ export function isPrdModel(progress: LoopProgress | undefined): boolean {
   return (
     progress !== undefined &&
     (progress.prdFile !== undefined || progress.roadmapFile === "")
+  );
+}
+
+/**
+ * Returns false when a `.done` text names another loop than the one the card shows.
+ *
+ * @remarks The slug comes from the `completion_promise` line and the session id from the front matter. An unknown value on either side counts as a match.
+ */
+export function doneMatchesLoop(
+  doneText: string,
+  previous: LoopProgress | undefined,
+): boolean {
+  if (previous === undefined) return true;
+  const slug =
+    /^completion_promise:\s*["']?(?:RALPH|ROADMAP) COMPLETE (\S+?)["']?[ \t]*\r?$/m.exec(
+      doneText,
+    )?.[1] ?? null;
+  if (slug !== null && slug !== previous.slug) return false;
+  const doneSession = parseEngineFile(doneText, true).engine?.sessionId ?? null;
+  const knownSession = previous.engine?.sessionId ?? null;
+  return (
+    doneSession === null ||
+    knownSession === null ||
+    doneSession === knownSession
   );
 }

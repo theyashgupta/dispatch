@@ -7,12 +7,7 @@ import {
   type CentreBranch,
   type CentreGraph,
 } from "./centre-graph.js";
-import {
-  focusOrder,
-  isFocusKey,
-  isPlainEnter,
-  nextFocus,
-} from "./centre-focus.js";
+import { focusOrder, isFocusKey, nextFocus } from "./centre-focus.js";
 
 function branch(id: string, band: BandKey, slot: number): CentreBranch {
   return {
@@ -154,27 +149,4 @@ test("a shipped branch is not in the focus order", () => {
     now: NOW,
   };
   assert.deepEqual(focusOrder(centreGraph(input)), ["centre", "G-1"]);
-});
-
-test("only Enter with no modifier is a plain Enter", () => {
-  const none = {
-    shiftKey: false,
-    ctrlKey: false,
-    altKey: false,
-    metaKey: false,
-  };
-  assert.equal(isPlainEnter({ key: "Enter", ...none }), true);
-  for (const modifier of [
-    "shiftKey",
-    "ctrlKey",
-    "altKey",
-    "metaKey",
-  ] as const) {
-    assert.equal(
-      isPlainEnter({ key: "Enter", ...none, [modifier]: true }),
-      false,
-    );
-  }
-  assert.equal(isPlainEnter({ key: " ", ...none }), false);
-  assert.equal(isPlainEnter({ key: "ArrowDown", ...none }), false);
 });

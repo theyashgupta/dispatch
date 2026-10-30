@@ -5,14 +5,11 @@ import test from "node:test";
 import type {
   Card,
   DecisionItem,
-  OrchestratorConversation,
   OrchestratorView,
 } from "../../src/shared/types.js";
 import { centreGraph } from "../../src/web/modules/orchestrator/domain/centre-graph.js";
-import { conversationView } from "../../src/web/modules/orchestrator/domain/conversation-view.js";
 import {
   FEATURE_PLAYBOOK,
-  ORCHESTRATOR_REPLY,
   QUICK_FIX_PLAYBOOK,
   centreScenario,
 } from "./fixtures/scenario-7/orchestrator.js";
@@ -32,7 +29,6 @@ const BOARD = "CEN";
 const QUICK_FIX = "CEN-1";
 const FEATURE = "CEN-2";
 const ORCHESTRATOR_CARD = "CEN-3";
-const COMMENT = "Start CEN-1 first, it unblocks the release.";
 const RUN_LOG = path.join(EVIDENCE_DIR, "local-104-centre-run-log.txt");
 
 const note = makeNote("local-104-centre");
@@ -157,7 +153,6 @@ interface CentreReads {
   cards: Card[];
   records: OrchestratorView[];
   decisions: DecisionItem[];
-  conversation: OrchestratorConversation;
 }
 
 async function readCentre(sb: Sandbox): Promise<CentreReads> {
@@ -173,16 +168,10 @@ async function readCentre(sb: Sandbox): Promise<CentreReads> {
     "GET",
     `/api/decisions?board=${BOARD}`,
   );
-  const conversation = await sb.api<OrchestratorConversation>(
-    "GET",
-    `/api/boards/${BOARD}/orchestrators/main/conversation`,
-  );
-  assert.equal(conversation.status, 200);
   return {
     cards: board.body.cards,
     records: records.body.orchestrators,
     decisions: decisions.body.items,
-    conversation: conversation.body,
   };
 }
 
@@ -195,16 +184,6 @@ const graphOf = (reads: CentreReads) =>
     now: Date.now(),
   });
 
-const timelineOf = (reads: CentreReads) =>
-  conversationView({
-    messages: reads.conversation.messages,
-    decisions: reads.decisions,
-    orchestratorId: "main",
-    orchestratorName: "Main",
-    orchestratorNames: new Map([["main", "Main"]]),
-    now: Date.now(),
-  });
-
 async function assertPlanProposed(sb: Sandbox): Promise<string> {
   const reads = await waitFor(
     async () => {
@@ -212,28 +191,22 @@ async function assertPlanProposed(sb: Sandbox): Promise<string> {
       const open = r.decisions.some(
         (d) => d.kind === "plan" && d.state === "open",
       );
-      const replied = r.conversation.messages.some(
-        (m) => m.role === "orchestrator" && m.text === ORCHESTRATOR_REPLY,
-      );
-      return open && replied ? r : null;
+      return open ? r : null;
     },
     4 * MINUTE,
-    "the open plan decision and the first orchestrator reply",
+    "the open plan decision",
   );
-  assert.equal(reads.conversation.status, "ok");
-  assert.equal(reads.conversation.messages[0]?.role, "system");
-  const plan = timelineOf(reads).find(
-    (e) => e.kind === "decision" && e.view.planRows.length > 0,
+  const plan = reads.decisions.find(
+    (d) => d.kind === "plan" && d.state === "open",
   );
-  assert.ok(plan?.kind === "decision");
+  assert.ok(plan?.plan !== undefined);
   assert.deepEqual(
-    plan.view.planRows.map((r) => [r.ref, r.playbook, r.order, r.size]),
+    plan.plan.entries.map((e) => [e.ref, e.playbook, e.order, e.size]),
     [
       [QUICK_FIX, QUICK_FIX_PLAYBOOK, 1, "small"],
       [FEATURE, FEATURE_PLAYBOOK, 2, "medium"],
     ],
   );
-  assert.equal(plan.view.otherOptionId, null);
   const graph = graphOf(reads);
   assert.deepEqual(
     graph.bands[2]?.branches.map((b) => [b.id, b.slot, b.playbook]),
@@ -245,32 +218,6 @@ async function assertPlanProposed(sb: Sandbox): Promise<string> {
   assert.equal(graph.bands[1]?.count, 0);
   note("plan proposed: two planned branches in plan order");
   return plan.id;
-}
-
-async function assertCommentReaches(sb: Sandbox): Promise<void> {
-  const sent = await sb.api<{ result: string }>(
-    "POST",
-    `/api/sessions/${ORCHESTRATOR_CARD}/input`,
-    { text: COMMENT },
-  );
-  assert.equal(sent.status, 200);
-  const reads = await waitFor(
-    async () => {
-      const r = await readCentre(sb);
-      return r.conversation.messages.some(
-        (m) => m.role === "user" && m.text === COMMENT,
-      )
-        ? r
-        : null;
-    },
-    2 * MINUTE,
-    "the comment as a user message",
-  );
-  const messages = reads.conversation.messages;
-  const index = messages.findIndex((m) => m.text === COMMENT);
-  assert.equal(messages[index + 1]?.role, "orchestrator");
-  assert.equal(messages[index + 1]?.text, ORCHESTRATOR_REPLY);
-  note(`comment delivered (${sent.body.result}) and answered`);
 }
 
 async function assertBranchesStart(sb: Sandbox): Promise<void> {
@@ -308,10 +255,9 @@ async function assertReplay(replayLog: string): Promise<void> {
 }
 
 /**
- * Run a board whose orchestrator proposes a plan, gets a comment and an approval, and starts both planned cards.
+ * Run a board whose orchestrator proposes a plan, gets an approval, and starts both planned cards.
  *
- * @remarks The inputs after the start are HTTP calls only: the hook that reports the transcript, the comment through
- * the session input route, and the plan answer. The centre view models run on the real route reads.
+ * @remarks The inputs after the start are HTTP calls only: the hook that reports the transcript and the plan answer. The centre view models run on the real route reads.
  */
 async function runScenario(sb: Sandbox): Promise<void> {
   const { replayLog, transcript } = await setup(sb);
@@ -322,7 +268,6 @@ async function runScenario(sb: Sandbox): Promise<void> {
   assert.equal(start.status, 202);
   await reportTranscript(sb, transcript);
   const planId = await assertPlanProposed(sb);
-  await assertCommentReaches(sb);
   const answer = await sb.api("POST", `/api/decisions/${planId}/answer`, {
     optionId: "approve",
   });
@@ -333,7 +278,7 @@ async function runScenario(sb: Sandbox): Promise<void> {
 }
 
 void test(
-  "scenario-LOCAL-104-centre: a plan in the conversation, a comment, an approval, then the branches start",
+  "scenario-LOCAL-104-centre: a plan, an approval, then the branches start",
   { timeout: 20 * MINUTE },
   async () => {
     const sb = await startSandbox({ name: "local-104-centre" });

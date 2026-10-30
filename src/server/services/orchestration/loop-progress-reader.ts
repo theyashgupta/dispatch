@@ -18,6 +18,7 @@ import {
   buildLoopProgress,
   buildPrdProgress,
   ENGINE_FILE,
+  openEngineText,
   parseProgressFile,
   phaseDir,
   progressPathOf,
@@ -25,6 +26,7 @@ import {
   unitFilePaths,
 } from "../domain/loop-progress.js";
 import {
+  doneMatchesLoop,
   featureDir,
   parsePrdEngine,
   prdSlugOf,
@@ -235,14 +237,24 @@ async function guardedReader(root: string): Promise<GuardedReader> {
 
 async function readEngineText(
   reader: GuardedReader,
+  previous: LoopProgress | undefined,
 ): Promise<{ text: string | null; closed: boolean }> {
-  let text = await reader.read(ENGINE_FILE);
-  let closed = false;
-  if (text === null && !reader.refused.has(ENGINE_FILE)) {
-    text = await reader.read(`${ENGINE_FILE}.done`);
-    closed = true;
+  const text = await reader.read(ENGINE_FILE);
+  if (text !== null || reader.refused.has(ENGINE_FILE)) {
+    return { text, closed: false };
   }
-  return { text, closed };
+  const doneText = await reader.read(`${ENGINE_FILE}.done`);
+  if (doneText !== null && doneMatchesLoop(doneText, previous)) {
+    return { text: doneText, closed: true };
+  }
+  if (previous?.engine?.active === true && !previous.engine.closed) {
+    reader.warnings.push("engine file removed without a close");
+    return {
+      text: openEngineText(previous.engine, previous.slug),
+      closed: false,
+    };
+  }
+  return { text: null, closed: false };
 }
 
 /**
@@ -293,7 +305,7 @@ async function readPrdModel(
     throw error;
   }
   const { warnings, refused, read } = reader;
-  const { text: engineText, closed } = await readEngineText(reader);
+  const { text: engineText, closed } = await readEngineText(reader, previous);
   const parsed = parsePrdEngine(engineText ?? "");
   const sameLoop = parsed.slug === null || parsed.slug === previous?.slug;
   const known = sameLoop ? previous?.prdFile : undefined;
@@ -390,7 +402,10 @@ async function readModel(
   }
   const reader = await guardedReader(root);
   const { warnings, refused, read } = reader;
-  const { text: engineText, closed } = await readEngineText(reader);
+  const { text: engineText, closed } = await readEngineText(
+    reader,
+    options.previous,
+  );
   const slug = pickSlug(folders, engineText, warnings);
   const progressText = await read(progressPathOf(slug));
   const roadmapFile = await pickRoadmap(root, progressText, warnings);

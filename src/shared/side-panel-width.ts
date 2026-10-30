@@ -1,6 +1,6 @@
 export const PANEL_MIN_WIDTH_PX = 360;
 export const PANEL_MAX_WIDTH_RATIO = 0.9;
-export const PANEL_KEYBOARD_STEP_PX = 16;
+const PANEL_KEYBOARD_STEP_PX = 16;
 
 const MOUSE_TAP_PX = 3;
 const TOUCH_TAP_PX = 8;
@@ -45,7 +45,6 @@ export function keyboardStepWidth(
   return clampPanelWidth(current + step, viewportWidth, navWidth);
 }
 
-/** Whether a drag that moved `delta` px is a tap: 3 px or less for a mouse, 8 px or less otherwise. */
 export function isTapGesture(delta: number, pointerType: string): boolean {
   return (
     Math.abs(delta) <= (pointerType === "mouse" ? MOUSE_TAP_PX : TOUCH_TAP_PX)

@@ -47,6 +47,7 @@ interface AttemptLine {
 }
 
 type ClosedReason = NonNullable<LoopEngine["closedReason"]>;
+export type CloseReason = Exclude<ClosedReason, "manual">;
 
 interface EngineParse {
   engine: LoopEngine | null;
@@ -374,6 +375,7 @@ export function parseEngineFile(text: string, closed: boolean): EngineParse {
       handoffPending: sessionId === HANDOFF_PENDING,
       startedAt: fields.get("started_at") || null,
       closed,
+      ...(fields.get("kept_open") === "true" && { keptOpen: true }),
       ...(closed && {
         closedReason: closedReasonOf(fields.get("closed_reason")),
       }),
@@ -383,7 +385,11 @@ export function parseEngineFile(text: string, closed: boolean): EngineParse {
 }
 
 function closedReasonOf(value: string | undefined): ClosedReason {
-  return value === "promise" || value === "close_loop" ? value : "manual";
+  return value === "promise" ||
+    value === "close_loop" ||
+    value === "done_marker"
+    ? value
+    : "manual";
 }
 
 /**
@@ -391,10 +397,7 @@ function closedReasonOf(value: string | undefined): ClosedReason {
  *
  * @remarks Text without a front matter comes back unchanged.
  */
-export function withClosedReason(
-  text: string,
-  reason: "promise" | "close_loop",
-): string {
+export function withClosedReason(text: string, reason: CloseReason): string {
   const lines = toLines(text);
   const [start, end] = frontMatterFences(lines);
   if (start === undefined || end === undefined) return text;
@@ -415,7 +418,7 @@ export function withClosedReason(
 export function closedEngineText(
   slug: string,
   sessionId: string | null,
-  reason: "promise" | "close_loop",
+  reason: CloseReason,
 ): string {
   return [
     "---",
@@ -424,7 +427,28 @@ export function closedEngineText(
     `completion_promise: "RALPH COMPLETE ${slug}"`,
     `closed_reason: ${reason}`,
     "---",
-    "Closed by Dispatch after the loop engine file was removed.",
+    `Closed by Dispatch after the loop engine file was removed, slug ${slug}.`,
+    "",
+  ].join("\n");
+}
+
+/**
+ * Returns the text of an open engine file rebuilt from a progress read.
+ *
+ * @remarks The reader uses it to keep a loop open after the plugin file vanished without a close. The
+ * body names the slug, so the roadmap reader still finds the loop folder among several.
+ */
+export function openEngineText(engine: LoopEngine, slug: string): string {
+  return [
+    "---",
+    "active: true",
+    "kept_open: true",
+    ...(engine.iteration === null ? [] : [`iteration: ${engine.iteration}`]),
+    ...(engine.sessionId === null ? [] : [`session_id: ${engine.sessionId}`]),
+    ...(engine.startedAt === null ? [] : [`started_at: ${engine.startedAt}`]),
+    `completion_promise: "RALPH COMPLETE ${slug}"`,
+    "---",
+    `Kept open by Dispatch after the engine file was removed, slug ${slug}.`,
     "",
   ].join("\n");
 }

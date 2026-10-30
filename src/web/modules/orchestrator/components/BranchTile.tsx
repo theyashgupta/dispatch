@@ -87,7 +87,7 @@ export function BranchTile({ branch, tile }: BranchTileProps) {
     <>
       <span className="flex flex-wrap items-center gap-(--space-sm)">
         {label !== null && (
-          <span className="font-mono text-xs text-muted-foreground">
+          <span className="font-mono text-mono text-muted-foreground">
             {label}
           </span>
         )}
@@ -120,6 +120,7 @@ export function BranchTile({ branch, tile }: BranchTileProps) {
         className={cn(
           "rounded-md border border-border",
           branch.tone === "error" ? "bg-danger-soft" : "bg-card",
+          branch.state === "running" && "animate-status-pulse",
         )}
       >
         {has("open") ? (

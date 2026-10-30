@@ -80,10 +80,15 @@ const ENGINE = {
   startedAt: null,
 };
 
-async function doneCard(title: string, closed: boolean | null) {
+async function doneCard(
+  title: string,
+  closed: boolean | null,
+  completion: "running" | "complete" = "running",
+) {
   const made = await startedCard(title);
   await store.setLoopProgress(made.card().id, {
     ...LOOP_PROGRESS,
+    completion,
     engine: closed === null ? null : { ...ENGINE, closed },
   });
   await store.applyMarker(
@@ -109,6 +114,23 @@ void test("moveToNeedsInput moves an Agent done card with a DONE marker and an o
   const { card, session } = await doneCard("done-open", false);
   await moveToNeedsInput(card(), session(), "idle");
   assert.equal(card().column, "needs_input");
+});
+
+void test("moveToNeedsInput keeps an Agent done card with a DONE marker and a complete loop whose engine is open", async () => {
+  const { card, session } = await doneCard("done-complete", false, "complete");
+  await moveToNeedsInput(card(), session(), "idle");
+  assert.equal(card().column, "agent_done");
+  assert.equal(card().lastMarker, "DONE built");
+});
+
+void test("moveToNeedsInput keeps an Agent done card with a DONE marker and a complete loop that has no engine", async () => {
+  const { card, session } = await doneCard(
+    "done-complete-no-engine",
+    null,
+    "complete",
+  );
+  await moveToNeedsInput(card(), session(), "idle");
+  assert.equal(card().column, "agent_done");
 });
 
 void test("moveToNeedsInput moves an Agent done card with a DONE marker and no loop engine", async () => {

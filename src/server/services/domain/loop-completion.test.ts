@@ -1,7 +1,11 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { LoopProgress, LoopUnit } from "../../../shared/types.js";
-import { loopCompletionOf, promiseCompletes } from "./loop-completion.js";
+import {
+  isPromiseLine,
+  loopCompletionOf,
+  promiseCompletes,
+} from "./loop-completion.js";
 
 const LOCAL_159 =
   "All 7 phases of unit A and unit B are green.\n<promise>RALPH COMPLETE local-159</promise>\nDISPATCH_STATUS: DONE - LOCAL-159 built, awaiting ship";
@@ -83,6 +87,37 @@ void test("loopCompletionOf gives false for an empty slug", () => {
   assert.equal(
     loopCompletionOf("<promise>RALPH COMPLETE </promise>", "").promise,
     false,
+  );
+});
+
+void test("isPromiseLine and loopCompletionOf agree on the promise truth table", () => {
+  const tag = "<promise>RALPH COMPLETE local-159</promise>";
+  const cases: [string, string, boolean][] = [
+    ["own line", tag, true],
+    ["leading glyph", `⏺ ${tag}`, true],
+    ["indented", `  ${tag}`, true],
+    ["roadmap phrase", "<promise>ROADMAP COMPLETE local-159</promise>", true],
+    ["inner whitespace", "<promise> RALPH COMPLETE local-159 </promise>", true],
+    [
+      "inside a sentence",
+      `the test writes \`${tag}\` and posts the hook`,
+      false,
+    ],
+    ["diff line", `+ ${tag}`, false],
+    ["other slug", "<promise>RALPH COMPLETE local-160</promise>", false],
+    ["prefix slug", "<promise>RALPH COMPLETE local-1590</promise>", false],
+  ];
+  for (const [name, line, want] of cases) {
+    assert.equal(isPromiseLine(line, "local-159"), want, name);
+    assert.equal(loopCompletionOf(line, "local-159").promise, want, name);
+  }
+  assert.equal(isPromiseLine(tag, "local-170"), false);
+  assert.equal(isPromiseLine(tag, "local-15"), false);
+  assert.equal(isPromiseLine(tag, ""), false);
+  assert.equal(
+    loopCompletionOf(`the doc quotes ${tag} here\n${tag}\n`, "local-159")
+      .promise,
+    true,
   );
 });
 

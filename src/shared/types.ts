@@ -2028,7 +2028,8 @@ export interface LoopEngine {
   handoffPending: boolean;
   startedAt: string | null;
   closed: boolean;
-  closedReason?: "promise" | "close_loop" | "manual";
+  keptOpen?: boolean;
+  closedReason?: "promise" | "close_loop" | "done_marker" | "manual";
 }
 
 export interface LoopGate {
@@ -2201,19 +2202,6 @@ export interface DecisionItem {
     usedIndexes: number[];
   };
   plan?: { entries: PlanEntry[] };
-}
-
-export interface ConversationMessage {
-  id: string;
-  at: string | null;
-  role: "user" | "orchestrator" | "system";
-  text: string;
-}
-
-export interface OrchestratorConversation {
-  status: "ok" | "no-session" | "no-transcript" | "unreadable";
-  messages: ConversationMessage[];
-  truncated: boolean;
 }
 
 export interface SessionMeters {

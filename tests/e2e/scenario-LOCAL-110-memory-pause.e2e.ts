@@ -104,11 +104,6 @@ function stateOf(pid: number): string {
   }).stdout.trim();
 }
 
-/** Return the pids of a pause mark without the first one, which is the shell of the pane. */
-function childPids(mark: NonNullable<Card["paused"]>): number[] {
-  return mark.pids.slice(1);
-}
-
 /** Return the pause or resume rows of one card, in event order. */
 function governorRows(
   events: OrchestrationEventRow[],
@@ -290,8 +285,8 @@ async function runScenario(held: Held): Promise<void> {
   );
   assert.equal(pauses[0]?.data.by, "memory");
   assert.ok(
-    childPids(mark).some((pid) => stateOf(pid).startsWith("T")),
-    `no child pid of ${c} is stopped: ${childPids(mark)
+    mark.pids.some((pid) => stateOf(pid).startsWith("T")),
+    `no pid of ${c} is stopped: ${mark.pids
       .map((p) => `${p}=${stateOf(p)}`)
       .join(" ")}`,
   );
@@ -331,7 +326,7 @@ async function runScenario(held: Held): Promise<void> {
     resumes[0]?.data.reason,
     `swap used 6000 MB is below ${RESUME_BELOW_MB} MB`,
   );
-  for (const pid of childPids(mark)) {
+  for (const pid of mark.pids) {
     assert.equal(
       stateOf(pid).startsWith("T"),
       false,
@@ -394,7 +389,7 @@ async function runScenario(held: Held): Promise<void> {
     restartResumes.at(-1)?.data.reason,
     `swap used 8000 MB is not above the ${CEILING_MB} MB ceiling after a restart`,
   );
-  for (const pid of childPids(again)) {
+  for (const pid of again.pids) {
     assert.equal(
       stateOf(pid).startsWith("T"),
       false,

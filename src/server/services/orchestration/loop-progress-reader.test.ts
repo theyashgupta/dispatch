@@ -698,7 +698,8 @@ void test("a single read keeps the PRD after the engine file is gone", async () 
     second.units[0]?.phases.map((phase) => phase.gate),
     ["pass", "pass", "pending"],
   );
-  assert.equal(second.engine, null);
+  assert.equal(second.engine?.active, true);
+  assert.equal(second.engine?.closed, false);
   assert.equal(second.prdFile, SINGLE_PRD);
 });
 
@@ -1044,4 +1045,109 @@ void test("a single PRD card adds no identifier folder watch", async (t) => {
     stop();
     fake.restore();
   }
+});
+
+const ENGINE_REL = ".claude/ralph-loop.local.md";
+
+async function singleRead(
+  root: string,
+  previous: LoopProgress,
+): Promise<LoopProgress> {
+  const progress = await readLoopProgress(root, { single: true, previous });
+  assert.ok(progress);
+  return progress;
+}
+
+async function firstSingleRead(root: string): Promise<LoopProgress> {
+  const first = await readLoopProgress(root, { single: true });
+  assert.ok(first?.engine);
+  return first;
+}
+
+function writeDone(root: string, slug: string, session: string): void {
+  writeFileSync(
+    join(root, `${ENGINE_REL}.done`),
+    `---\nactive: false\nsession_id: ${session}\ncompletion_promise: "RALPH COMPLETE ${slug}"\nclosed_reason: promise\n---\nold\n`,
+  );
+}
+
+void test("a done file of another slug is not read as this loop's close", async () => {
+  const root = singleRoot();
+  const first = await firstSingleRead(root);
+  rmSync(join(root, ENGINE_REL));
+  writeDone(root, "old-loop", "abc");
+  const closedPrevious = {
+    ...first,
+    engine: { ...first.engine!, closed: true },
+  };
+  const progress = await singleRead(root, closedPrevious);
+  assert.equal(progress.engine, null);
+});
+
+void test("a done file of another session id is not read as this loop's close", async () => {
+  const root = singleRoot();
+  const first = await firstSingleRead(root);
+  rmSync(join(root, ENGINE_REL));
+  writeDone(root, "demo-feature", "old-session");
+  const closedPrevious = {
+    ...first,
+    engine: { ...first.engine!, closed: true },
+  };
+  const progress = await singleRead(root, closedPrevious);
+  assert.equal(progress.engine, null);
+});
+
+void test("a done file of the same slug and session reads closed", async () => {
+  const root = singleRoot();
+  const first = await firstSingleRead(root);
+  rmSync(join(root, ENGINE_REL));
+  writeDone(root, "demo-feature", "abc");
+  const progress = await singleRead(root, first);
+  assert.equal(progress.engine?.closed, true);
+  assert.equal(progress.engine?.closedReason, "promise");
+});
+
+void test("a missing engine file with a previous open engine stays open and warns", async () => {
+  const root = singleRoot();
+  const first = await firstSingleRead(root);
+  rmSync(join(root, ENGINE_REL));
+  const progress = await singleRead(root, first);
+  assert.equal(progress.engine?.active, true);
+  assert.equal(progress.engine?.closed, false);
+  assert.equal(progress.engine?.sessionId, "abc");
+  assert.ok(
+    progress.warnings.includes("engine file removed without a close"),
+    progress.warnings.join("|"),
+  );
+});
+
+void test("a loop with no PRD path keeps its engine open over two reads after the engine file is gone", async () => {
+  const root = emptyTemp();
+  mkdirSync(join(root, ".claude"), { recursive: true });
+  writeFileSync(
+    join(root, ENGINE_REL),
+    `---\nactive: true\niteration: 1\nsession_id: abc\ncompletion_promise: "RALPH COMPLETE local-159"\n---\nBuild it.\n`,
+  );
+  const first = await firstSingleRead(root);
+  rmSync(join(root, ENGINE_REL));
+  for (const previous of [first, await singleRead(root, first)]) {
+    const progress = await singleRead(root, previous);
+    assert.equal(progress.slug, "local-159");
+    assert.equal(progress.engine?.active, true);
+    assert.equal(progress.engine?.closed, false);
+    assert.equal(progress.engine?.keptOpen, true);
+    assert.ok(
+      progress.warnings.includes("engine file removed without a close"),
+      progress.warnings.join("|"),
+    );
+  }
+});
+
+void test("a missing engine file with no previous engine reads no engine", async () => {
+  const root = singleRoot();
+  const first = await firstSingleRead(root);
+  rmSync(join(root, ENGINE_REL));
+  const progress = await singleRead(root, { ...first, engine: null });
+  assert.equal(progress.engine, null);
+  assert.deepEqual(progress.warnings, []);
 });

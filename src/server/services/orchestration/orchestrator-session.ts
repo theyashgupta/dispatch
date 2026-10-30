@@ -16,7 +16,12 @@ import type {
   StartError,
 } from "../../../shared/types.js";
 import { sleep } from "../../adapters/exec.js";
-import { hasSession, paneAtPrompt, sendKeys } from "../../adapters/tmux.js";
+import {
+  hasSession,
+  paneAtPrompt,
+  sendKeys,
+  sessionEnvValue,
+} from "../../adapters/tmux.js";
 import { boardRepository as store } from "../../store/board-repository.js";
 import { DISPATCH_DATA_DIR } from "../../store/data-dir.js";
 import {
@@ -45,7 +50,10 @@ import {
 } from "../../../shared/orchestrator-owner.js";
 import { isLiveSessionCard, resolveBoard } from "./boards.js";
 import { requireOrchestrationConfig } from "./group-launch.js";
-import { revokeOrchestratorToken } from "./orchestrator-tokens.js";
+import {
+  resolveOrchestratorToken,
+  revokeOrchestratorToken,
+} from "./orchestrator-tokens.js";
 import { runClaude } from "./run-claude.js";
 import { startSession } from "./start-session.js";
 import { sendConfirmed } from "./supervisor-send.js";
@@ -57,6 +65,7 @@ export const orchestratorTools: {
   send: typeof sendConfirmed;
   hasSession: typeof hasSession;
   atPrompt: typeof paneAtPrompt;
+  sessionEnv: typeof sessionEnvValue;
   mcpCommand: () => { command: string; args: string[] };
   stopWait: { totalMs: number; pollMs: number };
 } = {
@@ -66,6 +75,7 @@ export const orchestratorTools: {
   send: sendConfirmed,
   hasSession,
   atPrompt: paneAtPrompt,
+  sessionEnv: sessionEnvValue,
   mcpCommand: serverMcpCommand,
   stopWait: { totalMs: 30_000, pollMs: 500 },
 };
@@ -886,4 +896,98 @@ export async function settleTransientRecords(): Promise<number> {
     settled += moved.length;
   }
   return settled;
+}
+
+function tokenFault(
+  token: string | undefined,
+  identity: OrchestratorIdentity,
+): string | null {
+  if (token === undefined) return "no token";
+  const held = resolveOrchestratorToken(token);
+  if (held === undefined) return "unknown token";
+  if (held.revoked) return "revoked token";
+  return held.boardKey === identity.boardKey &&
+    held.orchestratorId === identity.orchestratorId
+    ? null
+    : "token of another orchestrator";
+}
+
+/**
+ * Relaunch claude once at boot in each open orchestrator session that runs on a token its orchestrator no longer holds.
+ *
+ * @remarks
+ * The MCP server reads its token once when claude starts, so a running claude cannot take a
+ * fresh one: the relaunch exits claude and runs it again through `runClaude`, which primes the
+ * shell with a fresh token and resumes the recorded conversation. A pane at its shell prompt makes no tool call, so it waits for the next resume.
+ */
+export async function relaunchStaleTokenSessions(): Promise<void> {
+  for (const board of store.listBoards()) {
+    if (board.policy.supervisor === "off") continue;
+    for (const { id, cardId } of board.orchestrators) {
+      const card = cardId ? store.getCard(cardId) : undefined;
+      const session = card?.sessions?.find(
+        (s) => s.id === card.activeSessionId,
+      );
+      const tmux = session?.tmuxSession;
+      if (!card || !session || !tmux) continue;
+      if (!(await orchestratorTools.hasSession(`=${tmux}`))) continue;
+      const target = `=${tmux}:`;
+      if (await orchestratorTools.atPrompt(target).catch(() => true)) continue;
+      const identity = { boardKey: board.key, orchestratorId: id };
+      const fault = tokenFault(
+        await orchestratorTools.sessionEnv(
+          `=${tmux}`,
+          "DISPATCH_ORCHESTRATOR_TOKEN",
+        ),
+        identity,
+      );
+      if (fault === null) continue;
+      let release: () => void;
+      try {
+        release = lock(board, id);
+      } catch {
+        continue;
+      }
+      let result = "launched";
+      await settleLaunch(
+        board,
+        id,
+        card.id,
+        async () => {
+          try {
+            await writeMcpConfig(board.key, id);
+            await orchestratorTools.keys(target, ["Escape"]);
+            await orchestratorTools.send(
+              card,
+              session,
+              "/exit",
+              "orchestrator_stop",
+            );
+            if (!(await waitForPrompt(target))) {
+              throw new Error("claude did not exit");
+            }
+            const outcome = await orchestratorTools.relaunch(card.id);
+            if (outcome !== "launched") throw new Error(outcome);
+          } catch (err) {
+            result = (err as Error).message;
+            throw err;
+          }
+        },
+        release,
+      );
+      store.appendOrchestrationEvent({
+        boardKey: board.key,
+        cardId: card.id,
+        sessionId: session.id,
+        kind: "supervisor_action",
+        data: {
+          action: "orchestrator_relaunch",
+          orchestratorId: id,
+          reason: fault,
+          result,
+        },
+        ts: new Date().toISOString(),
+      });
+    }
+  }
 }
