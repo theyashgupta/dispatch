@@ -1,6 +1,5 @@
 import { Router } from "express";
 import { resolveBoard } from "../services/orchestration/boards.js";
-import { readOrchestratorConversation } from "../services/orchestration/orchestrator-conversation.js";
 import {
   addOrchestrator,
   assignCard,
@@ -16,7 +15,6 @@ import { httpErrorHandler, orFail } from "./error-handler.js";
 import {
   addBodySchema,
   assignBodySchema,
-  conversationQuerySchema,
   editBodySchema,
   orchestratorIdSchema,
 } from "./orchestrators-schemas.js";
@@ -30,17 +28,6 @@ orchestratorsRouter.get("/boards/:key/orchestrators", (req, res) => {
   const board = resolveBoard(parseBoardKeyParam(req.params.key));
   res.status(200).json({ orchestrators: listOrchestrators(board) });
 });
-
-orchestratorsRouter.get(
-  "/boards/:key/orchestrators/:id/conversation",
-  async (req, res) => {
-    refuseOrchestratorToken(req);
-    const board = resolveBoard(parseBoardKeyParam(req.params.key));
-    const id = parseOrThrow(orchestratorIdSchema, req.params.id);
-    const { limit } = parseOrThrow(conversationQuerySchema, req.query);
-    res.status(200).json(await readOrchestratorConversation(board, id, limit));
-  },
-);
 
 orchestratorsRouter.post("/boards/:key/orchestrators", async (req, res) => {
   const board = resolveBoard(parseBoardKeyParam(req.params.key));

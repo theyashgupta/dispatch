@@ -1,6 +1,5 @@
 import { z } from "zod";
-import { CONVERSATION_LIMIT_MAX } from "../../shared/orchestrator-limits.js";
-import { intText, unknownFieldError } from "./schema-primitives.js";
+import { unknownFieldError } from "./schema-primitives.js";
 
 const unknownField = { error: unknownFieldError() };
 
@@ -89,10 +88,3 @@ export const assignBodySchema = z.strictObject(
   { orchestratorId: orchestratorIdSchema },
   unknownField,
 );
-
-export const conversationQuerySchema = z.object({
-  limit: intText("invalid-limit")
-    .refine((n) => n >= 1 && n <= CONVERSATION_LIMIT_MAX, "invalid-limit")
-    .optional()
-    .default(CONVERSATION_LIMIT_MAX),
-});

@@ -7,7 +7,7 @@ import {
   panelMaxWidth,
   persistedWidthCss,
   startsResizeDrag,
-} from "./panel-width.js";
+} from "./side-panel-width.js";
 
 void test("the clamp never lets the panel cover the sidebar", () => {
   assert.equal(clampPanelWidth(1400, 1280, 240), 1040);

@@ -47,6 +47,7 @@ import {
 } from "@/queries/cards-queries";
 import { useOrchestrationSummaryQuery } from "@/queries/orchestration-summary-queries";
 import { useSessionAccountMove } from "@/queries/session-account-queries";
+import { SidePanel } from "@/components/ui/side-panel";
 import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { useItems } from "@/components/ui/hooks/use-items";
 import { stampLastOpened } from "@/components/ui/hooks/use-last-opened";
@@ -56,7 +57,6 @@ import {
   PanelAccountRow,
   PanelBody,
   PanelEmptyState,
-  PanelFrame,
   PanelLoadError,
   PanelLoading,
   PanelPreviews,
@@ -79,7 +79,6 @@ import {
 } from "@/modules/detail/components/PanelNotice";
 import { liveResumeFailure } from "@/modules/detail/domain/live-resume-failure";
 import { PanelHeader } from "@/modules/detail/components/PanelHeader";
-import { PanelResizeHandle } from "@/modules/detail/components/PanelResizeHandle";
 import { RunClaudeButton } from "@/modules/detail/components/RunClaudeButton";
 import { PreviewRow } from "@/modules/detail/components/PreviewRow";
 import { ReferenceBlocks } from "@/modules/detail/components/ReferenceBlocks";
@@ -91,7 +90,6 @@ import { TerminalRegion } from "@/modules/detail/components/TerminalRegion";
 import { UnknownProbeRow } from "@/modules/detail/components/UnknownProbeRow";
 import { reviewHeader as buildReviewHeader } from "@/modules/detail/domain/review-header";
 import { heldPrItems } from "../../../../shared/pr-rows.js";
-import { panelEscapeAction } from "@/modules/detail/domain/panel-escape";
 import { groupCostLine } from "@/modules/detail/domain/group-cost-line";
 import {
   hasSessionFlow,
@@ -99,7 +97,6 @@ import {
 } from "@/modules/detail/domain/session-flow";
 import { useFocusReturn } from "@/modules/detail/hooks/use-focus-return";
 import { usePanelHistory } from "@/modules/detail/hooks/use-panel-history";
-import { usePanelResize } from "@/modules/detail/hooks/use-panel-resize";
 import {
   useCleanupCardMutation,
   useEnsureTerminalMutation,
@@ -234,14 +231,10 @@ export function DetailPanelContainer() {
   const [fullscreen, setFullscreen] = useState(false);
 
   const isCarousel = useMediaQuery(CAROUSEL_QUERY);
-  const isCoarsePointer = useMediaQuery("(pointer: coarse)");
   const isNarrowViewport = useMediaQuery("(max-width: 520px)");
   const takeover = !docked && isCarousel;
   const narrowPanel = (docked || takeover) && isNarrowViewport;
-  const effectiveFullscreen = fullscreen || takeover;
   const requestClose = usePanelHistory(open && takeover, onClose);
-  const resize = usePanelResize();
-  const { isDragging, cancelDrag } = resize;
   useFocusReturn(open);
 
   const { mutateAsync: ensureTerminal } = useEnsureTerminalMutation();
@@ -289,35 +282,6 @@ export function DetailPanelContainer() {
       window.setTimeout(() => stampLastOpened(id), 5000);
     };
   }, [card?.id, card?.tmuxSession]);
-
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (event: KeyboardEvent) => {
-      const action = panelEscapeAction({
-        key: event.key,
-        defaultPrevented: event.defaultPrevented,
-        dragging: isDragging(),
-        takeover,
-        fullscreen,
-        docked,
-      });
-      if (action === "cancel-drag") cancelDrag();
-      else if (action === "close-takeover") requestClose();
-      else if (action === "exit-fullscreen") setFullscreen(false);
-      else if (action === "close-overlay") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [
-    open,
-    fullscreen,
-    docked,
-    onClose,
-    takeover,
-    requestClose,
-    isDragging,
-    cancelDrag,
-  ]);
 
   const spawnedForRef = useRef<string | null>(null);
   useEffect(() => {
@@ -499,172 +463,178 @@ export function DetailPanelContainer() {
     </>
   );
   return (
-    <PanelFrame
+    <SidePanel
+      placement="overlay"
+      title="Ticket detail"
+      handleLabel="Resize panel"
+      storageKey="dsp.panel.width"
       open={open}
       docked={docked}
-      fullscreen={effectiveFullscreen}
-      asideRef={resize.asideRef}
-      onScrimClick={requestClose}
-    >
-      {!docked && !effectiveFullscreen && (
-        <PanelResizeHandle
-          open={open}
-          coarsePointer={isCoarsePointer}
-          resizing={resize.resizing}
-          currentWidthPx={resize.currentWidthPx}
-          maxWidthPx={resize.maxWidthPx}
-          onPointerDown={resize.onPointerDown}
-          onDoubleClick={resize.onDoubleClick}
-          onKeyDown={resize.onKeyDown}
-        />
-      )}
-      {docked && c == null ? (
-        <PanelEmptyState />
-      ) : (
+      expanded={fullscreen}
+      sheet={takeover}
+      onClose={takeover ? requestClose : onClose}
+      panel={
         <>
-          <PanelHeader
-            card={c}
-            editors={editors}
-            hasLiveSession={hasLiveSession}
-            detailsExpanded={detailsExpanded}
-            onToggleDetails={() => setDetailsExpanded((v) => !v)}
-            fullscreen={fullscreen}
-            onToggleFullscreen={() => setFullscreen((v) => !v)}
-            onClose={requestClose}
-            docked={docked}
-            takeover={takeover}
-            narrowPanel={narrowPanel}
-            onOpenEditor={(id, editor) => {
-              openEditor({ id, editor }).catch(console.error);
-            }}
-            onMove={(id, column) => {
-              moveCard({ id, column }).catch(console.error);
-            }}
-            onStartRequest={onStartRequest}
-            onCleanupRequest={onCleanupRequest}
-            onUnwindRequest={onUnwindRequest}
-            onResetRequest={onResetRequest}
-            onSyncRequest={onSyncRequest}
-            onPauseRequest={(id) => runPauseChange(pause.mutateAsync({ id }))}
-            onResumePausedRequest={(id) =>
-              runPauseChange(unpause.mutateAsync({ id }))
-            }
-            pausePending={
-              c != null &&
-              ((pause.isPending && pause.variables?.id === c.id) ||
-                (unpause.isPending && unpause.variables?.id === c.id))
-            }
-            onAskRequest={onAskRequest}
-            account={accountGroup}
-            resumeLine={resumeLine}
-            reviewHeader={reviewHeader}
-            costLine={groupCostLine(c, summary.data?.groups ?? [])}
-          />
-
-          {c != null && hasSessionFlow(c) ? (
-            <SessionFlowRow card={c}>{sessionControls}</SessionFlowRow>
+          {docked && c == null ? (
+            <PanelEmptyState />
           ) : (
-            sessionControls != null && <PanelRow>{sessionControls}</PanelRow>
-          )}
+            <>
+              <PanelHeader
+                card={c}
+                editors={editors}
+                hasLiveSession={hasLiveSession}
+                detailsExpanded={detailsExpanded}
+                onToggleDetails={() => setDetailsExpanded((v) => !v)}
+                fullscreen={fullscreen}
+                onToggleFullscreen={() => setFullscreen((v) => !v)}
+                onClose={requestClose}
+                docked={docked}
+                takeover={takeover}
+                narrowPanel={narrowPanel}
+                onOpenEditor={(id, editor) => {
+                  openEditor({ id, editor }).catch(console.error);
+                }}
+                onMove={(id, column) => {
+                  moveCard({ id, column }).catch(console.error);
+                }}
+                onStartRequest={onStartRequest}
+                onCleanupRequest={onCleanupRequest}
+                onUnwindRequest={onUnwindRequest}
+                onResetRequest={onResetRequest}
+                onSyncRequest={onSyncRequest}
+                onPauseRequest={(id) =>
+                  runPauseChange(pause.mutateAsync({ id }))
+                }
+                onResumePausedRequest={(id) =>
+                  runPauseChange(unpause.mutateAsync({ id }))
+                }
+                pausePending={
+                  c != null &&
+                  ((pause.isPending && pause.variables?.id === c.id) ||
+                    (unpause.isPending && unpause.variables?.id === c.id))
+                }
+                onAskRequest={onAskRequest}
+                account={accountGroup}
+                resumeLine={resumeLine}
+                reviewHeader={reviewHeader}
+                costLine={groupCostLine(c, summary.data?.groups ?? [])}
+              />
 
-          <PanelBody>
-            {hydrating ? (
-              <PanelLoading />
-            ) : pinFetchError != null ? (
-              <PanelLoadError kind={pinFetchError} onRetry={onRetryPinFetch} />
-            ) : (
-              <>
-                {hasLiveSession ? (
-                  detailsExpanded && (
-                    <PanelReference capped grow={false}>
-                      {referenceColumn}
-                    </PanelReference>
-                  )
+              {c != null && hasSessionFlow(c) ? (
+                <SessionFlowRow card={c}>{sessionControls}</SessionFlowRow>
+              ) : (
+                sessionControls != null && (
+                  <PanelRow>{sessionControls}</PanelRow>
+                )
+              )}
+
+              <PanelBody>
+                {hydrating ? (
+                  <PanelLoading />
+                ) : pinFetchError != null ? (
+                  <PanelLoadError
+                    kind={pinFetchError}
+                    onRetry={onRetryPinFetch}
+                  />
                 ) : (
-                  <PanelReference capped={false} grow={!c?.tmuxSession}>
-                    {referenceColumn}
-                  </PanelReference>
-                )}
+                  <>
+                    {hasLiveSession ? (
+                      detailsExpanded && (
+                        <PanelReference capped grow={false}>
+                          {referenceColumn}
+                        </PanelReference>
+                      )
+                    ) : (
+                      <PanelReference capped={false} grow={!c?.tmuxSession}>
+                        {referenceColumn}
+                      </PanelReference>
+                    )}
 
-                {c != null &&
-                  (c.previewsUnknown != null ||
-                    (c.previews != null && c.previews.length > 0)) && (
-                    <PanelPreviews>
-                      {c.previews?.map((preview) => (
-                        <PreviewRow key={preview.port} preview={preview} />
-                      ))}
-                      {c.previewsUnknown != null && (
-                        <UnknownProbeRow
-                          category={c.previewsUnknown.category}
-                          partial={(c.previews?.length ?? 0) > 0}
-                        />
+                    {c != null &&
+                      (c.previewsUnknown != null ||
+                        (c.previews != null && c.previews.length > 0)) && (
+                        <PanelPreviews>
+                          {c.previews?.map((preview) => (
+                            <PreviewRow key={preview.port} preview={preview} />
+                          ))}
+                          {c.previewsUnknown != null && (
+                            <UnknownProbeRow
+                              category={c.previewsUnknown.category}
+                              partial={(c.previews?.length ?? 0) > 0}
+                            />
+                          )}
+                        </PanelPreviews>
                       )}
-                    </PanelPreviews>
-                  )}
 
-                {note !== null && (
-                  <div
-                    data-testid="paused-note"
-                    className="mx-(--space-xl) mb-(--space-lg)"
-                  >
-                    <PanelMutedNotice label="Status">{note}</PanelMutedNotice>
-                  </div>
-                )}
+                    {note !== null && (
+                      <div
+                        data-testid="paused-note"
+                        className="mx-(--space-xl) mb-(--space-lg)"
+                      >
+                        <PanelMutedNotice label="Status">
+                          {note}
+                        </PanelMutedNotice>
+                      </div>
+                    )}
 
-                {frozen !== null && (
-                  <div
-                    data-testid="frozen-note"
-                    className="mx-(--space-xl) mb-(--space-lg)"
-                  >
-                    <PanelMutedNotice label="Status">{frozen}</PanelMutedNotice>
-                  </div>
-                )}
+                    {frozen !== null && (
+                      <div
+                        data-testid="frozen-note"
+                        className="mx-(--space-xl) mb-(--space-lg)"
+                      >
+                        <PanelMutedNotice label="Status">
+                          {frozen}
+                        </PanelMutedNotice>
+                      </div>
+                    )}
 
-                {liveFailure !== null && (
-                  <div
-                    data-testid="live-resume-failure"
-                    className="mx-(--space-xl) mb-(--space-lg)"
-                  >
-                    <PanelAlert>{liveFailure}</PanelAlert>
-                  </div>
-                )}
+                    {liveFailure !== null && (
+                      <div
+                        data-testid="live-resume-failure"
+                        className="mx-(--space-xl) mb-(--space-lg)"
+                      >
+                        <PanelAlert>{liveFailure}</PanelAlert>
+                      </div>
+                    )}
 
-                {hasLiveSession && c && (
-                  <TerminalRegion
-                    card={c}
-                    onReconnect={(id) => {
-                      ensureTerminal(id).catch(console.error);
-                    }}
-                  />
-                )}
+                    {hasLiveSession && c && (
+                      <TerminalRegion
+                        card={c}
+                        onReconnect={(id) => {
+                          ensureTerminal(id).catch(console.error);
+                        }}
+                      />
+                    )}
 
-                {activeSessionLost && (
-                  <SessionLostSection
-                    card={c}
-                    resume={(id) => resumeCard({ id })}
-                    resumeLine={resumeLine}
-                    onRestart={(lost) => {
-                      if (lost.workspace) {
-                        startCard({
-                          id: lost.id,
-                          extraDirection: lost.extraDirection ?? "",
-                        })
-                          .then((result) => {
-                            if (!result.ok)
-                              toast.error(startRefusalText(result));
-                          })
-                          .catch(console.error);
-                      } else {
-                        onStartRequest?.(lost.id);
-                      }
-                    }}
-                  />
+                    {activeSessionLost && (
+                      <SessionLostSection
+                        card={c}
+                        resume={(id) => resumeCard({ id })}
+                        resumeLine={resumeLine}
+                        onRestart={(lost) => {
+                          if (lost.workspace) {
+                            startCard({
+                              id: lost.id,
+                              extraDirection: lost.extraDirection ?? "",
+                            })
+                              .then((result) => {
+                                if (!result.ok)
+                                  toast.error(startRefusalText(result));
+                              })
+                              .catch(console.error);
+                          } else {
+                            onStartRequest?.(lost.id);
+                          }
+                        }}
+                      />
+                    )}
+                  </>
                 )}
-              </>
-            )}
-          </PanelBody>
+              </PanelBody>
+            </>
+          )}
         </>
-      )}
-    </PanelFrame>
+      }
+    />
   );
 }

@@ -18,39 +18,8 @@ const SETUP_STATUS = {
   node: { ok: true, version: "22.22.0", floor: "22.22" },
   storage: { ok: true, path: "/home/visual/.dispatch/board.db" },
 };
-const at = (minutesAgo: number) =>
-  new Date(now - minutesAgo * 60_000).toISOString();
 const SEEDED_DECISION_PREFIX = "dec-";
-const CONVERSATION = {
-  status: "ok",
-  truncated: false,
-  messages: [
-    {
-      id: "m1",
-      at: at(40),
-      role: "user",
-      text: "Start the billing migration after the schema unit ships.",
-    },
-    {
-      id: "m2",
-      at: at(38),
-      role: "orchestrator",
-      text: "Started GROUP-21 at unit 2. I will ask before the cutover.",
-    },
-    {
-      id: "m3",
-      at: at(20),
-      role: "system",
-      text: "GROUP-22 failed the Phase 5 gate.",
-    },
-  ],
-};
-
 const centreRoutes = async (page: Page) => {
-  await page.route(
-    "**/api/boards/ORC/orchestrators/orch-main/conversation",
-    (route) => route.fulfill({ json: CONVERSATION }),
-  );
   await page.route(
     (url) => url.pathname === "/api/decisions",
     async (route) => {
@@ -68,6 +37,11 @@ const centreRoutes = async (page: Page) => {
   );
 };
 
+const collapseCentre = (page: Page) =>
+  page.addInitScript(() => {
+    localStorage.setItem("dsp.centre.expanded", "false");
+  });
+
 const START_FAILED_SESSION = {
   cardId: "orc-orch-main",
   state: null,
@@ -83,6 +57,7 @@ const START_FAILED_SESSION = {
 };
 
 const startFailedRoutes = async (page: Page) => {
+  await collapseCentre(page);
   await centreRoutes(page);
   await page.route("**/api/boards/ORC/orchestrators", async (route) => {
     const response = await route.fetch();
@@ -175,16 +150,15 @@ const screens: {
   {
     name: "command-centre",
     url: `${orchestrated}/#/boards/ORC/orchestrator`,
-    routes: centreRoutes,
+    routes: async (page) => {
+      await collapseCentre(page);
+      await centreRoutes(page);
+    },
     ready: async (page) => {
+      const branch = page.getByText(/Billing migration/).first();
       if ((page.viewportSize()?.width ?? 0) < 768)
-        await page.getByRole("tab", { name: "Conversation" }).first().click();
-      await expect(
-        page.getByText(/Started GROUP-21 at unit 2/).first(),
-      ).toBeVisible();
-      await expect(
-        page.getByText(/Retry the Phase 5 gate now/).first(),
-      ).toBeVisible();
+        await expect(branch).toBeAttached();
+      else await expect(branch).toBeVisible();
     },
   },
   {
@@ -196,8 +170,6 @@ const screens: {
       await expect(
         page.getByRole("alert").filter({ hasText: "did not start" }),
       ).toBeVisible();
-      for (const name of ["Terminal", "Conversation"])
-        await page.getByRole("tab", { name }).click({ trial: true });
     },
   },
   {

@@ -14,7 +14,6 @@ import {
   addExtraMutationOptions,
   answeredDecisionsQueryOptions,
   boardRecordQueryOptions,
-  conversationQueryOptions,
   lifecycleMutationOptions,
   moveGroupsMutationOptions,
   centreDecisionsQueryOptions,
@@ -280,25 +279,6 @@ test("the answered decisions query reads the answered decisions of the board eve
   stubFetch({ status: 200, body: { items: [{ id: "d2" }] } });
   assert.deepEqual(await newClient().fetchQuery(options), [{ id: "d2" }]);
   assert.equal(calls[0]?.url, "/api/decisions?board=LOCAL&state=answered");
-});
-
-test("the conversation query reads one orchestrator every 3 s", async () => {
-  const options = conversationQueryOptions(LOCAL, "main");
-  assert.deepEqual(options.queryKey, [
-    "orchestrators",
-    "conversation",
-    "LOCAL",
-    "main",
-  ]);
-  assert.equal(options.refetchInterval, CENTRE_POLL_MS);
-  assert.equal(options.staleTime, 0);
-  const conversation = { status: "ok", messages: [], truncated: false };
-  stubFetch({ status: 200, body: conversation });
-  assert.deepEqual(await newClient().fetchQuery(options), conversation);
-  assert.equal(
-    calls[0]?.url,
-    "/api/boards/LOCAL/orchestrators/main/conversation",
-  );
 });
 
 test("Save policy puts the sixteen fields and no credits value, then updates the board list", async () => {

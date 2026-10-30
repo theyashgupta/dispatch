@@ -5,9 +5,7 @@ import {
   ArrowUp,
   ChevronDown,
   ChevronRight,
-  Maximize2,
   MessageCircleQuestion,
-  Minimize2,
   Pause,
   Play,
   RotateCcw,
@@ -28,6 +26,7 @@ import { CursorMark } from "@/components/icons/brands/CursorMark";
 import { VsCodeMark } from "@/components/icons/brands/VsCodeMark";
 import { LoadingButton } from "@/components/LoadingButton";
 import { Button } from "@/components/ui/button";
+import { SidePanelExpandToggle } from "@/components/ui/side-panel";
 import { cn } from "@/lib/utils";
 import { pauseAction } from "@/modules/detail/domain/pause-copy";
 import { ResumeTargetLine } from "./ResumeTargetLine";
@@ -183,19 +182,13 @@ export function PanelHeader({
         )}
 
         {hasLiveSession && !docked && !takeover && (
-          <Button
-            variant="ghost"
-            size="icon-md"
+          <SidePanelExpandToggle
+            expanded={fullscreen}
+            onToggleExpand={onToggleFullscreen}
+            expandLabel="Enter fullscreen"
+            collapseLabel="Exit fullscreen"
             className={ICON_BUTTON_CLASS}
-            onClick={onToggleFullscreen}
-            aria-label={fullscreen ? "Exit fullscreen" : "Enter fullscreen"}
-          >
-            {fullscreen ? (
-              <Minimize2 className="size-4" aria-hidden="true" />
-            ) : (
-              <Maximize2 className="size-4" aria-hidden="true" />
-            )}
-          </Button>
+          />
         )}
 
         {c?.column === "inbox" && (

@@ -11,22 +11,6 @@ export function isFocusKey(key: string): key is FocusKey {
   return (FOCUS_KEYS as readonly string[]).includes(key);
 }
 
-/** Tell whether a key event is Enter with no modifier key held. */
-export function isPlainEnter(
-  event: Pick<
-    KeyboardEvent,
-    "key" | "shiftKey" | "ctrlKey" | "altKey" | "metaKey"
-  >,
-): boolean {
-  return (
-    event.key === "Enter" &&
-    !event.shiftKey &&
-    !event.ctrlKey &&
-    !event.altKey &&
-    !event.metaKey
-  );
-}
-
 /**
  * Build the focus order of the canvas: the centre node, then the visible branches band by band.
  *
