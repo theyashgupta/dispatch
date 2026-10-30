@@ -66,12 +66,25 @@ src/web/components/ui/dialog.tsx	top-[50%]	viewport or container relative size
 src/web/components/ui/dialog.tsx	translate-x-[-50%]	viewport or container relative size
 src/web/components/ui/dialog.tsx	translate-y-[-50%]	viewport or container relative size
 src/web/components/ui/dropdown-menu.tsx	min-w-[8rem]	shadcn primitive geometry
+src/web/components/ui/hooks/use-side-panel-width.ts	z-[2147483647]	topmost overlay layer
 src/web/components/ui/input.tsx	transition-[color,box-shadow]	transition property list, no value
 src/web/components/ui/item.tsx	shadow-[inset_0_0_0_1px_var(--accent)]	ring shadow composed from tokens
 src/web/components/ui/scroll-area.tsx	rounded-[inherit]	shadcn primitive geometry
 src/web/components/ui/scroll-area.tsx	transition-[color,box-shadow]	transition property list, no value
 src/web/components/ui/select.tsx	min-w-[8rem]	shadcn primitive geometry
 src/web/components/ui/select.tsx	transition-[color,box-shadow]	transition property list, no value
+src/web/components/ui/side-panel.tsx	[transform:translate(-50%,-50%)]	viewport or container relative size
+src/web/components/ui/side-panel.tsx	[transition:var(--resize-handle-transition)]	CSS property with no Tailwind utility
+src/web/components/ui/side-panel.tsx	h-[calc(100dvh_-_var(--chrome-top,var(--page-header-height)))]	viewport or container relative size
+src/web/components/ui/side-panel.tsx	left-[calc(var(--nav-current,0px)_+_var(--orca-nav-width))]	viewport or container relative size
+src/web/components/ui/side-panel.tsx	max-w-[85%]	viewport or container relative size
+src/web/components/ui/side-panel.tsx	max-w-[calc(100vw_-_var(--nav-current,0px))]	viewport or container relative size
+src/web/components/ui/side-panel.tsx	top-[var(--chrome-top,var(--page-header-height))]	one-off pixel geometry without a token step
+src/web/components/ui/side-panel.tsx	transition-[translate]	transition property list, no value
+src/web/components/ui/side-panel.tsx	w-[calc(100%_-_var(--nav-current,0px))]	viewport or container relative size
+src/web/components/ui/side-panel.tsx	w-[calc(100%_-_var(--nav-current,0px)_-_var(--orca-nav-width))]	viewport or container relative size
+src/web/components/ui/side-panel.tsx	w-[var(--panel-live-width,var(--centre-pane-width,420px))]	one-off pixel geometry without a token step
+src/web/components/ui/side-panel.tsx	w-[var(--panel-live-width,var(--panel-width))]	one-off pixel geometry without a token step
 src/web/components/ui/sidebar.tsx	left-[calc(var(--sidebar-width)*-1)]	viewport or container relative size
 src/web/components/ui/sidebar.tsx	right-[calc(var(--sidebar-width)*-1)]	viewport or container relative size
 src/web/components/ui/sidebar.tsx	shadow-[0_0_0_1px_var(--sidebar-accent)]	ring shadow composed from tokens
@@ -156,24 +169,14 @@ src/web/modules/dashboard/views/DashboardView.tsx	grid-cols-[minmax(0,1fr)_24rem
 src/web/modules/dashboard/views/DashboardView.tsx	grid-rows-[repeat(7,auto)_1fr]	grid track template
 src/web/modules/detail/components/LinearSection.tsx	[field-sizing:fixed]	CSS property with no Tailwind utility
 src/web/modules/detail/components/PanelFrame.tsx	flex-[0_1_auto]	flex shorthand
-src/web/modules/detail/components/PanelFrame.tsx	h-[calc(100dvh_-_var(--chrome-top,var(--page-header-height)))]	viewport or container relative size
-src/web/modules/detail/components/PanelFrame.tsx	left-[calc(var(--nav-current,0px)_+_var(--orca-nav-width))]	viewport or container relative size
 src/web/modules/detail/components/PanelFrame.tsx	max-h-[40%]	viewport or container relative size
-src/web/modules/detail/components/PanelFrame.tsx	max-w-[calc(100vw_-_var(--nav-current,0px))]	viewport or container relative size
-src/web/modules/detail/components/PanelFrame.tsx	top-[var(--chrome-top,var(--page-header-height))]	one-off pixel geometry without a token step
-src/web/modules/detail/components/PanelFrame.tsx	transition-[translate]	transition property list, no value
-src/web/modules/detail/components/PanelFrame.tsx	w-[calc(100%_-_var(--nav-current,0px)_-_var(--orca-nav-width))]	viewport or container relative size
-src/web/modules/detail/components/PanelFrame.tsx	w-[var(--panel-live-width,var(--panel-width))]	one-off pixel geometry without a token step
 src/web/modules/detail/components/PanelHeader.tsx	flex-[0_1_auto]	flex shorthand
 src/web/modules/detail/components/PanelNotice.tsx	[word-break:break-word]	CSS property with no Tailwind utility
 src/web/modules/detail/components/PanelNotice.tsx	grid-cols-[--spacing(3)_1fr]	grid track template
-src/web/modules/detail/components/PanelResizeHandle.tsx	[transform:translate(-50%,-50%)]	viewport or container relative size
-src/web/modules/detail/components/PanelResizeHandle.tsx	[transition:var(--resize-handle-transition)]	CSS property with no Tailwind utility
 src/web/modules/detail/components/PrList.tsx	size-[5px]	one-off pixel geometry without a token step
 src/web/modules/detail/components/ReferenceBlocks.tsx	[word-break:break-word]	CSS property with no Tailwind utility
 src/web/modules/detail/components/SessionSwitcher.tsx	bg-[color-mix(in_srgb,var(--accent)_16%,var(--surface-column))]	tint of a signal token, pending a Badge tone or tint token
 src/web/modules/detail/components/SessionSwitcher.tsx	bg-[color-mix(in_srgb,var(--accent)_22%,var(--surface-column))]	tint of a signal token, pending a Badge tone or tint token
-src/web/modules/detail/hooks/use-panel-resize.ts	z-[2147483647]	topmost overlay layer
 src/web/modules/flow/components/FlowDiagram.tsx	animate-[flow-pulse_var(--motion-flow-pulse)_var(--easing-enter)_infinite]	keyframe shorthand built from motion tokens
 src/web/modules/flow/components/FlowWideFrame.tsx	max-w-[calc(var(--flow-stage-w)+2*var(--space-lg))]	viewport or container relative size
 src/web/modules/meetings/components/DraftReviewRow.tsx	grid-cols-[1.25rem_minmax(0,1fr)]	grid track template
