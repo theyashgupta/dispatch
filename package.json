@@ -62,6 +62,7 @@
     "doc-drift": "node scripts/check-doc-drift.mjs",
     "invariants": "node scripts/check-invariants.mjs",
     "check-hooks": "node scripts/check-hooks.mjs",
+    "token-gates": "node scripts/check-token-gates.mjs",
     "check:static": "node scripts/with-check-slot.mjs npm run check:static:unlocked",
     "check:static:unlocked": "npm run format:check && npm run lint && npm run typecheck && npm run depcruise && npm run deadcode",
     "selection-guard": "tsx scripts/terminal-selection-guard.ts",
@@ -83,13 +84,14 @@
     "panel-114": "node scripts/panel-114.mjs",
     "panel-115": "node scripts/panel-115.mjs",
     "check": "node scripts/with-check-slot.mjs npm run check:unlocked",
-    "check:unlocked": "npm run format:check && npm run lint && npm run depcruise && npm run typecheck && npm run test && npm run deadcode && npm run replay-gate && npm run doc-drift && npm run invariants && npm run check-hooks && npm run test:timing",
+    "check:unlocked": "npm run format:check && npm run lint && npm run depcruise && npm run typecheck && npm run test && npm run deadcode && npm run replay-gate && npm run doc-drift && npm run invariants && npm run token-gates && npm run check-hooks && npm run test:timing",
     "check:changed": "node scripts/with-check-slot.mjs node scripts/check-changed.mjs",
     "prepack": "npm run build",
     "test:visual": "playwright test",
     "test:visual:update": "playwright test --update-snapshots",
     "prepublishOnly": "node scripts/build-calendar-helper.mjs --require",
-    "test:e2e:accounts": "env -u NODE_ENV -u CLAUDE_CONFIG_DIR node --import tsx --test --test-concurrency=1 tests/e2e/scenario-LOCAL-159-account-login-decision.e2e.ts tests/e2e/scenario-LOCAL-159-managed-default.e2e.ts"
+    "test:e2e:accounts": "env -u NODE_ENV -u CLAUDE_CONFIG_DIR node --import tsx --test --test-concurrency=1 tests/e2e/scenario-LOCAL-159-account-login-decision.e2e.ts tests/e2e/scenario-LOCAL-159-managed-default.e2e.ts",
+    "test:e2e:engine-close": "env -u NODE_ENV -u CLAUDE_CONFIG_DIR node --import tsx --test --test-concurrency=1 tests/e2e/scenario-LOCAL-93-orchestrated.e2e.ts tests/e2e/scenario-LOCAL-151-engine-close.e2e.ts tests/e2e/scenario-LOCAL-172-promise-close.e2e.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",

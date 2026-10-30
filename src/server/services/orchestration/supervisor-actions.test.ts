@@ -220,6 +220,68 @@ void test(
   },
 );
 
+const DONE_ENGINE = {
+  active: true,
+  iteration: 1,
+  sessionId: "sess-now",
+  handoffPending: false,
+  startedAt: null,
+  closed: false,
+};
+
+const doneText = (slug: string, session: string) =>
+  `---\nactive: false\nsession_id: ${session}\ncompletion_promise: "RALPH COMPLETE ${slug}"\nclosed_reason: close_loop\n---\nbody\n`;
+
+void test(
+  "a close with a missing engine file rewrites a .done of another loop",
+  { skip: !hasTmux },
+  async () => {
+    const loop = await loopCard("close-old-done", {});
+    await store.setLoopProgress(loop.card().id, {
+      ...LOOP_PROGRESS,
+      engine: DONE_ENGINE,
+    });
+    const engine = path.join(loop.root, ".claude", "ralph-loop.local.md");
+    fs.mkdirSync(path.dirname(engine), { recursive: true });
+    fs.writeFileSync(`${engine}.done`, doneText("old-loop", "old-session"));
+    await runActions(
+      loop.card(),
+      loop.session(),
+      [{ kind: "close_loop" }],
+      "pane: <promise>ROADMAP COMPLETE",
+    );
+    const written = fs.readFileSync(`${engine}.done`, "utf8");
+    assert.match(written, /^completion_promise: "RALPH COMPLETE sbx-loop"$/m);
+    assert.match(written, /^session_id: sess-now$/m);
+    assert.match(written, /^closed_reason: done_marker$/m);
+    assert.equal(loop.actions()[0].data.result, "closed");
+  },
+);
+
+void test(
+  "a close with a missing engine file keeps a .done of the same loop unchanged",
+  { skip: !hasTmux },
+  async () => {
+    const loop = await loopCard("close-same-done", {});
+    await store.setLoopProgress(loop.card().id, {
+      ...LOOP_PROGRESS,
+      engine: DONE_ENGINE,
+    });
+    const engine = path.join(loop.root, ".claude", "ralph-loop.local.md");
+    fs.mkdirSync(path.dirname(engine), { recursive: true });
+    const same = doneText("sbx-loop", "sess-now");
+    fs.writeFileSync(`${engine}.done`, same);
+    await runActions(
+      loop.card(),
+      loop.session(),
+      [{ kind: "close_loop" }],
+      "pane: <promise>ROADMAP COMPLETE",
+    );
+    assert.equal(fs.readFileSync(`${engine}.done`, "utf8"), same);
+    assert.equal(loop.actions()[0].data.result, "closed");
+  },
+);
+
 void test(
   "a lost session runs the resume saga and then gets the resume prompt",
   { skip: !hasTmux },
@@ -451,6 +513,40 @@ void test(
     assert.equal(loop.userTexts().length, 0);
     assert.equal(loop.session().state, "needs_input");
     assert.equal(loop.session().stateReason, "resume_failed");
+  },
+);
+
+void test(
+  "a finished card whose session exits and whose relaunch answers busy stays in Agent done with its DONE marker",
+  { skip: !hasTmux },
+  async () => {
+    const loop = await loopCard("resume-busy-done", {}, true);
+    await store.applyMarker(
+      loop.card().id,
+      loop.session().id,
+      "agent_done",
+      undefined,
+      "DONE built",
+      "status_agent_done",
+    );
+    await runActions(
+      loop.card(),
+      loop.session(),
+      [{ kind: "resume" }],
+      "tmux: pane at shell prompt",
+      deps({
+        relaunch: () => Promise.resolve("busy"),
+        atShellPrompt: () => Promise.resolve(true),
+      }),
+    );
+    assert.equal(loop.userTexts().length, 0);
+    assert.equal(loop.card().column, "agent_done");
+    assert.equal(loop.card().lastMarker, "DONE built");
+    assert.notEqual(loop.session().stateReason, "resume_failed");
+    assert.deepEqual(
+      loop.actions().map((e) => [e.data.action, e.data.result, e.data.reason]),
+      [["resume", "skipped", "run claude busy on a finished card"]],
+    );
   },
 );
 

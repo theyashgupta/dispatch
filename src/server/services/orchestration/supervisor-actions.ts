@@ -1,6 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
+import { DONE_MARKER_PREFIX } from "../../../shared/marker-key.js";
 import { isHiddenCard } from "../../../shared/hidden-card.js";
 import type { Card, Session } from "../../../shared/types.js";
 import { boardRepository as store } from "../../store/board-repository.js";
@@ -15,7 +16,9 @@ import {
   closedEngineText,
   ENGINE_FILE,
   withClosedReason,
+  type CloseReason,
 } from "../domain/loop-progress.js";
+import { doneMatchesLoop } from "../domain/prd-progress.js";
 import {
   declineKeys,
   type PlanMemory,
@@ -27,6 +30,7 @@ import { readTranscriptTail } from "../../adapters/transcript.js";
 import { sessionTranscriptPath } from "./supervisor-transcript.js";
 import { withCardLock } from "./card-lock.js";
 import { endJob, type EndJobTools } from "./end-job.js";
+import { promiseCompletes } from "../domain/loop-completion.js";
 import { refreshLoopProgress } from "./loop-progress-reader.js";
 import { memoryCheck } from "./memory-governor.js";
 import { isFolder, resumeSession } from "./resume-session.js";
@@ -107,7 +111,7 @@ async function answerPrompt(
 }
 
 async function writeAtomic(file: string, text: string): Promise<void> {
-  const tmp = `${file}.tmp`;
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
   await fsp.writeFile(tmp, text);
   await fsp.rename(tmp, file);
 }
@@ -115,7 +119,7 @@ async function writeAtomic(file: string, text: string): Promise<void> {
 async function closeEngineFile(
   card: Card,
   engine: string,
-  closedBy: "promise" | "close_loop",
+  closedBy: CloseReason,
 ): Promise<{ result: string; reason: typeof closedBy | "manual" }> {
   const done = `${engine}.done`;
   try {
@@ -124,12 +128,8 @@ async function closeEngineFile(
     const code = (err as NodeJS.ErrnoException).code;
     const slug = card.loopProgress?.slug;
     if (code === "ENOENT" && slug) {
-      if (
-        await fsp.access(done).then(
-          () => true,
-          () => false,
-        )
-      ) {
+      const doneText = await fsp.readFile(done, "utf8").catch(() => null);
+      if (doneText !== null && doneMatchesLoop(doneText, card.loopProgress)) {
         return { result: "closed", reason: closedBy };
       }
       try {
@@ -152,11 +152,16 @@ async function closeEngineFile(
   }
 }
 
+/**
+ * Close the loop engine file and record the `close_loop` action.
+ *
+ * @remarks
+ * Every supervisor close writes the reason `done_marker`, because only a DONE line closes a loop.
+ */
 async function closeLoop(card: Card, session: Session): Promise<void> {
   const root = rootOf(card, session);
   const engine = path.join(root, ENGINE_FILE);
-  const closedBy =
-    card.loopProgress?.completion === "complete" ? "close_loop" : "promise";
+  const closedBy = "done_marker";
   const { result, reason } =
     root === ""
       ? { result: "failed: no session root", reason: closedBy }
@@ -171,6 +176,42 @@ async function closeLoop(card: Card, session: Session): Promise<void> {
 }
 
 /**
+ * Close the loop engine file when a DONE marker arrives on the hook channel.
+ *
+ * @remarks Acts only for the active session of a supervisor-on board with an open engine, when the
+ * loop reads complete or, for a loop with no phase model, the same message carries the promise line.
+ * A DONE printed with phases left, or on a loop whose phases cannot be read, closes nothing.
+ */
+export async function closeLoopOnDone(
+  cardId: string,
+  sessionId: string,
+  message: string,
+): Promise<void> {
+  try {
+    await refreshLoopProgress(cardId);
+    const card = store.getCard(cardId);
+    if (!card) return;
+    if (
+      store.getBoard(card.boardKey ?? DEFAULT_BOARD_KEY)?.policy.supervisor !==
+      "on"
+    )
+      return;
+    if (sessionId !== card.activeSessionId) return;
+    const session = card.sessions?.find((s) => s.id === sessionId);
+    const progress = card.loopProgress;
+    if (!session || !progress?.engine?.active || progress.engine.closed) return;
+    if (
+      progress.completion !== "complete" &&
+      !promiseCompletes(progress, true, message)
+    )
+      return;
+    await closeLoop(card, session);
+  } catch (err) {
+    console.warn("[hooks] close loop on DONE failed", err);
+  }
+}
+
+/**
  * The reason a resume must not act on a card, or null when it may.
  *
  * @remarks A hidden orchestrator card resumes only while its orchestrator runs. The memory check
@@ -182,6 +223,20 @@ function resumeBlocked(card: Card, withMemory = true): string | null {
   if (!withMemory) return null;
   const memory = memoryCheck(card.boardKey ?? DEFAULT_BOARD_KEY);
   return memory.ok ? null : memory.reason;
+}
+
+/**
+ * Whether the live card sits in Agent done with its DONE marker.
+ *
+ * @remarks A busy relaunch on such a card must not move it to Needs input, because
+ * `start_ship` then refuses the finished card.
+ */
+function finishedCard(card: Card): boolean {
+  const live = store.getCard(card.id);
+  return (
+    live?.column === "agent_done" &&
+    live.lastMarker?.startsWith(DONE_MARKER_PREFIX) === true
+  );
 }
 
 /**
@@ -231,6 +286,14 @@ async function resume(
     const blocked = resumeBlocked(card);
     if (blocked !== null) return failed(blocked);
     const outcome = await deps.relaunch(card.id);
+    if (outcome === "busy" && finishedCard(card)) {
+      record(card, session, {
+        action: "resume",
+        result: "skipped",
+        reason: "run claude busy on a finished card",
+      });
+      return null;
+    }
     if (outcome !== "launched") return failed(`run claude ${outcome}`);
   } else {
     await deps.resume(card.id);

@@ -81,7 +81,6 @@ interface ActivityRowProps {
   description: string;
   age: string;
   identifiers?: Record<string, string>;
-  onSelect?: (cardId: string) => void;
 }
 
 export function ActivityRow({
@@ -90,14 +89,12 @@ export function ActivityRow({
   description,
   age,
   identifiers,
-  onSelect,
 }: ActivityRowProps) {
   const Icon = GLYPH_LOOKUP[type] ?? CircleAlert;
-  const interactive = onSelect != null && cardId != null;
   const label = cardId != null ? (identifiers?.[cardId] ?? cardId) : null;
 
-  const content = (
-    <>
+  return (
+    <Item className="w-full flex-nowrap items-start gap-(--space-xs) rounded-none border-0 p-0 text-left text-foreground transition-none">
       <Icon
         className={cn(
           "mt-px size-3 flex-none",
@@ -117,21 +114,6 @@ export function ActivityRow({
           <span className="text-muted-foreground">{` · ${age}`}</span>
         )}
       </span>
-    </>
+    </Item>
   );
-
-  const className =
-    "w-full flex-nowrap items-start gap-(--space-xs) rounded-none border-0 p-0 text-left text-foreground transition-none";
-
-  if (interactive) {
-    return (
-      <Item asChild className={cn(className, "cursor-pointer hover:bg-accent")}>
-        <button type="button" onClick={() => onSelect(cardId)}>
-          {content}
-        </button>
-      </Item>
-    );
-  }
-
-  return <Item className={className}>{content}</Item>;
 }

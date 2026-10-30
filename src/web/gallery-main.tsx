@@ -7,6 +7,7 @@ import "./styles/globals.css";
 import "./styles/gallery.css";
 import type { Card as BoardCard } from "../shared/types.js";
 import type { CardSearchResult } from "../shared/search.js";
+import { SessionStateBadge } from "@/components/badges/SessionStateBadge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   AlertDialog,
@@ -491,6 +492,15 @@ function Gallery() {
               <Badge tone="state" stateColor="var(--accent)">
                 state
               </Badge>
+            </div>
+          </Demo>
+          <Demo title="Session status">
+            <div className="flex flex-wrap gap-2">
+              <SessionStateBadge state="working" />
+              <SessionStateBadge state="idle" />
+              <SessionStateBadge state="needs_input" />
+              <SessionStateBadge state="roadmap_complete" />
+              <SessionStateBadge state="api_error" />
             </div>
           </Demo>
           <Demo title="Progress">
@@ -1069,7 +1079,7 @@ function Gallery() {
                             </SidebarMenuButton>
                           </SidebarMenuItem>
                           <SidebarMenuItem>
-                            <SidebarMenuButton>Sessions</SidebarMenuButton>
+                            <SidebarMenuButton>Inbox</SidebarMenuButton>
                           </SidebarMenuItem>
                           <SidebarMenuItem>
                             <SidebarMenuButton>Settings</SidebarMenuButton>

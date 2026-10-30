@@ -132,7 +132,8 @@ export async function markNeedsInput(
 /**
  * Move the live card to the `needs_input` column unless it is already there.
  *
- * @remarks A supervisor stop never replaces the DONE marker of a card whose loop engine is closed.
+ * @remarks A supervisor stop never replaces the DONE marker of a card whose loop engine is closed or
+ * whose loop reads complete, because a frozen pane on a finished loop is not a stop.
  */
 export async function moveToNeedsInput(
   card: Card,
@@ -144,7 +145,8 @@ export async function moveToNeedsInput(
   if (
     live?.column === "agent_done" &&
     live.lastMarker?.startsWith(DONE_MARKER_PREFIX) &&
-    live.loopProgress?.engine?.closed === true
+    (live.loopProgress?.engine?.closed === true ||
+      live.loopProgress?.completion === "complete")
   ) {
     return;
   }

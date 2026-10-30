@@ -81,6 +81,8 @@ const calls: Call[] = [];
 const afterCall: { hook: (call: Call) => Promise<void> } = {
   hook: () => Promise.resolve(),
 };
+const realSendInput = shipTools.sendInput;
+const realSessionMergeWaitMs = shipTools.sessionMergeWaitMs;
 shipTools.pollMs = 50;
 shipTools.headPollMs = 10;
 shipTools.run = async (cmd, args, opts) => {
@@ -100,11 +102,16 @@ async function setPolicy(patch: Partial<BoardPolicy>): Promise<void> {
   await store.setBoardPolicy(SBX, { ...store.getBoard(SBX)!.policy, ...patch });
 }
 
-beforeEach(() => setPolicy({ shipRights: "merge" }));
+beforeEach(() => {
+  shipTools.sendInput = realSendInput;
+  shipTools.sessionMergeWaitMs = realSessionMergeWaitMs;
+  return setPolicy({ shipRights: "merge" });
+});
 
 function progress(
   statuses: LoopUnitStatus[],
   engine: LoopProgress["engine"] = null,
+  completion: LoopProgress["completion"] = "complete",
 ): LoopProgress {
   return {
     slug: "ship",
@@ -122,7 +129,7 @@ function progress(
       phases: [],
     })),
     engine,
-    completion: "complete",
+    completion,
     summary: {
       unitsDone: statuses.length,
       unitsTotal: statuses.length,
@@ -1027,6 +1034,80 @@ void test("a retry after a new commit on the branch runs the check again", async
   );
 });
 
+void test("a retry on a new merge commit with the same tree skips the check command", async () => {
+  const check = countingCheck();
+  const stack = await newStack({
+    checkCommand: check.command,
+    scenario: { checks: "fail" },
+  });
+  await startShip(stack, ["unit-1"]);
+  const first = await finished(stack.card);
+  assert.equal(first.failedStep, "waiting_checks");
+  assert.equal(check.runs(), 1);
+  await pushToMain(stack.bare, { "a.txt": "unit-1\n" }, "feat: unit-1 (#1)");
+  setGhScenario(stack.ghScenario, { checks: "pass" });
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  const before = first.branches[0].checked!;
+  const after = flow.branches[0].checked!;
+  assert.notEqual(after, before);
+  const treeOf = (c: string) =>
+    gitOutput(stack.worktree, "rev-parse", `${c}^{tree}`);
+  assert.equal(await treeOf(after), await treeOf(before));
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.equal(check.runs(), 1);
+  assert.equal(flow.branches[0]?.checkSkipped, true);
+  assert.equal(
+    groupStatesOf(stack.card.id).filter((s) => s === "ship_check_skipped")
+      .length,
+    1,
+  );
+});
+
+void test("a resumed flow whose passed commit is the checked commit still runs the check on a dirty worktree", async () => {
+  const check = countingCheck();
+  const stack = await newStack({ checkCommand: check.command });
+  await gitOutput(stack.worktree, "checkout", "-q", "unit-1");
+  const head = await gitOutput(stack.worktree, "rev-parse", "HEAD");
+  const leftover = path.join(stack.worktree, "scratch.txt");
+  fs.writeFileSync(leftover, "left behind\n");
+  await storeRunning(stack, {
+    state: "checking",
+    tip: head,
+    checked: head,
+    passed: head,
+  });
+  resumeShipFlows();
+  await waitFor(() => Promise.resolve(check.runs() >= 1), 10_000, "check run");
+  fs.rmSync(leftover);
+  const flow = await finished(stack.card);
+  assert.equal(check.runs(), 1);
+  assert.equal(flow.branches[0]?.checkSkipped, false);
+});
+
+void test("a passed commit that no longer resolves runs the check", async () => {
+  const check = countingCheck();
+  const stack = await newStack({
+    checkCommand: check.command,
+    scenario: { checks: "fail" },
+  });
+  await startShip(stack, ["unit-1"]);
+  await finished(stack.card);
+  const runs = check.runs();
+  setGhScenario(stack.ghScenario, { checks: "pass" });
+  const stored = store.getCard(stack.card.id)!.shipFlow!;
+  await store.setShipFlow(stack.card.id, {
+    ...stored,
+    state: "stopped",
+    branches: stored.branches.map((b) => ({ ...b, passed: "0".repeat(40) })),
+  });
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.equal(check.runs(), runs + 1);
+  assert.equal(flow.branches[0]?.checkSkipped, false);
+});
+
 void test("a retry after a failed check runs the check again", async () => {
   const check = countingCheck(true);
   const stack = await newStack({ checkCommand: check.command });
@@ -1094,13 +1175,22 @@ void test("an empty check command records no passed commit and no skip", async (
   );
 });
 
-void test("a merge conflict with main stops at merging_main and aborts the merge", async () => {
+void test("a conflict with main and a refused session send stops at merging_main and aborts the merge", async () => {
   const stack = await newStack();
+  await store.markSessionLost(stack.card.id, undefined);
+  assert.equal(
+    store.getCard(stack.card.id)?.sessions?.some((s) => s.tmuxSession != null),
+    false,
+  );
   await pushToMain(stack.bare, { "a.txt": "main side\n" }, "main edit");
   await startShip(stack, ["unit-1", "unit-2"]);
   const flow = await finished(stack.card);
   assert.equal(flow.state, "stopped");
   assert.equal(flow.failedStep, "merging_main");
+  assert.equal(
+    flow.reason,
+    "merge conflict in a.txt; session send refused: no-live-session",
+  );
   assert.deepEqual(
     flow.branches.map((b) => b.state),
     ["failed", "queued"],
@@ -1112,6 +1202,214 @@ void test("a merge conflict with main stops at merging_main and aborts the merge
     false,
   );
   assert.deepEqual(ghCalls(stack), []);
+});
+
+/** Give `unit-1` a Markdown base from main and a branch paragraph, then push a conflicting main paragraph. */
+async function notesConflict(stack: Stack): Promise<void> {
+  await pushToMain(stack.bare, { "NOTES.md": "# Notes\n" }, "notes base");
+  await gitOutput(stack.worktree, "fetch", "-q", "origin");
+  await gitOutput(stack.worktree, "checkout", "-q", "unit-1");
+  await gitOutput(stack.worktree, "merge", "-q", "--no-edit", "origin/main");
+  fs.writeFileSync(
+    path.join(stack.worktree, "NOTES.md"),
+    "# Notes\n\nbranch para\n",
+  );
+  await gitOutput(stack.worktree, "add", "-A");
+  await gitOutput(stack.worktree, "commit", "-qm", "branch notes");
+  await gitOutput(stack.worktree, "checkout", "-q", "group-work");
+  await pushToMain(
+    stack.bare,
+    { "NOTES.md": "# Notes\n\nmain para\n" },
+    "main notes",
+  );
+}
+
+interface SentMessage {
+  caller: unknown;
+  text: string;
+}
+
+/**
+ * Replace `shipTools.sendInput` with a recorder that answers confirmed.
+ *
+ * @remarks `session` runs once after the send, as the card's session would, outside the flow.
+ */
+function recordSends(session: () => Promise<void>): SentMessage[] {
+  const sent: SentMessage[] = [];
+  shipTools.sendInput = (caller, _card, text) => {
+    sent.push({ caller, text });
+    setTimeout(() => void session(), 0);
+    return Promise.resolve("confirmed");
+  };
+  return sent;
+}
+
+async function sessionMerges(
+  stack: Stack,
+  resolved: Record<string, string>,
+): Promise<void> {
+  await gitOutput(stack.worktree, "merge", "origin/main").catch(
+    () => undefined,
+  );
+  for (const [file, text] of Object.entries(resolved)) {
+    fs.writeFileSync(path.join(stack.worktree, file), text);
+  }
+  await gitOutput(stack.worktree, "add", "-A");
+  await gitOutput(stack.worktree, "commit", "--no-edit");
+}
+
+async function moveToAgentDone(stack: Stack): Promise<void> {
+  markerCount += 1;
+  await store.applyMarker(
+    stack.card.id,
+    undefined,
+    "agent_done",
+    undefined,
+    `marker-${markerCount}`,
+    "status_agent_done",
+  );
+}
+
+void test("a conflict only in a Markdown file is merged by the flow with main first and the branch after", async () => {
+  const stack = await newStack();
+  await notesConflict(stack);
+  const sent = recordSends(() => Promise.resolve());
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done");
+  assert.deepEqual(sent, []);
+  const notes = await gitOutput(stack.worktree, "show", "unit-1:NOTES.md");
+  assert.equal(notes.includes("<<<<<<<"), false);
+  assert.ok(notes.indexOf("main para") >= 0);
+  assert.ok(notes.indexOf("main para") < notes.indexOf("branch para"));
+  const commit = await gitOutput(
+    stack.worktree,
+    "rev-list",
+    "--parents",
+    "-1",
+    "unit-1",
+  );
+  assert.equal(commit.split(" ").length, 3);
+});
+
+void test("a conflict in a code file and a Markdown file goes to the card session and the flow waits for its merge", async () => {
+  const stack = await newStack();
+  await notesConflict(stack);
+  await pushToMain(stack.bare, { "a.txt": "main side\n" }, "main edit");
+  const sent = recordSends(async () => {
+    await sessionMerges(stack, {
+      "a.txt": "resolved\n",
+      "NOTES.md": "# Notes\n\nmain para\n\nbranch para\n",
+    });
+    await moveToAgentDone(stack);
+  });
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done");
+  assert.equal(sent.length, 1);
+  assert.deepEqual(sent[0]?.caller, CALLER);
+  assert.equal(
+    sent[0]?.text,
+    `Ship flow: the merge of origin/main into unit-1 conflicts in NOTES.md, a.txt. In ${stack.worktree}, merge origin/main into unit-1, resolve every conflict, run the scoped checks, commit the merge, do not push, then report DONE.`,
+  );
+  assert.equal(
+    await gitOutput(stack.worktree, "show", "unit-1:a.txt"),
+    "resolved",
+  );
+});
+
+void test("the flow stops after the wait cap when the session never merges", async () => {
+  const stack = await newStack();
+  shipTools.sessionMergeWaitMs = 200;
+  recordSends(() => Promise.resolve());
+  await pushToMain(stack.bare, { "a.txt": "main side\n" }, "main edit");
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "stopped");
+  assert.equal(flow.failedStep, "merging_main");
+  assert.equal(
+    flow.reason,
+    "the session did not merge origin/main within 60 minutes",
+  );
+  const items = decisionsOf(stack.card.id);
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.kind, "ship_failure");
+});
+
+void test("the third conflict stops the flow after 2 session sends", async () => {
+  const stack = await newStack();
+  await pushToMain(stack.bare, { "a.txt": "main 0\n" }, "main edit 0");
+  let sends = 0;
+  shipTools.sendInput = async () => {
+    sends += 1;
+    await sessionMerges(stack, { "a.txt": `resolved ${sends}\n` });
+    await moveToAgentDone(stack);
+    await pushToMain(stack.bare, { "a.txt": `main ${sends}\n` }, "main again");
+    return "confirmed";
+  };
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(sends, 2);
+  assert.equal(flow.state, "stopped");
+  assert.equal(flow.failedStep, "merging_main");
+  assert.equal(
+    flow.reason,
+    "merge conflict in a.txt; the session did not settle it after 2 sends",
+  );
+});
+
+void test("the flow keeps waiting while the session leaves an untracked file in the worktree", async () => {
+  const stack = await newStack();
+  const leftover = path.join(stack.worktree, "scratch.txt");
+  recordSends(async () => {
+    await sessionMerges(stack, { "a.txt": "resolved\n" });
+    fs.writeFileSync(leftover, "left behind\n");
+    await moveToAgentDone(stack);
+  });
+  await pushToMain(stack.bare, { "a.txt": "main side\n" }, "main edit");
+  await startShip(stack, ["unit-1"]);
+  await waitFor(
+    () => Promise.resolve(fs.existsSync(leftover)),
+    10_000,
+    "session work",
+  );
+  const lockFreeStatuses = () =>
+    calls.filter((c) => c.args.includes("--no-optional-locks")).length;
+  const seen = lockFreeStatuses();
+  await waitFor(
+    () => Promise.resolve(lockFreeStatuses() >= seen + 2),
+    10_000,
+    "two more status polls",
+  );
+  const waiting = store.getCard(stack.card.id)!.shipFlow!;
+  assert.equal(waiting.state, "running");
+  assert.equal(waiting.branches[0]?.state, "merging_main");
+  fs.rmSync(leftover);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done");
+});
+
+void test("a resumed flow at merging_main with a dirty worktree waits for the session and then finishes", async () => {
+  const stack = await newStack();
+  const tip1 = await gitOutput(stack.worktree, "rev-parse", "unit-1");
+  const leftover = path.join(stack.worktree, "scratch.txt");
+  fs.writeFileSync(leftover, "left behind\n");
+  await storeRunning(stack, { state: "merging_main", tip: tip1 });
+  resumeShipFlows();
+  const lockFreeStatuses = () =>
+    calls.filter((c) => c.args.includes("--no-optional-locks")).length;
+  await waitFor(
+    () => Promise.resolve(lockFreeStatuses() >= 2),
+    10_000,
+    "two status polls",
+  );
+  const waiting = store.getCard(stack.card.id)!.shipFlow!;
+  assert.equal(waiting.state, "running");
+  assert.equal(waiting.branches[0]?.state, "merging_main");
+  await moveToAgentDone(stack);
+  fs.rmSync(leftover);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
 });
 
 void test("the subset check stops at checking when a branch carries a file only an earlier branch changed", async () => {
@@ -1966,6 +2264,57 @@ void test("a plain merge failure stops at merging with the first stderr line", a
   );
   assert.equal(merges.length, 1);
   assert.equal(flow.branches[0]?.state, "failed");
+  const views = ghCalls(stack).filter(
+    (a) => a[1] === "view" && a.includes("state,headRefOid"),
+  );
+  assert.deepEqual(
+    views.map((a) => a.slice(0, 5)),
+    [["pr", "view", "1", "--json", "state,headRefOid"]],
+  );
+});
+
+void test("a merge that landed while the call errored counts as merged", async () => {
+  const stack = await newStack({
+    scenario: {
+      checks: "pass",
+      mergeLandsThenFails: "fake gh: error connecting to api.github.com",
+    },
+  });
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.equal(flow.branches[0]?.state, "merged");
+  assert.equal(flow.branches[0]?.admin, false);
+  assert.equal(decisionsOf(stack.card.id).length, 0);
+  assert.equal(await gitOutput(stack.bare, "show", "main:a.txt"), "unit-1");
+});
+
+void test("a failed merge whose PR shows another head than the checked commit stops at merging", async () => {
+  const stack = await newStack({
+    scenario: {
+      checks: "pass",
+      mergeLandsThenFails: "fake gh: boom",
+      mergedHeadRefOid: "0".repeat(40),
+    },
+  });
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assertStoppedAt(stack, flow, "merging", "fake gh: boom");
+});
+
+void test("an admin retry that landed while the call errored counts as merged and records the admin merge", async () => {
+  const stack = await newStack({
+    scenario: {
+      checks: "pass",
+      signatureBlock: true,
+      mergeLandsThenFails: "fake gh: admin call timed out",
+    },
+  });
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.equal(flow.branches[0]?.admin, true);
+  assert.equal(ghCalls(stack).filter((a) => a[1] === "merge").length, 2);
 });
 
 void test("a push to the PR branch after the check makes the pinned merge fail and the flow stops", async () => {
@@ -2231,6 +2580,79 @@ void test("startShip treats a ticket card with no launch and a session branch as
     "not-group-card",
   );
   assert.deepEqual(calls, []);
+});
+
+const closedEngine = {
+  active: true,
+  iteration: 3,
+  sessionId: null,
+  handoffPending: false,
+  startedAt: null,
+  closed: true,
+};
+
+function needsInputTicket(stack: Stack, loopProgress?: LoopProgress): Card {
+  const base = { ...store.getCard(stack.card.id)! };
+  delete base.loopProgress;
+  return {
+    ...base,
+    source: "local",
+    launch: undefined,
+    branch: "unit-1",
+    column: "needs_input",
+    ...(loopProgress ? { loopProgress } : {}),
+  };
+}
+
+void test("startShip ships a ticket card in Needs input whose engine is closed and loop is complete", async () => {
+  const stack = await newStack();
+  const card = needsInputTicket(stack, progress(["shipped"], closedEngine));
+  const started = await startShipFlow(CALLER, card, {
+    repository: stack.repo,
+    branches: [branchInput("unit-1")],
+  });
+  assert.equal(started.state, "running");
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+});
+
+void test("startShip refuses a ticket card in Needs input with an open engine as engine-not-closed", async () => {
+  const stack = await newStack();
+  const card = needsInputTicket(
+    stack,
+    progress(["shipped"], { ...closedEngine, closed: false }),
+  );
+  await refusedCard(card, stack, "unit-1", 409, "engine-not-closed");
+  assert.deepEqual(calls, []);
+});
+
+void test("startShip refuses a ticket card in Needs input as card-not-done when its loop is still running or has no progress", async () => {
+  const stack = await newStack();
+  const running = needsInputTicket(
+    stack,
+    progress(["shipped"], closedEngine, "running"),
+  );
+  await refusedCard(running, stack, "unit-1", 409, "card-not-done");
+  await refusedCard(
+    needsInputTicket(stack),
+    stack,
+    "unit-1",
+    409,
+    "card-not-done",
+  );
+  assert.deepEqual(calls, []);
+});
+
+void test("startShip keeps the worktree check for a ticket card in Needs input with a closed engine and complete loop", async () => {
+  const stack = await newStack();
+  const card = needsInputTicket(stack, progress(["shipped"], closedEngine));
+  const untracked = path.join(stack.worktree, "stray.txt");
+  fs.writeFileSync(untracked, "x\n");
+  try {
+    await refusedCard(card, stack, "unit-1", 409, "worktree-dirty");
+  } finally {
+    fs.rmSync(untracked, { force: true });
+  }
 });
 
 type RunOptions = Parameters<typeof shipTools.run>[2];

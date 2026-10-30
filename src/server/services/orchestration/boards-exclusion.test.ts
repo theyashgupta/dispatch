@@ -41,6 +41,31 @@ await store.applyMarker(
   "status_needs_input",
 );
 
+const TOKEN = "session-token-must-not-leak";
+const ACME = parseBoardKey("ACME") as BoardKey;
+await store.createBoard({
+  key: ACME,
+  name: "Acme",
+  workspaceRoot: "/acme/sessions",
+  repositories: [],
+  linearTeamKeys: [],
+});
+const acmeLive = await store.createLocalCard(ACME, "Live ticket", "");
+const acmeLost = await store.createLocalCard(ACME, "Lost ticket", "");
+for (const card of [acmeLive, acmeLost]) {
+  await store.completeStart(card.id, undefined, {
+    workspacePath: `/acme/sessions/${card.id}`,
+    branch: card.id,
+    tmuxSession: `dsp-${card.id}`,
+  });
+}
+await store.mintHookChannel(acmeLive.id, TOKEN);
+assert.equal(
+  store.getCard(acmeLive.id)?.sessions?.some((s) => s.hookToken === TOKEN),
+  true,
+);
+await store.markSessionLost(acmeLost.id, undefined);
+
 void test("the card list service leaves the hidden card out", () => {
   const listed = listBoardCards(SBX, {});
   assert.deepEqual(
@@ -100,4 +125,51 @@ void test("a stopped orchestrator's live hidden card does not block archive, a r
   });
   await store.setBoardOrchestrators(OTH, [{ ...main, state: "stopped" }]);
   assert.equal((await archiveBoard(OTH)).archived, true);
+});
+
+void test("the session list keeps the live sessions for live=true and the lost ones for live=false", () => {
+  assert.deepEqual(
+    listBoardSessions(ACME, undefined)
+      .map((s) => s.cardId)
+      .sort(),
+    [acmeLive.id, acmeLost.id].sort(),
+  );
+  assert.deepEqual(
+    listBoardSessions(ACME, true).map((s) => s.cardId),
+    [acmeLive.id],
+  );
+  assert.deepEqual(
+    listBoardSessions(ACME, false).map((s) => s.cardId),
+    [acmeLost.id],
+  );
+  assert.deepEqual(listBoardSessions(SBX, false), []);
+});
+
+void test("a session list entry carries no hook token", () => {
+  const json = JSON.stringify(listBoardSessions(ACME, undefined));
+  assert.ok(!json.includes(TOKEN));
+  assert.ok(!json.includes("hookToken"));
+});
+
+void test("an archived board still lists its sessions", async () => {
+  const ARC = parseBoardKey("ARC") as BoardKey;
+  await store.createBoard({
+    key: ARC,
+    name: "Archive",
+    workspaceRoot: "/arc/sessions",
+    repositories: [],
+    linearTeamKeys: [],
+  });
+  const card = await store.createLocalCard(ARC, "Lost ticket", "");
+  await store.completeStart(card.id, undefined, {
+    workspacePath: `/arc/sessions/${card.id}`,
+    branch: card.id,
+    tmuxSession: `dsp-${card.id}`,
+  });
+  await store.markSessionLost(card.id, undefined);
+  assert.equal((await archiveBoard(ARC)).archived, true);
+  assert.deepEqual(
+    listBoardSessions(ARC, undefined).map((s) => s.cardId),
+    [card.id],
+  );
 });

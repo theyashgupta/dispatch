@@ -47,7 +47,7 @@ Select the label **Boards** to fold or unfold the section. Press `Enter` or `Spa
 
 Press `B` to open the command palette with the boards only. Type to filter the boards. The palette lists **Switch to board** for each active board except the current one, then **Manage boards** and **Create board**. `B` does nothing while you type in a text field or while a dialog is open. Select a board in the palette to show the same page on that board.
 
-The address of a board page holds the board key. The pages with a keyed address are the board (`/boards/<key>`), the dashboard (`/boards/<key>/dashboard`), the inbox (`/boards/<key>/inbox`), the sessions (`/boards/<key>/sessions`) and the board settings (`/boards/<key>/settings`). The other pages keep the `board` search parameter, for example `/tickets?board=<key>`. The old addresses, such as `/board`, `/inbox` and `/dashboard?board=<key>`, still open the same pages.
+The address of a board page holds the board key. The pages with a keyed address are the board (`/boards/<key>`), the dashboard (`/boards/<key>/dashboard`), the inbox (`/boards/<key>/inbox`) and the board settings (`/boards/<key>/settings`). The other pages keep the `board` search parameter, for example `/tickets?board=<key>`. The old addresses, such as `/board`, `/inbox` and `/dashboard?board=<key>`, still open the same pages.
 
 ### Create a board from the palette
 
@@ -192,6 +192,7 @@ The orchestrator node of the command centre shows the state of the session as a 
 - **Session lost** and **Claude exited**. The session ended. **Resume** shows.
 - **Frozen after compaction**. Claude stopped after an idle compaction. See [A frozen session](#a-frozen-session).
 - **Released**. Claude exited on purpose after the loop finished, to free memory. The card keeps its column, its marker and its terminal text. **Run Claude** starts Claude again.
+- **Roadmap done**. The loop printed its completion promise or its DONE line. Dispatch closes the loop file only when the DONE line shows.
 
 When the orchestrator waits at its prompt, Dispatch wakes it. Dispatch types one line that starts with "Dispatch wake:" when you answer its decision item, when one of its groups reaches Agent done, needs input, fails to start, ships, stops its ship flow, hits a loop error or a usage limit, and when the **Wake timer (minutes)** of the policy runs out. Dispatch never types while the orchestrator works, types at most one line in 20 seconds, and never wakes a stopped orchestrator.
 
@@ -199,7 +200,6 @@ The hidden card and the MCP configuration file do not show in the UI. To confirm
 
 1. The badge reads **Working** and the **Stop** button shows.
 2. The **Terminal** tab of the pane shows the live terminal.
-3. The **Changed since** card of the dashboard shows a row such as "Supervisor: a card is now Working".
 
 The start can fail. The controls of the command centre then show the line "The orchestrator did not start: <reason>." The reason names the step and the last text of the Claude pane. Dispatch waits about 30 seconds for Claude to be ready, so the badge can read **Starting** for some time before the line shows. Choose **Try again** beside the line to start again. The board now has a main orchestrator, so the page header button of the board reads **Orchestrator**.
 
@@ -278,7 +278,6 @@ The loop also reports each phase gate and unit gate to Dispatch. The report uses
 
 - The boards page **Loops** column shows each running loop as a group id and a percent.
 - The dashboard section **Progress per group** shows one row for each group that has a loop. It also shows each single card that the orchestrator started, with the phases of its PRD.
-- The dashboard section **Changed since** shows the gate events.
 
 ## The dashboard
 
@@ -299,9 +298,9 @@ At 1024 px and wider, the sections show in this order:
 1. The status line.
 2. **Progress per group**, full width.
 3. **Left on this board**, full width.
-4. Two columns. The main column holds **Tickets by column**. The rail holds **Next step**, **Needs your call**, **Changed since** and **Cost and usage**.
+4. Two columns. The main column holds **Tickets by column**. The rail holds **Next step**, **Needs your call** and **Cost and usage**.
 
-Below 1024 px, the sections show in this order: the status line, **Needs your call**, **Progress per group**, **Left on this board**, **Tickets by column**, **Next step**, **Changed since** and **Cost and usage**. Each section shows once in the page. The section headings are small uppercase labels. A screen reader still reads the names "Attention queue", "Progress per group", "Left on this board", "Tickets by column", "Next step", "Activity log" and "Cost and usage".
+Below 1024 px, the sections show in this order: the status line, **Needs your call**, **Progress per group**, **Left on this board**, **Tickets by column**, **Next step** and **Cost and usage**. Each section shows once in the page. The section headings are small uppercase labels. A screen reader still reads the names "Attention queue", "Progress per group", "Left on this board", "Tickets by column", "Next step", "Activity log" and "Cost and usage".
 
 - **Progress per group.** The first line of the section is the memory line, for example "Memory: 812 MB free, swap 2048 of 8192 MB". It adds ", <n> paused" when loops are paused. It updates every 15 seconds. It shows "(stale)" after 60 seconds without a reading, and it is hidden when the computer is not a Mac. Each loop is a milestone track with one node for each unit. With no units it shows "No loop progress". The session badges and the last gate text stay on the track header. A node has one of these states:
   - Done. The node has a check glyph and the state line "Done HH:MM" or "Done".
@@ -315,14 +314,7 @@ Below 1024 px, the sections show in this order: the status line, **Needs your ca
   - A footer line when there is data: the last gate text, "Depends on <ids>" or "Shipped HH:MM".
 - **Next step.** For the first running loop that has a current unit, it shows "<group id> unit <n>: <unit title>" and "Phase <n> of <m>: <phase name>". With no such loop it shows "No loop running" and "Start a group from the board."
 - **Needs your call.** Each item that needs you, oldest wait first. With no item it shows "Nothing needs you." The card has a red tint only when it holds at least one item. The recommended decision option is bold. See the section "The attention queue".
-- **Changed since <time>.** The time is the time of the oldest row on the shown page. A row has a dot, the change text with the card id in bold, and the time on the right. The dot colors are red, amber, green and grey:
-  - Red is for a failed gate, a loop error, a failed start or a stopped ship.
-  - Amber is for needs input and a usage limit.
-  - Green is for a passed gate, agent done and shipped.
-  - Grey is for the other rows.
 - **Cost and usage.** The cost of each group against its budget, and the usage meters of the Claude account, as compact rows. With no cost it shows "No cost yet." See the section "Budgets and usage limits".
-
-**Changed since** shows one row for each recorded event, newest first. The orchestrator rows are tool calls and raised decisions. The supervisor rows are actions, session state changes, loop gates, PR changes and a wake of the machine. Your rows are the decisions that you answer and the goals that you submit. A policy save, a board change and a press of **Start orchestrator** write no row of their own. The filters **Actor** (**All**, **Orchestrator**, **Supervisor**, **You**) and **Group** limit the rows. The log shows 20 rows. Choose **Show more** for 20 more. With no match it shows "No activity matches." With no event it shows "No activity on this board yet."
 
 Each node and each tile state has a glyph and a text. The page reads without color.
 
@@ -339,7 +331,7 @@ When free memory is below the floor and a start or a resume must wait or be refu
 To stop a loop by hand:
 
 1. Open the card of a loop that has a live session. The card panel header shows **Pause** next to **Reset**.
-2. Choose **Pause**. Dispatch stops every process of the loop until you resume it. On a narrow panel the button shows only its icon and keeps the name **Pause**.
+2. Choose **Pause**. Dispatch stops Claude and the commands that it runs until you resume the loop. The terminal stays usable, and keys that you type while the loop is paused reach Claude after the resume. On a narrow panel the button shows only its icon and keeps the name **Pause**.
 3. The card shows a paused badge. The panel shows a note. The note reads "Paused. Resume it when you are ready." after you pause the loop. It reads "Paused for memory. Dispatch resumes it when swap falls." when Dispatch paused the loop because of memory.
 4. Choose **Resume** in the same place to continue the loop.
 
@@ -798,7 +790,7 @@ When the supervisor is on, Dispatch finds the freeze and handles it:
 1. The card badge shows **Frozen after compaction**. The card detail shows "Frozen after an idle compaction since <time>. Dispatch relaunches Claude with resume 15 minutes after that."
 2. After 15 minutes, Dispatch stops Claude. It starts Claude again with `--resume` in the same tmux window, so the session keeps its conversation.
 3. Dispatch types the loop prompt one time.
-4. The dashboard **Changed since** log shows the relaunch.
+4. The timeline of the card detail panel shows "session relaunched after a freeze".
 
 Dispatch relaunches a session one time for each freeze. When the session freezes a second time in the same unit and phase, Dispatch does not relaunch it again. The card moves to **Needs input** with a failed resume. When memory is low, Dispatch does not stop Claude. The card moves to **Needs input** and Claude keeps running.
 

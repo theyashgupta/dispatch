@@ -8,11 +8,11 @@ delete process.env.TMUX;
 const { run } = await import("../../adapters/exec.js");
 const { TMUX_SERVER_ARGS } = await import("../../adapters/tmux.js");
 const { resolveBinaryPath } = await import("../../adapters/resolve-binary.js");
+const { readProcessTable } = await import("../../adapters/process-tree.js");
 const { pauseCard, unpauseCard } = await import("./pause-card.js");
 const { sendConfirmed } = await import("./supervisor-send.js");
 const { probeResume, probeTools } = await import("./resume-probe.js");
-const { MEMORY_RESUME_LINE } =
-  await import("../../../shared/dispatch-lines.js");
+const { RESUME_PROBE_LINE } = await import("../../../shared/dispatch-lines.js");
 const { paneAtPrompt, paneTerminal, paneTtyCooked } =
   await import("../../adapters/tmux.js");
 const { actionTools, runActions } = await import("./supervisor-actions.js");
@@ -103,12 +103,12 @@ void test(
 );
 
 void test(
-  "a SIGCONT that reaches the shim while its job is in the background does not stop it",
+  "a pause leaves the pane shell and the shim running and the shell never takes the terminal",
   { skip: !available },
   async () => {
     const s = await startSupervised({
       tmpRoot: env.root,
-      title: "LOCAL-139-bg-cont",
+      title: "LOCAL-180-shell-runs",
       group: true,
       shell: true,
       scenario: { lfInserts: true },
@@ -120,51 +120,72 @@ void test(
       confirmMs: 5_000,
       pollMs: 200,
     };
+    const { stdout: panePid } = await run("tmux", [
+      ...TMUX_SERVER_ARGS,
+      "display-message",
+      "-p",
+      "-t",
+      target,
+      "#{pane_pid}",
+    ]);
+    const shellPid = Number(panePid.trim());
+    const shimPid = (await readProcessTable())?.get(shellPid)?.[0];
+    assert.ok(shimPid !== undefined, "the pane shell runs a job");
 
     await pauseCard(s.card().id, { by: "memory", reason: "test pause" });
     const pids = s.card().paused?.pids ?? [];
-    assert.ok(pids.length >= 2, "the pause recorded the shell and its job");
-    const [shellPid, shimPid] = pids;
-
-    process.kill(shellPid, "SIGCONT");
-    for (let i = 0; i < 50; i++) {
-      const t = await paneTerminal(target);
-      if (t && t.tpgid === t.pgid) break;
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    const owner = await paneTerminal(target);
-    assert.equal(owner?.tpgid, owner?.pgid, "the shell took the terminal");
-
-    process.kill(shimPid, "SIGCONT");
+    assert.ok(pids.length > 0, "the pause stopped claude");
+    assert.ok(!pids.includes(shellPid), "the pane shell was not stopped");
+    assert.ok(!pids.includes(shimPid), "the shim was not stopped");
     await new Promise((resolve) => setTimeout(resolve, 1_000));
 
-    assert.doesNotMatch(
-      await s.pane(),
-      /suspended \(tty output\)/,
-      "the shim was not stopped by SIGTTOU in the background",
+    const owner = await paneTerminal(target);
+    assert.notEqual(owner?.tpgid, owner?.pgid, "the shell kept out");
+    for (const pid of [shellPid, shimPid]) {
+      const { stdout } = await run("ps", ["-o", "stat=", "-p", String(pid)]);
+      assert.doesNotMatch(stdout.trim(), /^T/, `pid ${pid} is not stopped`);
+    }
+    assert.doesNotMatch(await s.pane(), /suspended/);
+    assert.equal(
+      await paneTtyCooked(target),
+      false,
+      "pane tty is raw (-icanon) while paused",
     );
-    const { stdout } = await run("ps", ["-o", "stat=", "-p", String(shimPid)]);
-    assert.doesNotMatch(stdout.trim(), /^T/, "the shim is not stopped");
+    await run("tmux", [
+      ...TMUX_SERVER_ARGS,
+      "send-keys",
+      "-t",
+      target,
+      "-l",
+      "typed while paused",
+    ]);
 
     await unpauseCard(s.card().id, { reason: "test resume" });
-    for (let i = 0; i < 50 && !paneReady(await s.pane()); i++) {
+    for (
+      let i = 0;
+      i < 50 && !(await s.pane()).includes("typed while paused");
+      i++
+    )
       await new Promise((resolve) => setTimeout(resolve, 100));
-    }
+    assert.match(
+      await s.pane(),
+      /typed while paused/,
+      "keys typed during the pause reached the REPL",
+    );
+    await run("tmux", [...TMUX_SERVER_ARGS, "send-keys", "-t", target, "C-u"]);
     assert.equal(
       await sendConfirmed(
         s.card(),
         s.session(),
-        "after the background continue",
+        "after a pause that left the shell alone",
         "test",
         timing,
         () => Promise.resolve(s.transcript),
       ),
       "confirmed",
     );
-    assert.equal(
-      await paneTtyCooked(target),
-      false,
-      "pane tty is raw (-icanon) after resume",
+    assert.ok(
+      s.userTexts().includes("after a pause that left the shell alone"),
     );
   },
 );
@@ -195,7 +216,7 @@ void test(
 
     await probeResume(s.card().id);
 
-    assert.ok(s.userTexts().includes(MEMORY_RESUME_LINE));
+    assert.ok(s.userTexts().includes(RESUME_PROBE_LINE));
     const rows = s.actions().map((e) => e.data);
     assert.ok(
       rows.some((d) => d.action === "resume_probe" && d.result === "confirmed"),
