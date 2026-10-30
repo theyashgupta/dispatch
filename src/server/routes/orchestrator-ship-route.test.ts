@@ -629,6 +629,31 @@ void test("start_ship answers 409 card-not-done for a launched ticket card in Ne
   }
 });
 
+void test("start_ship answers 202 for a launched ticket card in Needs input whose engine is closed and loop is complete", async () => {
+  await setPolicy({ shipRights: "merge" });
+  const card = await launchedTicket("needs_input", {
+    tree: await freshTree("needs-input-tree"),
+  });
+  await store.setLoopProgress(card.id, {
+    ...awaitingShip,
+    engine: {
+      active: true,
+      iteration: 3,
+      sessionId: null,
+      handoffPending: false,
+      startedAt: null,
+      closed: true,
+    },
+  });
+  const reply = await shipOf(store.getCard(card.id)!, card.id);
+  assert.equal(reply.status, 202, JSON.stringify(reply.body));
+  await waitFor(
+    () => Promise.resolve(store.getCard(card.id)?.shipFlow?.state === "done"),
+    30_000,
+    "flow done",
+  );
+});
+
 void test("start_ship answers 400 invalid-branch-name for a launched ticket card and a branch that is not its session branch", async () => {
   await setPolicy({ shipRights: "merge" });
   const card = await launchedTicket("agent_done");

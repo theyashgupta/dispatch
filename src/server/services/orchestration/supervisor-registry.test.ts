@@ -20,6 +20,8 @@ const {
 } = await import("./supervisor-registry.js");
 const { actionTools } = await import("./supervisor-actions.js");
 const { recordMemory } = await import("../../test-support/memory-fixtures.js");
+const { LOOP_PROGRESS } =
+  await import("../../test-support/supervised-session.js");
 await store.load();
 const realTools = { ...actionTools };
 after(() => {
@@ -649,4 +651,66 @@ void test("superviseLost on a card whose active session is released plans no res
   assert.equal(calls.resume, 0);
   assert.equal(supervisorEvents(SBX, ids.cardId).length, 0);
   assert.equal(sessionOf(ids.cardId)?.state, "released");
+});
+
+async function finishedLoop(title: string, completion: "running" | "complete") {
+  const ids = await startedCard(SBX, title);
+  await store.setOrchestratorFields(ids.cardId, {
+    launch: { direction: "run the loop" },
+  });
+  await store.setLoopProgress(ids.cardId, {
+    ...LOOP_PROGRESS,
+    completion,
+    engine: {
+      active: true,
+      iteration: 1,
+      sessionId: "s-1",
+      handoffPending: false,
+      startedAt: null,
+      closed: false,
+    },
+  });
+  await store.applyMarker(
+    ids.cardId,
+    ids.sessionId,
+    "agent_done",
+    undefined,
+    "DONE built",
+    "status_agent_done",
+  );
+  ensureWatcher(ids.tmuxSession, null).progressRead = true;
+  return ids;
+}
+
+async function idleTwice(ids: Awaited<ReturnType<typeof startedCard>>) {
+  const t0 = Date.now();
+  const at = (minute: number, name: string) =>
+    supervisePane({ ...ids, pane: pane(name) }, t0 + minute * 60_000);
+  for (const minute of [0, 1, 2]) await at(minute, "idle.txt");
+  await at(3, "working.txt");
+  for (const minute of [4, 5, 6]) await at(minute, "idle.txt");
+}
+
+void test("an unchanged pane keeps a complete loop in Agent done with its DONE marker", async () => {
+  const ids = await finishedLoop("done-frozen", "complete");
+  try {
+    await idleTwice(ids);
+    const card = store.getCard(ids.cardId);
+    assert.equal(sessionOf(ids.cardId)?.state, "needs_input");
+    assert.equal(card?.column, "agent_done");
+    assert.equal(card?.lastMarker, "DONE built");
+  } finally {
+    dropWatcher(ids.tmuxSession);
+  }
+});
+
+void test("an unchanged pane still moves a running loop in Agent done to Needs input", async () => {
+  const ids = await finishedLoop("done-running", "running");
+  try {
+    await idleTwice(ids);
+    assert.equal(sessionOf(ids.cardId)?.state, "needs_input");
+    assert.equal(store.getCard(ids.cardId)?.column, "needs_input");
+  } finally {
+    dropWatcher(ids.tmuxSession);
+  }
 });
