@@ -90,7 +90,7 @@ export function AppSidebar({
                   <SidebarSeparator className="mx-1 my-2 bg-border data-[orientation=horizontal]:w-auto" />
                 ) : null
               ) : (
-                <SidebarGroupLabel className="h-auto rounded-none pt-2 pb-1 font-semibold tracking-[0.04em] text-muted-foreground uppercase">
+                <SidebarGroupLabel className="h-auto rounded-none pt-2 pb-1 font-semibold tracking-(--tracking-label) text-muted-foreground uppercase">
                   {entry.group}
                 </SidebarGroupLabel>
               )}

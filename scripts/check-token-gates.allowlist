@@ -16,7 +16,6 @@ src/web/components/GroupCollapsible.tsx	grid-rows-[1fr]	grid track template
 src/web/components/GroupCollapsible.tsx	transition-[grid-template-rows]	transition property list, no value
 src/web/components/SettingsPanelLayout.tsx	[scrollbar-gutter:stable]	CSS property with no Tailwind utility
 src/web/components/SplitPane.tsx	[transition:var(--hover-transition)]	CSS property with no Tailwind utility
-src/web/components/Wordmark.tsx	tracking-[0.18em]	tracking token lands in LOCAL-144
 src/web/components/badges/PrBadge.tsx	size-[5px]	one-off pixel geometry without a token step
 src/web/components/badges/SourceBadge.tsx	bg-[color-mix(in_srgb,var(--badge-state)_16%,transparent)]	tint of a signal token, pending a Badge tone or tint token
 src/web/components/badges/SourceIcon.tsx	bg-[color-mix(in_srgb,var(--badge-state)_16%,transparent)]	tint of a signal token, pending a Badge tone or tint token
@@ -108,7 +107,6 @@ src/web/modules/board/components/CardView.tsx	transition-[background-color,borde
 src/web/modules/board/components/ColumnHeader.tsx	animate-[count-pulse_var(--motion-count-change)_var(--easing-enter)]	keyframe shorthand built from motion tokens
 src/web/modules/board/components/ColumnHeader.tsx	bg-[color-mix(in_srgb,var(--badge-state)_16%,var(--surface-column))]	tint of a signal token, pending a Badge tone or tint token
 src/web/modules/board/components/ColumnHeader.tsx	text-[color-mix(in_srgb,var(--badge-state)_35%,var(--text))]	tint of a signal token, pending a Badge tone or tint token
-src/web/modules/board/components/ColumnHeader.tsx	tracking-[0.04em]	tracking token lands in LOCAL-144
 src/web/modules/board/components/ColumnResizeHandle.tsx	[transition:var(--resize-handle-transition)]	CSS property with no Tailwind utility
 src/web/modules/board/components/MoveToPicker.tsx	w-[clamp(200px,60vw,260px)]	viewport or container relative size
 src/web/modules/board/components/SearchField.tsx	bg-[color-mix(in_srgb,var(--badge-state)_16%,var(--surface-column))]	tint of a signal token, pending a Badge tone or tint token
@@ -119,7 +117,6 @@ src/web/modules/board/components/SelectionBar.tsx	bottom-[calc(var(--space-xl)+v
 src/web/modules/board/components/SelectionBar.tsx	max-w-[calc(100vw_-_2*var(--space-lg))]	viewport or container relative size
 src/web/modules/board/components/StatusPillSwitcher.tsx	bg-[color-mix(in_srgb,var(--badge-state)_16%,var(--surface-column))]	tint of a signal token, pending a Badge tone or tint token
 src/web/modules/board/components/StatusPillSwitcher.tsx	text-[color-mix(in_srgb,var(--badge-state)_35%,var(--text))]	tint of a signal token, pending a Badge tone or tint token
-src/web/modules/board/components/StatusPillSwitcher.tsx	tracking-[0.04em]	tracking token lands in LOCAL-144
 src/web/modules/board/components/dnd/BoardDragOverlay.tsx	h-[20px]	one-off pixel geometry without a token step
 src/web/modules/board/components/dnd/BoardDragOverlay.tsx	min-w-[20px]	one-off pixel geometry without a token step
 src/web/modules/board/components/dnd/BoardDragOverlay.tsx	translate-[4px]	one-off pixel geometry without a token step
@@ -191,7 +188,6 @@ src/web/modules/settings/components/SettingsSidebar.tsx	max-w-[80vw]	viewport or
 src/web/modules/settings/components/UpdatesSection.tsx	[overflow-wrap:anywhere]	CSS property with no Tailwind utility
 src/web/modules/setup/components/SetupDialog.tsx	max-h-[calc(100vh-2rem)]	viewport or container relative size
 src/web/modules/setup/components/SetupDialog.tsx	max-w-[min(45rem,calc(100%-2rem))]	viewport or container relative size
-src/web/modules/shell/components/AppSidebar.tsx	tracking-[0.04em]	tracking token lands in LOCAL-144
 src/web/modules/shell/components/BottomBar.tsx	transition-[height]	transition property list, no value
 src/web/modules/shell/components/CheatSheet.tsx	grid-cols-[repeat(auto-fit,minmax(150px,1fr))]	grid track template
 src/web/modules/shell/components/CheatSheet.tsx	max-h-[70vh]	viewport or container relative size
@@ -203,8 +199,6 @@ src/web/modules/shell/components/NavRow.tsx	bg-[color-mix(in_srgb,var(--accent)_
 src/web/modules/shell/components/ShellFrame.tsx	[--nav-current:0px]	scoped custom property set from tokens
 src/web/modules/shell/components/ShellFrame.tsx	[--nav-current:var(--nav-width)]	scoped custom property set from tokens
 src/web/modules/shell/components/ShellFrame.tsx	[--nav-current:var(--nav-width-collapsed)]	scoped custom property set from tokens
-src/web/modules/shell/components/SidebarBoards.tsx	tracking-[0.04em]	tracking token lands in LOCAL-144
-src/web/modules/shell/components/SidebarDashboards.tsx	tracking-[0.04em]	tracking token lands in LOCAL-144
 src/web/modules/shell/containers/ShellContainer.tsx	[--sidebar-width-icon:var(--nav-width-collapsed)]	scoped custom property set from tokens
 src/web/modules/shell/containers/ShellContainer.tsx	[--sidebar-width:var(--nav-width)]	scoped custom property set from tokens
 src/web/modules/today/components/EntryRow.tsx	leading-[normal]	one-off pixel geometry without a token step
