@@ -30,7 +30,7 @@ export function ColumnHeader({
   }, [count]);
 
   return (
-    <div className="sticky top-0 z-1 flex h-(--column-header-height) shrink-0 items-center gap-(--space-xs) bg-(--surface-column) text-sm font-medium tracking-[0.04em] text-muted-foreground select-none">
+    <div className="sticky top-0 z-1 flex h-(--column-header-height) shrink-0 items-center gap-(--space-xs) bg-(--surface-column) text-sm font-medium tracking-(--tracking-label) text-muted-foreground select-none">
       <span
         ref={accentVars}
         className="shrink-0 border-b-2 border-(--column-accent) pb-0.5 whitespace-nowrap"

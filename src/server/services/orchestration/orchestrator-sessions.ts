@@ -87,10 +87,14 @@ const busyCards = new Set<string>();
  *
  * @remarks Every tool checks the session state and then types into the pane, so two calls in
  * parallel would both pass the check and interleave their keys. A running ship flow owns the
- * worktree, so every session tool waits until it ends.
+ * worktree, so every session tool waits until it ends, except the send of the ship flow itself.
  */
-async function oneAtATime<T>(card: Card, tool: () => Promise<T>): Promise<T> {
-  if (card.shipFlow?.state === "running")
+async function oneAtATime<T>(
+  card: Card,
+  tool: () => Promise<T>,
+  fromShipFlow = false,
+): Promise<T> {
+  if (!fromShipFlow && card.shipFlow?.state === "running")
     throw new ConflictError("ship-running");
   if (busyCards.has(card.id)) throw new ConflictError("session-busy");
   busyCards.add(card.id);
@@ -128,20 +132,25 @@ export async function sendInput(
   caller: OrchestratorIdentity,
   card: Card,
   text: string,
+  opts: { fromShipFlow?: boolean } = {},
 ): Promise<SendResult> {
   assertTypable(text);
-  return oneAtATime(card, async () => {
-    const session = liveSession(card);
-    assertKeysAllowed(card, session);
-    assertNotUserStop(session);
-    enforce(
-      checkBudget({
-        policy: callerPolicy(caller),
-        cost: groupCost(card),
-      }),
-    );
-    return sessionTools.send(card, session, text, "orchestrator_input");
-  });
+  return oneAtATime(
+    card,
+    async () => {
+      const session = liveSession(card);
+      assertKeysAllowed(card, session);
+      assertNotUserStop(session);
+      enforce(
+        checkBudget({
+          policy: callerPolicy(caller),
+          cost: groupCost(card),
+        }),
+      );
+      return sessionTools.send(card, session, text, "orchestrator_input");
+    },
+    opts.fromShipFlow,
+  );
 }
 
 /**

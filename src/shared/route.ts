@@ -4,9 +4,7 @@ export const PAGES = [
   "board",
   "inbox",
   "tickets",
-  "workspace",
   "settings",
-  "activity",
   "accounts",
   "playbooks",
   "vault",
@@ -152,7 +150,7 @@ export function switchBoardLocation(
 
 /**
  * Decides the hash the app should show on first load: the current hash wins with its query, then
- * the remembered route, then the legacy workspace view, then the board.
+ * the remembered route, then the board.
  *
  * @remarks Every stored value is re-parsed and re-serialized, so a stale or corrupt entry can
  * only ever redirect to a page that exists.
@@ -160,7 +158,6 @@ export function switchBoardLocation(
 export function initialHash(
   currentHash: string,
   storedRoute: string | null,
-  legacyView: string | null,
 ): string {
   if (currentHash !== "" && currentHash !== "#" && currentHash !== "#/") {
     const query = currentHash.indexOf("?");
@@ -171,9 +168,6 @@ export function initialHash(
   }
   if (storedRoute != null && storedRoute !== "") {
     return routeHash(parseRoute(storedRoute));
-  }
-  if (legacyView === "workspace" || legacyView === "orca") {
-    return "#/workspace";
   }
   return "#/board";
 }
