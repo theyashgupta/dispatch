@@ -241,7 +241,7 @@ a diff line means "added" or "removed", the same meaning those two chip tones al
 
 ## Session status colours
 
-Five tokens colour every session state in the session badge, the Sessions sidebar row and the centre tiles.
+Five tokens colour every session state in the session badge and the centre tiles.
 
 | Token              | Dark      | Light                | States                                                                                                             |
 | ------------------ | --------- | -------------------- | ------------------------------------------------------------------------------------------------------------------ |
@@ -251,7 +251,7 @@ Five tokens colour every session state in the session badge, the Sessions sideba
 | `--status-stopped` | `#3fb950` | `80% mix with black` | `roadmap_complete`; centre Agent done                                                                              |
 | `--status-errored` | `#e5484d` | `theme neutral`      | `api_error`, `lost`, `shell_prompt`; centre Resume failed                                                          |
 
-The session badge, the Sessions sidebar row and the centre tiles read these five tokens, each state keeps the tone group it had before, and a running centre tile pulses through `animate-status-pulse`, which the global reduced-motion rule stops.
+The session badge and the centre tiles read these five tokens, each state keeps the tone group it had before, and a running centre tile pulses through `animate-status-pulse`, which the global reduced-motion rule stops.
 
 `scripts/contrast-113.mjs` measures each token as a 3:1 mark on every tier and as a 35% ink on a 16% tint of itself. The badge renders a 12% tint, which only raises contrast.
 
