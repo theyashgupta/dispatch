@@ -1,4 +1,3 @@
-import { ActivityContainer } from "@/modules/dashboard/containers/ActivityContainer";
 import { AttentionQueueContainer } from "@/modules/dashboard/containers/AttentionQueueContainer";
 import { CostContainer } from "@/modules/dashboard/containers/CostContainer";
 import { DashboardLoadingContainer } from "@/modules/dashboard/containers/DashboardLoadingContainer";
@@ -30,9 +29,6 @@ export function DashboardView() {
         </div>
         <div className="min-w-0 lg:col-start-2 lg:row-start-4">
           <NextStepContainer />
-        </div>
-        <div className="min-w-0 lg:col-start-2 lg:row-start-6">
-          <ActivityContainer />
         </div>
         <div className="min-w-0 lg:col-start-2 lg:row-start-7">
           <CostContainer />

@@ -23,16 +23,16 @@ test("every nav row's page parses back to itself", () => {
   }
 });
 
-test("groups with no rows are omitted and order is Home, Work, Sources, System", () => {
+test("groups with no rows are omitted and order is Home, Sources, System", () => {
   assert.deepEqual(
     navGroups(NAV_ITEMS).map((entry) => entry.group),
-    ["Home", "Work", "Sources", "System"],
+    ["Home", "Sources", "System"],
   );
   assert.deepEqual(
     navGroups(NAV_ITEMS.filter((item) => item.group !== "System")).map(
       (entry) => entry.group,
     ),
-    ["Home", "Work", "Sources"],
+    ["Home", "Sources"],
   );
 });
 
@@ -49,10 +49,10 @@ test("the System group lists its pages in order, Workspaces after Archive, Flow 
   );
 });
 
-test("the Work group lists Sessions, Workspace and Activity in order", () => {
-  assert.deepEqual(
-    NAV_ITEMS.filter((item) => item.group === "Work").map((item) => item.page),
-    ["sessions", "workspace", "activity"],
+test("no nav row opens Activity", () => {
+  assert.equal(
+    NAV_ITEMS.some((item) => (item.page as string) === "activity"),
+    false,
   );
 });
 
@@ -78,9 +78,9 @@ test("NAV_ITEMS has exactly one Tickets row, in the Sources group", () => {
   assert.equal(rows[0]?.group, "Sources");
 });
 
-test("navGroups orders Home, Work, Sources, System", () => {
+test("navGroups orders Home, Sources, System", () => {
   const groups = navGroups(NAV_ITEMS).map((entry) => entry.group);
-  assert.deepEqual(groups, ["Home", "Work", "Sources", "System"]);
+  assert.deepEqual(groups, ["Home", "Sources", "System"]);
 });
 
 test("no nav row opens the board or the dashboard", () => {

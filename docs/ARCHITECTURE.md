@@ -99,28 +99,28 @@ research). The backend is layered `bootstrap → routes → services → adapter
 [docs/standards/backend-design.md](standards/backend-design.md) — this table names the layers
 and roles only, it does not restate the layering policy.
 
-| Layer               | Modules                                                                                                                                                                                                                                                                                                                                         | Role                                                                                                                                                                                                                                                                                                                                       |
-| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Bootstrap           | `bootstrap/index.ts`, `bootstrap/cli.ts`, `bootstrap/binary-check.ts`, `bootstrap/config.ts`, `bootstrap/reconcile.ts`                                                                                                                                                                                                                          | CLI entry (`doctor`/`uninstall`/boot), informative startup preflight lines (via `services/infra/preflight.ts`), `StartupError` for config failures, config load/bootstrap, boot session reconcile, then wire routes + SSE and start poller/watcher.                                                                                        |
-| Routes              | `routes/index.ts`, `routes/cards.route.ts`, `routes/board.route.ts`, `routes/sse.route.ts`, `routes/loopback.ts`                                                                                                                                                                                                                                | Loopback-gated REST router, the hand-rolled SSE broadcast endpoint, and the loopback request guard.                                                                                                                                                                                                                                        |
-| Linear + mapping    | `adapters/poller.ts`, `store/mapping.ts`                                                                                                                                                                                                                                                                                                        | GraphQL poll loop and the pure issue-versus-card reconcile mapping.                                                                                                                                                                                                                                                                        |
-| Store               | `store/board.store.ts`, `store/board-repository.ts`                                                                                                                                                                                                                                                                                             | Single-writer card store: serialized mutation queue, atomic persist, snapshot ordering.                                                                                                                                                                                                                                                    |
-| Services (start)    | `services/orchestration/start-session.ts`, `services/orchestration/steps.ts`, `services/infra/kickoff.ts`                                                                                                                                                                                                                                       | Start-saga runner, its do/undo steps, and the infra kickoff-prompt builder.                                                                                                                                                                                                                                                                |
-| Services (sessions) | `services/orchestration/cleanup.ts`, `services/infra/config-holder.ts`, `services/domain/workspace-paths.ts`                                                                                                                                                                                                                                    | Teardown saga, the orchestration-config holder (routes read config through it, value-free 400 when unset), and the canonical worktree-path builder.                                                                                                                                                                                        |
-| Orchestration       | `services/orchestration/boards.ts`, `services/orchestration/orchestrator-session.ts`, `services/orchestration/orchestrator-groups.ts`, `services/orchestration/loop-progress-reader.ts`, `services/orchestration/ship-flow.ts`                                                                                                                  | Board records and policy, the orchestrator lifecycle with its hidden session card, the group create and start rules for orchestrators, the read-only loop file reader, and the ship flow runner.                                                                                                                                           |
-| Supervisor          | `services/orchestration/supervisor-registry.ts`, `services/orchestration/supervisor-pass.ts`, `services/orchestration/supervisor-actions.ts`, `services/orchestration/supervisor-limit.ts`, `services/orchestration/supervisor-handoff.ts`, `adapters/power.ts`                                                                                 | One watcher for each live tmux session, the 60 s pass (keep awake, wake check, PR changes, held group starts, budget stop), the planned actions, the usage limit flow, the handoff, and the keep awake holder.                                                                                                                             |
-| Orchestrator API    | `routes/orchestrator.route.ts`, `routes/orchestrator.handlers.ts`, `routes/orchestrators.route.ts`, `routes/boards.route.ts`, `routes/board-policy.route.ts`, `routes/loops.route.ts`                                                                                                                                                           | The token-gated orchestrator tool router and its handlers, the user routes for orchestrator records and boards, the policy route, and the loop gate report route. The API section lists every route.                                                                                                                                       |
-| Claude accounts     | `orchestration/claude-accounts.ts`, `domain/claude-launch.ts`, `services/orchestration/claude-login.ts`, `services/orchestration/claude-usage.ts`, `services/orchestration/claude-account-ops.ts`, `adapters/claude-cli.ts`, `adapters/claude-login.ts`, `adapters/claude-usage.ts`, `routes/accounts.route.ts`, `src/server/store/data-dir.ts` | Account registry and config dirs (orchestration); the pure launch builder (domain); the CLI login state machine, the usage poll and cache, and the account operations that compose CLI calls (orchestration); the CLI, login-process and usage adapters; their routes; and the data-dir resolver every layer shares.                       |
-| Markers             | `adapters/markers/parse.ts`, `adapters/markers/scan-decision.ts`, `adapters/markers/pane-view.ts`, `adapters/markers/watcher.ts`                                                                                                                                                                                                                | Pure marker parser, the pure per-tick decision core, the pane-view helpers, and the I/O-shell pane watcher applying one card decision per tick.                                                                                                                                                                                            |
-| Adapters            | `adapters/exec.ts`, `adapters/git.ts`, `adapters/tmux.ts`, `adapters/ttyd.ts`, `adapters/claude-trust.ts`, `adapters/editors.ts`, `adapters/resolve-binary.ts`                                                                                                                                                                                  | The argv-only subprocess chokepoint, the git / tmux / ttyd / claude-trust adapters over it, editor launch, and binary-path resolution.                                                                                                                                                                                                     |
-| Shared              | `shared/types.ts`                                                                                                                                                                                                                                                                                                                               | Pure cross-half contracts; `BoardSnapshot` is both the SSE payload and the on-disk board file.                                                                                                                                                                                                                                             |
-| Frontend entry      | `web/main.tsx`, `web/lib/app-store.ts`, `web/lib/query-client.ts`, `web/lib/http.ts`                                                                                                                                                                                                                                                            | The provider stack (QueryClientProvider, ThemeProvider, RouterProvider and the splash), the app store for cross-module UI state, the query client, and the HTTP client that returns 4xx and 5xx responses as typed data.                                                                                                                   |
-| Frontend routes     | `web/routes/__root.tsx`, `web/routes/board.{-$id}.lazy.tsx`, `web/modules/shell/containers/ShellContainer.tsx`                                                                                                                                                                                                                                  | Hash routes own the URL and its params. The router context gives the query client and the app store to every container. The root route renders the shell view with module views in its slots: the page, the detail panel and the card action dialogs.                                                                                      |
-| Frontend modules    | `web/modules/board/views/BoardView.tsx`, `web/modules/board/containers/BoardContainer.tsx`, `web/modules/detail/containers/DetailPanelContainer.tsx`, `web/modules/shell/components/AppSidebar.tsx`                                                                                                                                             | One folder per feature under `web/modules/`, with the layers views, containers, components, hooks, domain and queries. A module never imports a sibling module. [frontend-architecture.md](standards/frontend-architecture.md) has the layer rules.                                                                                        |
-| Frontend boards     | `web/modules/boards/views/BoardsView.tsx`, `web/modules/boards/containers/BoardsContainer.tsx`, `web/modules/boards/containers/BoardFormContainer.tsx`, `web/modules/shell/components/SidebarBoards.tsx`, `web/modules/shell/components/SidebarDashboards.tsx`                                                                                  | The boards page (list, create, edit, archive, restore) and the sidebar. The sidebar has a Boards section and a Dashboards section (the boards with a main orchestrator). The path key selects the board on the keyed pages (`/boards/<key>`, `/boards/<key>/inbox` and so on). The `board` search parameter selects it on the other pages. |
-| Orchestrator centre | `web/modules/orchestrator/views/OrchestratorEntryView.tsx`, `web/modules/orchestrator/views/CentreView.tsx`, `web/modules/orchestrator/containers/SettingsSheetContainer.tsx`, `web/modules/orchestrator/containers/PolicyContainer.tsx`, `web/modules/orchestrator/containers/OrchestratorsContainer.tsx`                                      | The header entry button opens the command centre page of the board. The settings sheet on the centre has the tabs Policy and Orchestrators. The policy form is the only place where a user changes a board policy.                                                                                                                         |
-| Frontend dashboard  | `web/routes/dashboard.{-$id}.lazy.tsx`, `web/modules/dashboard/views/DashboardView.tsx`, `web/modules/dashboard/containers/use-dashboard-data.ts`                                                                                                                                                                                               | The `/dashboard` page of the selected board. Each section container reads its inputs through `use-dashboard-data.ts` and shows its own loading, error and empty state. The header strip at the top of the page shows the title, the sync state and the stale text.                                                                         |
-| Frontend shared     | `web/components/ui/button.tsx`, `web/components/ui/hooks/use-app-store.ts`, `web/components/ThemeProvider.tsx`, `web/queries/board-snapshot-queries.ts`                                                                                                                                                                                         | The shadcn primitives and app-wide hooks, the shared components, the queries that two or more modules read (the board snapshot and its SSE stream), and the design tokens in `web/styles/tokens.css`.                                                                                                                                      |
+| Layer               | Modules                                                                                                                                                                                                                                                                                                                                         | Role                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bootstrap           | `bootstrap/index.ts`, `bootstrap/cli.ts`, `bootstrap/binary-check.ts`, `bootstrap/config.ts`, `bootstrap/reconcile.ts`                                                                                                                                                                                                                          | CLI entry (`doctor`/`uninstall`/boot), informative startup preflight lines (via `services/infra/preflight.ts`), `StartupError` for config failures, config load/bootstrap, boot session reconcile, then wire routes + SSE and start poller/watcher.                                                                                                                                                                         |
+| Routes              | `routes/index.ts`, `routes/cards.route.ts`, `routes/board.route.ts`, `routes/sse.route.ts`, `routes/loopback.ts`                                                                                                                                                                                                                                | Loopback-gated REST router, the hand-rolled SSE broadcast endpoint, and the loopback request guard.                                                                                                                                                                                                                                                                                                                         |
+| Linear + mapping    | `adapters/poller.ts`, `store/mapping.ts`                                                                                                                                                                                                                                                                                                        | GraphQL poll loop and the pure issue-versus-card reconcile mapping.                                                                                                                                                                                                                                                                                                                                                         |
+| Store               | `store/board.store.ts`, `store/board-repository.ts`                                                                                                                                                                                                                                                                                             | Single-writer card store: serialized mutation queue, atomic persist, snapshot ordering.                                                                                                                                                                                                                                                                                                                                     |
+| Services (start)    | `services/orchestration/start-session.ts`, `services/orchestration/steps.ts`, `services/infra/kickoff.ts`                                                                                                                                                                                                                                       | Start-saga runner, its do/undo steps, and the infra kickoff-prompt builder.                                                                                                                                                                                                                                                                                                                                                 |
+| Services (sessions) | `services/orchestration/cleanup.ts`, `services/infra/config-holder.ts`, `services/domain/workspace-paths.ts`                                                                                                                                                                                                                                    | Teardown saga, the orchestration-config holder (routes read config through it, value-free 400 when unset), and the canonical worktree-path builder.                                                                                                                                                                                                                                                                         |
+| Orchestration       | `services/orchestration/boards.ts`, `services/orchestration/orchestrator-session.ts`, `services/orchestration/orchestrator-groups.ts`, `services/orchestration/loop-progress-reader.ts`, `services/orchestration/ship-flow.ts`                                                                                                                  | Board records and policy, the orchestrator lifecycle with its hidden session card, the group create and start rules for orchestrators, the read-only loop file reader, and the ship flow runner.                                                                                                                                                                                                                            |
+| Supervisor          | `services/orchestration/supervisor-registry.ts`, `services/orchestration/supervisor-pass.ts`, `services/orchestration/supervisor-actions.ts`, `services/orchestration/supervisor-limit.ts`, `services/orchestration/supervisor-handoff.ts`, `adapters/power.ts`                                                                                 | One watcher for each live tmux session, the 60 s pass (keep awake, wake check, PR changes, held group starts, budget stop), the planned actions, the usage limit flow, the handoff, and the keep awake holder.                                                                                                                                                                                                              |
+| Orchestrator API    | `routes/orchestrator.route.ts`, `routes/orchestrator.handlers.ts`, `routes/orchestrators.route.ts`, `routes/boards.route.ts`, `routes/board-policy.route.ts`, `routes/loops.route.ts`                                                                                                                                                           | The token-gated orchestrator tool router and its handlers, the user routes for orchestrator records and boards, the policy route, and the loop gate report route. The API section lists every route.                                                                                                                                                                                                                        |
+| Claude accounts     | `orchestration/claude-accounts.ts`, `domain/claude-launch.ts`, `services/orchestration/claude-login.ts`, `services/orchestration/claude-usage.ts`, `services/orchestration/claude-account-ops.ts`, `adapters/claude-cli.ts`, `adapters/claude-login.ts`, `adapters/claude-usage.ts`, `routes/accounts.route.ts`, `src/server/store/data-dir.ts` | Account registry and config dirs (orchestration); the pure launch builder (domain); the CLI login state machine, the usage poll and cache, and the account operations that compose CLI calls (orchestration); the CLI, login-process and usage adapters; their routes; and the data-dir resolver every layer shares.                                                                                                        |
+| Markers             | `adapters/markers/parse.ts`, `adapters/markers/scan-decision.ts`, `adapters/markers/pane-view.ts`, `adapters/markers/watcher.ts`                                                                                                                                                                                                                | Pure marker parser, the pure per-tick decision core, the pane-view helpers, and the I/O-shell pane watcher applying one card decision per tick.                                                                                                                                                                                                                                                                             |
+| Adapters            | `adapters/exec.ts`, `adapters/git.ts`, `adapters/tmux.ts`, `adapters/ttyd.ts`, `adapters/claude-trust.ts`, `adapters/editors.ts`, `adapters/resolve-binary.ts`                                                                                                                                                                                  | The argv-only subprocess chokepoint, the git / tmux / ttyd / claude-trust adapters over it, editor launch, and binary-path resolution.                                                                                                                                                                                                                                                                                      |
+| Shared              | `shared/types.ts`                                                                                                                                                                                                                                                                                                                               | Pure cross-half contracts; `BoardSnapshot` is both the SSE payload and the on-disk board file.                                                                                                                                                                                                                                                                                                                              |
+| Frontend entry      | `web/main.tsx`, `web/lib/app-store.ts`, `web/lib/query-client.ts`, `web/lib/http.ts`                                                                                                                                                                                                                                                            | The provider stack (QueryClientProvider, ThemeProvider, RouterProvider and the splash), the app store for cross-module UI state, the query client, and the HTTP client that returns 4xx and 5xx responses as typed data.                                                                                                                                                                                                    |
+| Frontend routes     | `web/routes/__root.tsx`, `web/routes/board.{-$id}.lazy.tsx`, `web/modules/shell/containers/ShellContainer.tsx`                                                                                                                                                                                                                                  | Hash routes own the URL and its params. The router context gives the query client and the app store to every container. The root route renders the shell view with module views in its slots: the page, the detail panel and the card action dialogs.                                                                                                                                                                       |
+| Frontend modules    | `web/modules/board/views/BoardView.tsx`, `web/modules/board/containers/BoardContainer.tsx`, `web/modules/detail/containers/DetailPanelContainer.tsx`, `web/modules/shell/components/AppSidebar.tsx`                                                                                                                                             | One folder per feature under `web/modules/`, with the layers views, containers, components, hooks, domain and queries. A module never imports a sibling module. [frontend-architecture.md](standards/frontend-architecture.md) has the layer rules.                                                                                                                                                                         |
+| Frontend boards     | `web/modules/boards/views/BoardsView.tsx`, `web/modules/boards/containers/BoardsContainer.tsx`, `web/modules/boards/containers/BoardFormContainer.tsx`, `web/modules/shell/components/SidebarBoards.tsx`, `web/modules/shell/components/SidebarDashboards.tsx`                                                                                  | The boards page (list, create, edit, archive, restore) and the sidebar. The sidebar has a Boards section and a Dashboards section (the boards with a main orchestrator). The path key selects the board on the keyed pages (`/boards/<key>`, `/boards/<key>/inbox` and so on). The `board` search parameter selects it on the other pages. `/sessions` opens the boards list and `/boards/<key>/sessions` opens that board. |
+| Orchestrator centre | `web/modules/orchestrator/views/OrchestratorEntryView.tsx`, `web/modules/orchestrator/views/CentreView.tsx`, `web/modules/orchestrator/containers/SettingsSheetContainer.tsx`, `web/modules/orchestrator/containers/PolicyContainer.tsx`, `web/modules/orchestrator/containers/OrchestratorsContainer.tsx`                                      | The header entry button opens the command centre page of the board. The settings sheet on the centre has the tabs Policy and Orchestrators. The policy form is the only place where a user changes a board policy.                                                                                                                                                                                                          |
+| Frontend dashboard  | `web/routes/dashboard.{-$id}.lazy.tsx`, `web/modules/dashboard/views/DashboardView.tsx`, `web/modules/dashboard/containers/use-dashboard-data.ts`                                                                                                                                                                                               | The `/dashboard` page of the selected board. Each section container reads its inputs through `use-dashboard-data.ts` and shows its own loading, error and empty state. The header strip at the top of the page shows the title, the sync state and the stale text.                                                                                                                                                          |
+| Frontend shared     | `web/components/ui/button.tsx`, `web/components/ui/hooks/use-app-store.ts`, `web/components/ThemeProvider.tsx`, `web/queries/board-snapshot-queries.ts`                                                                                                                                                                                         | The shadcn primitives and app-wide hooks, the shared components, the queries that two or more modules read (the board snapshot and its SSE stream), and the design tokens in `web/styles/tokens.css`.                                                                                                                                                                                                                       |
 
 ## API
 
@@ -317,14 +317,6 @@ Mount prefix: `/api`.
 | Method | Path          | Auth | Purpose                                                                     |
 | ------ | ------------- | ---- | --------------------------------------------------------------------------- |
 | GET    | `/api/events` | User | Read the card and hook event log, newest first, or the rows after a cursor. |
-
-### `routes/sessions.route.ts`
-
-Mount prefix: `/api`.
-
-| Method | Path            | Auth | Purpose                                                      |
-| ------ | --------------- | ---- | ------------------------------------------------------------ |
-| GET    | `/api/sessions` | User | List the sessions of a board, only the live ones when asked. |
 
 ### `routes/sse.route.ts`
 
@@ -757,8 +749,7 @@ that board. `loops` lists `{ groupId, percent }` for each group card of the boar
 progress is `running`, sorted by `groupId`.
 
 **List routes.** `GET /api/cards?board=&column=&source=&hasSession=` returns `{ cards, total }`
-with the snapshot redaction. `GET /api/sessions?board=&live=` returns `{ sessions }`, and each
-session holds its card id.
+with the snapshot redaction.
 
 **The `board` parameter.** Each collection route takes an optional `board` query parameter. No
 `board` means `LOCAL`, so each request of today returns the same body. A malformed key returns `400`
@@ -1302,8 +1293,7 @@ session, sorted by `createdAt`, carrying `id`, `ordinal`, `lost`, `active`, `cre
 explicit object-literal pick per session, never `{ ...s }`, so `hookToken`, `claudeSessionId`,
 `claudeSessions` and `workspacePath` cannot ride along even if the entity grows. `active` is
 computed in the same pick from `card.activeSessionId`, the wire's single source of truth, so it
-cannot disagree with it; the Sessions page needs it because it lists rows without the card. The
-detail panel's switcher and the cleanup modal's plural copy render only when the array holds two or
+cannot disagree with it. The detail panel's switcher and the cleanup modal's plural copy render only when the array holds two or
 more entries.
 
 ### Session Inheritance
@@ -2466,7 +2456,7 @@ identity-stable across four separate mutations:
   that query makes `takeover` true, which makes `effectiveFullscreen` true, so the guard fails via
   its `!effectiveFullscreen` term. The panel is `100vw` there, so there is no width to trade — this
   is intended behavior, not a defect, and the
-  breakpoint was deliberately not lowered to add one. In DOCKED (Orca) mode the handle is absent
+  breakpoint was deliberately not lowered to add one. In DOCKED mode (unreachable since the Workspace page was removed) the handle is absent
   at every width instead, via the guard's `!docked` term — `takeover` is `false` in docked mode
   regardless of viewport, so `effectiveFullscreen`/`CAROUSEL_QUERY` play no part there. Second, at
   `>=1024px` in the undocked panel the handle DID render but declared no
@@ -2526,7 +2516,7 @@ alongside open/close, fullscreen and resize. The script (changed U2-16) runs the
 fullscreen, resize, close and reopen, 5 route changes on Board, Board to Workspace, card switch,
 session switch, 4 route changes on Workspace, a system theme flip to light and back (CDP media
 emulation, the `8-theme-light` and `8-theme-dark` rows), then Workspace to Board, which it asserts
-as an R-12 panel close and does not measure.
+as an R-12 panel close and does not measure. The script predates the Workspace page removal.
 
 **The handle is also a keyboard-operable `role="separator"`.** It declares
 `aria-orientation="vertical"`, is focusable (`tabIndex={0}`), and reports
@@ -2545,7 +2535,7 @@ not render below `CAROUSEL_QUERY`, for the same reason the touch discussion abov
 forces the panel to `100vw`, so there is no width left to trade — a deliberate non-fix, not a gap
 to close.
 
-**Docked (Orca) mode is a SECOND style-only derivation of the same `<aside>`, re-deriving `PANEL-03`
+**Docked mode is a SECOND style-only derivation of the same `<aside>`, re-deriving `PANEL-03`
 for a second surface.** `position` stays `fixed` in BOTH modes; only the `top`, `left`, `width`, `height`,
 `border-l`, `translate` and `transition` classes branch on the `docked` prop, the exact same category of change
 the fullscreen precedent above already proved remount-free; a `position` mode switch was deliberately
@@ -2554,8 +2544,8 @@ close `X`, and the fullscreen toggle are conditionally UNMOUNTED when docked —
 are stateless, decorative siblings outside the iframe subtree, never the terminal itself; the
 docked-and-empty-selection state (centered "Select a ticket" copy) renders only when
 `docked && card == null`, so the card-present subtree — and the terminal's position in it — is
-identical in both modes. The Orca side nav (`web/modules/workspace/`) never renders a terminal: it holds
-zero imports of `TerminalRegion` or `<iframe>`, is pure navigation chrome, and drives
+identical in both modes. No page reaches docked mode since the Workspace page was removed (`docked` is `false`); the code stays until a follow-up removes it. The side nav of that page (`web/modules/workspace/`, removed) never rendered a terminal: it held
+zero imports of `TerminalRegion` or `<iframe>`, was pure navigation chrome, and drove
 the SAME `selectedCardId` the board/inbox views already write to. The ensure-terminal spawn guard
 below stays a single ref BY CONSTRUCTION: one `selectedCardId`, one hoisted panel, means "the same
 card open in both views at once" is structurally impossible, so no per-card guard `Map` is needed — a
@@ -2656,7 +2646,7 @@ a second one on the card face.
 
 **The session row's render gate is an OR, not the switcher's own `sessionSummaries != null`.**
 The switcher renders only when `sessionSummaries` holds two or more entries. At N=1 the array is
-present (LOCAL-39, for the Sessions page) but the switcher stays hidden, and N=1 is exactly the
+present (LOCAL-39) but the switcher stays hidden, and N=1 is exactly the
 moment a person needs to create session 2. The row now renders when EITHER the
 switcher has something to show OR the button has a reason to exist, so the affordance is reachable
 at N=1 without the switcher's own gate widening.
@@ -4969,7 +4959,7 @@ Each mark names an integration and nothing else, with one case to know: the Gran
 - **Keyboard focus is an outline, never a box-shadow.** The outline focus classes of `components/ui` are the single definition, and `src/web/components/ui/focus-outline.test.ts` enforces them. If an `overflow: hidden` ancestor clips the outline offset, set the offset to 0 at that call site. Do not use a box-shadow, because it looks the same as the selection ring. Lint: `retiredLiteralBan` fails the accent focus shadow value in all of `src`; `designLiteralBan` fails an arbitrary shadow class outside `components/ui`; the style ban fails a `style` prop outside `components/ui`, `modules/*/components/dnd/` and the viewer.
 - **One float shadow token.** `--shadow-float` in `src/web/styles/tokens.css` is the only float shadow. The light block declares it again with a lighter value (decision U1-07). Lint: `retiredLiteralBan` fails the float shadow value in all of `src`; `designLiteralBan` fails an arbitrary shadow class (`shadow-[`) outside `components/ui`. Use `shadow-md`, `shadow-lg` or `shadow-(--shadow-float)`.
 - **One wordmark definition.** `src/web/components/Wordmark.tsx` is the only place that writes the type treatment of the DISPATCH wordmark. Lint: `retiredLiteralBan` fails a `fontWeight` property of 800 in all of `src`; `designLiteralBan` fails `font-extrabold` and `font-[800]` outside `components/ui`.
-- **The looser reading rhythm never enters a board surface.** The `.reading-surface` class lifts `--line-body` from its global value to 1.6 (`src/web/styles/tokens.css`). A board card keeps the global value, so card density does not change. A board file may read `var(--line-body)`, because the card title uses it. Lint: `boardZoneBan`, on `src/web/modules/board/**` only, fails the `reading-surface` class name and a `--line-body` declaration (a `--line-body:` class string or a `"--line-body"` object key). Other modules may use `.reading-surface` (`ModalBody.tsx`, `PanelFrame.tsx`, `BulkConfirmModal.tsx`).
+- **The looser reading rhythm never enters a board surface.** The `.reading-surface` class lifts `--line-body` from its global value to 1.6 (`src/web/styles/tokens.css`). A board card keeps the global value, so card density does not change. A board file may read `var(--line-body)`, because the card title uses it. Lint: `boardZoneBan`, on `src/web/modules/board/**` only, fails the `reading-surface` class name and a `--line-body` declaration (a `--line-body:` class string or a `"--line-body"` object key). Other modules may use `.reading-surface` (`ModalBody.tsx`, `PanelFrame.tsx`).
 
 The lint rules read code, not comments. The old line scan also matched a comment. The invariant gate fails on a retired ID string in this doc (EXTRA), so this record names each check by its description.
 
@@ -5076,7 +5066,7 @@ the columns exactly as before, so the detail panel's PANEL-03 no-remount rule is
 slot list is sidebar, `banner`, `header` per page, `content`, `detail`. The sync strip and its mode
 control are gone: pages are chosen by hash route, parsed by `parseRoute` in `src/shared/route.ts`
 and owned by TanStack Router on hash history (`src/web/routes/`); `src/web/main.tsx` remembers the last route under
-`dsp.route` and maps the legacy `dsp.view` value once on first load. The sidebar dimensions
+`dsp.route`. An unknown or old hash opens the board; `initialHash` takes the current hash, then the stored route, then the board. The sidebar dimensions
 (`--nav-width`, `--nav-width-collapsed`), the page header height (`--page-header-height`), the
 seven `--src-*` source colors and the "active sidebar row" accent job are ratified in
 `docs/standards/design-contract.md`.
@@ -5093,7 +5083,7 @@ seven `--src-*` source colors and the "active sidebar row" accent job are ratifi
 sets `--nav-current` (the live sidebar width: `var(--nav-width)`, `var(--nav-width-collapsed)`, or `0px`
 when the sidebar becomes a phone sheet) with classes on its root element. The hook
 `usePublishedHeight` in `hooks/use-published-height.ts` sets `--chrome-top` (the measured height of
-the top bar, banner and page header) on the same element with `style.setProperty`. The docked (Orca) `PanelFrame.tsx` reads
+the top bar, banner and page header) on the same element with `style.setProperty`. The docked (Orca) `PanelFrame.tsx`, unreachable until a follow-up removes it, reads
 both: `top: var(--chrome-top)`, `left: calc(var(--nav-current, 0px) + var(--orca-nav-width))` and
 `width: calc(100% - var(--nav-current, 0px) - var(--orca-nav-width))`, so collapsing the sidebar
 shifts the docked panel by style values alone and never remounts the terminal iframe. Measured at
@@ -5103,8 +5093,8 @@ shifts the docked panel by style values alone and never remounts the terminal if
 `components/BottomBar.tsx` sits in flow at the end of the content column, so page content never goes
 under it. The same hook sets `--bottom-bar-height` on `document.documentElement`: 64px when the bar
 shows, 0px when it hides on scroll down, and unset on desktop. The root is the target because toasts
-and sheets portal to the body. The toaster, `SelectionBar.tsx` and `SessionsBulkBar.tsx` add the
-variable to their bottom offset. At 390px, the spec tests/visual/bottom-bar.spec.ts checks three
+and sheets portal to the body. The toaster and `SelectionBar.tsx` add the variable to their bottom
+offset. At 390px, the spec tests/visual/bottom-bar.spec.ts checks three
 behaviours: the toaster and `SelectionBar.tsx` clear the bar through the variable; the bar hides on
 scroll down, shows on scroll up, and under reduced motion stays shown with no transition; and on a
 touch device the fields of the create ticket dialog and the command palette use 16px text or more.
@@ -5133,9 +5123,8 @@ the sidebar is collapsed the text stays in the DOM with the `sr-only` class so t
 `textContent` is always the complete string.
 The status precedence itself is unchanged and homed by `SYNC-04` above. The footer, top to bottom:
 sync status, the account usage chip (always compact at this width), New ticket (an outline `Button`
-with a `--surface-card` resting fill that lifts to `--surface-card-hover`), the Activity drawer toggle
-(`id="activity-toggle"`, the drawer's focus-return target) beside the collapse toggle, and the
-Settings row.
+with a `--surface-card` resting fill that lifts to `--surface-card-hover`), the collapse toggle, and
+the Settings row.
 
 **Responsive rule.** At or below 1023px (the breakpoint the board carousel and
 the detail-panel takeover already share) the sidebar renders collapsed regardless of the
@@ -5151,7 +5140,7 @@ scrolling strip above the content (`web/modules/settings/views/SettingsView.tsx`
 **Retired with the strip.** The strip cascade invariant (its two token cascades, formerly the
 eighteenth NEW-series ID) and its file-scoped check were deleted together with the strip component, and `FROZEN_COUNT` in `scripts/check-invariants.mjs`
 moved from 150 to 149 in the same commit. The three strip tokens (height, padding, grid
-columns) are gone; the banner, the drawer header and the sidebar identity row
+columns) are gone; the banner and the sidebar identity row
 read `--page-header-height` (52px, stepped to 44px below 768px for the same card-row reason the
 strip once recorded). The strip's zone grid, its width-dependent template, the narrow-width
 wordmark removal and the view-switch rendering (Candidate C and its retune) are history, recorded
@@ -5164,17 +5153,17 @@ palette, n opens New ticket, ? opens the cheat sheet, b opens the palette with t
 (j, k, h, l move the focused card, 1 to 7 move it to a column through the board's own move path;
 Enter stays with the focused card, a role button that opens itself, as the resolver leaves Enter
 to activatable targets);
-`INBOX_SHORTCUTS`; and `SESSIONS_SHORTCUTS`. The inert rule: a plain key never fires while the user types in an input, textarea, select or
+and `INBOX_SHORTCUTS`. The inert rule: a plain key never fires while the user types in an input, textarea, select or
 contentEditable, with a modifier held, outside the owning view, or while a Modal or a row menu is
 open; a meta binding fires only with Cmd or Ctrl and never with Shift. The global keys are also
-inert while the Activity drawer or the nav sheet is open and before setup finishes, and the board
+inert while the nav sheet is open and before setup finishes, and the board
 keys are inert while the undocked detail panel is open. Closing the palette, the cheat sheet or
 New ticket returns focus to the element that had it, unless a palette command ran.
 The palette (`modules/shell/components/CommandPalette.tsx`) is a shadcn `Dialog` over `cmdk`, so its
 Escape and focus trap come from Radix; its commands come from `buildCommands` in
 `src/web/modules/shell/domain/commands.ts`, which calls the handlers that `ShellContainer.tsx` passes in. The cheat sheet renders the four tables, so a binding
 cannot ship without its row. The sidebar sits above the detail panel scrim, and a change to any
-page other than Workspace closes the undocked panel, so one sidebar click navigates.
+page closes the panel, so one sidebar click navigates.
 
 **Flow page.** `modules/flow/containers/FlowContainer.tsx` draws the work pipeline on the client only, from the
 board stream (`items`, `cards`, `enabledSources`, `syncedAt`, `pollIntervalMs`,
@@ -5965,7 +5954,7 @@ switch-sockets` (a pid-scoped, `ESTABLISHED`-only, bounded poll-to-zero proof th
   iframe expando, and the dispatch-side upstream socket's LOCAL ephemeral port — never the dispatch
   server's own pid, which stays constant across a real remount and is demonstrated dead by its own
   `--dead-signal-demo` mode). Covers all five forbidden mount events plus the newly-named
-  card-switch-while-open case, and the one legitimate re-point (session switch). Since U2-16 it also runs a route change loop on Board and Workspace and a system theme flip.
+  card-switch-while-open case, and the one legitimate re-point (session switch). Since U2-16 it also runs a route change loop on Board and Workspace (a page since removed) and a system theme flip.
 - **`node scripts/panel-98.mjs`** (`npm run panel-98`, Phase 98, PRLINK-01/02/03/06) - a CDP
   structural/DOM instrument, deliberately OUTSIDE `npm run check` (it boots a real sandboxed
   dispatch server and requires the live `com.dispatch.app` service stopped for its duration). Five
@@ -6631,8 +6620,9 @@ a merge of `origin/main` with no edit, and records the merged commit as `checked
 runs on that commit, the push uses the refspec `<checked>:refs/heads/<name>`, and the merge
 passes gh's match head commit option with it; a resumed flow whose HEAD moved stops. Each branch
 stores `passed`, the commit on which its check last passed. A new flow copies `passed` from the
-previous flow of the same card, repository and branch name. When `checked` equals `passed`, the
-flow does not run the check command, sets `checkSkipped` to true and records one
+previous flow of the same card, repository and branch name. The flow does not run the check command
+when the tree of `checked` equals the tree of `passed` and the worktree has no change. A failed git
+read runs the check. A skipped check sets `checkSkipped` to true and records one
 `ship_check_skipped` group state (loop cards only). The diff scope check and the prose check still
 run. Each gh
 call names the repository of the `origin` remote (`repo` on the flow; null unless the host is
@@ -6644,7 +6634,8 @@ When `gh pr create` fails with `already exists` and a `/pull/<n>` URL, the flow 
 closed PR is not adopted, and a new PR opens. The admin merge retry runs only when every violation clause of the merge error (lines split on
 sentence ends, commas and semicolons) matches the signature rule wording `must have verified
 signatures`.
-The flow never rebases and never edits code. Every git and gh call has a time limit (120 s, 300 s
+The flow does not rebase. It edits files only in a docs-only merge. Every git and gh call has a
+time limit (120 s, 300 s
 for fetch and push, 30 min for the check command) and a 64 MiB output buffer, and the diffs run
 with fixed color, prefix and path settings. The check command gets `DISPATCH_CHECK_WAIT_SECONDS=5400`.
 Its 30 min stop while the slot gate prints its waiting line and start again at the gate's
@@ -6658,11 +6649,21 @@ reason. The runner reads the board policy before each step
 and poll: `none` stops the flow and `open_prs` stops the merges. The runner keeps its board key,
 and a card that is gone stops it with no write; unwind refuses a group whose flow runs with 409
 `ship-running`. A thrown runner is stored as stopped. A refused move to Done after the last merge
-keeps the flow done and raises a `ship_failure` item for a manual move. A conflict, a failed check or an identity mismatch stops the flow
+keeps the flow done and raises a `ship_failure` item for a manual move. A conflict, a refused
+session send, the wait cap, the send cap, a failed check or an identity mismatch stops the flow
 and raises one `ship_failure` decision item. The identity stop compares the author and message of
 the new `origin/main` tip with the `git config` identity that the flow read at its start. One flow
 runs on a board at a time. A flow in the state `running` is started again at boot by
-`resumeShipFlows`, and a stopped flow is replaced by a new `start_ship` call.
+`resumeShipFlows`, and a stopped flow is replaced by a new `start_ship` call. When the merge of
+`origin/main` conflicts only in Markdown files, the flow merges each file with the lines of main
+first and the lines of the branch after them. Then it makes a merge commit. For any other
+conflict, the flow aborts the merge. It sends one merge instruction to the session of the card
+through the send path, with the ship flow exception. Then it waits in `merging_main`. The wait
+ends when the branch holds that main commit, the worktree is clean and the card is in Agent done.
+The wait is 60 minutes for each send, and a branch gets 2 sends. A resumed flow counts one send.
+It waits when the worktree is dirty. After a failed `gh pr merge`, the flow reads the PR state and
+head once. A PR that is `MERGED` on the checked commit counts as merged. For any other answer, the
+first line of the merge error is the stop reason.
 
 **Ship gate for a group with no loop progress.** A group with no loop progress has no
 `loopProgress` or zero units (decision record D-10). `assertShippable` refuses 409
@@ -6676,7 +6677,9 @@ reads the identity or writes, `assertAheadAndClean` resolves the base once. The 
 `refs/remotes/origin/<base>` when that ref exists, else `refs/heads/<base>`. It answers 409
 `unknown-base` for a base that is empty, starts with a hyphen, is not a plain branch name or resolves to neither ref. Each branch must be ahead of that ref (409
 `branch-not-ahead`) and the worktree must be clean (409 `worktree-dirty`). A failed git call of
-these two checks answers 409 `no-workspace`. A group with loop progress keeps the D-8 rules.
+these two checks answers 409 `no-workspace`. A group with loop progress keeps the D-8 rules. A card
+that is not a group loop also passes the column check in Needs input when its loop engine is closed
+and its loop completion is complete. The ahead and clean checks still run for that card.
 
 **MCP server.** `dispatch mcp` serves the 37 tools over stdio. `bootstrap/cli.ts` reads and checks
 `DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and
@@ -6776,7 +6779,7 @@ record is `stopped`, and with 409 `orchestrator-session-live` while the tmux ses
 open. At boot `settleTransientRecords` moves each `starting` or `stopping` record to `running` while its
 hidden tmux session is open (the supervisor then classifies the session), else to `stopped` with its
 token revoked. The session is probed by `card.tmuxSession`, else by the name the start saga gives it
-(`dsp-<branch or identifier>`), because a first start writes `tmuxSession` only once claude is ready. The supervisor applies the effective policy of the owner (`ownerPolicy`) to each loop:
+(`dsp-<branch or identifier>`), because a first start writes `tmuxSession` only once claude is ready. After the server listens, `relaunchStaleTokenSessions` reads `DISPATCH_ORCHESTRATOR_TOKEN` from the tmux environment of each open orchestrator session where claude runs. When that token is missing, unknown, revoked or of another orchestrator, it presses `Escape`, types `/exit`, waits for the shell prompt and relaunches claude through `runClaude`, which gives the shell a fresh token and resumes the recorded conversation. The MCP server reads its token only when claude starts, so a running claude cannot get a fresh token without a relaunch. Each relaunch writes one `supervisor_action` event with `action: "orchestrator_relaunch"`, the `reason` and the `result`. A session at its shell prompt makes no tool call and stays as it is. The supervisor applies the effective policy of the owner (`ownerPolicy`) to each loop:
 the budget per group, the cap on running loops and the usage limit.
 
 **Launch limits.** When the card is hidden, `buildLaunch` in `steps.ts` adds the arguments of

@@ -17,6 +17,7 @@ import { boardRepository as store } from "../../store/board-repository.js";
 import {
   ConflictError,
   ForbiddenError,
+  HttpError,
   ValidationError,
 } from "../domain/errors.js";
 import { checkShipRights } from "../domain/orchestrator-policy.js";
@@ -41,15 +42,20 @@ import { moveCard } from "./card-move.js";
 import { createDecisionItem } from "./decision-items.js";
 import { recordGroupState } from "./group-state-events.js";
 import { enforce } from "./orchestrator-groups.js";
+import { sendInput } from "./orchestrator-sessions.js";
 
 export const shipTools: {
   run: typeof run;
+  sendInput: typeof sendInput;
   pollMs: number;
   headPollMs: number;
+  sessionMergeWaitMs: number;
 } = {
   run,
+  sendInput,
   pollMs: 30_000,
   headPollMs: 2_000,
+  sessionMergeWaitMs: 60 * 60_000,
 };
 
 const DISPATCH_PACKAGE = "@theyashgupta/dispatch";
@@ -66,6 +72,8 @@ const NETWORK_TIMEOUT_MS = 300_000;
 const MAX_BUFFER = 64 * 1024 * 1024;
 const MAX_POLL_FAILURES = 5;
 const HEAD_READS = 5;
+const MAX_SESSION_ROUNDS = 2;
+const MAX_LISTED_FILES = 10;
 const PLAIN_BASE_RE = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
 const FINISHED_STATUSES = new Set(["built, awaiting /ship", "shipped"]);
 const RESERVED_BRANCHES = new Set(["main", "master", "HEAD"]);
@@ -107,6 +115,7 @@ interface Runner {
   worktree: string;
   checkCommand: string | null;
   resumed: boolean;
+  sessionRounds: Map<string, number>;
 }
 
 class ShipStop extends Error {}
@@ -323,6 +332,20 @@ function isGroupLoop(
 }
 
 /**
+ * True for a card in Agent done, or in Needs input with a closed and complete loop.
+ *
+ * @remarks A lost or frozen session moves a finished card to Needs input after its DONE.
+ */
+function finishedColumn(card: Card): boolean {
+  return (
+    card.column === "agent_done" ||
+    (card.column === "needs_input" &&
+      card.loopProgress?.engine?.closed === true &&
+      card.loopProgress.completion === "complete")
+  );
+}
+
+/**
  * Get the `pr` detail of an already-shipped refusal of a Done card, or no detail when the card carries no PR number.
  *
  * @remarks The ship flow is read first, because Done cleanup clears the detected `prs` of the card.
@@ -350,9 +373,10 @@ function assertNoRunningFlow(boardKey: BoardKey): void {
  * Check the ship preconditions of a group card or a single ticket card in their fixed order, with no git call and no write.
  *
  * @remarks A card whose engine is active and not closed is refused whatever its unit count. A group
- * with no loop progress and every single ticket card need the Agent done column, and a refusal is
- * a typed error, so a refused call stores no flow. A ticket card with no launch passes only with a
- * session branch, and never as a group member or a review card, whose branch is not its own work.
+ * with no loop progress and every single ticket card need the Agent done column, or Needs input
+ * with a closed engine and complete loop. A refusal is a typed error, so a refused call stores no
+ * flow. A ticket card with no launch passes only with a session branch, and never as a group
+ * member or a review card, whose branch is not its own work.
  */
 function assertShippable(
   caller: OrchestratorIdentity,
@@ -385,7 +409,7 @@ function assertShippable(
   if (!isGroupLoop(card) && card.column === "done") {
     throw new ConflictError("already-shipped", donePr(card));
   }
-  if (!isGroupLoop(card) && card.column !== "agent_done") {
+  if (!isGroupLoop(card) && !finishedColumn(card)) {
     throw new ConflictError("card-not-done");
   }
   assertShipBranches(
@@ -553,6 +577,7 @@ export async function startShip(
       flow: structuredClone(flow),
       ...target,
       resumed: false,
+      sessionRounds: new Map(),
     });
     return flow;
   } finally {
@@ -589,9 +614,16 @@ function launch(r: Runner): void {
   });
 }
 
+/** Read the runner's card; a card that is gone throws so the runner stops with no write. */
+function liveCard(r: Runner): Card {
+  const card = store.getCard(r.cardId);
+  if (card === undefined) throw new CardGone();
+  return card;
+}
+
 /** Store the flow on its card; a card that is gone throws so the runner stops with no write. */
 async function persist(r: Runner): Promise<void> {
-  if (store.getCard(r.cardId) === undefined) throw new CardGone();
+  liveCard(r);
   await store.setShipFlow(r.cardId, r.flow);
 }
 
@@ -607,33 +639,219 @@ function pause(): Promise<void> {
  * that is gone stops the runner.
  */
 function applyShipRights(r: Runner): void {
-  if (store.getCard(r.cardId) === undefined) throw new CardGone();
+  liveCard(r);
   const rights = store.getBoard(r.boardKey)?.policy.shipRights ?? "none";
   if (rights === "none") throw new ShipStop("ship rights were removed");
   if (rights !== "merge") r.flow.rights = "open_prs";
 }
 
 /**
- * Check out the branch, record its tip, merge origin/main and record the merged commit.
+ * Merge the conflicted Markdown files with the lines of main first, then commit the merge.
  *
- * @remarks A conflict aborts the merge. The recorded commit is the one the check runs on and the
- * one that is pushed and merged.
+ * @remarks Returns false, and changes nothing, unless every path ends in `.md` and holds the index
+ * stages 1, 2 and 3 as regular files. A failed write aborts the merge and returns false, so the
+ * session path takes over.
  */
-async function mergeMain(r: Runner, branch: ShipBranch): Promise<void> {
-  if ((await exec(r, "git", ["status", "--porcelain"])) !== "") {
-    throw new ShipStop("worktree has uncommitted changes");
-  }
-  await exec(r, "git", ["fetch", "origin"], NETWORK_TIMEOUT_MS);
-  await exec(r, "git", ["checkout", "--no-guess", branch.name, END_OF_OPTIONS]);
-  if (branch.tip === null) {
-    branch.tip = await exec(r, "git", ["rev-parse", "HEAD"]);
-    await persist(r);
+async function mergeDocsConflict(r: Runner, files: string[]): Promise<boolean> {
+  if (!files.every((f) => f.endsWith(".md"))) return false;
+  const conflicts: {
+    file: string;
+    base: string;
+    ours: string;
+    main: string;
+  }[] = [];
+  for (const file of files) {
+    const lines = (
+      await exec(r, "git", [
+        "-c",
+        "core.quotePath=false",
+        "--literal-pathspecs",
+        "ls-files",
+        "-u",
+        END_OF_OPTIONS,
+        file,
+      ])
+    ).split("\n");
+    const oids = new Map<string, string>();
+    for (const line of lines) {
+      const [meta = "", name] = line.split("\t");
+      const [mode, oid = "", stage = ""] = meta.split(" ");
+      if (name === file && mode === "100644") oids.set(stage, oid);
+    }
+    const base = oids.get("1");
+    const ours = oids.get("2");
+    const main = oids.get("3");
+    if (lines.length !== 3 || !base || !ours || !main) return false;
+    conflicts.push({ file, base, ours, main });
   }
   try {
-    await exec(r, "git", ["merge", "--no-edit", "origin/main"]);
-  } catch (err) {
-    await exec(r, "git", ["merge", "--abort"]).catch(() => undefined);
-    throw new ShipStop(firstLine(err));
+    for (const { file, base, ours, main } of conflicts) {
+      const merged = await shipTools.run(
+        "git",
+        ["merge-file", "-p", "--union", "--object-id", main, base, ours],
+        callOptions(r.worktree),
+      );
+      fs.writeFileSync(path.join(r.worktree, file), merged.stdout);
+      await exec(r, "git", ["add", END_OF_OPTIONS, file]);
+    }
+    await exec(r, "git", ["commit", "--no-edit"]);
+  } catch {
+    await abortMerge(r);
+    return false;
+  }
+  return true;
+}
+
+async function abortMerge(r: Runner): Promise<void> {
+  await exec(r, "git", ["merge", "--abort"]).catch(() => undefined);
+}
+
+function listFiles(files: string[]): string {
+  const shown = files.slice(0, MAX_LISTED_FILES).join(", ");
+  return files.length > MAX_LISTED_FILES
+    ? `${shown} and ${files.length - MAX_LISTED_FILES} more`
+    : shown;
+}
+
+/**
+ * Send the card's session the merge instruction for a conflict the flow cannot merge itself.
+ *
+ * @remarks A branch gets 2 sends in one flow, and the third conflict stops the flow. A refused send
+ * stops the flow with the refusal code of the typed error. The ship flow send skips only the
+ * ship-running refusal.
+ */
+async function askSessionToMerge(
+  r: Runner,
+  branch: ShipBranch,
+  files: string[],
+): Promise<void> {
+  const rounds = r.sessionRounds.get(branch.name) ?? 0;
+  if (rounds >= MAX_SESSION_ROUNDS) {
+    throw new ShipStop(
+      `merge conflict in ${listFiles(files)}; the session did not settle it after ${MAX_SESSION_ROUNDS} sends`,
+    );
+  }
+  const card = liveCard(r);
+  r.sessionRounds.set(branch.name, rounds + 1);
+  const listed = listFiles(files);
+  const text = `Ship flow: the merge of origin/main into ${branch.name} conflicts in ${listed}. In ${r.worktree}, merge origin/main into ${branch.name}, resolve every conflict, run the scoped checks, commit the merge, do not push, then report DONE.`;
+  try {
+    await shipTools.sendInput(
+      { boardKey: r.boardKey, orchestratorId: r.flow.orchestratorId },
+      card,
+      text,
+      { fromShipFlow: true },
+    );
+  } catch (sendErr) {
+    throw new ShipStop(
+      `merge conflict in ${listed}; session send refused: ${sendErr instanceof HttpError ? sendErr.code : firstLine(sendErr)}`,
+    );
+  }
+}
+
+/** Tell if the branch holds the main commit, the worktree is clean and the card is in Agent done. */
+async function sessionMerged(
+  r: Runner,
+  branch: ShipBranch,
+  main: string,
+): Promise<boolean> {
+  const holdsMain = await exec(r, "git", [
+    "merge-base",
+    "--is-ancestor",
+    main,
+    `refs/heads/${branch.name}`,
+  ]).then(
+    () => true,
+    () => false,
+  );
+  const clean = await exec(r, "git", [
+    "--no-optional-locks",
+    "status",
+    "--porcelain",
+  ]).then(
+    (out) => out === "",
+    () => false,
+  );
+  return holdsMain && clean && liveCard(r).column === "agent_done";
+}
+
+/** Poll until the session has merged `main` into the branch; stop the flow after the wait cap. */
+async function waitForSessionMerge(
+  r: Runner,
+  branch: ShipBranch,
+  main: string,
+): Promise<void> {
+  const deadline = Date.now() + shipTools.sessionMergeWaitMs;
+  for (;;) {
+    applyShipRights(r);
+    if (await sessionMerged(r, branch, main)) return;
+    if (Date.now() >= deadline) {
+      throw new ShipStop(
+        "the session did not merge origin/main within 60 minutes",
+      );
+    }
+    await pause();
+  }
+}
+
+/**
+ * Check out the branch, record its tip, merge origin/main and record the merged commit.
+ *
+ * @remarks A conflict only in Markdown files is merged by the flow; any other conflict aborts the
+ * merge and goes to the card's session, and the step runs again from its start once the session
+ * has merged. A resumed flow at `merging_main` with a dirty worktree waits for the session in place
+ * of stopping. The recorded commit is the one the check runs on and the one that is pushed and merged.
+ */
+async function mergeMain(r: Runner, branch: ShipBranch): Promise<void> {
+  for (;;) {
+    if ((await exec(r, "git", ["status", "--porcelain"])) !== "") {
+      if (!r.resumed || branch.state !== "merging_main") {
+        throw new ShipStop("worktree has uncommitted changes");
+      }
+      await waitForSessionMerge(
+        r,
+        branch,
+        await exec(r, "git", ["rev-parse", "origin/main"]),
+      );
+      continue;
+    }
+    await exec(r, "git", ["fetch", "origin"], NETWORK_TIMEOUT_MS);
+    await exec(r, "git", [
+      "checkout",
+      "--no-guess",
+      branch.name,
+      END_OF_OPTIONS,
+    ]);
+    if (branch.tip === null) {
+      branch.tip = await exec(r, "git", ["rev-parse", "HEAD"]);
+      await persist(r);
+    }
+    const main = await exec(r, "git", ["rev-parse", "origin/main"]);
+    try {
+      await exec(r, "git", ["merge", "--no-edit", "origin/main"]);
+      break;
+    } catch (err) {
+      let unmerged: string;
+      try {
+        unmerged = await exec(r, "git", [
+          ...DIFF,
+          "--name-only",
+          "--diff-filter=U",
+        ]);
+      } catch (listErr) {
+        await abortMerge(r);
+        throw listErr;
+      }
+      if (unmerged === "") {
+        await abortMerge(r);
+        throw new ShipStop(firstLine(err));
+      }
+      const files = unmerged.split("\n");
+      if (await mergeDocsConflict(r, files)) break;
+      await abortMerge(r);
+      await askSessionToMerge(r, branch, files);
+      await waitForSessionMerge(r, branch, main);
+    }
   }
   branch.checked = await exec(r, "git", ["rev-parse", "HEAD"]);
   await persist(r);
@@ -674,11 +892,38 @@ function isDispatchRepo(worktree: string): boolean {
 }
 
 /**
+ * Tell if HEAD has the tree of the passed commit and the worktree has no change.
+ *
+ * @remarks A failed git read gives false, so an error never skips the check.
+ */
+async function unchangedTree(r: Runner, branch: ShipBranch): Promise<boolean> {
+  if (branch.passed == null) return false;
+  const tree = (rev: string) =>
+    exec(r, "git", ["rev-parse", "--verify", "--quiet", `${rev}^{tree}`]);
+  try {
+    const [passed, head] = await Promise.all([
+      tree(branch.passed),
+      tree("HEAD"),
+    ]);
+    if (passed === "" || passed !== head) return false;
+    return (
+      (await exec(r, "git", [
+        "--no-optional-locks",
+        "status",
+        "--porcelain",
+      ])) === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Check that the diff holds only this branch, the prose rule and the repository check command.
  *
  * @remarks The branch's own files run from the previous branch's stored tip to this branch's tip
  * before the merge. Only the first branch, which has no previous tip, uses its merge base. A retry
- * on the commit that already passed skips only the check command.
+ * on the tree that already passed, with a clean worktree, skips only the check command.
  */
 async function check(r: Runner, branch: ShipBranch): Promise<void> {
   const tip = branch.tip ?? (await exec(r, "git", ["rev-parse", "HEAD"]));
@@ -711,7 +956,7 @@ async function check(r: Runner, branch: ShipBranch): Promise<void> {
   }
   const argv = r.checkCommand.split(/\s+/).filter((a) => a !== "");
   if (argv.length === 0) return;
-  if (branch.passed != null && branch.passed === branch.checked) {
+  if (await unchangedTree(r, branch)) {
     branch.checkSkipped = true;
     await persist(r);
     recordGroupState(
@@ -909,7 +1154,8 @@ async function waitChecks(r: Runner, branch: ShipBranch): Promise<void> {
  * Squash merge the PR, once more as admin when the signature rule blocks it.
  *
  * @remarks The merge names the checked commit as the head it must match, so a push to the PR
- * branch after the check is never merged.
+ * branch after the check is never merged. A failed merge call counts as merged when one re-read
+ * shows the PR `MERGED` on the checked commit, as after a call that errored while the merge landed.
  */
 async function mergePr(r: Runner, branch: ShipBranch): Promise<void> {
   if (branch.checked === null)
@@ -930,14 +1176,31 @@ async function mergePr(r: Runner, branch: ShipBranch): Promise<void> {
     await exec(r, "gh", ghArgs(r, args));
   } catch (err) {
     const stderr = (err as { stderr?: string }).stderr ?? "";
-    if (!isSignatureBlock(stderr)) throw new ShipStop(firstLine(err));
+    if (!isSignatureBlock(stderr)) {
+      if (await mergedOnChecked(r, branch)) return;
+      throw new ShipStop(firstLine(err));
+    }
     try {
       await exec(r, "gh", ghArgs(r, [...args, "--admin"]));
     } catch (again) {
-      throw new ShipStop(firstLine(again));
+      if (!(await mergedOnChecked(r, branch)))
+        throw new ShipStop(firstLine(again));
     }
     branch.admin = true;
     await persist(r);
+  }
+}
+
+/** Read the PR once and answer whether it is `MERGED` on the checked commit; any read failure answers false. */
+async function mergedOnChecked(
+  r: Runner,
+  branch: ShipBranch,
+): Promise<boolean> {
+  try {
+    const view = await viewPr(r, branch.pr!, "state,headRefOid");
+    return view.state === "MERGED" && view.headRefOid === branch.checked;
+  } catch {
+    return false;
   }
 }
 
@@ -1004,7 +1267,7 @@ async function stop(
   state: ShipBranchState,
   reason: string,
 ): Promise<void> {
-  if (store.getCard(r.cardId) === undefined) throw new CardGone();
+  liveCard(r);
   branch.state = "failed";
   Object.assign(r.flow, {
     state: "stopped",
@@ -1131,6 +1394,11 @@ export function resumeShipFlows(): void {
         flow: structuredClone(flow),
         ...shipTarget(card, flow.repository),
         resumed: true,
+        sessionRounds: new Map(
+          flow.branches
+            .filter((b) => b.state === "merging_main")
+            .map((b) => [b.name, 1]),
+        ),
       };
       if (card.workspacePath) {
         launch(r);
