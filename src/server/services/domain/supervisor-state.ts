@@ -10,6 +10,7 @@ import {
   parseLimitSurface,
   type LimitSurface,
 } from "./limit-surface.js";
+import { DONE_MARKER, isPromiseLine } from "./loop-completion.js";
 
 export type PromptKind = "dangerous_delete" | "peer_message" | "other";
 
@@ -34,6 +35,7 @@ export interface DetectInput {
   engineSessionId: string | null;
   completion: LoopProgress["completion"] | null;
   engineOpen: boolean;
+  slug: string | null;
   transcript: { size: number; lastAssistantText: string | null } | null;
   memory: DetectMemory;
 }
@@ -79,15 +81,12 @@ const MODE_FOOTER = /^\s*⏵/;
 const COMPACTED_IDLE = /compacted while idle/i;
 const NEEDS_INPUT_MARKER = /^\s*(?:⏺\s*)?DISPATCH_STATUS:\s*NEEDS_INPUT\b/;
 const HANDOFF_LINE = /^\s*(⏺\s*)?HANDOFF_READY\s+[\w.-]+\s*$/;
-const COMPLETE_PROMISE = /<promise>(ROADMAP|RALPH) COMPLETE\b/;
-const DONE_MARKER =
-  /^\s*(?:⏺\s*)?DISPATCH_STATUS:\s*DONE\b(?:\s*[\u2014\u2013-]\s*.*)?\s*$/;
 const API_ERROR_HEAD = /^\s*⏺\s*API Error\b/;
 const LIMIT_RESET_LINE = /limit\b.*\bresets?\s+\S/i;
 const LIMIT_MESSAGE = /^\s*You[\u2019']ve hit your (?:[\w-]+ )*limit\b/;
 
-function isCompleteLine(line: string): boolean {
-  return COMPLETE_PROMISE.test(line) || DONE_MARKER.test(line);
+function isCompleteLine(line: string, slug: string | null): boolean {
+  return isPromiseLine(line, slug ?? "") || DONE_MARKER.test(line);
 }
 
 /** Trim a pane line into a one-line evidence string with a source prefix. */
@@ -436,11 +435,14 @@ export function detectState(input: DetectInput): Detection {
   const transcriptLines = agentLines(
     inputAt >= 0 ? lines.slice(0, inputAt) : lines,
   );
-  const paneDone =
-    transcriptLines.find((l) => COMPLETE_PROMISE.test(l)) ??
-    lastAgentBlock(transcriptLines).find((l) => DONE_MARKER.test(l));
+  const newest = lastAgentBlock(transcriptLines);
+  const paneDone = (newest.length > 0 ? newest : transcriptLines).find((l) =>
+    isCompleteLine(l, input.slug),
+  );
   const tailDone = input.engineOpen
-    ? transcript?.lastAssistantText?.split("\n").find(isCompleteLine)
+    ? transcript?.lastAssistantText
+        ?.split("\n")
+        .find((l) => isCompleteLine(l, input.slug))
     : undefined;
   if (input.completion === "complete") {
     if (paneDone !== undefined)

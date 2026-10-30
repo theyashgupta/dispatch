@@ -15,7 +15,9 @@ import {
   closedEngineText,
   ENGINE_FILE,
   withClosedReason,
+  type CloseReason,
 } from "../domain/loop-progress.js";
+import { doneMatchesLoop } from "../domain/prd-progress.js";
 import {
   declineKeys,
   type PlanMemory,
@@ -27,6 +29,7 @@ import { readTranscriptTail } from "../../adapters/transcript.js";
 import { sessionTranscriptPath } from "./supervisor-transcript.js";
 import { withCardLock } from "./card-lock.js";
 import { endJob, type EndJobTools } from "./end-job.js";
+import { promiseCompletes } from "../domain/loop-completion.js";
 import { refreshLoopProgress } from "./loop-progress-reader.js";
 import { memoryCheck } from "./memory-governor.js";
 import { isFolder, resumeSession } from "./resume-session.js";
@@ -107,7 +110,7 @@ async function answerPrompt(
 }
 
 async function writeAtomic(file: string, text: string): Promise<void> {
-  const tmp = `${file}.tmp`;
+  const tmp = `${file}.${process.pid}.${Date.now()}.tmp`;
   await fsp.writeFile(tmp, text);
   await fsp.rename(tmp, file);
 }
@@ -115,7 +118,7 @@ async function writeAtomic(file: string, text: string): Promise<void> {
 async function closeEngineFile(
   card: Card,
   engine: string,
-  closedBy: "promise" | "close_loop",
+  closedBy: CloseReason,
 ): Promise<{ result: string; reason: typeof closedBy | "manual" }> {
   const done = `${engine}.done`;
   try {
@@ -124,12 +127,8 @@ async function closeEngineFile(
     const code = (err as NodeJS.ErrnoException).code;
     const slug = card.loopProgress?.slug;
     if (code === "ENOENT" && slug) {
-      if (
-        await fsp.access(done).then(
-          () => true,
-          () => false,
-        )
-      ) {
+      const doneText = await fsp.readFile(done, "utf8").catch(() => null);
+      if (doneText !== null && doneMatchesLoop(doneText, card.loopProgress)) {
         return { result: "closed", reason: closedBy };
       }
       try {
@@ -152,11 +151,16 @@ async function closeEngineFile(
   }
 }
 
-async function closeLoop(card: Card, session: Session): Promise<void> {
+async function closeLoop(
+  card: Card,
+  session: Session,
+  forcedReason?: "done_marker",
+): Promise<void> {
   const root = rootOf(card, session);
   const engine = path.join(root, ENGINE_FILE);
   const closedBy =
-    card.loopProgress?.completion === "complete" ? "close_loop" : "promise";
+    forcedReason ??
+    (card.loopProgress?.completion === "complete" ? "close_loop" : "promise");
   const { result, reason } =
     root === ""
       ? { result: "failed: no session root", reason: closedBy }
@@ -168,6 +172,42 @@ async function closeLoop(card: Card, session: Session): Promise<void> {
     reason,
   });
   await refreshLoopProgress(card.id);
+}
+
+/**
+ * Close the loop engine file when a DONE marker arrives on the hook channel.
+ *
+ * @remarks Acts only for the active session of a supervisor-on board with an open engine, when the
+ * loop reads complete or, for a loop with no phase model, the same message carries the promise line.
+ * A DONE printed with phases left, or on a loop whose phases cannot be read, closes nothing.
+ */
+export async function closeLoopOnDone(
+  cardId: string,
+  sessionId: string,
+  message: string,
+): Promise<void> {
+  try {
+    await refreshLoopProgress(cardId);
+    const card = store.getCard(cardId);
+    if (!card) return;
+    if (
+      store.getBoard(card.boardKey ?? DEFAULT_BOARD_KEY)?.policy.supervisor !==
+      "on"
+    )
+      return;
+    if (sessionId !== card.activeSessionId) return;
+    const session = card.sessions?.find((s) => s.id === sessionId);
+    const progress = card.loopProgress;
+    if (!session || !progress?.engine?.active || progress.engine.closed) return;
+    if (
+      progress.completion !== "complete" &&
+      !promiseCompletes(progress, true, message)
+    )
+      return;
+    await closeLoop(card, session, "done_marker");
+  } catch (err) {
+    console.warn("[hooks] close loop on DONE failed", err);
+  }
 }
 
 /**

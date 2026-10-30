@@ -714,3 +714,38 @@ void test("an unchanged pane still moves a running loop in Agent done to Needs i
     dropWatcher(ids.tmuxSession);
   }
 });
+
+void test("an idle loop whose engine Dispatch only kept open gets no restart prompt", async () => {
+  const ids = await startedCard(SBX, "kept-open");
+  await store.setOrchestratorFields(ids.cardId, {
+    launch: { direction: "run the loop" },
+  });
+  await store.setLoopProgress(ids.cardId, {
+    ...LOOP_PROGRESS,
+    engine: {
+      active: true,
+      iteration: 1,
+      sessionId: "s-1",
+      handoffPending: false,
+      startedAt: null,
+      closed: false,
+      keptOpen: true,
+    },
+  });
+  ensureWatcher(ids.tmuxSession, null).progressRead = true;
+  try {
+    const t0 = Date.now();
+    for (const minute of [0, 1, 2])
+      await supervisePane(
+        { ...ids, pane: pane("idle.txt") },
+        t0 + minute * 60_000,
+      );
+    assert.equal(sessionOf(ids.cardId)?.state, "idle");
+    const actions = store
+      .listOrchestrationEvents(SBX, 0, 500)
+      .filter((e) => e.cardId === ids.cardId && e.kind === "supervisor_action");
+    assert.deepEqual(actions, []);
+  } finally {
+    dropWatcher(ids.tmuxSession);
+  }
+});

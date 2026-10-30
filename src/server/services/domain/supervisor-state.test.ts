@@ -22,6 +22,13 @@ function pane(name: string): string {
   return readFileSync(new URL(name, PANES), "utf8");
 }
 
+const PANE_FOOTER =
+  "✻ Worked for 6s · done 4:01 AM\n❯ \n  Opus 5.5 · high  │  ██░░░░░░░░   17%  174k/1.0M\n";
+
+function promisePane(slug: string, phrase = "RALPH COMPLETE"): string {
+  return `⏺ All units are green.\n  <promise>${phrase} ${slug}</promise>\n${PANE_FOOTER}`;
+}
+
 function input(over: Partial<DetectInput>): DetectInput {
   return {
     now: 0,
@@ -33,6 +40,7 @@ function input(over: Partial<DetectInput>): DetectInput {
     engineSessionId: "3f0c2a7e-5d1b-4c3e-9a2f-1b2c3d4e5f60",
     completion: "running",
     engineOpen: true,
+    slug: null,
     transcript: null,
     memory: initialMemory(),
     ...over,
@@ -100,7 +108,12 @@ const FIXTURE_STATES: [
     { engineSessionId: "handoff-pending" },
     "handoff_ready",
   ],
-  ["roadmap-complete.txt", 1, { completion: "complete" }, "roadmap_complete"],
+  [
+    "roadmap-complete-final.txt",
+    1,
+    { completion: "complete", slug: "g2-foundation" },
+    "roadmap_complete",
+  ],
   ["limit-menu.txt", 2, {}, "usage_limit_dialog"],
   ["limit-menu-2.txt", 2, {}, "usage_limit_dialog"],
   ["auto-continue.txt", 2, {}, "usage_limit_wait"],
@@ -119,6 +132,16 @@ for (const [file, count, over, state] of FIXTURE_STATES) {
     assert.equal(last(feed(pane(file), count, over)), state);
   });
 }
+
+void test("the recorded pane with the promise in an older block and a newer reply below it is not roadmap_complete", () => {
+  const state = last(
+    feed(pane("roadmap-complete.txt"), 1, {
+      completion: "complete",
+      slug: "g2-foundation",
+    }),
+  );
+  assert.notEqual(state, "roadmap_complete");
+});
 
 void test("every one of the 13 states comes from a recorded pane", () => {
   const seen = new Set(FIXTURE_STATES.map(([, , , s]) => s));
@@ -317,27 +340,29 @@ void test("HANDOFF_READY inside a user prompt block is not handoff_ready", () =>
 
 void test("the ROADMAP COMPLETE promise with progress not complete is not roadmap_complete", () => {
   for (const completion of ["running", "not_started", null] as const) {
-    const states = feed(pane("roadmap-complete.txt"), 3, { completion }).map(
-      (d) => d.state,
-    );
+    const states = feed(promisePane("g2", "ROADMAP COMPLETE"), 3, {
+      completion,
+      slug: "g2",
+    }).map((d) => d.state);
     assert.ok(!states.includes("roadmap_complete"), String(completion));
   }
 });
 
 void test("the RALPH COMPLETE promise of a single PRD loop is roadmap_complete only with completion complete", () => {
-  const text = pane("roadmap-complete.txt").replace(
-    /<promise>ROADMAP COMPLETE[^<]*<\/promise>/,
-    "<promise>RALPH COMPLETE demo-feature</promise>",
+  const text = promisePane("demo-feature");
+  const slug = "demo-feature";
+  const done = feed(text, 3, { completion: "complete", slug }).map(
+    (d) => d.state,
   );
-  assert.ok(text.includes("RALPH COMPLETE demo-feature"));
-  const done = feed(text, 3, { completion: "complete" }).map((d) => d.state);
   assert.ok(done.includes("roadmap_complete"));
-  const running = feed(text, 3, { completion: "running" }).map((d) => d.state);
+  const running = feed(text, 3, { completion: "running", slug }).map(
+    (d) => d.state,
+  );
   assert.ok(!running.includes("roadmap_complete"));
 });
 
 void test("a completion signal in the pane or the transcript tail gives roadmap_complete only with completion complete", () => {
-  const promisePane = pane("roadmap-complete.txt");
+  const promiseText = promisePane("demo");
   const jobPane = pane("after-pause-job-lines.txt");
   const tail = (text: string) => ({
     size: 100,
@@ -346,7 +371,7 @@ void test("a completion signal in the pane or the transcript tail gives roadmap_
   });
   const sources: [string, string, DetectInput["transcript"], string | null][] =
     [
-      ["pane promise", promisePane, null, "pane:"],
+      ["pane promise", promiseText, null, "pane:"],
       [
         "transcript promise",
         jobPane,
@@ -363,7 +388,9 @@ void test("a completion signal in the pane or the transcript tail gives roadmap_
     ];
   for (const [name, text, transcript, prefix] of sources) {
     for (const completion of ["complete", "running"] as const) {
-      const d = detectState(input({ pane: text, transcript, completion }));
+      const d = detectState(
+        input({ pane: text, transcript, completion, slug: "demo" }),
+      );
       const wanted = prefix !== null && completion === "complete";
       assert.equal(
         d.state === "roadmap_complete",
@@ -386,6 +413,7 @@ void test("with the engine closed a transcript tail signal is not roadmap_comple
         pane: jobPane,
         completion: "complete",
         engineOpen: false,
+        slug: "demo",
         transcript: { size: 100, lastAssistantText },
       }),
     );
@@ -393,9 +421,10 @@ void test("with the engine closed a transcript tail signal is not roadmap_comple
   }
   const closed = detectState(
     input({
-      pane: pane("roadmap-complete.txt"),
+      pane: promisePane("demo"),
       completion: "complete",
       engineOpen: false,
+      slug: "demo",
     }),
   );
   assert.equal(closed.state, "roadmap_complete");
@@ -968,5 +997,51 @@ void test("a changed limit message restarts the two sample rule", () => {
   assert.equal(
     sample("You've hit your session limit · resets 3pm"),
     "usage_limit_wait",
+  );
+});
+
+void test("a pane promise line counts only for the slug, alone on its line, in the newest agent block", () => {
+  const stateOf = (text: string, slug: string) =>
+    detectState(input({ pane: text, completion: "complete", slug })).state;
+  assert.equal(
+    stateOf(promisePane("local-159"), "local-159"),
+    "roadmap_complete",
+  );
+  const quoted =
+    "⏺ The doc says the test writes <promise>RALPH COMPLETE local-159</promise> and posts the hook.\n" +
+    PANE_FOOTER;
+  assert.notEqual(stateOf(quoted, "local-170"), "roadmap_complete");
+  assert.notEqual(stateOf(quoted, "local-159"), "roadmap_complete");
+  assert.notEqual(
+    stateOf(promisePane("local-159"), "local-170"),
+    "roadmap_complete",
+  );
+  assert.notEqual(stateOf(promisePane("local-159"), ""), "roadmap_complete");
+  const older =
+    "⏺ Done.\n  <promise>RALPH COMPLETE local-159</promise>\n⏺ Which branch should I rebase on?\n" +
+    PANE_FOOTER;
+  assert.notEqual(stateOf(older, "local-159"), "roadmap_complete");
+});
+
+void test("a transcript tail promise counts only on its own line", () => {
+  const stateOf = (lastAssistantText: string, slug: string | null) =>
+    detectState(
+      input({
+        pane: pane("after-pause-job-lines.txt"),
+        completion: "complete",
+        slug,
+        transcript: { size: 100, lastAssistantText },
+      }),
+    ).state;
+  const own = "All green.\n<promise>RALPH COMPLETE local-159</promise>";
+  const sentence =
+    "The test writes <promise>RALPH COMPLETE local-159</promise> and posts the hook.";
+  assert.equal(stateOf(own, "local-159"), "roadmap_complete");
+  assert.notEqual(stateOf(sentence, "local-159"), "roadmap_complete");
+  assert.notEqual(stateOf(own, "local-170"), "roadmap_complete");
+  assert.notEqual(stateOf(own, null), "roadmap_complete");
+  assert.equal(
+    stateOf("Built.\nDISPATCH_STATUS: DONE - built", null),
+    "roadmap_complete",
   );
 });

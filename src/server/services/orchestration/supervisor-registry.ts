@@ -169,7 +169,10 @@ function loopOf(card: Card, now: number): LoopFacts | null {
   if (!isLoopCard(card) || progress === undefined) return null;
   const { currentUnit, currentPhase } = progress.summary;
   return {
-    engineActive: progress.engine?.active === true && !progress.engine.closed,
+    engineActive:
+      progress.engine?.active === true &&
+      !progress.engine.closed &&
+      progress.engine.keptOpen !== true,
     handoffPending: progress.engine?.handoffPending === true,
     unitPhase: `${currentUnit ?? "none"}/${currentPhase?.number ?? "none"}`,
   };
@@ -335,6 +338,7 @@ export async function supervisePane(
         ? "complete"
         : (card.loopProgress?.completion ?? null),
       engineOpen,
+      slug: card.loopProgress?.slug ?? null,
       transcript,
       memory: watcher.memory,
     });
