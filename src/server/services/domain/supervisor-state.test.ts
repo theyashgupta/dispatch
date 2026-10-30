@@ -1105,3 +1105,79 @@ void test("doneLine stays unset for a DONE line in an older agent block or in th
   assert.equal(closedTail.state, "roadmap_complete");
   assert.equal(closedTail.doneLine, undefined);
 });
+
+void test("doneLine is read from a pane without the agent block glyph", () => {
+  const slug = "local-159";
+  const detect = (text: string) =>
+    detectState(input({ completion: "complete", slug, pane: text }));
+  const bare = `  <promise>RALPH COMPLETE ${slug}</promise>\n`;
+  const promiseOnly = detect(bare + PANE_FOOTER);
+  assert.equal(promiseOnly.state, "roadmap_complete");
+  assert.equal(promiseOnly.doneLine, undefined);
+
+  const withDone = detect(
+    `${bare}  DISPATCH_STATUS: DONE - built\n${PANE_FOOTER}`,
+  );
+  assert.equal(withDone.state, "roadmap_complete");
+  assert.equal(withDone.doneLine, true);
+});
+
+void test("a DONE line typed at the prompt never sets doneLine", () => {
+  const slug = "local-159";
+  const detect = (text: string) =>
+    detectState(input({ completion: "complete", slug, pane: text }));
+  const head = `⏺ All units are green.\n  <promise>RALPH COMPLETE ${slug}</promise>\n`;
+  const modelRow = "  Opus 5.5 · high  │  ██░░░░░░░░   17%  174k/1.0M\n";
+
+  const inInputBox = detect(
+    `${head}❯ DISPATCH_STATUS: DONE - built\n${modelRow}`,
+  );
+  assert.equal(inInputBox.state, "roadmap_complete");
+  assert.equal(inInputBox.doneLine, undefined);
+
+  const inUserBlock = detect(
+    `${head}❯ DISPATCH_STATUS: DONE - built\n❯ \n${modelRow}`,
+  );
+  assert.equal(inUserBlock.state, "roadmap_complete");
+  assert.equal(inUserBlock.doneLine, undefined);
+});
+
+void test("doneLine is set when the promise is in the pane and the DONE line only in the transcript tail", () => {
+  const slug = "local-159";
+  const detect = (over: Partial<DetectInput>) =>
+    detectState(
+      input({ completion: "complete", slug, pane: promisePane(slug), ...over }),
+    );
+  const split = detect({
+    transcript: {
+      size: 100,
+      lastAssistantText: "Built.\nDISPATCH_STATUS: DONE - built",
+    },
+  });
+  assert.equal(split.state, "roadmap_complete");
+  assert.ok(split.evidence.startsWith("pane:"), split.evidence);
+  assert.equal(split.doneLine, true);
+
+  const closedEngine = detect({
+    engineOpen: false,
+    transcript: {
+      size: 100,
+      lastAssistantText: "Built.\nDISPATCH_STATUS: DONE - built",
+    },
+  });
+  assert.equal(closedEngine.doneLine, undefined);
+});
+
+void test("a pane DONE line with no promise gives roadmap_complete with doneLine", () => {
+  const slug = "local-159";
+  const detected = detectState(
+    input({
+      completion: "complete",
+      slug,
+      pane: `⏺ Built.\n  DISPATCH_STATUS: DONE - built\n${PANE_FOOTER}`,
+    }),
+  );
+  assert.equal(detected.state, "roadmap_complete");
+  assert.ok(detected.evidence.startsWith("pane:"), detected.evidence);
+  assert.equal(detected.doneLine, true);
+});
