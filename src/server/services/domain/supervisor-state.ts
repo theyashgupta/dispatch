@@ -45,6 +45,7 @@ export interface Detection {
   evidence: string;
   promptKind?: PromptKind;
   busy?: true;
+  doneLine?: true;
   memory: DetectMemory;
 }
 
@@ -436,27 +437,30 @@ export function detectState(input: DetectInput): Detection {
     inputAt >= 0 ? lines.slice(0, inputAt) : lines,
   );
   const newest = lastAgentBlock(transcriptLines);
-  const paneDone = (newest.length > 0 ? newest : transcriptLines).find((l) =>
-    isCompleteLine(l, input.slug),
-  );
-  const tailDone = input.engineOpen
-    ? transcript?.lastAssistantText
-        ?.split("\n")
-        .find((l) => isCompleteLine(l, input.slug))
-    : undefined;
+  const paneScope = newest.length > 0 ? newest : transcriptLines;
+  const paneDone = paneScope.find((l) => isCompleteLine(l, input.slug));
+  const tailLines = input.engineOpen
+    ? (transcript?.lastAssistantText?.split("\n") ?? [])
+    : [];
+  const tailDone = tailLines.find((l) => isCompleteLine(l, input.slug));
+  const doneExtra = [...paneScope, ...tailLines].some((l) =>
+    DONE_MARKER.test(l),
+  )
+    ? { doneLine: true as const }
+    : {};
   if (input.completion === "complete") {
     if (paneDone !== undefined)
       return done(
         "roadmap_complete",
         evidence("pane", paneDone),
-        {},
+        doneExtra,
         dialogMem,
       );
     if (tailDone !== undefined)
       return done(
         "roadmap_complete",
         evidence("transcript", tailDone),
-        {},
+        doneExtra,
         dialogMem,
       );
   }

@@ -253,7 +253,7 @@ void test(
     const written = fs.readFileSync(`${engine}.done`, "utf8");
     assert.match(written, /^completion_promise: "RALPH COMPLETE sbx-loop"$/m);
     assert.match(written, /^session_id: sess-now$/m);
-    assert.match(written, /^closed_reason: promise$/m);
+    assert.match(written, /^closed_reason: done_marker$/m);
     assert.equal(loop.actions()[0].data.result, "closed");
   },
 );

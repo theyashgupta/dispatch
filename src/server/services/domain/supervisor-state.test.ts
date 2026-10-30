@@ -1045,3 +1045,63 @@ void test("a transcript tail promise counts only on its own line", () => {
     "roadmap_complete",
   );
 });
+
+void test("roadmap_complete carries doneLine only when a DISPATCH_STATUS DONE line is in the scope", () => {
+  const slug = "local-159";
+  const detect = (over: Partial<DetectInput>) =>
+    detectState(input({ completion: "complete", slug, ...over }));
+  const promiseOnly = detect({ pane: promisePane(slug) });
+  assert.equal(promiseOnly.state, "roadmap_complete");
+  assert.equal(promiseOnly.doneLine, undefined);
+
+  const withDone = detect({
+    pane: promisePane(slug).replace(
+      PANE_FOOTER,
+      `  DISPATCH_STATUS: DONE - built\n${PANE_FOOTER}`,
+    ),
+  });
+  assert.equal(withDone.state, "roadmap_complete");
+  assert.equal(withDone.doneLine, true);
+
+  const jobPane = pane("after-pause-job-lines.txt");
+  const tailPromise = detect({
+    pane: jobPane,
+    transcript: {
+      size: 100,
+      lastAssistantText: `All green.\n<promise>RALPH COMPLETE ${slug}</promise>`,
+    },
+  });
+  assert.equal(tailPromise.state, "roadmap_complete");
+  assert.equal(tailPromise.doneLine, undefined);
+  const tailDone = detect({
+    pane: jobPane,
+    transcript: {
+      size: 100,
+      lastAssistantText: "Built.\nDISPATCH_STATUS: DONE - built",
+    },
+  });
+  assert.equal(tailDone.state, "roadmap_complete");
+  assert.equal(tailDone.doneLine, true);
+});
+
+void test("doneLine stays unset for a DONE line in an older agent block or in the tail of a closed engine", () => {
+  const slug = "local-159";
+  const detect = (over: Partial<DetectInput>) =>
+    detectState(input({ completion: "complete", slug, ...over }));
+  const olderDone = detect({
+    pane: `⏺ Built.\n  DISPATCH_STATUS: DONE - built\n${promisePane(slug)}`,
+  });
+  assert.equal(olderDone.state, "roadmap_complete");
+  assert.equal(olderDone.doneLine, undefined);
+
+  const closedTail = detect({
+    engineOpen: false,
+    pane: promisePane(slug),
+    transcript: {
+      size: 100,
+      lastAssistantText: "Built.\nDISPATCH_STATUS: DONE - built",
+    },
+  });
+  assert.equal(closedTail.state, "roadmap_complete");
+  assert.equal(closedTail.doneLine, undefined);
+});
