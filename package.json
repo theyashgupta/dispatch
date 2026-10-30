@@ -90,7 +90,8 @@
     "test:visual": "playwright test",
     "test:visual:update": "playwright test --update-snapshots",
     "prepublishOnly": "node scripts/build-calendar-helper.mjs --require",
-    "test:e2e:accounts": "env -u NODE_ENV -u CLAUDE_CONFIG_DIR node --import tsx --test --test-concurrency=1 tests/e2e/scenario-LOCAL-159-account-login-decision.e2e.ts tests/e2e/scenario-LOCAL-159-managed-default.e2e.ts"
+    "test:e2e:accounts": "env -u NODE_ENV -u CLAUDE_CONFIG_DIR node --import tsx --test --test-concurrency=1 tests/e2e/scenario-LOCAL-159-account-login-decision.e2e.ts tests/e2e/scenario-LOCAL-159-managed-default.e2e.ts",
+    "test:e2e:engine-close": "env -u NODE_ENV -u CLAUDE_CONFIG_DIR node --import tsx --test --test-concurrency=1 tests/e2e/scenario-LOCAL-93-orchestrated.e2e.ts tests/e2e/scenario-LOCAL-151-engine-close.e2e.ts tests/e2e/scenario-LOCAL-172-promise-close.e2e.ts"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",

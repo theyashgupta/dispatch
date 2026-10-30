@@ -877,3 +877,19 @@ void test("the close retry after a failed rename runs once a minute and only whi
     dropWatcher(loop.ids.tmuxSession);
   }
 });
+
+void test("a DONE line 10 s after a promise-only read closes the engine without waiting for the retry", async () => {
+  const loop = await completeLoop("done-ten-seconds-after-promise");
+  try {
+    await supervisePane({ ...loop.ids, pane: PROMISE_PANE }, 10 * MINUTE);
+    assert.equal(sessionOf(loop.ids.cardId)?.state, "roadmap_complete");
+    assert.deepEqual(loop.closeRows(), []);
+    await supervisePane({ ...loop.ids, pane: DONE_PANE }, 10 * MINUTE + 10_000);
+    assert.equal(loop.closeRows().length, 1);
+    assert.equal(loop.closeRows()[0].data.result, "closed");
+    assert.equal(loop.closeRows()[0].data.reason, "done_marker");
+    assert.equal(existsSync(loop.engine), false);
+  } finally {
+    dropWatcher(loop.ids.tmuxSession);
+  }
+});

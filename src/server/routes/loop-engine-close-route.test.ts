@@ -498,3 +498,31 @@ void test("a finished loop whose engine file is deleted with no promise and no D
   assert.equal(reply.body.error, "engine-not-closed");
   assert.equal(fs.existsSync(`${engine}.done`), false);
 });
+
+void test("a finished loop whose transcript has the promise but no DONE line keeps its engine open, so start_ship answers 409 engine-not-closed", async () => {
+  await enableSupervisor();
+  const ws = ownRoot("ws-promise-only");
+  const card = await launchedTicket(ws);
+  const engine = seedFinishedLoop(ws);
+  await refreshLoopProgress(card.id);
+  await store.setTranscriptPath(
+    card.id,
+    sessionOf(card).id,
+    seedTranscript(
+      "sess-promise-only",
+      `Both phases are green.\n<promise>${PROMISE}</promise>`,
+    ),
+  );
+  await sampleThrice(card);
+
+  const progress = store.getCard(card.id)?.loopProgress;
+  assert.equal(progress?.completion, "complete");
+  assert.equal(progress?.engine?.closed, false);
+  assert.equal(closeLoopEvents(card).length, 0);
+  assert.equal(fs.existsSync(engine), true);
+  assert.equal(fs.existsSync(`${engine}.done`), false);
+  const reply = await shipOf(card);
+  assert.equal(reply.status, 409, JSON.stringify(reply.body));
+  assert.equal(reply.body.error, "engine-not-closed");
+  assert.equal(store.getCard(card.id)?.shipFlow, undefined);
+});
