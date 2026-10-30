@@ -206,6 +206,7 @@ The orchestrator node of the command centre shows the state of the session as a 
 - **Session lost** and **Claude exited**. The session ended. **Resume** shows.
 - **Frozen after compaction**. Claude stopped after an idle compaction. See [A frozen session](#a-frozen-session).
 - **Released**. Claude exited on purpose after the loop finished, to free memory. The card keeps its column, its marker and its terminal text. **Run Claude** starts Claude again.
+- **Roadmap done**. The loop printed its completion promise or its DONE line. Dispatch closes the loop file only when the DONE line shows.
 
 When the orchestrator waits at its prompt, Dispatch wakes it. Dispatch types one line that starts with "Dispatch wake:" when you answer its decision item, when one of its groups reaches Agent done, needs input, fails to start, ships, stops its ship flow, hits a loop error or a usage limit, and when the **Wake timer (minutes)** of the policy runs out. Dispatch never types while the orchestrator works, types at most one line in 20 seconds, and never wakes a stopped orchestrator.
 
@@ -344,7 +345,7 @@ When free memory is below the floor and a start or a resume must wait or be refu
 To stop a loop by hand:
 
 1. Open the card of a loop that has a live session. The card panel header shows **Pause** next to **Reset**.
-2. Choose **Pause**. Dispatch stops every process of the loop until you resume it. On a narrow panel the button shows only its icon and keeps the name **Pause**.
+2. Choose **Pause**. Dispatch stops Claude and the commands that it runs until you resume the loop. The terminal stays usable, and keys that you type while the loop is paused reach Claude after the resume. On a narrow panel the button shows only its icon and keeps the name **Pause**.
 3. The card shows a paused badge. The panel shows a note. The note reads "Paused. Resume it when you are ready." after you pause the loop. It reads "Paused for memory. Dispatch resumes it when swap falls." when Dispatch paused the loop because of memory.
 4. Choose **Resume** in the same place to continue the loop.
 

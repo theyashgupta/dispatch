@@ -13,6 +13,7 @@ import { cardOf, writeRunLog } from "./harness/board-reads.js";
 import {
   EVIDENCE_DIR,
   MINUTE,
+  SANDBOX_ROOT,
   makeNote,
   startSandbox,
   waitFor,
@@ -170,7 +171,7 @@ async function setup(sb: Sandbox): Promise<SampleRepo> {
   return sample;
 }
 
-/** Writes replay files whose loop pane shows no promise line, so only the transcript can trigger the close. */
+/** Writes replay files whose loop pane shows no promise line, so only the Stop hook message can trigger the close. */
 function writeScenarios(sb: Sandbox): string {
   const transcript = path.join(sb.logs, "orchestrator.jsonl");
   fs.writeFileSync(transcript, "");
@@ -353,9 +354,9 @@ const closeRows = (events: OrchestrationEventRow[]): OrchestrationEventRow[] =>
   );
 
 /**
- * Post the DONE Stop hook with a transcript and check that the supervisor closes the engine on the promise, with no restart, within 60 s.
+ * Post the DONE Stop hook with a transcript and check that the hook route closes the engine with the reason done_marker, with no restart, within 60 s.
  *
- * @remarks The card holds no PRD and no state file, so no phase can read complete. Only the promise in the transcript tail can close the engine.
+ * @remarks The card holds no PRD and no state file, so no phase can read complete. The Stop message carries the promise line and the DONE line, which a loop with no phase model needs for the close.
  */
 async function assertPromiseCloses(
   sb: Sandbox,
@@ -381,7 +382,7 @@ async function assertPromiseCloses(
   const seconds = (Date.parse(close.ts) - Date.parse(doneAt)) / 1000;
   note(`close_loop row ${close.id} came ${seconds} s after the Stop hook`);
   assert.equal(close.data.result, "closed");
-  assert.equal(close.data.reason, "promise");
+  assert.equal(close.data.reason, "done_marker");
   assert.ok(seconds <= CLOSE_LIMIT_SECONDS, `${seconds} s is over the limit`);
 
   const progress = await waitFor(
@@ -396,7 +397,7 @@ async function assertPromiseCloses(
     "the card progress to show the closed engine and completion complete",
   );
   const loop = progress.loopProgress;
-  assert.equal(loop?.engine?.closedReason, "promise");
+  assert.equal(loop?.engine?.closedReason, "done_marker");
   assert.equal(loop?.summary.unitsDone, 1);
   assert.equal(loop?.summary.unitsTotal, 1);
   assert.ok(
@@ -408,7 +409,7 @@ async function assertPromiseCloses(
   assert.equal(fs.existsSync(path.join(root, ENGINE_REL)), false);
   const done = path.join(root, `${ENGINE_REL}.done`);
   assert.equal(fs.existsSync(done), true);
-  assert.match(fs.readFileSync(done, "utf8"), /^closed_reason: promise$/m);
+  assert.match(fs.readFileSync(done, "utf8"), /^closed_reason: done_marker$/m);
 
   const events = await sb.orchestrationEvents(BOARD);
   assert.equal(closeRows(events).length, 1, "exactly one close_loop row");
@@ -506,10 +507,28 @@ async function runScenario(sb: Sandbox): Promise<void> {
 }
 
 void test(
-  "scenario-LOCAL-172-promise-close: the supervisor closes the engine of a single PRD loop with no phases from the promise in the transcript tail, and start_ship is then accepted",
+  "scenario-LOCAL-172-promise-close: the DONE Stop hook with the promise line closes the engine of a single PRD loop with no phases, and start_ship is then accepted",
   { timeout: 20 * MINUTE },
   async () => {
-    const sb = await startSandbox({ name: "local-172-promise-close" });
+    const sample = path.join(
+      SANDBOX_ROOT,
+      "local-172-promise-close-memory-sample.json",
+    );
+    fs.mkdirSync(SANDBOX_ROOT, { recursive: true });
+    fs.writeFileSync(
+      sample,
+      JSON.stringify({
+        freeMb: 4096,
+        compressorMb: 500,
+        swapUsedMb: 0,
+        swapTotalMb: 12288,
+        load1: 2,
+      }),
+    );
+    const sb = await startSandbox({
+      name: "local-172-promise-close",
+      memorySampleFile: sample,
+    });
     try {
       await runScenario(sb);
     } finally {

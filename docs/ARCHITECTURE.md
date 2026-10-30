@@ -4144,6 +4144,8 @@ freshness guarantee for the point where a start actually gets requested.
 
 **Input after a resume (LOCAL-139).** A SIGSTOP of the pane tree and the `fg` of unpause leave the pane tty in the cooked mode of the shell, so Enter reaches claude as a line feed (a new line in the input box, not a submit) and focus and status replies show as text. The pty shim (`bootstrap/pty-shim-setup.ts`) handles SIGCONT: when it owns the foreground of the pane tty, it sets raw mode again (without flushing typed input) and changes the inner pty size by one row and back after 100 ms, then re-syncs the size from the outer terminal, so claude redraws (Node emits `resize` only on a real size change). In the background it does nothing, because `tcsetattr` there stops the shim with SIGTTOU. A pane started before this shim runs the old script until claude relaunches. As a safety net, each successful governor resume emits `resumed` on `memoryEmitter`, and the server subscribes `probeResume` (`services/orchestration/resume-probe.ts`) to it at boot, without waiting for it. The probe runs only for an In Progress card whose session is not in `needs_input` or `permission_prompt`, and it stops when the card is paused again, starts again, or changes its active session, or when the tmux session ends. It waits while the pane is busy or a capture fails (one capture every 5 s, 30 min at most). A pane with an open dialog is skipped (`resume_probe` result `skipped`), because a relaunch would close the dialog. Otherwise it claims the supervisor watcher of the session and the card lock (a held one means a retry after 5 s, 3 attempts, then `resume_probe` `skipped` with reason `supervisor busy`), then types the line `Dispatch resume check: the session continued after a memory pause. ...` through `sendLine`, the reason-returning form of `sendConfirmed`, with a 30 s ready wait and two 30 s confirm windows (60 s in all for the line to reach the transcript). A confirmed line logs `resume_probe` with `result: "confirmed"`. On `not ready` or `not in transcript` it captures the pane again: a busy pane means a turn began, so it logs `unconfirmed` with reason `turn began`, never types the line again and kills nothing. It relaunches only when `paneTtyCooked` reads true, because a healthy REPL always has a raw tty, and the session carries `DISPATCH_SHELL_SESSION`, because a pane rooted at claude always reads as at its prompt. Then it logs a `supervisor_action` with `action: "relaunch"`, `level: "WARN"`, sends SIGHUP to the foreground process group of the pane (never the shell group, never an unsafe pid), waits 10 s for the shell prompt, then sends SIGKILL only if the same group still owns the terminal, waits 5 s more, and runs the supervisor `resume` action, which relaunches `claude --resume <recorded id>` through `runClaude` and types the resume continue line. The probe checks the card again after the job ends. If the shell does not come back, the card goes to Needs Input with `resume_failed`. Other unconfirmed reasons, and a tty that is not cooked, only log the result. User and orchestrator unpause get the shim fix but no probe.
 
+**Pause below the pane job (LOCAL-180).** `pauseCard` stops only the processes two levels or more below the pane root, through `stopBelowJob` (`adapters/process-tree.ts`). The pane shell and its job (the pty shim, or claude in a pane without the shim) keep running. The shell then never sees a stopped job and never takes the terminal, so the pane tty stays raw. Unpause types no `fg`, and keys typed during the pause reach claude after the resume. Under the shim, the pause stops claude and its tool processes. In a pane without the shim, it stops only the tool processes of claude. The mark stores only the stopped pids. A whole-tree mark has the pane shell as its first pid: an older Dispatch wrote it. Only for a whole-tree mark does unpause check the terminal and type `fg`. A successful `unpauseCard` of a whole-tree mark emits `resumed` on `pauseEmitter` (`services/orchestration/pause-card.ts`), and at boot the server subscribes `probeResume` to that event. So the user unpause, the orchestrator `resume_card` tool and the memory governor resume all run the resume probe for a whole-tree mark. A pause below the job cannot leave the tty cooked, so its resume runs no probe: the probe line would clear a draft that the user typed during the pause. The probe line reads `Dispatch resume check: the session continued after a pause. ...` (`RESUME_PROBE_LINE`). Separately, `moveToNeedsInput` (`supervisor-record.ts`) keeps a card in Agent done when its last marker is a DONE key and its loop progress reads `complete`, also while the engine file is open. The session state still records `needs_input`, but the column and the DONE marker stay, so `start_ship` does not answer `card-not-done` for a finished loop on a frozen pane. This paragraph replaces these statements above: the whole-tree SIGSTOP and the `fg` steps of "Pause and unpause" (now only for a whole-tree mark), and the `memoryEmitter` subscription and the last sentence of "Input after a resume". The shim still gets SIGCONT when unpause continues the tree, but a pause below the job does not need its raw-mode repair.
+
 **Known limit.** The gate reads one 15 second sample and does not count the starts it admits, so a burst of starts between two samples can all pass; the concurrency cap still bounds the burst. The supervisor's held-group start skips the group for that pass, with no event. Run Claude on a hand-opened session and the user's resume of a loop at `needs_input` are not gated.
 
 ### Startup Preflight
@@ -4988,19 +4990,18 @@ output is the proof. A reader who sees `PASS: 121/121` alone has not yet seen th
 run.
 
 **No file under `src/web` may carry a status-meaning colour literal (`NEW-24`).** The status,
-priority, column and source palettes each live once, in `src/web/styles/tokens.css`, as twenty
-`--col-*`/`--prio-*`/`--status-*`/`--src-*` custom properties (thirteen status-meaning names plus
+priority, column and source palettes each live once, in `src/web/styles/tokens.css`, as twenty-five
+`--col-*`/`--prio-*`/`--status-*`/`--src-*` custom properties (eighteen status-meaning names plus
 the seven source colours ratified on 2026-09-23 in `docs/standards/design-contract.md`). `checkStatusColorSingleSource` in
-`scripts/check-invariants.mjs` reads those twenty declarations at run time and builds its
+`scripts/check-invariants.mjs` reads those twenty-five declarations at run time and builds its
 denylist from the resulting hex values, rather than hardcoding them, so a future palette retune
-can never leave a stale denylist behind; the check requires all twenty names present with a hex
+can never leave a stale denylist behind; the check requires all twenty-five names present with a hex
 value and reports a named missing-subject sentinel violation, not a silently emptied denylist, if
 any is absent or renamed. The literal scan covers `.ts`, `.tsx`, `.css` and `.html` under
-`src/web`, since a stylesheet reintroduces a palette hex as easily as a component, with two named
-exemptions: `tokens.css` itself, the palette's single legitimate home, and the `--hl-*` custom
-properties in `src/web/viewer/viewer.css`, whose values carry syntax-highlight meaning rather
-than status meaning (`--hl-attr`'s `#ef8e3b` matches `--status-stale`/`--prio-high` by
-coincidental hue reuse, not by status semantics). A global `src/**` scan would be the wrong shape here, the same reasoning
+`src/web`, since a stylesheet reintroduces a palette hex as easily as a component, with one named
+exemption: `tokens.css` itself, the palette's single legitimate home. The viewer's `--hl-*`
+syntax-highlight colours live there too since LOCAL-143, so `src/web/viewer/viewer.css` holds no
+colour literal. A global `src/**` scan would be the wrong shape here, the same reasoning
 the retired strip cascade check and the retired board reading rhythm check record above: this check's subject is `src/web` specifically. The
 literal half alone is not the whole guarantee, so the check also fences the MECHANISM: the single
 definition of "which colour a column renders" is `COLUMN_ACCENT` in
@@ -5016,14 +5017,15 @@ and still hold only `var(--col-*)`/`var(--accent)`, `var(--prio-*)` or `var(--sr
 values, or the mechanism half reports a sentinel violation, matching `NEW-22`'s own two-half
 fence/claim discipline. A repo-wide audit at landing,
 recorded in `.planning/phases/114-board-density-states-motion-accents/114-MEASUREMENTS.md` under
-"NEW-24 break legs", found zero status-meaning colour literals under `src/web` outside the
-`viewer.css` `--hl-*` exemption named above, so the gate is
+"NEW-24 break legs", found zero status-meaning colour literals under `src/web` outside
+`tokens.css` (the viewer `--hl-*` values then sat in `viewer.css` under an exemption that LOCAL-143
+retired), so the gate is
 confirmatory rather than a cleanup of a present violation; the same ledger records three verbatim
 trips proving the check can fail: a reintroduced literal at a real consuming site, a deleted
 palette declaration hitting the missing-subject sentinel, and a renamed `COLUMN_ACCENT` hitting
 the mechanism half.
 
-Since 2026-09-29 (G9 Unit 1) `tokens.css` holds a light block that names the same tokens again. The count above does not change: the check reads the twenty declarations whose value is a bare hex, all in the `:root` block, and it skips a declaration whose value starts with `color-mix`, which is the only form the light block uses for these names. `--col-parked` is a twenty-first signal token that the check does not fence; the light block treats it the same way. See [Theme Engine](#theme-engine).
+Since 2026-09-29 (G9 Unit 1) `tokens.css` holds a light block that names the same tokens again. The count above does not change: the check reads the twenty-five declarations whose value is a bare hex, all in the `:root` block, and it skips a declaration whose value starts with `color-mix`, which is the only form the light block uses for these names. `--col-parked` is a twenty-sixth signal token that the check does not fence; the light block treats it the same way. See [Theme Engine](#theme-engine).
 
 `scripts/check-invariants.mjs` once covered all six through four checks, and three have retired. The global literal scan (the focus shadow, the float shadow and the wordmark weight) and the board reading rhythm check moved to the lint rules in the record above on 2026-10-07. The strip cascade check retired with the strip (see [App Shell Zones](#app-shell-zones)). The fourth, file-scoped check (`checkTerminalFence`, `NEW-20`, above) still covers the terminal client. It proves only the fenced subject set, never the fenced contents, as stated above.
 
@@ -6201,6 +6203,7 @@ Run `node scripts/scenario-names.mjs` after you add or rename a scenario file, b
 - tests/e2e/scenario-LOCAL-170-frozen-relaunch.e2e.ts (LOCAL-170)
 - tests/e2e/scenario-LOCAL-171-ship-retry.e2e.ts (LOCAL-171)
 - tests/e2e/scenario-LOCAL-172-promise-close.e2e.ts (LOCAL-172)
+- tests/e2e/scenario-LOCAL-180-pause-resume-echo.e2e.ts (LOCAL-180)
 - tests/e2e/scenario-LOCAL-197-live-isolation.e2e.ts (LOCAL-197)
 - tests/e2e/scenario-LOCAL-201-session-release.e2e.ts (LOCAL-201)
 - tests/e2e/scenario-LOCAL-209-worktree-node-modules.e2e.ts (LOCAL-209)
@@ -6320,6 +6323,8 @@ for each inbound value, which the orchestrator session gets, and every other ses
 suggested `/ship` line (LOCAL-184). Each session start also merges both keys into the
 `settings.json` of the config dir it launches on, which for an added account is the link to the home
 file, so a new account dir has them too (LOCAL-198).
+
+**Engine close on the DONE marker (LOCAL-174).** When a Stop hook carries a DONE marker, `applyStopEvent` (`hook-events.ts`) applies the column and calls `closeLoopOnDone` (`supervisor-actions.ts`). That function reads the loop progress again. It acts only for the active session of a board that runs the supervisor, and only while the engine is open. The loop must read `complete`, or, for a loop with no phase model, the same message must also have the promise line. The close reason is `done_marker`, a fourth `closedReason` value. The pane does not need to show a promise. A promise line is a whole line that is the promise tag with `RALPH COMPLETE` or `ROADMAP COMPLETE` and the slug of the card (`isPromiseLine` in `loop-completion.ts`). In the pane, only the newest agent block can hold it. When no `⏺` line is visible, the whole visible transcript can hold it. A tag in prose, in a diff or for another slug is not a promise line. A `.done` file is the close of this loop only when its slug and its session id match the loop that the card last read (`doneMatchesLoop` in `prd-progress.ts`). The reader ignores the `.done` of another loop, and a close writes a fresh closed text over it. When the engine file disappears with no close, the reader keeps the last open engine with `kept_open: true` and warns `engine file removed without a close`. Then `start_ship` still answers `engine-not-closed`, but the supervisor does not prompt a kept engine to continue.
 
 ### Session Supervisor
 
@@ -6515,6 +6520,8 @@ loop whose engine is `handoff-pending` gets the handoff resume prompt instead of
 
 **Running count and session release.** LOCAL-201 changes the running count (`runningLoops`). It skips a card in Agent done or Done, and it skips a card whose loop engine is closed. A card with no engine yet still counts. The `get_policy` read and every cap check read this count. The supervisor releases a finished launched card to free memory. The release is due 10 minutes (`RELEASE_AFTER_MS`, or `DISPATCH_RELEASE_AFTER_MS` for the sandbox) after the later of the move to Agent done and the last session state change. These conditions must also hold: the last marker is a DONE marker, the engine is closed or absent, the pane is idle, and no ship flow is running or stopped. The supervisor then types `/exit`, and the session state becomes `released`. The tmux session, the pane, the column and the marker stay. The supervisor kills nothing. A stored `released` holds against every detection until Run Claude or `resume_session` relaunches Claude, a lost tmux session does not resume it, and account moves and pause skip it. `send_prompt` refuses a released session. `resume_session` brings Claude back through `runClaude`, as Run Claude does.
 
+**Close only on the DONE line (LOCAL-187).** The supervisor closes a loop engine file only when the session printed a DONE line. `detectState` sets `doneLine` on a `roadmap_complete` detection when a `DISPATCH_STATUS: DONE` line is in the newest agent block of the pane (or in the whole visible transcript when no `⏺` line shows) or in the transcript tail. `planActions` plans `close_loop` on `roadmap_complete` only with `doneLine`, and the once-a-minute close retry in `supervisePane` runs only while the detection still has `doneLine`. A promise without a DONE line gives `roadmap_complete` ("Roadmap done") and closes nothing, because a session can still work after it prints its promise. Every Dispatch close, from the supervisor or from the Stop hook, passes the reason `done_marker`; the recorded reason reads `manual` only when reading or rewriting the renamed `.done` file fails. The reasons `promise` and `close_loop` stay readable in older `.done` files, but no new close writes them. This paragraph replaces these statements above: the close at `roadmap_complete` without a DONE line in the "Loop close" bullet and in the paragraph on the pane signal after a memory pause (the planner and the once-a-minute retry now also need the DONE line), the reasons `close_loop` and `promise` in the "Loop close" bullet and in the `engine.closedReason` value list, and the reason `promise` in the scenario 17 paragraph.
+
 ### Orchestrator Control Surface
 
 LOCAL-90 gives an orchestrator a fixed set of server calls (decision records D-4 and D-9). The
@@ -6625,8 +6632,9 @@ a merge of `origin/main` with no edit, and records the merged commit as `checked
 runs on that commit, the push uses the refspec `<checked>:refs/heads/<name>`, and the merge
 passes gh's match head commit option with it; a resumed flow whose HEAD moved stops. Each branch
 stores `passed`, the commit on which its check last passed. A new flow copies `passed` from the
-previous flow of the same card, repository and branch name. When `checked` equals `passed`, the
-flow does not run the check command, sets `checkSkipped` to true and records one
+previous flow of the same card, repository and branch name. The flow does not run the check command
+when the tree of `checked` equals the tree of `passed` and the worktree has no change. A failed git
+read runs the check. A skipped check sets `checkSkipped` to true and records one
 `ship_check_skipped` group state (loop cards only). The diff scope check and the prose check still
 run. Each gh
 call names the repository of the `origin` remote (`repo` on the flow; null unless the host is
@@ -6638,7 +6646,8 @@ When `gh pr create` fails with `already exists` and a `/pull/<n>` URL, the flow 
 closed PR is not adopted, and a new PR opens. The admin merge retry runs only when every violation clause of the merge error (lines split on
 sentence ends, commas and semicolons) matches the signature rule wording `must have verified
 signatures`.
-The flow never rebases and never edits code. Every git and gh call has a time limit (120 s, 300 s
+The flow does not rebase. It edits files only in a docs-only merge. Every git and gh call has a
+time limit (120 s, 300 s
 for fetch and push, 30 min for the check command) and a 64 MiB output buffer, and the diffs run
 with fixed color, prefix and path settings. The check command gets `DISPATCH_CHECK_WAIT_SECONDS=5400`.
 Its 30 min stop while the slot gate prints its waiting line and start again at the gate's
@@ -6652,11 +6661,21 @@ reason. The runner reads the board policy before each step
 and poll: `none` stops the flow and `open_prs` stops the merges. The runner keeps its board key,
 and a card that is gone stops it with no write; unwind refuses a group whose flow runs with 409
 `ship-running`. A thrown runner is stored as stopped. A refused move to Done after the last merge
-keeps the flow done and raises a `ship_failure` item for a manual move. A conflict, a failed check or an identity mismatch stops the flow
+keeps the flow done and raises a `ship_failure` item for a manual move. A conflict, a refused
+session send, the wait cap, the send cap, a failed check or an identity mismatch stops the flow
 and raises one `ship_failure` decision item. The identity stop compares the author and message of
 the new `origin/main` tip with the `git config` identity that the flow read at its start. One flow
 runs on a board at a time. A flow in the state `running` is started again at boot by
-`resumeShipFlows`, and a stopped flow is replaced by a new `start_ship` call.
+`resumeShipFlows`, and a stopped flow is replaced by a new `start_ship` call. When the merge of
+`origin/main` conflicts only in Markdown files, the flow merges each file with the lines of main
+first and the lines of the branch after them. Then it makes a merge commit. For any other
+conflict, the flow aborts the merge. It sends one merge instruction to the session of the card
+through the send path, with the ship flow exception. Then it waits in `merging_main`. The wait
+ends when the branch holds that main commit, the worktree is clean and the card is in Agent done.
+The wait is 60 minutes for each send, and a branch gets 2 sends. A resumed flow counts one send.
+It waits when the worktree is dirty. After a failed `gh pr merge`, the flow reads the PR state and
+head once. A PR that is `MERGED` on the checked commit counts as merged. For any other answer, the
+first line of the merge error is the stop reason.
 
 **Ship gate for a group with no loop progress.** A group with no loop progress has no
 `loopProgress` or zero units (decision record D-10). `assertShippable` refuses 409
@@ -6670,7 +6689,9 @@ reads the identity or writes, `assertAheadAndClean` resolves the base once. The 
 `refs/remotes/origin/<base>` when that ref exists, else `refs/heads/<base>`. It answers 409
 `unknown-base` for a base that is empty, starts with a hyphen, is not a plain branch name or resolves to neither ref. Each branch must be ahead of that ref (409
 `branch-not-ahead`) and the worktree must be clean (409 `worktree-dirty`). A failed git call of
-these two checks answers 409 `no-workspace`. A group with loop progress keeps the D-8 rules.
+these two checks answers 409 `no-workspace`. A group with loop progress keeps the D-8 rules. A card
+that is not a group loop also passes the column check in Needs input when its loop engine is closed
+and its loop completion is complete. The ahead and clean checks still run for that card.
 
 **MCP server.** `dispatch mcp` serves the 37 tools over stdio. `bootstrap/cli.ts` reads and checks
 `DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and
@@ -6770,7 +6791,7 @@ record is `stopped`, and with 409 `orchestrator-session-live` while the tmux ses
 open. At boot `settleTransientRecords` moves each `starting` or `stopping` record to `running` while its
 hidden tmux session is open (the supervisor then classifies the session), else to `stopped` with its
 token revoked. The session is probed by `card.tmuxSession`, else by the name the start saga gives it
-(`dsp-<branch or identifier>`), because a first start writes `tmuxSession` only once claude is ready. The supervisor applies the effective policy of the owner (`ownerPolicy`) to each loop:
+(`dsp-<branch or identifier>`), because a first start writes `tmuxSession` only once claude is ready. After the server listens, `relaunchStaleTokenSessions` reads `DISPATCH_ORCHESTRATOR_TOKEN` from the tmux environment of each open orchestrator session where claude runs. When that token is missing, unknown, revoked or of another orchestrator, it presses `Escape`, types `/exit`, waits for the shell prompt and relaunches claude through `runClaude`, which gives the shell a fresh token and resumes the recorded conversation. The MCP server reads its token only when claude starts, so a running claude cannot get a fresh token without a relaunch. Each relaunch writes one `supervisor_action` event with `action: "orchestrator_relaunch"`, the `reason` and the `result`. A session at its shell prompt makes no tool call and stays as it is. The supervisor applies the effective policy of the owner (`ownerPolicy`) to each loop:
 the budget per group, the cap on running loops and the usage limit.
 
 **Launch limits.** When the card is hidden, `buildLaunch` in `steps.ts` adds the arguments of

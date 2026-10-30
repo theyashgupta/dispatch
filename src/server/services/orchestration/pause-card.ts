@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { ALL_BOARDS } from "../../../shared/board-key.js";
 import { isHiddenCard } from "../../../shared/hidden-card.js";
 import type {
@@ -11,6 +12,7 @@ import {
   readElapsed,
   signalSafe,
   signalTree,
+  stopBelowJob,
   type TreeSignal,
 } from "../../adapters/process-tree.js";
 import {
@@ -29,6 +31,7 @@ import { record } from "./supervisor-record.js";
 export const pauseTools: {
   panePids: typeof panePidsBySession;
   signalTree: typeof signalTree;
+  stopBelowJob: typeof stopBelowJob;
   paneTerminal: typeof paneTerminal;
   readElapsed: typeof readElapsed;
   sendKeys: typeof sendKeys;
@@ -39,6 +42,7 @@ export const pauseTools: {
 } = {
   panePids: panePidsBySession,
   signalTree,
+  stopBelowJob,
   paneTerminal,
   readElapsed,
   sendKeys,
@@ -47,6 +51,8 @@ export const pauseTools: {
   sleep,
   kill: (pid, signal) => process.kill(pid, signal),
 };
+
+export const pauseEmitter = new EventEmitter();
 
 const NO_LIVE_SESSION = "no live session";
 const OTHER_OWNER = "a command typed while paused owns the terminal";
@@ -183,7 +189,7 @@ function assertPausable(card: Card): LiveSession {
 }
 
 /**
- * Stop every process of a loop card's session and mark the card paused.
+ * Stop the processes under the pane job of a loop card's session and mark the card paused.
  *
  * @remarks Runs under the card lock and writes the mark before it signals, so a session that dies
  * mid-pause releases the mark's pids through the store event. A signal that fails or stops
@@ -212,9 +218,7 @@ export async function pauseCard(
       if (!marked)
         throw new ConflictError("not-pausable", { reason: NO_LIVE_SESSION });
       const pids = await panePidsOf(session.tmuxSession);
-      const signalled = pids
-        ? await pauseTools.signalTree(pids, "SIGSTOP")
-        : null;
+      const signalled = pids ? await pauseTools.stopBelowJob(pids) : null;
       if (!signalled?.length) {
         await store.clearCardPaused(card.id);
         throw new ConflictError("not-pausable", {
@@ -324,9 +328,10 @@ async function foreground(tmuxSession: string, pids: number[]): Promise<void> {
 /**
  * Continue every process of a paused card's session and clear the mark.
  *
- * @remarks Runs under the card lock. The stored pids are continued first, so unpause works when
- * `ps` or tmux fails. The mark clears even when the pane is gone, and stays when another process
- * owns the terminal or the shell keeps it after the retry.
+ * @remarks Runs under the card lock and continues the stored pids first, so unpause works when `ps`
+ * or tmux fails. The mark clears even when the pane is gone. A whole-tree mark, whose first pid is
+ * the pane shell, also gets the terminal check, `fg` and a `resumed` event for the resume probe,
+ * because only that pause can leave the pane tty cooked.
  */
 export async function unpauseCard(
   cardId: string,
@@ -339,21 +344,26 @@ export async function unpauseCard(
       if (!card.paused) throw new ConflictError("not-paused");
       const session = activeSession(card);
       const pids = session ? await panePidsOf(session.tmuxSession) : undefined;
-      if (session && pids)
+      const first = card.paused.pids[0];
+      const wholeTree = first !== undefined && pids?.includes(first) === true;
+      if (session && wholeTree)
         await assertTerminalFree(session.tmuxSession, card.paused.pids);
       continueOrphans(card.paused.pids);
       if (session && pids) {
         await pauseTools.signalTree(pids, "SIGCONT");
-        try {
-          await foreground(session.tmuxSession, card.paused.pids);
-        } catch (err) {
-          await pauseTools.signalTree(pids, "SIGSTOP");
-          throw err;
+        if (wholeTree) {
+          try {
+            await foreground(session.tmuxSession, card.paused.pids);
+          } catch (err) {
+            await pauseTools.signalTree(pids, "SIGSTOP");
+            throw err;
+          }
         }
       }
       await store.clearCardPaused(card.id);
       if (session)
         record(card, session, { action: "resume", reason: opts.reason });
+      if (wholeTree) pauseEmitter.emit("resumed", card.id);
       return requireCard(card.id);
     },
     { allowPaused: true },

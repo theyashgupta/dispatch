@@ -1,6 +1,13 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import path from "node:path";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { installFakeTmux } from "../../test-support/fake-tmux.js";
@@ -20,6 +27,8 @@ const {
 } = await import("./supervisor-registry.js");
 const { actionTools } = await import("./supervisor-actions.js");
 const { recordMemory } = await import("../../test-support/memory-fixtures.js");
+const { LOOP_PROGRESS } =
+  await import("../../test-support/supervised-session.js");
 await store.load();
 const realTools = { ...actionTools };
 after(() => {
@@ -28,6 +37,7 @@ after(() => {
 });
 
 const SBX = parseBoardKey("SBX")!;
+const MINUTE = 60_000;
 await store.createBoard({
   key: SBX,
   name: "Sandbox",
@@ -649,4 +659,221 @@ void test("superviseLost on a card whose active session is released plans no res
   assert.equal(calls.resume, 0);
   assert.equal(supervisorEvents(SBX, ids.cardId).length, 0);
   assert.equal(sessionOf(ids.cardId)?.state, "released");
+});
+
+async function finishedLoop(title: string, completion: "running" | "complete") {
+  const ids = await startedCard(SBX, title);
+  await store.setOrchestratorFields(ids.cardId, {
+    launch: { direction: "run the loop" },
+  });
+  await store.setLoopProgress(ids.cardId, {
+    ...LOOP_PROGRESS,
+    completion,
+    engine: {
+      active: true,
+      iteration: 1,
+      sessionId: "s-1",
+      handoffPending: false,
+      startedAt: null,
+      closed: false,
+    },
+  });
+  await store.applyMarker(
+    ids.cardId,
+    ids.sessionId,
+    "agent_done",
+    undefined,
+    "DONE built",
+    "status_agent_done",
+  );
+  ensureWatcher(ids.tmuxSession, null).progressRead = true;
+  return ids;
+}
+
+async function idleTwice(ids: Awaited<ReturnType<typeof startedCard>>) {
+  const t0 = Date.now();
+  const at = (minute: number, name: string) =>
+    supervisePane({ ...ids, pane: pane(name) }, t0 + minute * 60_000);
+  for (const minute of [0, 1, 2]) await at(minute, "idle.txt");
+  await at(3, "working.txt");
+  for (const minute of [4, 5, 6]) await at(minute, "idle.txt");
+}
+
+void test("an unchanged pane keeps a complete loop in Agent done with its DONE marker", async () => {
+  const ids = await finishedLoop("done-frozen", "complete");
+  try {
+    await idleTwice(ids);
+    const card = store.getCard(ids.cardId);
+    assert.equal(sessionOf(ids.cardId)?.state, "needs_input");
+    assert.equal(card?.column, "agent_done");
+    assert.equal(card?.lastMarker, "DONE built");
+  } finally {
+    dropWatcher(ids.tmuxSession);
+  }
+});
+
+void test("an unchanged pane still moves a running loop in Agent done to Needs input", async () => {
+  const ids = await finishedLoop("done-running", "running");
+  try {
+    await idleTwice(ids);
+    assert.equal(sessionOf(ids.cardId)?.state, "needs_input");
+    assert.equal(store.getCard(ids.cardId)?.column, "needs_input");
+  } finally {
+    dropWatcher(ids.tmuxSession);
+  }
+});
+
+void test("an idle loop whose engine Dispatch only kept open gets no restart prompt", async () => {
+  const ids = await startedCard(SBX, "kept-open");
+  await store.setOrchestratorFields(ids.cardId, {
+    launch: { direction: "run the loop" },
+  });
+  await store.setLoopProgress(ids.cardId, {
+    ...LOOP_PROGRESS,
+    engine: {
+      active: true,
+      iteration: 1,
+      sessionId: "s-1",
+      handoffPending: false,
+      startedAt: null,
+      closed: false,
+      keptOpen: true,
+    },
+  });
+  ensureWatcher(ids.tmuxSession, null).progressRead = true;
+  try {
+    const t0 = Date.now();
+    for (const minute of [0, 1, 2])
+      await supervisePane(
+        { ...ids, pane: pane("idle.txt") },
+        t0 + minute * 60_000,
+      );
+    assert.equal(sessionOf(ids.cardId)?.state, "idle");
+    const actions = store
+      .listOrchestrationEvents(SBX, 0, 500)
+      .filter((e) => e.cardId === ids.cardId && e.kind === "supervisor_action");
+    assert.deepEqual(actions, []);
+  } finally {
+    dropWatcher(ids.tmuxSession);
+  }
+});
+
+const LOOP_SLUG = LOOP_PROGRESS.slug;
+const ENGINE_REL = path.join(".claude", "ralph-loop.local.md");
+const PROMISE_PANE = `⏺ All units are green.\n  <promise>RALPH COMPLETE ${LOOP_SLUG}</promise>\n✻ Worked for 6s · done 4:01 AM\n❯ \n  Opus 5.5 · high  │  ██░░░░░░░░   17%  174k/1.0M\n`;
+const DONE_PANE = PROMISE_PANE.replace(
+  "✻ Worked",
+  "  DISPATCH_STATUS: DONE - built\n✻ Worked",
+);
+
+async function completeLoop(title: string, blockedClose = false) {
+  const root = mkdtempSync(path.join(env.root, `${title}-`));
+  const ids = await startedCard(SBX, title, root);
+  await store.setOrchestratorFields(ids.cardId, {
+    launch: { direction: "run the loop" },
+  });
+  const engine = path.join(root, ENGINE_REL);
+  mkdirSync(path.dirname(engine), { recursive: true });
+  writeFileSync(
+    engine,
+    `---\nactive: true\niteration: 1\nsession_id: s-1\ncompletion_promise: "RALPH COMPLETE ${LOOP_SLUG}"\n---\nbody\n`,
+  );
+  if (blockedClose)
+    mkdirSync(path.join(`${engine}.done`, "keep"), { recursive: true });
+  const seed = () =>
+    store.setLoopProgress(ids.cardId, {
+      ...LOOP_PROGRESS,
+      completion: "complete",
+      engine: {
+        active: true,
+        iteration: 1,
+        sessionId: "s-1",
+        handoffPending: false,
+        startedAt: null,
+        closed: false,
+      },
+    });
+  await seed();
+  ensureWatcher(ids.tmuxSession, null).progressRead = true;
+  const closeRows = () =>
+    store
+      .listOrchestrationEvents(SBX, 0, 500)
+      .filter(
+        (e) =>
+          e.cardId === ids.cardId &&
+          e.kind === "supervisor_action" &&
+          e.data.action === "close_loop",
+      );
+  return { ids, engine, seed, closeRows };
+}
+
+void test("a promise with no DONE line gives roadmap_complete and leaves the engine file in place", async () => {
+  const loop = await completeLoop("promise-only");
+  try {
+    await supervisePane({ ...loop.ids, pane: PROMISE_PANE }, 10 * MINUTE);
+    await supervisePane({ ...loop.ids, pane: PROMISE_PANE }, 20 * MINUTE);
+    assert.equal(sessionOf(loop.ids.cardId)?.state, "roadmap_complete");
+    assert.deepEqual(loop.closeRows(), []);
+    assert.equal(existsSync(loop.engine), true);
+    assert.equal(existsSync(`${loop.engine}.done`), false);
+  } finally {
+    dropWatcher(loop.ids.tmuxSession);
+  }
+});
+
+void test("a promise and a DONE line close the engine with the reason done_marker", async () => {
+  const loop = await completeLoop("promise-and-done");
+  try {
+    await supervisePane({ ...loop.ids, pane: DONE_PANE }, 10 * MINUTE);
+    assert.equal(sessionOf(loop.ids.cardId)?.state, "roadmap_complete");
+    assert.equal(loop.closeRows().length, 1);
+    assert.equal(loop.closeRows()[0].data.result, "closed");
+    assert.equal(loop.closeRows()[0].data.reason, "done_marker");
+    assert.equal(existsSync(loop.engine), false);
+    assert.match(
+      readFileSync(`${loop.engine}.done`, "utf8"),
+      /^closed_reason: done_marker$/m,
+    );
+  } finally {
+    dropWatcher(loop.ids.tmuxSession);
+  }
+});
+
+void test("a DONE line that arrives after the promise closes the engine on the next retry", async () => {
+  const loop = await completeLoop("done-after-promise");
+  try {
+    await supervisePane({ ...loop.ids, pane: PROMISE_PANE }, 10 * MINUTE);
+    assert.deepEqual(loop.closeRows(), []);
+    await supervisePane({ ...loop.ids, pane: DONE_PANE }, 12 * MINUTE);
+    assert.equal(loop.closeRows().length, 1);
+    assert.equal(loop.closeRows()[0].data.reason, "done_marker");
+    assert.equal(existsSync(loop.engine), false);
+  } finally {
+    dropWatcher(loop.ids.tmuxSession);
+  }
+});
+
+void test("the close retry after a failed rename runs once a minute and only while the DONE line is seen", async () => {
+  const loop = await completeLoop("retry-gated", true);
+  try {
+    const sample = async (pane: string, at: number) => {
+      await loop.seed();
+      await supervisePane({ ...loop.ids, pane }, at);
+    };
+    await sample(DONE_PANE, 10 * MINUTE);
+    assert.equal(loop.closeRows().length, 1);
+    assert.match(String(loop.closeRows()[0].data.result), /^failed/);
+    await sample(DONE_PANE, 10 * MINUTE + 30_000);
+    assert.equal(loop.closeRows().length, 1);
+    await sample(DONE_PANE, 11 * MINUTE + 1_000);
+    assert.equal(loop.closeRows().length, 2);
+    await sample(PROMISE_PANE, 13 * MINUTE);
+    await sample(PROMISE_PANE, 15 * MINUTE);
+    assert.equal(loop.closeRows().length, 2);
+    await sample(DONE_PANE, 17 * MINUTE);
+    assert.equal(loop.closeRows().length, 3);
+    assert.equal(existsSync(loop.engine), true);
+  } finally {
+    dropWatcher(loop.ids.tmuxSession);
+  }
 });

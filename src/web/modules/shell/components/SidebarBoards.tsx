@@ -41,7 +41,7 @@ export function SidebarBoards({
           <SidebarGroupLabel asChild>
             <button
               type="button"
-              className="h-auto w-full justify-between rounded-none pt-2 pb-1 font-semibold tracking-[0.04em] text-muted-foreground uppercase [&[data-state=closed]>svg]:-rotate-90"
+              className="h-auto w-full justify-between rounded-none pt-2 pb-1 font-semibold tracking-(--tracking-label) text-muted-foreground uppercase [&[data-state=closed]>svg]:-rotate-90"
             >
               Boards
               <ChevronDownIcon aria-hidden="true" />

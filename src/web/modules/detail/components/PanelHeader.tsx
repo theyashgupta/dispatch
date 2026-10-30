@@ -263,7 +263,7 @@ export function PanelHeader({
             disabled={pausePending}
             onClick={() => onPauseRequest?.(c.id)}
             aria-label={narrowPanel ? "Pause" : undefined}
-            title="Stop every process of this loop until you resume it"
+            title="Stop Claude and its commands until you resume the loop"
           >
             <Pause className="size-3" aria-hidden="true" />
             {!narrowPanel && "Pause"}
