@@ -61,7 +61,7 @@ function squashMerge(pr, subject) {
     const trailer = scenario.coAuthor ? "\n\nCo-Authored-By: Helper <helper@example.com>" : "";
     git(
       ["-c", "user.name=" + author.name, "-c", "user.email=" + author.email,
-        "commit", "-q", "-m", subject + trailer],
+        "commit", "-q", "--allow-empty", "-m", subject + trailer],
       dir,
     );
     git(["push", "-q", "origin", "HEAD:main"], dir);

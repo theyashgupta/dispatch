@@ -1028,6 +1028,80 @@ void test("a retry after a new commit on the branch runs the check again", async
   );
 });
 
+void test("a retry on a new merge commit with the same tree skips the check command", async () => {
+  const check = countingCheck();
+  const stack = await newStack({
+    checkCommand: check.command,
+    scenario: { checks: "fail" },
+  });
+  await startShip(stack, ["unit-1"]);
+  const first = await finished(stack.card);
+  assert.equal(first.failedStep, "waiting_checks");
+  assert.equal(check.runs(), 1);
+  await pushToMain(stack.bare, { "a.txt": "unit-1\n" }, "feat: unit-1 (#1)");
+  setGhScenario(stack.ghScenario, { checks: "pass" });
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  const before = first.branches[0].checked!;
+  const after = flow.branches[0].checked!;
+  assert.notEqual(after, before);
+  const treeOf = (c: string) =>
+    gitOutput(stack.worktree, "rev-parse", `${c}^{tree}`);
+  assert.equal(await treeOf(after), await treeOf(before));
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.equal(check.runs(), 1);
+  assert.equal(flow.branches[0]?.checkSkipped, true);
+  assert.equal(
+    groupStatesOf(stack.card.id).filter((s) => s === "ship_check_skipped")
+      .length,
+    1,
+  );
+});
+
+void test("a resumed flow whose passed commit is the checked commit still runs the check on a dirty worktree", async () => {
+  const check = countingCheck();
+  const stack = await newStack({ checkCommand: check.command });
+  await gitOutput(stack.worktree, "checkout", "-q", "unit-1");
+  const head = await gitOutput(stack.worktree, "rev-parse", "HEAD");
+  const leftover = path.join(stack.worktree, "scratch.txt");
+  fs.writeFileSync(leftover, "left behind\n");
+  await storeRunning(stack, {
+    state: "checking",
+    tip: head,
+    checked: head,
+    passed: head,
+  });
+  resumeShipFlows();
+  await waitFor(() => Promise.resolve(check.runs() >= 1), 10_000, "check run");
+  fs.rmSync(leftover);
+  const flow = await finished(stack.card);
+  assert.equal(check.runs(), 1);
+  assert.equal(flow.branches[0]?.checkSkipped, false);
+});
+
+void test("a passed commit that no longer resolves runs the check", async () => {
+  const check = countingCheck();
+  const stack = await newStack({
+    checkCommand: check.command,
+    scenario: { checks: "fail" },
+  });
+  await startShip(stack, ["unit-1"]);
+  await finished(stack.card);
+  const runs = check.runs();
+  setGhScenario(stack.ghScenario, { checks: "pass" });
+  const stored = store.getCard(stack.card.id)!.shipFlow!;
+  await store.setShipFlow(stack.card.id, {
+    ...stored,
+    state: "stopped",
+    branches: stored.branches.map((b) => ({ ...b, passed: "0".repeat(40) })),
+  });
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.equal(check.runs(), runs + 1);
+  assert.equal(flow.branches[0]?.checkSkipped, false);
+});
+
 void test("a retry after a failed check runs the check again", async () => {
   const check = countingCheck(true);
   const stack = await newStack({ checkCommand: check.command });

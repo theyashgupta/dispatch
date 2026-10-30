@@ -6617,8 +6617,9 @@ a merge of `origin/main` with no edit, and records the merged commit as `checked
 runs on that commit, the push uses the refspec `<checked>:refs/heads/<name>`, and the merge
 passes gh's match head commit option with it; a resumed flow whose HEAD moved stops. Each branch
 stores `passed`, the commit on which its check last passed. A new flow copies `passed` from the
-previous flow of the same card, repository and branch name. When `checked` equals `passed`, the
-flow does not run the check command, sets `checkSkipped` to true and records one
+previous flow of the same card, repository and branch name. The flow does not run the check command
+when the tree of `checked` equals the tree of `passed` and the worktree has no change. A failed git
+read runs the check. A skipped check sets `checkSkipped` to true and records one
 `ship_check_skipped` group state (loop cards only). The diff scope check and the prose check still
 run. Each gh
 call names the repository of the `origin` remote (`repo` on the flow; null unless the host is
