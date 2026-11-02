@@ -1,6 +1,27 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { elbowPath } from "./centre-edges.js";
+import { elbowPath, pickSource } from "./centre-edges.js";
+
+const sources = new Map([
+  ["", "A"],
+  ["x", "B"],
+]);
+
+test("an unnamed tile uses the unnamed node", () => {
+  assert.equal(pickSource(null, sources), "A");
+});
+
+test("a named tile uses the node of that name", () => {
+  assert.equal(pickSource("x", sources), "B");
+});
+
+test("a tile that names a missing node has no source", () => {
+  assert.equal(pickSource("missing", sources), null);
+});
+
+test("an unnamed tile has no source when no node is unnamed", () => {
+  assert.equal(pickSource(null, new Map([["x", "B"]])), null);
+});
 
 test("an elbow runs right to the middle, down to the tile row, then right into the tile", () => {
   assert.equal(
