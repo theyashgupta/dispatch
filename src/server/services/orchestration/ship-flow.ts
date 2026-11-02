@@ -919,6 +919,25 @@ async function unchangedTree(r: Runner, branch: ShipBranch): Promise<boolean> {
 }
 
 /**
+ * The Dispatch check argv: the board's check command, then `npm run lint:typed`, in one check slot.
+ *
+ * @remarks CI runs lint:typed after the check, so the ship check must run it too. The outer slot
+ * gate holds the slot for both steps and the inner gates see it held, so the 30 minute budget
+ * covers both and no second slot is taken.
+ */
+function withTypedLint(argv: string[]): string[] {
+  return [
+    "node",
+    "scripts/with-check-slot.mjs",
+    "sh",
+    "-c",
+    '"$@" && npm run lint:typed',
+    "check",
+    ...argv,
+  ];
+}
+
+/**
  * Check that the diff holds only this branch, the prose rule and the repository check command.
  *
  * @remarks The branch's own files run from the previous branch's stored tip to this branch's tip
@@ -937,7 +956,8 @@ async function check(r: Runner, branch: ShipBranch): Promise<void> {
   if (extra.length > 0) {
     throw new ShipStop(`files outside this branch: ${extra.join(", ")}`);
   }
-  if (isDispatchRepo(r.worktree)) {
+  const dispatch = isDispatchRepo(r.worktree);
+  if (dispatch) {
     const found = proseViolations(
       await exec(r, "git", [...DIFF, "origin/main", "HEAD"]),
     );
@@ -966,7 +986,7 @@ async function check(r: Runner, branch: ShipBranch): Promise<void> {
     );
     return;
   }
-  await runCheck(r.worktree, argv);
+  await runCheck(r.worktree, dispatch ? withTypedLint(argv) : argv);
   branch.passed = branch.checked;
   await persist(r);
 }

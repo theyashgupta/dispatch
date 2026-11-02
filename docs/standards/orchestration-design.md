@@ -237,7 +237,7 @@ Usage credits are not a value of any field. With `supervisor` off, the board beh
 
 1. Check out the branch in the group worktree and merge origin/main against the old stack tip, so git takes the side of main for the units that are already squashed. Never rebase.
 2. Check that the diff against origin/main holds only this branch. For the Dispatch repository, check that no added prose line in docs, src, scripts, `.claude` and `CLAUDE.md` has an em dash or a double hyphen. Code spans and table delimiter rows are exempt. To mark a generated block in a Markdown doc, use only the link reference comment form `[//]: # "<name>:start"` and `[//]: # "<name>:end"`. Do not use an HTML comment as a marker, because its delimiters are double hyphens and the prose rule refuses them.
-3. Run the check command of the repository entry (D-1).
+3. Run the check command of the repository entry (D-1). For the Dispatch repository, run `npm run lint:typed` after it in the same check slot, as the CI check job does (LOCAL-220).
 4. Push and open the PR with the given title and body.
 5. Wait for the checks.
 6. With `merge` rights: squash merge with the subject `<title> (#<n>)` and an empty body. If the signature rule blocks, merge again with `--admin` and record it. With `open_prs` rights: wait for the user to merge.
