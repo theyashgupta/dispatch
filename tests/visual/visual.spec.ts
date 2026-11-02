@@ -56,6 +56,35 @@ const START_FAILED_SESSION = {
   startError: "worktree: fatal: a branch named 'orchestrator' already exists",
 };
 
+const treeRoutes = async (page: Page) => {
+  await collapseCentre(page);
+  await centreRoutes(page);
+  await page.route("**/api/boards/ORC/orchestrators", async (route) => {
+    const response = await route.fetch();
+    const { orchestrators } = (await response.json()) as {
+      orchestrators: Record<string, unknown>[];
+    };
+    const main = orchestrators[0];
+    await route.fulfill({
+      response,
+      json: {
+        orchestrators: [
+          ...orchestrators,
+          {
+            ...main,
+            id: "search",
+            name: "Search",
+            role: "extra",
+            kind: "feature",
+            scope: { groupIds: ["GROUP-22"], ticketIds: [] },
+            session: null,
+          },
+        ],
+      },
+    });
+  });
+};
+
 const startFailedRoutes = async (page: Page) => {
   await collapseCentre(page);
   await centreRoutes(page);
@@ -190,6 +219,18 @@ const screens: {
       const tile = page.locator('[data-edge-tile="GROUP-21"]');
       await expect(tile.getByText("Needs attention")).toBeVisible();
       await tile.evaluate((el) => el.scrollIntoView({ block: "start" }));
+    },
+  },
+  {
+    name: "centre-tree",
+    url: `${orchestrated}/#/boards/ORC/orchestrator?view=tree`,
+    widths: [1440],
+    routes: treeRoutes,
+    ready: async (page) => {
+      await expect(page.locator('[data-edge-node="search"]')).toBeVisible();
+      await expect(
+        page.locator('[data-edge-tile="GROUP-22"][data-edge-from="search"]'),
+      ).toBeVisible();
     },
   },
   {
