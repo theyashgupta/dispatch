@@ -307,6 +307,7 @@ function seedOrchestrated(db) {
     orcCard(id, title, column, minutesAgo, "local", extra);
   const cards = [
     group("GROUP-21", "Billing migration", "in_progress", 4, {
+      memberIds: ["ORC-121", "ORC-122", "ORC-123"],
       loopProgress: orcLoop(
         "billing",
         [
@@ -408,6 +409,7 @@ function seedOrchestrated(db) {
       activeSessionId: "s24",
     }),
     group("GROUP-25", "Export service", "needs_input", 25, {
+      memberIds: ["ORC-124"],
       sessions: [
         orcSession("s25", 25, {
           state: "needs_input",
@@ -431,6 +433,26 @@ function seedOrchestrated(db) {
     }),
     ticket("ORC-105", "Parked ticket", "parked", 300),
     ticket("ORC-106", "Done ticket", "done", 500),
+    ticket("ORC-121", "Billing schema tickets", "in_progress", 30, {
+      groupId: "GROUP-21",
+    }),
+    ticket("ORC-122", "Billing backfill job", "agent_done", 40, {
+      groupId: "GROUP-21",
+    }),
+    ticket("ORC-123", "Billing cutover runbook", "in_progress", 20, {
+      groupId: "GROUP-21",
+      loopProgress: orcLoop(
+        "cutover",
+        [orcUnit(1, "Runbook", "in progress", 4, 1, 40, true)],
+        "running",
+        1,
+        { number: 2, name: "Phase 2" },
+        gate(1, 2, "fail", 20),
+      ),
+    }),
+    ticket("ORC-124", "Export format spec", "todo", 25, {
+      groupId: "GROUP-25",
+    }),
   ];
   const insertCard = db.prepare(
     "INSERT OR REPLACE INTO cards (id, data, board_key) VALUES (?, ?, 'ORC')",

@@ -130,7 +130,7 @@ const screens: {
     url: `${orchestrated}/#/boards`,
     ready: (page) =>
       expect(
-        page.getByText("8 need attention").locator("visible=true"),
+        page.getByText("9 need attention").locator("visible=true"),
       ).toBeVisible(),
   },
   {
@@ -159,6 +159,37 @@ const screens: {
       if ((page.viewportSize()?.width ?? 0) < 768)
         await expect(branch).toBeAttached();
       else await expect(branch).toBeVisible();
+    },
+  },
+  {
+    name: "centre-group-collapsed",
+    url: `${orchestrated}/#/boards/ORC/orchestrator`,
+    routes: async (page) => {
+      await collapseCentre(page);
+      await centreRoutes(page);
+    },
+    ready: async (page) => {
+      const control = page.getByRole("button", {
+        name: "Show 3 units and 3 tickets",
+      });
+      await control.scrollIntoViewIfNeeded();
+      await expect(control).toHaveAttribute("aria-expanded", "false");
+    },
+  },
+  {
+    name: "centre-group-expanded",
+    url: `${orchestrated}/#/boards/ORC/orchestrator`,
+    routes: async (page) => {
+      await collapseCentre(page);
+      await centreRoutes(page);
+    },
+    ready: async (page) => {
+      await page
+        .getByRole("button", { name: "Show 3 units and 3 tickets" })
+        .click();
+      const tile = page.locator('[data-edge-tile="GROUP-21"]');
+      await expect(tile.getByText("Needs attention")).toBeVisible();
+      await tile.evaluate((el) => el.scrollIntoView({ block: "start" }));
     },
   },
   {
