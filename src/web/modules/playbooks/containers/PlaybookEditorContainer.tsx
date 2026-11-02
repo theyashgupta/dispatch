@@ -13,7 +13,8 @@ import { useFolderBrowser } from "@/queries/workspace-folders-queries";
 const COLLISION_MESSAGE = "A playbook with that name already exists";
 
 export type PlaybookEditorTarget =
-  { mode: "create" } | { mode: "edit"; playbook: Playbook & { slug: string } };
+  | { mode: "create" }
+  | { mode: "edit"; playbook: Playbook & { slug: string } };
 
 interface PlaybookEditorContainerProps {
   target: PlaybookEditorTarget;

@@ -1,13 +1,9 @@
-import js from "@eslint/js";
 import tseslint from "typescript-eslint";
-import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";
 import jsdoc from "eslint-plugin-jsdoc";
 import boundaries from "eslint-plugin-boundaries";
 import checkFile from "eslint-plugin-check-file";
-import prettier from "eslint-config-prettier";
 import commentsJsdocOnly from "./eslint-local/comments-jsdoc-only.js";
-import { builtinRules } from "eslint/use-at-your-own-risk";
 
 const importResolver = {
   typescript: {
@@ -524,225 +520,6 @@ const jsdocRules = {
 };
 
 /**
- * Comment-standard rule 9 escape hatch, mirrored from the custom rule: a
- * comment carrying a URL, issue number, or ticket key names an external fact
- * and is exempt from the inline-comment ban.
- */
-const externalFactPattern = "(https?:\\/\\/|#\\d+|\\b[A-Z][A-Z0-9]+-\\d+\\b)";
-
-const copyNodePrefixes = [
-  "Literal:not([regex])[value=",
-  "TemplateElement[value.raw=",
-  "JSXText[value=",
-];
-const copyGuardSelectors = copyNodePrefixes.map((prefix) => ({
-  selector: `${prefix}/\u2014| \u2013 |(^|[^-\\w])-{2}($|[^-\\w])/]`,
-  message:
-    "No em dashes, spaced en dashes, or double hyphens in copy. Use a comma, period, colon, or rephrase.",
-}));
-const panelIdentityBan = [
-  {
-    selector:
-      "JSXOpeningElement[name.name='iframe'] > JSXAttribute[name.name='key']",
-    message: "PANEL-03: never key the terminal iframe (docs/ARCHITECTURE.md).",
-  },
-  {
-    selector:
-      "JSXOpeningElement[name.name=/^(DetailPanelView|DetailPanelContainer|PanelFrame|TerminalRegion)$/] > JSXAttribute[name.name='key']",
-    message:
-      "PANEL-03: a key on the panel ancestry remounts the terminal iframe.",
-  },
-  {
-    selector:
-      "JSXOpeningElement[name.name='iframe']:not(:has(JSXAttribute[name.name='sandbox'][value.value='allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox']))",
-    message: "PANEL-03: the terminal iframe sandbox value is locked (U3-07).",
-  },
-];
-const retiredLiteralBan = [
-  ...copyNodePrefixes.map((prefix) => ({
-    selector: `${prefix}/0 0 0 2px var\\(--accent\\)/]`,
-    message:
-      "Do not draw keyboard focus with an accent box-shadow. Use the outline focus classes (docs/ARCHITECTURE.md#design-system-invariants).",
-  })),
-  ...copyNodePrefixes.map((prefix) => ({
-    selector: `${prefix}/0 6px 16px rgba\\(0, ?0, ?0, ?0?\\.45\\)/]`,
-    message:
-      "Do not write the float shadow value. It lives once in src/web/styles/tokens.css as --shadow-float (docs/ARCHITECTURE.md#design-system-invariants).",
-  })),
-  ...[
-    "Property:matches([key.name='fontWeight'],[key.value='fontWeight']) > Literal[value=800]",
-    "Property:matches([key.name='fontWeight'],[key.value='fontWeight']) > :matches(TSAsExpression, TSSatisfiesExpression) > Literal[value=800]",
-  ].map((selector) => ({
-    selector,
-    message:
-      "Do not write font weight 800. Use the Wordmark component or a --weight-* token (docs/ARCHITECTURE.md#design-system-invariants).",
-  })),
-];
-const globalSyntax = [
-  ...copyGuardSelectors,
-  ...panelIdentityBan,
-  ...retiredLiteralBan,
-];
-const styleBan = [
-  {
-    selector: 'JSXAttribute[name.name="style"]',
-    message:
-      "Do not use the JSX style prop. Use Tailwind token classes (docs/standards/frontend-architecture.md, The only-shadcn rule).",
-  },
-];
-const hexBan = copyNodePrefixes.map((prefix) => ({
-  selector: `${prefix}/#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\\b/]`,
-  message:
-    "Do not write a hex colour. Add a token to src/web/styles/tokens.css and use its Tailwind token class (docs/standards/frontend-architecture.md, The only-shadcn rule).",
-}));
-const fetchBan = [
-  'CallExpression[callee.name="fetch"]',
-  'NewExpression[callee.name="EventSource"]',
-].map((selector) => ({
-  selector,
-  message:
-    "Only query files call fetch or create an EventSource (docs/standards/frontend-architecture.md, Import matrix).",
-}));
-const radixBan = {
-  group: ["@radix-ui/*", "radix-ui", "radix-ui/*"],
-  message:
-    "Import Radix only in components/ui. Compose the shadcn primitive (docs/standards/frontend-architecture.md, The only-shadcn rule).",
-};
-const httpBan = {
-  regex: "(^|/)lib/http(\\.[cm]?[jt]sx?)?$",
-  message:
-    "Only query files import src/web/lib/http.ts (docs/standards/frontend-architecture.md, Layer definitions).",
-};
-const queryBan = {
-  group: ["@tanstack/react-query"],
-  message:
-    "Import TanStack Query only in query files, containers and src/web/queries/, and in a route only as a type. Views, components, hooks and domain files never import it (docs/standards/frontend-architecture.md, Layer definitions).",
-};
-const routerBan = {
-  group: ["@tanstack/react-router"],
-  message:
-    "Import TanStack Router only in routes, views and containers. Components and domain files never import it (docs/standards/frontend-architecture.md, Layer definitions).",
-};
-const reactBan = {
-  regex: "^react(-dom)?(/.*)?$",
-  message:
-    "Keep src/web/lib free of React. Put a React hook in components/ui/hooks/ (docs/standards/frontend-architecture.md, Shared tiers).",
-};
-const designLiteralBan = [
-  ...copyNodePrefixes.map((prefix) => ({
-    selector: `${prefix}/shadow-\\[/]`,
-    message:
-      "Do not write an arbitrary shadow class. Use a shadow token class such as shadow-lg or shadow-(--shadow-float) (docs/ARCHITECTURE.md#design-system-invariants).",
-  })),
-  ...copyNodePrefixes.map((prefix) => ({
-    selector: `${prefix}/font-(extrabold|\\[800\\])/]`,
-    message:
-      "Do not write a weight 800 class. Use font-normal, font-medium or font-semibold (docs/ARCHITECTURE.md#design-system-invariants).",
-  })),
-];
-const boardZoneBan = [
-  ...copyNodePrefixes.map((prefix) => ({
-    selector: `${prefix}/reading-surface/]`,
-    message:
-      "Do not use the reading-surface class in the board module. Board cards keep the global --line-body (docs/ARCHITECTURE.md#design-system-invariants).",
-  })),
-  ...[
-    ...copyNodePrefixes.map((prefix) => `${prefix}/--line-body\\s*:/]`),
-    "Property[key.value='--line-body']",
-  ].map((selector) => ({
-    selector,
-    message:
-      "Do not redefine --line-body in the board module. Read var(--line-body) only (docs/ARCHITECTURE.md#design-system-invariants).",
-  })),
-];
-const designPlugin = {
-  rules: { "restricted-syntax": builtinRules.get("no-restricted-syntax")! },
-};
-const selectorBan = [
-  {
-    selector:
-      'CallExpression[callee.name="useAppStore"] > ArrowFunctionExpression[body.type=/^(?:ObjectExpression|ArrayExpression)$/]',
-    message:
-      "Select one stored field or a primitive from useAppStore. A selector that builds an object or array returns a new value on every read and loops useSyncExternalStore (src/web/components/ui/hooks/use-app-store.ts).",
-  },
-];
-const newTreeSyntax = [...styleBan, ...hexBan, ...fetchBan, ...selectorBan];
-const newTreeZones = [
-  /**
-   * The terminal client stays fenced outside the React zones (NEW-20).
-   */
-  {
-    files: ["src/web/**/*.{ts,tsx}"],
-    ignores: ["src/web/terminal-main.ts"],
-    syntax: newTreeSyntax,
-    imports: [radixBan, httpBan, queryBan, routerBan],
-  },
-  {
-    files: ["src/web/main.tsx"],
-    syntax: newTreeSyntax,
-    imports: [radixBan, httpBan],
-  },
-  {
-    files: ["src/web/lib/**/*.ts"],
-    syntax: newTreeSyntax,
-    imports: [radixBan, httpBan, queryBan, routerBan, reactBan],
-  },
-  {
-    files: ["src/web/lib/query-client.ts"],
-    syntax: newTreeSyntax,
-    imports: [radixBan, httpBan, routerBan, reactBan],
-  },
-  {
-    files: ["src/web/lib/http.ts"],
-    syntax: [...styleBan, ...hexBan],
-    imports: [radixBan, queryBan, routerBan, reactBan],
-  },
-  {
-    files: ["src/web/routes/**/*.{ts,tsx}"],
-    syntax: newTreeSyntax,
-    imports: [radixBan, httpBan, { ...queryBan, allowTypeImports: true }],
-  },
-  {
-    files: ["src/web/modules/*/views/**/*.{ts,tsx}"],
-    syntax: newTreeSyntax,
-    imports: [radixBan, httpBan, queryBan],
-  },
-  {
-    files: ["src/web/modules/*/containers/**/*.{ts,tsx}"],
-    syntax: newTreeSyntax,
-    imports: [radixBan, httpBan],
-  },
-  {
-    files: ["src/web/modules/*/components/dnd/**/*.{ts,tsx}"],
-    syntax: [...hexBan, ...fetchBan, ...selectorBan],
-    imports: [radixBan, httpBan, queryBan, routerBan],
-  },
-  {
-    files: ["src/web/modules/*/queries/**/*.{ts,tsx}"],
-    syntax: [...styleBan, ...hexBan],
-    imports: [radixBan, routerBan],
-  },
-  {
-    files: ["src/web/components/ui/**/*.{ts,tsx}"],
-    syntax: [...hexBan, ...fetchBan, ...selectorBan],
-    imports: [httpBan, queryBan, routerBan],
-  },
-  {
-    files: ["src/web/queries/**/*.{ts,tsx}"],
-    syntax: [...styleBan, ...hexBan],
-    imports: [radixBan, routerBan],
-  },
-  /**
-   * Exception U4-13, dated 2026-10-01: the viewer keeps its style constants and its file fetch.
-   */
-  {
-    files: ["src/web/viewer/**/*.{ts,tsx}", "src/web/viewer-main.tsx"],
-    syntax: hexBan,
-    imports: [radixBan, httpBan, queryBan, routerBan],
-  },
-];
-
-/**
  * Extglob kebab-case segment shared by the check-file role-suffix patterns.
  * Mirrors the plugin's built-in KEBAB_CASE exactly (leading lowercase letter
  * required) so the suffix subtrees are precisely as strict as the base block.
@@ -750,66 +527,19 @@ const newTreeZones = [
 const KEBAB = "+([a-z])*([a-z0-9])*(-+([a-z0-9]))";
 const ROUTE_FILE = `@(__root|${KEBAB}.\\{-$id\\}?(.lazy)|${KEBAB}.index?(.lazy)|${KEBAB}.\\$key.@(settings|index)?(.lazy)|${KEBAB}.\\$key.${KEBAB}.\\{-$id\\}?(.lazy))`;
 
-const typed = process.env.DISPATCH_LINT_TYPED === "1";
-
 export default tseslint.config(
   {
-    ignores: [
-      "dist/**",
-      "node_modules/**",
-      "eslint.config.ts",
-      "src/web/routeTree.gen.ts",
-      ".dependency-cruiser.cjs",
-      "eslint-local/**",
-      "scripts/**/*",
-      "!scripts/*.mjs",
-      ".claude/worktrees/**",
-      "src/web/public/**",
-      ".planning/**",
-      ".sandbox/**",
-    ],
+    ignores: ["src/web/routeTree.gen.ts", "src/web/public/**"],
   },
 
-  {
-    linterOptions: { reportUnusedDisableDirectives: typed ? "warn" : "off" },
-  },
-
-  js.configs.recommended,
-  ...(typed
-    ? tseslint.configs.recommendedTypeChecked
-    : tseslint.configs.recommended),
-  ...(typed
-    ? [
-        {
-          languageOptions: {
-            parserOptions: {
-              projectService: true,
-              tsconfigRootDir: import.meta.dirname,
-            },
-          },
-        },
-      ]
-    : []),
+  tseslint.configs.base,
 
   {
-    files: [".claude/**/*.mjs", "tests/**/*.mjs", "scripts/*.mjs"],
-    extends: [tseslint.configs.disableTypeChecked],
-    languageOptions: { globals: globals.node },
-  },
-
-  {
-    files: ["scripts/*.mjs"],
-    rules: { "no-empty": ["error", { allowEmptyCatch: true }] },
-  },
-
-  {
-    files: ["scripts/terminal-appearance-e2e.mjs"],
-    languageOptions: { globals: globals.browser },
+    linterOptions: { reportUnusedDisableDirectives: "off" },
   },
 
   {
     files: ["src/server/**/*.ts", "src/shared/**/*.ts"],
-    languageOptions: { globals: globals.node },
     plugins: { jsdoc, local: commentsJsdocOnly },
     settings: { jsdoc: { mode: "typescript" } },
     rules: {
@@ -820,7 +550,6 @@ export default tseslint.config(
 
   {
     files: ["src/web/**/*.{ts,tsx}"],
-    languageOptions: { globals: globals.browser },
     ...reactHooks.configs.flat.recommended,
     plugins: {
       ...reactHooks.configs.flat.recommended.plugins,
@@ -851,113 +580,6 @@ export default tseslint.config(
 
   boundariesConfig,
   feWebBoundariesConfig,
-
-  /**
-   * The exec chokepoint (argv-array, no-shell) is the app's shell-injection guard; this ban
-   * closes the bypass surface at build time. The allow-list is four files total: the chokepoint
-   * itself, the two AUDIT-01 carve-outs (`ttyd.ts`, `cli.ts`), and the Phase-74 `cloudflared.ts`
-   * extension — author narrow, never widen.
-   * @see docs/standards/architecture.md#exec-chokepoint-rulings
-   */
-  {
-    files: ["src/server/**/*.ts"],
-    rules: {
-      "no-restricted-imports": [
-        "error",
-        {
-          paths: [
-            {
-              name: "node:child_process",
-              message:
-                "Route subprocess calls through adapters/exec.ts (the chokepoint) — docs/standards/architecture.md exec-chokepoint rulings.",
-            },
-            {
-              name: "child_process",
-              message:
-                "Route subprocess calls through adapters/exec.ts (the chokepoint) — docs/standards/architecture.md exec-chokepoint rulings.",
-            },
-          ],
-        },
-      ],
-    },
-  },
-  {
-    files: [
-      "src/server/adapters/exec.ts",
-      "src/server/adapters/ttyd.ts",
-      "src/server/adapters/cloudflared.ts",
-      "src/server/bootstrap/cli.ts",
-    ],
-    rules: { "no-restricted-imports": "off" },
-  },
-
-  /**
-   * Copy guard: no em dash, spaced en dash, or free-standing double hyphen
-   * in any string literal, template chunk, or JSX text. Flags (`--yes`) and
-   * CSS custom properties (`--color`) pass because the hyphens touch a word
-   * character; regex literals are exempt so the marker parser can keep
-   * accepting the dash variants older agents still emit.
-   */
-  {
-    files: ["src/**/*.{ts,tsx}"],
-    rules: {
-      "no-restricted-syntax": ["error", ...globalSyntax],
-    },
-  },
-
-  ...newTreeZones.map(({ files, ignores, syntax, imports }) => ({
-    files,
-    ignores: ignores ?? [],
-    rules: {
-      "no-restricted-syntax": ["error", ...globalSyntax, ...syntax],
-      "no-restricted-imports": ["error", { patterns: imports }],
-    },
-  })),
-
-  {
-    files: ["src/web/**/*.{ts,tsx}"],
-    ignores: ["src/web/components/ui/**"],
-    plugins: { design: designPlugin },
-    rules: { "design/restricted-syntax": ["error", ...designLiteralBan] },
-  },
-
-  {
-    files: ["src/web/modules/board/**/*.{ts,tsx}"],
-    plugins: { design: designPlugin },
-    rules: {
-      "design/restricted-syntax": [
-        "error",
-        ...designLiteralBan,
-        ...boardZoneBan,
-      ],
-    },
-  },
-
-  {
-    files: ["src/**/*.{ts,tsx}"],
-    rules: {
-      "no-empty": ["error", { allowEmptyCatch: true }],
-      "no-inline-comments": ["error", { ignorePattern: externalFactPattern }],
-      "no-warning-comments": [
-        "error",
-        { terms: ["todo", "fixme", "xxx", "hack"], location: "anywhere" },
-      ],
-      "preserve-caught-error": "warn",
-      "no-useless-assignment": "warn",
-    },
-  },
-
-  ...(typed
-    ? [
-        {
-          files: ["src/**/*.{ts,tsx}"],
-          rules: {
-            "@typescript-eslint/no-misused-promises": "warn",
-            "@typescript-eslint/no-unsafe-argument": "warn",
-          },
-        },
-      ]
-    : []),
 
   /**
    * File/folder naming enforcement (docs/standards/folder-structure.md):
@@ -1073,9 +695,6 @@ export default tseslint.config(
         { "src/**/*.test.ts": `${KEBAB}.test` },
         { ignoreMiddleExtensions: false },
       ],
-      "@typescript-eslint/no-floating-promises": "off",
     },
   },
-
-  prettier,
 );

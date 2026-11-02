@@ -52,7 +52,8 @@ export async function getCardComments(id: string): Promise<LinearComment[]> {
 }
 
 type LinearActionResult =
-  { ok: true } | { ok: false; status: number; error: string | null };
+  | { ok: true }
+  | { ok: false; status: number; error: string | null };
 
 /**
  * POST a Linear action for a card and keep a failure as typed data.
@@ -149,7 +150,8 @@ export async function setCardBlockedBy(
 }
 
 type SetCardOrchestratorResult =
-  { ok: true } | { ok: false; status: number; error: string | null };
+  | { ok: true }
+  | { ok: false; status: number; error: string | null };
 
 /**
  * Move a card to an orchestrator: PUT /api/boards/:board/cards/:id/orchestrator.

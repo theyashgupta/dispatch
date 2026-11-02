@@ -10,7 +10,8 @@ export type SlackChannelList =
   | { ok: false; code: string };
 
 export type SlackChannelInfo =
-  { ok: true; id: string; name: string } | { ok: false; code: string };
+  | { ok: true; id: string; name: string }
+  | { ok: false; code: string };
 
 /**
  * Read every page of users.conversations for the given types, up to 5 pages of 200.
@@ -44,7 +45,8 @@ export async function listConversations(
       );
     }
     const meta = body.response_metadata as
-      { next_cursor?: unknown } | undefined;
+      | { next_cursor?: unknown }
+      | undefined;
     cursor = text(meta?.next_cursor) || undefined;
     if (!cursor) return { ok: true, rows, truncated: false };
   }

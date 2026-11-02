@@ -2,11 +2,13 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { ESLint } from "eslint";
+import { lintWithOxlint } from "./oxlint-json.ts";
 
 const root = path.resolve(import.meta.dirname, "..");
-const eslint = new ESLint({ cwd: root });
-const RULES = new Set(["no-restricted-syntax", "design/restricted-syntax"]);
+const RULES = new Set([
+  "syntax/restricted-syntax",
+  "syntax/design-restricted-syntax",
+]);
 
 const board = "src/web/modules/board/components/CardView.tsx";
 const boardTs = "src/web/modules/board/domain/board-keys.ts";
@@ -22,23 +24,6 @@ const lineBody = "Do not redefine --line-body in the board module.";
 const focusShadow = "Do not draw keyboard focus with an accent box-shadow.";
 const floatShadow = "Do not write the float shadow value.";
 const weight800 = "Do not write font weight 800.";
-
-/**
- * Lints one snippet as the content of an existing repo file and lists the design ban message openings.
- *
- * @remarks The type-aware parser needs a path the project service knows, so each case borrows a real file path; lintText never writes it.
- */
-async function verdict(filePath: string, code: string): Promise<string[]> {
-  const [result] = await eslint.lintText(code, {
-    filePath: path.join(root, filePath),
-  });
-  assert.equal(result.fatalErrorCount, 0, filePath);
-  return result.messages
-    .filter((message) => message.ruleId && RULES.has(message.ruleId))
-    .map((message) =>
-      message.message.slice(0, message.message.indexOf(".") + 1),
-    );
-}
 
 const cases: [string, string, string, string[]][] = [
   [
@@ -158,15 +143,60 @@ const cases: [string, string, string, string[]][] = [
   ],
 ];
 
-for (const [name, filePath, code, expected] of cases) {
-  void test(name, async () => {
-    assert.deepEqual(await verdict(filePath, code), expected);
+const fixtureFiles = cases.map(
+  ([, filePath], index) =>
+    `${path.dirname(filePath)}/__design-ban-${index}${path.extname(filePath)}`,
+);
+
+/**
+ * Writes each snippet next to its borrowed file, lints them in one oxlint run and removes them again.
+ *
+ * @remarks Oxlint reads files from disk and picks its rules by path, so each case borrows the folder of a real file. A fixture name that already exists makes the write fail, so a real file is never replaced.
+ */
+function lintFixtures(): ReturnType<typeof lintWithOxlint> {
+  const written: string[] = [];
+  try {
+    for (const [index, [, , code]] of cases.entries()) {
+      fs.writeFileSync(path.join(root, fixtureFiles[index]), code, {
+        flag: "wx",
+      });
+      written.push(fixtureFiles[index]);
+    }
+    return lintWithOxlint(fixtureFiles);
+  } finally {
+    for (const file of written)
+      fs.rmSync(path.join(root, file), { force: true });
+  }
+}
+
+const found = lintFixtures();
+
+/**
+ * Lists the design ban message openings reported for one fixture file.
+ */
+function verdict(file: string): string[] {
+  const findings = found.get(file) ?? [];
+  assert.deepEqual(
+    findings.filter((finding) => finding.ruleId === "parse-error"),
+    [],
+    file,
+  );
+  return findings
+    .filter((finding) => RULES.has(finding.ruleId))
+    .map((finding) =>
+      finding.message.slice(0, finding.message.indexOf(".") + 1),
+    );
+}
+
+for (const [index, [name, , , expected]] of cases.entries()) {
+  void test(name, () => {
+    assert.deepEqual(verdict(fixtureFiles[index]), expected);
   });
 }
 
 void test("the board zone ban folder still exists", () => {
   assert.ok(
     fs.existsSync(path.join(root, "src/web/modules/board")),
-    "eslint.config.ts bans reading-surface and --line-body under src/web/modules/board; move the ban with the folder",
+    "oxlint.config.ts bans reading-surface and --line-body under src/web/modules/board; move the ban with the folder",
   );
 });

@@ -3,7 +3,12 @@ import type { LoopProgress, LoopUnit } from "./types.js";
 import { clock } from "./clock-text.js";
 
 export type NodeState =
-  "done" | "current" | "blocked" | "failed" | "next" | "later";
+  | "done"
+  | "current"
+  | "blocked"
+  | "failed"
+  | "next"
+  | "later";
 
 export interface TrackNode {
   unit: number;

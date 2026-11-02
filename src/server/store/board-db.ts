@@ -407,7 +407,8 @@ function opensClean(candidate: string): boolean {
   try {
     probe = new DatabaseSync(candidate, { readOnly: true });
     const row = probe.prepare("PRAGMA integrity_check").get() as
-      { integrity_check?: string } | undefined;
+      | { integrity_check?: string }
+      | undefined;
     return row?.integrity_check === "ok";
   } catch {
     return false;
@@ -545,7 +546,8 @@ function connect(): DatabaseSync {
   try {
     db = new DatabaseSync(BOARD_DB_PATH);
     const row = db.prepare("PRAGMA integrity_check").get() as
-      { integrity_check?: string } | undefined;
+      | { integrity_check?: string }
+      | undefined;
     if (row?.integrity_check === "ok") return db;
     try {
       db.close();
@@ -1255,7 +1257,8 @@ export function openBoardDb(): BoardDb {
     },
     findOrchestratorToken(tokenHash) {
       return selectOrchestratorToken.get(tokenHash) as
-        OrchestratorTokenRow | undefined;
+        | OrchestratorTokenRow
+        | undefined;
     },
     insertDecisionItem(item) {
       insertDecisionItem.run({

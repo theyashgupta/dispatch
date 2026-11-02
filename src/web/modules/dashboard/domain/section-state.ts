@@ -1,5 +1,7 @@
 export type SectionState =
-  { kind: "loading" } | { kind: "error"; message: string } | { kind: "ready" };
+  | { kind: "loading" }
+  | { kind: "error"; message: string }
+  | { kind: "ready" };
 
 interface QueryRead {
   data: unknown;

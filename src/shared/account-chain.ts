@@ -6,7 +6,12 @@ const LEGACY_HELD_SUFFIX = ", not moved";
 const LEGACY_MANUAL_SUFFIX = ", switched now";
 
 export type ChainTrigger =
-  "usage" | "surface" | "rate-limit" | "reset" | "switch-now" | "held";
+  | "usage"
+  | "surface"
+  | "rate-limit"
+  | "reset"
+  | "switch-now"
+  | "held";
 
 export interface ChainReason {
   trigger: ChainTrigger;

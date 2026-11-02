@@ -2,7 +2,9 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { ErrorAlert } from "@/components/ErrorAlert";
 
 export type VaultImportOutcome =
-  { ok: true; imported: string[]; skipped: string[] } | { ok: false } | null;
+  | { ok: true; imported: string[]; skipped: string[] }
+  | { ok: false }
+  | null;
 
 interface VaultImportNoticeProps {
   outcome: VaultImportOutcome;

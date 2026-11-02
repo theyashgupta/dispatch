@@ -118,7 +118,7 @@ and roles only, it does not restate the layering policy.
 | Frontend routes     | `web/routes/__root.tsx`, `web/routes/board.{-$id}.lazy.tsx`, `web/modules/shell/containers/ShellContainer.tsx`                                                                                                                                                                                                                                  | Hash routes own the URL and its params. The router context gives the query client and the app store to every container. The root route renders the shell view with module views in its slots: the page, the detail panel and the card action dialogs.                                                                                                                                                                       |
 | Frontend modules    | `web/modules/board/views/BoardView.tsx`, `web/modules/board/containers/BoardContainer.tsx`, `web/modules/detail/containers/DetailPanelContainer.tsx`, `web/modules/shell/components/AppSidebar.tsx`                                                                                                                                             | One folder per feature under `web/modules/`, with the layers views, containers, components, hooks, domain and queries. A module never imports a sibling module. [frontend-architecture.md](standards/frontend-architecture.md) has the layer rules.                                                                                                                                                                         |
 | Frontend boards     | `web/modules/boards/views/BoardsView.tsx`, `web/modules/boards/containers/BoardsContainer.tsx`, `web/modules/boards/containers/BoardFormContainer.tsx`, `web/modules/shell/components/SidebarBoards.tsx`, `web/modules/shell/components/SidebarDashboards.tsx`                                                                                  | The boards page (list, create, edit, archive, restore) and the sidebar. The sidebar has a Boards section and a Dashboards section (the boards with a main orchestrator). The path key selects the board on the keyed pages (`/boards/<key>`, `/boards/<key>/inbox` and so on). The `board` search parameter selects it on the other pages. `/sessions` opens the boards list and `/boards/<key>/sessions` opens that board. |
-| Orchestrator centre | `web/modules/orchestrator/views/OrchestratorEntryView.tsx`, `web/modules/orchestrator/views/CentreView.tsx`, `web/modules/orchestrator/containers/SettingsSheetContainer.tsx`, `web/modules/orchestrator/containers/PolicyContainer.tsx`, `web/modules/orchestrator/containers/OrchestratorsContainer.tsx`                                      | The header entry button opens the command centre page of the board. The settings sheet on the centre has the tabs Policy and Orchestrators. The policy form is the only place where a user changes a board policy.                                                                                                                                                                                                          |
+| Orchestrator centre | `web/modules/shell/components/SidebarOrchestratorRow.tsx`, `web/modules/orchestrator/views/CentreView.tsx`, `web/modules/orchestrator/containers/SettingsSheetContainer.tsx`, `web/modules/orchestrator/containers/PolicyContainer.tsx`, `web/modules/orchestrator/containers/OrchestratorsContainer.tsx`                                       | The sidebar row under the selected board and the palette command "Open orchestrator" open the command centre page of the board. The settings sheet on the centre has the tabs Policy and Orchestrators. The policy form is the only place where a user changes a board policy.                                                                                                                                              |
 | Frontend dashboard  | `web/routes/dashboard.{-$id}.lazy.tsx`, `web/modules/dashboard/views/DashboardView.tsx`, `web/modules/dashboard/containers/use-dashboard-data.ts`                                                                                                                                                                                               | The `/dashboard` page of the selected board. Each section container reads its inputs through `use-dashboard-data.ts` and shows its own loading, error and empty state. The header strip at the top of the page shows the title, the sync state and the stale text.                                                                                                                                                          |
 | Frontend shared     | `web/components/ui/button.tsx`, `web/components/ui/hooks/use-app-store.ts`, `web/components/ThemeProvider.tsx`, `web/queries/board-snapshot-queries.ts`                                                                                                                                                                                         | The shadcn primitives and app-wide hooks, the shared components, the queries that two or more modules read (the board snapshot and its SSE stream), and the design tokens in `web/styles/tokens.css`.                                                                                                                                                                                                                       |
 
@@ -2840,7 +2840,7 @@ phase's own plan summaries mis-generalized as "never use `=` for `send-keys`/`ca
   `resume-session.ts`, `cleanup.ts`, `uninstall.ts`, and `ttyd.ts`'s `spawnTtyd` attach target.
 - **Pane-level targets** (`capture-pane`, `send-keys`, `paste-buffer`) require a TRAILING COLON,
   `=<name>:`, to resolve AT ALL. Live-verified directly on this machine's tmux 3.6a: `capture-pane -t
-=<name>` (no colon) fails with `can't find pane` even against a session that is genuinely alive,
+  =<name>` (no colon) fails with `can't find pane` even against a session that is genuinely alive,
   while `capture-pane -t =<name>:` (with colon) correctly resolves the exact session and ignores a
   longer-named live sibling — same result confirmed for `send-keys`. `markers/watcher.ts`'s
   `capturePane(`=${tmuxName}:`, ...)` is the one call site in this codebase already shipping the
@@ -5278,7 +5278,7 @@ is a behavior change, not a refactor.
    group members, `members` always an array (`[]` for a non-group card) — and, like every other
    handler in `cards.route.ts` — **`400`, not `404`**, for an unknown id (`T-82-03`); `sync-linear`'s
    `404` stays the sole documented deviation. See `## GET /api/cards/:id answers a group parent's
-real membership directly, independent of windowing` below for the full envelope contract. Each
+   real membership directly, independent of windowing` below for the full envelope contract. Each
    collection route takes the optional `board` query parameter, and the board routes live under
    `/api/boards` (see Board API).
    `POST /api/loops/report` (LOCAL-88) answers `202`, `401` for a missing or unknown
@@ -5339,11 +5339,11 @@ real membership directly, independent of windowing` below for the full envelope 
 5. **tmux invocations (argv-exact).** Session name `dsp-<identifier>`;
    `new-session -d -s <name> -c <cwd> -x 200 -y 50 [-e KEY=VALUE ...]` with NO command argv (tmux runs
    its `default-shell` as a login shell, `SHELL-01`); the claude launch is `send-keys -l -t =<name>:
-<quoted line>` followed by a separate `send-keys Enter`; `capture-pane -p -J -t =<name>:`; exact-name
+   <quoted line>` followed by a separate `send-keys Enter`; `capture-pane -p -J -t =<name>:`; exact-name
    `=` targeting; `load-buffer -b`/`paste-buffer -b -p -d`; separate `send-keys Enter`. Geometry `200×50`
    is load-bearing for readiness/marker parsing.
 6. **ttyd invocation + tracking.** `ttyd -W -i 127.0.0.1 -p 0 -b /sessions/<sessionId>/terminal -t
-disableLeaveAlert=true -t DISPATCH_TTYD_REVISION_<revision>=1 tmux -u attach -t =<session>` (`-u` is
+   disableLeaveAlert=true -t DISPATCH_TTYD_REVISION_<revision>=1 tmux -u attach -t =<session>` (`-u` is
    mandatory — see `TERM-04`); port
    parsed from stderr `Listening on port: N`; loopback bind mandatory; orphan-sweep ownership proof
    (`basename(argv0)==="ttyd"` AND argv includes `tmux`+`attach`, OR the process title contains the
@@ -5905,8 +5905,8 @@ question; none of them read prose for truth.
   `after current-build install: changed: config.json`), `plist-staleness` (renders both builds'
   plists, corrupts one, and drives the current build's `healServicePlist` through two calls
   expecting `"rewritten"` then `"unchanged"`, proven able to fail with
-  `--break stale-plist-uncorrected`, reported as `second healServicePlist call reported
-"rewritten", expected "unchanged"`), and `uninstall-keeps` (proves a bare `uninstall --yes` keeps
+  `--break stale-plist-uncorrected`, reported as
+  `second healServicePlist call reported "rewritten", expected "unchanged"`), and `uninstall-keeps` (proves a bare `uninstall --yes` keeps
   `config.json`, board data, and playbooks, removing only `hook.sh`/`hook-settings.json`, proven
   able to fail by the real `v3.0.0` release's own shipped bug, whose `--dry-run Remove:` section
   lists `config.json` before the current build's fix runs). Two hard safety rules hold everywhere
@@ -5927,7 +5927,7 @@ question; none of them read prose for truth.
   a genuine persisted session and proves it is swept on restart while the fixture's own
   current-revision ttyd are re-adopted, same pid, and still serve their own pane — proven able to
   fail in the sweep direction, the spare direction, and against a wrong-subject pid); `--check
-switch-sockets` (a pid-scoped, `ESTABLISHED`-only, bounded poll-to-zero proof that a session
+  switch-sockets` (a pid-scoped, `ESTABLISHED`-only, bounded poll-to-zero proof that a session
   switch's OLD dispatch-to-ttyd socket count reaches zero and the NEW session's count reaches one —
   proven able to fail on a real leak, and proven that scoping the count to the wrong port reads a
   constant unrelated to the leak); `--check switch-atomicity` (60 concurrent switch/read requests
@@ -5992,7 +5992,7 @@ switch-sockets` (a pid-scoped, `ESTABLISHED`-only, bounded poll-to-zero proof th
     expected it to stop growing once the breaker tripped"). Every check is proven able to fail.
     The PR probe now sits behind three gates in front of every `gh pr list` spawn: a per-repo
     10-minute negative cache (deterministic categories only), a global rate-limit breaker (`gh api
-rate_limit`, paused until `reset` under 50 remaining), and a semaphore of four concurrent spawns.
+    rate_limit`, paused until `reset` under 50 remaining), and a semaphore of four concurrent spawns.
     A skipped probe (a cache hit or a breaker pause) deliberately does not advance the session's
     `PROBE_FAILURE_CEILING`, only a real spawn that fails counts as a strike.
 - **`node scripts/panel-99.mjs`** (`npm run panel-99`, Phase 99, PORT-02) - a CDP structural/DOM
@@ -6057,29 +6057,29 @@ rate_limit`, paused until `reset` under 50 remaining), and a semaphore of four c
   (`single-card-unchanged: MSD-A expected column "done", measured "todo"`), `keyboard-unchanged`
   (`keyboard-unchanged: MSD-B expected column "done", measured "todo"`), `stacked-overlay`
   (`stacked-overlay: leg A (N=3), 4px back face transform expected "matrix(1, 0, 0, 1, 4, 4)",
-measured "matrix(1, 0, 0, 1, 4, 10)"`), `stacked-overlay-paint-order` (raising that same face's
+  measured "matrix(1, 0, 0, 1, 4, 10)"`), `stacked-overlay-paint-order` (raising that same face's
   inline `z-index` to 9 mid-drag, geometry untouched, produces `stacked-overlay: leg A (N=3), paint
-order, the element painted at the deck's centre point expected to be the front CardView face,
-measured the deck back face at index 1`), `overlay-unchanged-n1` (`overlay-unchanged-n1: N=0 leg,
-expected exactly 1 face-level element directly under the fixed overlay node, measured 2`), `a11y`
+  order, the element painted at the deck's centre point expected to be the front CardView face,
+  measured the deck back face at index 1`), `overlay-unchanged-n1` (`overlay-unchanged-n1: N=0 leg,
+  expected exactly 1 face-level element directly under the fixed overlay node, measured 2`), `a11y`
   (`a11y: deck container aria-hidden expected "true", measured null`), `group-modal-prefill`
   (`group-modal-prefill: modal member identifier set expected ["MSD-A","MSD-B","MSD-C"], measured
-["MSD-B","MSD-C"]`, never "modal not found"), `atomic-rollback` (releasing all three initial move
+  ["MSD-B","MSD-C"]`, never "modal not found"), `atomic-rollback` (releasing all three initial move
   requests successfully produces `atomic-rollback: trip, [role="alert"] text expected "Couldn't move
-3 tickets", measured null` and `atomic-rollback: trip, MSD-A expected column "todo" immediately
-after rollback, measured "done"`), `atomic-rollback-toast` (a `MutationObserver` removing
+  3 tickets", measured null` and `atomic-rollback: trip, MSD-A expected column "todo" immediately
+  after rollback, measured "done"`), `atomic-rollback-toast` (a `MutationObserver` removing
   `[role="alert"]` the instant it appears, injection otherwise normal, produces `atomic-rollback: leg
-1 (clean rollback), [role="alert"] text expected "Couldn't move 3 tickets", measured null` while
+  1 (clean rollback), [role="alert"] text expected "Couldn't move 3 tickets", measured null` while
   every column assertion still passes), and `atomic-rollback-stranded-compensation` (a
   monkey-patched `console.error` swallowing "stranded" messages plus a `MutationObserver` removing
   the alert, layered on a real permanently-failed compensation, produces `atomic-rollback: trip
-(detection signals suppressed), expected [role="alert"] to stay visible past 3200ms for a stranded
-compensation, measured absent` and `atomic-rollback: trip (detection signals suppressed), expected
-a console.error mentioning "stranded" and card id panel100-a, none captured`; the card id in that
+  (detection signals suppressed), expected [role="alert"] to stay visible past 3200ms for a stranded
+  compensation, measured absent` and `atomic-rollback: trip (detection signals suppressed), expected
+  a console.error mentioning "stranded" and card id panel100-a, none captured`; the card id in that
   message is NOT deterministic, it names whichever compensating request the CDP pause queue delivers
   first out of a concurrent `Promise.allSettled`, so a run may quote `panel100-c` instead. Those two
   assertions became load-bearing only once `checkAtomicRollback` grew `leg 3 (compensation
-permanently fails)`, which runs the same scenario in the configuration where both must PASS;
+  permanently fails)`, which runs the same scenario in the configuration where both must PASS;
   before that leg they ran only in this break's trip, where they are expected to fail, and deleting
   the legacy board's whole stranded-suppression path left every run green).
   `density-91.mjs --compare` against `panel-100.mjs`'s own Phase 100 BEFORE snapshot reports zero
@@ -6856,7 +6856,7 @@ and `resume-loop` runs no cap or budget check. They are state changing user rout
 `refuseOrchestratorTokenOnUserRoute` refuses an orchestrator token on them.
 
 **Command centre.** The `orchestrator` web module (`web/modules/orchestrator/`) holds the command centre. The
-route `/boards/$key/orchestrator/{-$id}` shows it. The entry button is in the page header (Screen 5).
+route `/boards/$key/orchestrator/{-$id}` shows it. The entry is the Orchestrator row under the selected board in the sidebar, the Orchestrator icon in the collapsed sidebar, and the palette command "Open orchestrator".
 Its label is "Add orchestrator" on a board with no record. Its label is "Orchestrator" on a board with a
 record. It reads only the `Board` that the board list holds.
 
@@ -6887,3 +6887,5 @@ The settings sheet on the centre has two tabs:
   groups.
 
 When the engine file of a single PRD loop names no PRD path, the reader finds the PRD by its slug in `.planning/prds/` at the session root or in a repo folder one level below it: the engine slug, or, when the engine names no slug, the card identifier in lowercase and then as written (LOCAL-200).
+
+Lint and format tooling (LOCAL-218, 2026-10-26). This paragraph replaces the parts of the dev tooling list above that name ESLint or Prettier for `npm run lint`, `npm run lint:typed`, `npm run check:changed` and the format hook. `npm run format` and `npm run format:check` run oxfmt with `.oxfmtrc.json`. `npm run lint` holds one check slot. It runs oxlint with `oxlint.config.ts` on the full repo, which includes the subfolders and the `.ts` files of `scripts/`, then runs `npm run lint:eslint-rest`. The rest pass runs ESLint on `src` with five rule families only, because oxlint has no equivalent for them: `local/comments-jsdoc-only`, `boundaries`, `check-file`, `jsdoc` and `react-hooks`. The `no-restricted-syntax` bans run in oxlint through the local JS plugin `restricted-syntax` in `eslint-local/`, as `syntax/restricted-syntax` and `syntax/design-restricted-syntax`. `npm run lint:typed` runs `oxlint --type-aware` with `oxlint-tsgolint` and is the only mode that reports unused disable directives. Typed rules do not apply to `scripts/`. `npm run check:changed` runs oxfmt and oxlint on the changed files and the rest pass on the changed `src/` files. The format hook runs oxfmt on the edited file, and the Stop hook reads the oxfmt and oxlint error lines.

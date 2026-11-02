@@ -274,7 +274,8 @@ export async function readPushSubscription(): Promise<PushSubscription | null> {
 }
 
 export type PushEnableResult =
-  { ok: true } | { ok: false; error: "too-many-subscriptions" | "generic" };
+  | { ok: true }
+  | { ok: false; error: "too-many-subscriptions" | "generic" };
 
 /**
  * Subscribe this device to push, prompting for permission if needed.

@@ -4,7 +4,8 @@ import type {
 } from "../../../shared/types.js";
 
 export type LimitSurface =
-  { kind: "a" } | { kind: "b"; options: string[]; cursor: number };
+  | { kind: "a" }
+  | { kind: "b"; options: string[]; cursor: number };
 
 export const CREDITS_OPTION =
   /credit|extra usage|upgrade|funds|pay|usage billing|switch to usage/i;

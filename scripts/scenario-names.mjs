@@ -99,7 +99,7 @@ export function renderList(names) {
  * Put the list between the two scenario list markers of a doc.
  *
  * @remarks
- * Returns undefined when a marker is missing. The block keeps a blank line on each side of the list so that prettier does not change it.
+ * Returns undefined when a marker is missing. The block keeps a blank line on each side of the list so that oxfmt does not change it.
  */
 export function replaceList(docText, list) {
   const start = docText.indexOf(LIST_START);
@@ -271,22 +271,18 @@ export function renameScenarios(root) {
 }
 
 /**
- * Run the repo's prettier on the files this run wrote so the output passes the format check.
+ * Run the repo's oxfmt on the files this run wrote so the output passes the format check.
  *
  * @remarks
  * A longer label can push a line past the print width. An empty file set or a checkout without `node_modules` skips the step.
  */
 function formatFiles(root, files) {
-  const prettier = join(root, "node_modules", ".bin", "prettier");
-  if (files.length === 0 || !existsSync(prettier)) return;
-  execFileSync(
-    prettier,
-    ["--ignore-unknown", "--log-level", "warn", "--write", ...files],
-    {
-      cwd: root,
-      stdio: "inherit",
-    },
-  );
+  const oxfmt = join(root, "node_modules", ".bin", "oxfmt");
+  if (files.length === 0 || !existsSync(oxfmt)) return;
+  execFileSync(oxfmt, ["--no-error-on-unmatched-pattern", ...files], {
+    cwd: root,
+    stdio: "inherit",
+  });
 }
 
 /**

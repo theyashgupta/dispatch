@@ -6,7 +6,8 @@ export const PROFILE_HANDLES_MAX = 20;
 export const PROFILE_HANDLE_MAX = 100;
 
 type ProfileResult =
-  { ok: true; value: UserProfile } | { ok: false; error: string };
+  | { ok: true; value: UserProfile }
+  | { ok: false; error: string };
 
 type TextField = "name" | "email" | "role" | "brief";
 

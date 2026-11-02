@@ -11,7 +11,9 @@ import { ExtraFormContainer } from "./ExtraFormContainer";
 import { MoveGroupsContainer } from "./MoveGroupsContainer";
 
 type Dialog =
-  { kind: "add" } | { kind: "edit"; id: string } | { kind: "move"; id: string };
+  | { kind: "add" }
+  | { kind: "edit"; id: string }
+  | { kind: "move"; id: string };
 
 interface OrchestratorsContainerProps {
   board: BoardKey;

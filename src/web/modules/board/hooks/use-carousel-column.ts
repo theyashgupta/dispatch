@@ -29,7 +29,8 @@ export function useCarouselColumn(isCarousel: boolean) {
       (entries) => {
         for (const entry of entries) {
           const col = (entry.target as HTMLElement).dataset.column as
-            ColumnId | undefined;
+            | ColumnId
+            | undefined;
           if (col == null) continue;
           ratios.set(col, entry.intersectionRatio);
         }

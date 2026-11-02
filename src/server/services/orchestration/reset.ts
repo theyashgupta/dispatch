@@ -5,7 +5,8 @@ import { branchDelete, branchExists } from "../../adapters/git.js";
 import { killSessionProcesses, removeWorkspaceFiles } from "./cleanup.js";
 
 export type ResetOutcome =
-  { ok: true } | { ok: false; status: 404 | 409 | 500; error: string };
+  | { ok: true }
+  | { ok: false; status: 404 | 409 | 500; error: string };
 
 /**
  * Reset a started card (LOCAL-20): kill its sessions, remove its workspaces and local branches,

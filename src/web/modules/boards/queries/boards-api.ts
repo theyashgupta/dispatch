@@ -7,7 +7,8 @@ import { http, httpError } from "@/lib/http";
 import { boardRequest } from "@/queries/board-create-api";
 
 export type BoardWriteResult =
-  { ok: true; board: Board } | ({ ok: false } & BoardRefusal);
+  | { ok: true; board: Board }
+  | ({ ok: false } & BoardRefusal);
 
 async function send(url: string, init: RequestInit): Promise<BoardWriteResult> {
   const result = await boardRequest<{ board: Board }>(url, init);

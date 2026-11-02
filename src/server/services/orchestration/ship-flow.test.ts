@@ -1464,6 +1464,93 @@ void test("in the Dispatch repository an em dash in an added doc line stops at c
   );
 });
 
+/**
+ * A stack whose `unit-1` makes the worktree a Dispatch repository with a pass-through slot gate
+ * and a `lint:typed` script that counts its runs and exits with `exitCode`.
+ */
+async function typedLintStack(
+  exitCode: number,
+): Promise<{ stack: Stack; lintRuns: () => number }> {
+  const stack = await newStack();
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ship-lint-"));
+  roots.push(dir);
+  const count = path.join(dir, "count.txt");
+  const lint = path.join(dir, "lint.mjs");
+  fs.writeFileSync(
+    lint,
+    [
+      `import fs from "node:fs";`,
+      `fs.appendFileSync(${JSON.stringify(count)}, "x\\n");`,
+      `console.log("board-switcher.test.ts:4:9 no-unnecessary-type-assertion");`,
+      `process.exit(${exitCode});`,
+    ].join("\n"),
+  );
+  const inTree = (...args: string[]) => gitOutput(stack.worktree, ...args);
+  await inTree("checkout", "-q", "unit-1");
+  fs.writeFileSync(
+    path.join(stack.worktree, "package.json"),
+    JSON.stringify({
+      name: "@theyashgupta/dispatch",
+      version: "1.0.0",
+      scripts: { "lint:typed": `node ${lint}` },
+    }),
+  );
+  fs.mkdirSync(path.join(stack.worktree, "scripts"), { recursive: true });
+  fs.writeFileSync(
+    path.join(stack.worktree, "scripts", "with-check-slot.mjs"),
+    [
+      `import { spawnSync } from "node:child_process";`,
+      `const [cmd, ...args] = process.argv.slice(2);`,
+      `process.exit(spawnSync(cmd, args, { stdio: "inherit" }).status ?? 1);`,
+    ].join("\n"),
+  );
+  await inTree("add", "-A");
+  await inTree("commit", "-qm", "dispatch");
+  await inTree("checkout", "-q", "group-work");
+  return {
+    stack,
+    lintRuns: () =>
+      fs.existsSync(count)
+        ? fs.readFileSync(count, "utf8").split("\n").filter(Boolean).length
+        : 0,
+  };
+}
+
+void test("in the Dispatch repository a typed lint error stops at checking with the lint output in the reason", async () => {
+  const { stack, lintRuns } = await typedLintStack(1);
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "stopped");
+  assert.equal(flow.failedStep, "checking");
+  const reason = flow.reason ?? "";
+  assert.match(
+    reason,
+    /^check command failed at step lint:typed with exit code 1:/,
+  );
+  assert.match(
+    reason,
+    /board-switcher\.test\.ts:4:9 no-unnecessary-type-assertion/,
+  );
+  assert.equal(lintRuns(), 1);
+  assert.equal(
+    calls.some((c) => c.args[0] === "push"),
+    false,
+  );
+  assert.deepEqual(ghCalls(stack), []);
+});
+
+void test("in the Dispatch repository a passing typed lint continues to the push", async () => {
+  const { stack, lintRuns } = await typedLintStack(0);
+  await startShip(stack, ["unit-1"]);
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+  assert.equal(lintRuns(), 1);
+  assert.equal(
+    calls.some((c) => c.args[0] === "push"),
+    true,
+  );
+});
+
 void test("resumeShipFlows finishes a stored running flow from its stored tips without a second PR", async () => {
   const stack = await newStack();
   const inTree = (...args: string[]) => gitOutput(stack.worktree, ...args);

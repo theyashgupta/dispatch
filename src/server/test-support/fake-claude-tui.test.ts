@@ -1253,7 +1253,7 @@ void test(
       const users = readJsonl(pane.transcript).filter((e) => e.type === "user");
       assert.equal(users.length, 1);
       assert.equal(
-        (users[0]?.message as { content: string }).content,
+        (users[0].message as { content: string }).content,
         lines.join("\n"),
       );
     } finally {

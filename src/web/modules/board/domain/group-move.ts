@@ -10,7 +10,8 @@ export interface GroupMove {
 }
 
 export type GroupMovePlan =
-  { refused: true } | { refused: false; moves: GroupMove[] };
+  | { refused: true }
+  | { refused: false; moves: GroupMove[] };
 
 /** The cards named in `cardIds` that are not already in the target column. */
 export function groupMoveCandidates(

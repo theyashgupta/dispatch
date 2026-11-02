@@ -14,7 +14,8 @@ import { clock } from "../../../../shared/clock-text.js";
 import { accountFor } from "./usage-meters.js";
 
 export type AttentionBadge =
-  { kind: "state"; state: SupervisorState } | { kind: "label"; label: string };
+  | { kind: "state"; state: SupervisorState }
+  | { kind: "label"; label: string };
 
 export type AttentionAction = "resume" | "retry_resume";
 

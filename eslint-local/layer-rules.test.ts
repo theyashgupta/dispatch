@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { ESLint } from "eslint";
+import { lintWithOxlint } from "./oxlint-json.ts";
 
 const root = path.resolve(import.meta.dirname, "..");
 const web = path.join(root, "src/web");
@@ -180,7 +181,10 @@ function missingDirs(dir: string): string[] {
  *
  * @remarks The boundaries resolver needs the imported files on disk, so virtual paths cannot work. A planned real file that already exists is used as it is and never written or deleted.
  */
-async function lintFixtures(): Promise<Map<string, ESLint.LintResult>> {
+async function lintFixtures(): Promise<{
+  eslint: Map<string, ESLint.LintResult>;
+  oxlint: ReturnType<typeof lintWithOxlint>;
+}> {
   const pending = Object.entries(fixtures).filter(([rel]) => {
     const exists = fs.existsSync(path.join(web, rel));
     if (exists && !plannedFiles.has(rel))
@@ -199,9 +203,12 @@ async function lintFixtures(): Promise<Map<string, ESLint.LintResult>> {
     }
     const files = Object.keys(fixtures).map((rel) => path.join(web, rel));
     const results = await new ESLint({ cwd: root }).lintFiles(files);
-    return new Map(
-      results.map((result) => [path.relative(web, result.filePath), result]),
-    );
+    return {
+      eslint: new Map(
+        results.map((result) => [path.relative(web, result.filePath), result]),
+      ),
+      oxlint: lintWithOxlint(files.map((file) => path.relative(root, file))),
+    };
   } finally {
     for (const file of createdFiles) fs.rmSync(file, { force: true });
     for (const dir of [...createdDirs].reverse())
@@ -209,7 +216,7 @@ async function lintFixtures(): Promise<Map<string, ESLint.LintResult>> {
   }
 }
 
-const results = await lintFixtures();
+const { eslint: results, oxlint: oxResults } = await lintFixtures();
 
 void test("every fixture parses and reports no rule-less message", () => {
   for (const [rel, result] of results) {
@@ -218,6 +225,13 @@ void test("every fixture parses and reports no rule-less message", () => {
       result.messages.filter((message) => message.ruleId === null),
       [],
       rel,
+    );
+  }
+  for (const [file, findings] of oxResults) {
+    assert.deepEqual(
+      findings.filter((finding) => finding.ruleId === "parse-error"),
+      [],
+      file,
     );
   }
 });
@@ -344,17 +358,17 @@ for (const [rel, message] of Object.entries(red)) {
 }
 
 const BAN_RULES = new Set([
-  "no-restricted-syntax",
   "no-restricted-imports",
-  "design/restricted-syntax",
+  "syntax/restricted-syntax",
+  "syntax/design-restricted-syntax",
 ]);
-const syntaxRule = "no-restricted-syntax: ";
+const syntaxRule = "syntax/restricted-syntax: ";
 const styleSyntax = `${syntaxRule}Do not use the JSX style prop. Use Tailwind token classes (docs/standards/frontend-architecture.md, The only-shadcn rule).`;
 const hexSyntax = `${syntaxRule}Do not write a hex colour. Add a token to src/web/styles/tokens.css and use its Tailwind token class (docs/standards/frontend-architecture.md, The only-shadcn rule).`;
 const selectorSyntax = `${syntaxRule}Select one stored field or a primitive from useAppStore. A selector that builds an object or array returns a new value on every read and loops useSyncExternalStore (src/web/components/ui/hooks/use-app-store.ts).`;
 const dashSyntax = `${syntaxRule}No em dashes, spaced en dashes, or double hyphens in copy. Use a comma, period, colon, or rephrase.`;
 const fetchSyntax = `${syntaxRule}Only query files call fetch or create an EventSource (docs/standards/frontend-architecture.md, Import matrix).`;
-const designRule = "design/restricted-syntax: ";
+const designRule = "syntax/design-restricted-syntax: ";
 const shadowClassSyntax = `${designRule}Do not write an arbitrary shadow class. Use a shadow token class such as shadow-lg or shadow-(--shadow-float) (docs/ARCHITECTURE.md#design-system-invariants).`;
 const weightClassSyntax = `${designRule}Do not write a weight 800 class. Use font-normal, font-medium or font-semibold (docs/ARCHITECTURE.md#design-system-invariants).`;
 const readingSurfaceSyntax = `${designRule}Do not use the reading-surface class in the board module. Board cards keep the global --line-body (docs/ARCHITECTURE.md#design-system-invariants).`;
@@ -382,11 +396,9 @@ function imported(source: string, message: string): string {
  * Lists the style, hex, copy, fetch and import ban messages reported for one fixture.
  */
 function banMessages(rel: string): string[] {
-  const result = results.get(rel);
-  assert.ok(result, `no lint result for ${rel}`);
-  return result.messages
-    .filter((message) => message.ruleId && BAN_RULES.has(message.ruleId))
-    .map((message) => `${message.ruleId}: ${message.message}`);
+  return (oxResults.get(path.join("src/web", rel)) ?? [])
+    .filter((finding) => BAN_RULES.has(finding.ruleId))
+    .map((finding) => `${finding.ruleId}: ${finding.message}`);
 }
 
 for (const rel of [
