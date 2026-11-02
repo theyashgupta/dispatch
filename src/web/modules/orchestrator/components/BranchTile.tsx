@@ -25,7 +25,7 @@ import {
   tileMeters,
 } from "@/modules/orchestrator/domain/centre-page-state";
 
-const GLYPHS = {
+export const BRANCH_GLYPHS = {
   planned: CircleDashed,
   running: Play,
   needs_input: MessageCircleQuestionMark,
@@ -63,7 +63,7 @@ interface BranchTileProps {
 
 const RESUME_ACTIONS = ["resume", "retry_resume"] as const;
 
-const BODY_CLASS =
+export const BODY_CLASS =
   "flex w-full flex-col gap-(--space-xs) rounded-md p-(--space-md) text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
 export function BranchTile({ branch, tile }: BranchTileProps) {
@@ -97,7 +97,7 @@ export function BranchTile({ branch, tile }: BranchTileProps) {
         <ToneBadge
           label={branch.label}
           tone={branch.tone}
-          glyph={GLYPHS[branch.state]}
+          glyph={BRANCH_GLYPHS[branch.state]}
         />
       </span>
       <span className="text-sm font-semibold wrap-anywhere">
