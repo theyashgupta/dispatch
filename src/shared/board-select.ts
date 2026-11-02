@@ -87,13 +87,14 @@ export function withBoard(path: string, board: BoardKey): string {
   return `${path}${path.includes("?") ? "&" : "?"}board=${encodeURIComponent(board)}`;
 }
 
-/** The board a card deep link must switch to, or null when the card already belongs to the selected board (U3-13). */
+/** The board a card deep link must switch to, or null when the card already belongs to the selected board or the open split board (U3-13). */
 export function cardBoardSwitch(
   cardBoard: BoardKey | undefined,
   selected: BoardKey,
+  split: BoardKey | null = null,
 ): BoardKey | null {
   const board = cardBoard ?? DEFAULT_BOARD_KEY;
-  return board === selected ? null : board;
+  return board === selected || board === split ? null : board;
 }
 
 /** The board the bare app entry goes to: the remembered board when it is active and not `LOCAL` (U3-01). */

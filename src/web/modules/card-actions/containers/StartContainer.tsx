@@ -93,14 +93,17 @@ export function StartRequestContainer() {
   const { appStore } = useRouteContext({ from: "__root__" });
   const router = useRouter();
   const boardKey = useAppStore(appStore, (s) => s.board);
-  const board = useBoardSnapshot(
-    boardKey,
-    useAppStore(appStore, (s) => s.doneLimit),
-  );
+  const splitBoard = useAppStore(appStore, (s) => s.splitBoard);
+  const doneLimit = useAppStore(appStore, (s) => s.doneLimit);
+  const board = useBoardSnapshot(boardKey, doneLimit);
+  const splitSnapshot = useBoardSnapshot(splitBoard ?? boardKey, doneLimit);
   const request = useAppStore(appStore, (s) => s.start);
   const pinned = useAppStore(appStore, (s) => s.pinned);
   const card =
     board?.cards.find((c) => c.id === request?.cardId) ??
+    (splitBoard === null
+      ? undefined
+      : splitSnapshot?.cards.find((c) => c.id === request?.cardId)) ??
     actionablePinnedCard(request?.cardId, pinned);
   if (card == null || request == null) return null;
   return (

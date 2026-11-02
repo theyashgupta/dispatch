@@ -35,10 +35,27 @@ export interface CommandContext {
   syncNow: () => void;
   switchBoard: (key: BoardKey) => void;
   createBoard: (name: string) => Promise<void>;
+  split?: { open: boolean; available: boolean; toggle: () => void };
 }
 
 const hasLiveSession = (card: Card) =>
   card.tmuxSession != null && card.sessionLost !== true;
+
+/**
+ * The one split-view command, or none when the board page cannot split.
+ *
+ * @remarks The Command type has no disabled state, so a closed split with no other board to open shows no entry.
+ */
+function splitCommands(split: CommandContext["split"]): Command[] {
+  if (split === undefined || (!split.open && !split.available)) return [];
+  return [
+    {
+      id: "board:split",
+      label: split.open ? "Close split view" : "Split board view",
+      run: split.toggle,
+    },
+  ];
+}
 
 /**
  * The palette's commands for the selected card, then every page, New ticket, Sync now and the boards.
@@ -99,6 +116,7 @@ export function buildCommands(
       run: ctx.meetingNotes,
     },
     { id: "sync-now", label: "Sync now", run: ctx.syncNow },
+    ...splitCommands(ctx.split),
   ];
   if (card == null || card.groupId != null) return [...general, ...boards];
   const commands: Command[] = [];
