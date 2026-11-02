@@ -103,7 +103,7 @@ export interface CentreBand {
 }
 
 export interface CentreEdge {
-  from: "centre";
+  from: string;
   to: string;
   band: BandKey;
   dashed: boolean;
@@ -231,7 +231,11 @@ function isRunByOrchestrator(card: Card, entry: PlanEntry | undefined) {
   );
 }
 
-function statusOf(card: Card, session: ActiveSessionView | null): Status {
+/** Answer the state, label, tone and band of a card from its card column and active session. */
+export function statusOf(
+  card: Card,
+  session: ActiveSessionView | null,
+): Status {
   const state = session?.state;
   const reason = session?.stateReason;
   if (card.column === "agent_done" || state === "roadmap_complete") {
@@ -316,7 +320,8 @@ function timeText(iso: string, clock: Clock): string | null {
   return `${date} ${time}`;
 }
 
-const isShipped = (card: Card): boolean =>
+/** Tell whether a card has shipped: in the Done column or with a finished ship flow. */
+export const isShipped = (card: Card): boolean =>
   card.column === "done" || card.shipFlow?.state === "done";
 
 function detailOf(
@@ -480,21 +485,30 @@ const RECORD_STATES: Partial<
 
 const STARTING = { label: "Starting", tone: "neutral" } as const;
 
+/** Answer the label and tone of an orchestrator record: a stopped or stopping record beats its session state. */
+export function recordStatus(record: OrchestratorView): {
+  label: string;
+  tone: BranchTone;
+} {
+  const state = record.session?.state ?? null;
+  const known =
+    RECORD_STATES[record.state] ??
+    (state === null ? STARTING : SESSION_STATES[state]);
+  return { label: known.label, tone: known.tone };
+}
+
 function centreNode(
   record: OrchestratorView,
   branches: readonly CentreBranch[],
   cards: readonly Card[],
 ): CentreNode {
-  const state = record.session?.state ?? null;
-  const known =
-    RECORD_STATES[record.state] ??
-    (state === null ? STARTING : SESSION_STATES[state]);
+  const { label, tone } = recordStatus(record);
   return {
     id: record.id,
     name: record.name,
     role: record.role,
-    label: known.label,
-    tone: known.tone,
+    label,
+    tone,
     contextPercent: record.session?.contextPercent ?? null,
     cost: record.session?.cost ?? null,
     branchCount: branches.length,
