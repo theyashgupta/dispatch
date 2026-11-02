@@ -104,6 +104,10 @@ export function ShellFrame({
             boards.onCreate();
             setOpenMobile(false);
           },
+          onOpenOrchestrator: () => {
+            boards.onOpenOrchestrator();
+            setOpenMobile(false);
+          },
         }}
         dashboards={{
           ...dashboards,

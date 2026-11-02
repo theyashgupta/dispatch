@@ -4,8 +4,6 @@ import {
   CENTRE_TERMINAL_CLOSE_ID,
 } from "@/modules/orchestrator/domain/centre-page-state";
 
-export const ENTRY_BUTTON_ID = "orchestrator-entry";
-
 function focusOnNextFrame(id: string): void {
   requestAnimationFrame(() => {
     document.getElementById(id)?.focus();

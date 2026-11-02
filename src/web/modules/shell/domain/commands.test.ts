@@ -47,6 +47,7 @@ function ctx() {
       calls.push(`create-board ${name}`);
       await Promise.resolve();
     },
+    startOrchestrator: () => calls.push("start-orchestrator"),
   };
   return { context, calls };
 }
@@ -64,6 +65,7 @@ test("with no card only the page commands, New ticket and Sync now appear", () =
     "new-ticket",
     "meeting-notes",
     "sync-now",
+    "open-orchestrator",
     "manage-boards",
     "create-board",
   ]);
@@ -80,7 +82,7 @@ test("the meeting notes command opens the paste flow", () => {
 });
 
 test("a To Do card puts Start and every allowed Move to first, in column order, never In Progress or Agent Done", () => {
-  const cardIds = ids(card()).slice(0, -8);
+  const cardIds = ids(card()).slice(0, -9);
   assert.deepEqual(cardIds, [
     "start",
     "move:needs_input",
@@ -93,7 +95,7 @@ test("a To Do card puts Start and every allowed Move to first, in column order, 
 test("a Done card with a live session yields Open terminal and Clean up and never a move to its own column", () => {
   const cardIds = ids(
     card({ column: "done", tmuxSession: "dsp-LOCAL-7" }),
-  ).slice(0, -8);
+  ).slice(0, -9);
   assert.deepEqual(cardIds, [
     "open-terminal",
     "move:todo",
@@ -163,7 +165,7 @@ test("filter is a case-insensitive substring over the label that keeps order", (
 });
 
 test("an Inbox card offers only Move to To Do and a grouped member gets no card commands", () => {
-  assert.deepEqual(ids(card({ column: "inbox" })).slice(0, -8), ["move:todo"]);
+  assert.deepEqual(ids(card({ column: "inbox" })).slice(0, -9), ["move:todo"]);
   assert.deepEqual(ids(card({ groupId: "g1" })), ids(null));
 });
 
@@ -369,4 +371,49 @@ test("a closed split with no other board shows no split command", () => {
 
 test("without a split context there is no split command", () => {
   assert.equal(ids(null).includes("board:split"), false);
+});
+
+test("Open orchestrator follows Sync now and opens the orchestrator page", () => {
+  const { context, calls } = ctx();
+  const commands = buildCommands(context, nav, null);
+  const listed = commands.map((c) => c.id);
+  assert.equal(
+    listed.indexOf("open-orchestrator"),
+    listed.indexOf("sync-now") + 1,
+  );
+  const open = commands.find((c) => c.id === "open-orchestrator");
+  assert.equal(open?.label, "Open orchestrator");
+  void open?.run();
+  assert.deepEqual(calls, ["go orchestrator"]);
+});
+
+test("Start orchestrator shows only when the entry can start and runs startOrchestrator", () => {
+  const { context, calls } = ctx();
+  const start = buildCommands(context, nav, null, null, false, true).find(
+    (c) => c.id === "start-orchestrator",
+  );
+  assert.equal(start?.label, "Start orchestrator");
+  void start?.run();
+  assert.deepEqual(calls, ["start-orchestrator"]);
+  assert.equal(
+    buildCommands(ctx().context, nav, null, null, false, false).some(
+      (c) => c.id === "start-orchestrator",
+    ),
+    false,
+  );
+});
+
+test("no command offers Message orchestrator", () => {
+  const commands = buildCommands(
+    ctx().context,
+    nav,
+    card(),
+    twoBoards,
+    true,
+    true,
+  );
+  assert.equal(
+    commands.some((c) => c.label.includes("Message orchestrator")),
+    false,
+  );
 });

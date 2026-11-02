@@ -120,7 +120,7 @@ To open the policy form of a board:
 1. If the board does not exist, create it (see "Create a board").
 2. Select the board in the **Boards** section (see "Switch boards").
 3. Open the board page.
-4. Choose **Orchestrator**, or **Add orchestrator** when the board has none. The command centre opens. Choose **Settings** to open the settings sheet. The sheet has two tabs: **Policy** and **Orchestrators**. The terminal and the decisions are on the command centre.
+4. Choose the **Orchestrator** row under the selected board in the sidebar. The row reads **Add orchestrator** when the board has none. The command centre opens. Choose **Settings** to open the settings sheet. The sheet has two tabs: **Policy** and **Orchestrators**. The terminal and the decisions are on the command centre.
 5. Open **Policy**. The form is called **Policy for** and the board name.
 
 Only you can change the policy. The orchestrator reads it. No tool can change it.
@@ -176,10 +176,10 @@ A session that starts without hooks gets no settings file, so this value does no
 
 ## Add and start an orchestrator
 
-1. Select the board in the **Boards** section. Open the board page. Every board has its own button. `LOCAL` has one too, and its supervisor starts **Off**.
-2. Choose **Add orchestrator** in the page header. When the board already has an orchestrator, the button reads **Orchestrator**. The command centre opens (see "The command centre"). Choose **Settings** to open the settings sheet at the right of the command centre. The sheet opens at the **Policy** tab.
+1. Select the board in the **Boards** section. Every board has its own **Orchestrator** row under it in the sidebar. `LOCAL` has one too, and its supervisor starts **Off**.
+2. Choose **Add orchestrator** under the selected board in the sidebar. When the board already has an orchestrator, the row reads **Orchestrator**. In the collapsed sidebar, use the Orchestrator icon. The palette command **Open orchestrator** opens it too. The command centre opens (see "The command centre"). Choose **Settings** to open the settings sheet at the right of the command centre. The sheet opens at the **Policy** tab.
 3. Make sure the supervisor is **On** in the **Policy** tab. With the supervisor **Off**, the button **Start** of the command centre is off. The command centre shows this line under the button: "Turn on the supervisor in Policy to start an orchestrator."
-4. Close the settings sheet. Choose **Start** in the controls of the command centre.
+4. Close the settings sheet. Choose **Start** in the controls of the command centre. The palette command **Start orchestrator** also starts it.
 
 When the board has no orchestrator record, **Start** first adds the main orchestrator. The record has the id `main` and the name "Main orchestrator". Then it starts the orchestrator.
 
@@ -215,7 +215,7 @@ The hidden card and the MCP configuration file do not show in the UI. To confirm
 1. The badge reads **Working** and the **Stop** button shows.
 2. The terminal pane shows the live terminal.
 
-The start can fail. The controls of the command centre then show the line "The orchestrator did not start: <reason>." The reason names the step and the last text of the Claude pane. Dispatch waits about 30 seconds for Claude to be ready, so the badge can read **Starting** for some time before the line shows. Choose **Try again** beside the line to start again. The board now has a main orchestrator, so the page header button of the board reads **Orchestrator**.
+The start can fail. The controls of the command centre then show the line "The orchestrator did not start: <reason>." The reason names the step and the last text of the Claude pane. Dispatch waits about 30 seconds for Claude to be ready, so the badge can read **Starting** for some time before the line shows. Choose **Try again** beside the line to start again. The board now has a main orchestrator, so the sidebar row of the board reads **Orchestrator**.
 
 The terminal pane shows the live terminal. The buttons of the command centre depend on the state:
 
@@ -357,7 +357,7 @@ The command centre shows one orchestrator of a board as one page. It has the orc
 
 ### Open the command centre
 
-- Choose **Orchestrator** in the page header of the board. When the board has no orchestrator, the button reads **Add orchestrator** from 768 px wide. On a narrower screen it reads **Orchestrator**. Both buttons open the command centre.
+- Choose the **Orchestrator** row under the selected board in the sidebar. The row reads **Add orchestrator** when the board has no orchestrator. In the collapsed sidebar, choose the Orchestrator icon. Or run the palette command **Open orchestrator**. All three open the command centre.
 - Choose **Open command centre** next to the **Project map** title of the dashboard.
 - Open `/boards/<key>/orchestrator` for the main orchestrator. Open `/boards/<key>/orchestrator/<orchestrator id>` for another orchestrator.
 - The address `/orchestrator?board=<key>` only redirects to `/boards/<key>/orchestrator`. The same applies to `/orchestrator/<orchestrator id>?board=<key>`.

@@ -123,6 +123,15 @@ export function AppSidebar({
                     collapsed
                     onNavigate={onNavigate}
                   />
+                  {boards.orchestrator !== null ? (
+                    <NavRow
+                      page="orchestrator"
+                      label={boards.orchestrator.label}
+                      active={current === "orchestrator"}
+                      collapsed
+                      onNavigate={onNavigate}
+                    />
+                  ) : null}
                   {hasMainOrchestrator ? (
                     <NavRow
                       page="dashboard"

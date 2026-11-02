@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { formatCount } from "../../../../shared/format-count.js";
 import type { BoardKey } from "../../../../shared/types.js";
 import { Badge } from "@/components/ui/badge";
@@ -15,10 +16,12 @@ export function SidebarBoardRow({
   item,
   showLoops,
   onOpen,
+  children,
 }: {
   item: SwitcherItem;
   showLoops: boolean;
   onOpen: (key: BoardKey) => void;
+  children?: ReactNode;
 }) {
   return (
     <SidebarMenuItem>
@@ -46,6 +49,7 @@ export function SidebarBoardRow({
           </span>
         ) : null}
       </SidebarMenuButton>
+      {children}
     </SidebarMenuItem>
   );
 }
