@@ -32,7 +32,8 @@ const loggedCategories = new Set<string>();
  * category the caller must surface as "could not check" (F-03/F-04).
  */
 export type PrProbeResult =
-  { ok: true; prs: PrInfo[] } | { ok: false; category: ProbeFailureCategory };
+  | { ok: true; prs: PrInfo[] }
+  | { ok: false; category: ProbeFailureCategory };
 
 /**
  * Narrow `gh`'s own `state` token to the closed {@link PrInfo} union, reading anything

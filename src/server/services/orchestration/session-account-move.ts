@@ -44,7 +44,11 @@ import {
 } from "./steps.js";
 
 export type MoveCause =
-  "switch" | "turn end" | "session action" | "automatic move" | "usage limit";
+  | "switch"
+  | "turn end"
+  | "session action"
+  | "automatic move"
+  | "usage limit";
 
 export type SessionMoveOutcome =
   | "moved"

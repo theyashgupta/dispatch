@@ -22,12 +22,21 @@ import type {
 } from "../../../../shared/types.js";
 
 export type BranchState =
-  "planned" | "running" | "needs_input" | "usage_limit" | "done" | "attention";
+  | "planned"
+  | "running"
+  | "needs_input"
+  | "usage_limit"
+  | "done"
+  | "attention";
 
 export type BranchTone = SessionTone;
 
 export type BranchAction =
-  "open" | "reply" | "open_terminal" | "resume" | "retry_resume";
+  | "open"
+  | "reply"
+  | "open_terminal"
+  | "resume"
+  | "retry_resume";
 
 export type BandKey = "needs_you" | "running" | "planned" | "done";
 

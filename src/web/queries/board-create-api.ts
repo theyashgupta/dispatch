@@ -6,10 +6,12 @@ import type { Board } from "../../shared/types.js";
 import { http, type ApiFailure } from "@/lib/http";
 
 export type BoardRequestResult<T> =
-  { ok: true; data: T } | ({ ok: false } & BoardRefusal);
+  | { ok: true; data: T }
+  | ({ ok: false } & BoardRefusal);
 
 export type CreateBoardResult =
-  { ok: true; board: Board; link: string } | ({ ok: false } & BoardRefusal);
+  | { ok: true; board: Board; link: string }
+  | ({ ok: false } & BoardRefusal);
 
 const BOARD_ERROR_COPY: Record<string, string> = {
   "board-archived": "This board is archived.",

@@ -1522,14 +1522,16 @@ async function main() {
       );
       portsHeld = true; // fold into the same non-zero-exit signal
     }
+    let ttydHeld = false;
     for (const key of Object.keys(ttyd)) {
       if (await isPortListening(ttyd[key].port)) {
         console.error(
           `ASSERTION: ttyd port ${ttyd[key].port} (${key}) still LISTENING after teardown`,
         );
-        portsHeld = true;
+        ttydHeld = true;
       }
     }
+    if (ttydHeld) portsHeld = true;
   }
 
   const realAfter = statRealBoardDb();

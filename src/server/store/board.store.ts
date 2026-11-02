@@ -2863,7 +2863,8 @@ class BoardStore extends EventEmitter {
     destination: UnwindDestination,
   ): Promise<{ ok: true; row: ArchivedGroup } | { ok: false; reason: string }> {
     let result:
-      { ok: true; row: ArchivedGroup } | { ok: false; reason: string } = {
+      | { ok: true; row: ArchivedGroup }
+      | { ok: false; reason: string } = {
       ok: false,
       reason: "unknown card id",
     };
@@ -4902,7 +4903,8 @@ class BoardStore extends EventEmitter {
     { ok: true; card: Card } | { ok: false; ineligibleIds: string[] }
   > {
     let result!:
-      { ok: true; card: Card } | { ok: false; ineligibleIds: string[] };
+      | { ok: true; card: Card }
+      | { ok: false; ineligibleIds: string[] };
     let refused = false;
     return this.enqueue(() => {
       if (!this.isOpenBoard(board)) {
@@ -5057,7 +5059,8 @@ class BoardStore extends EventEmitter {
   recordLinearPush(
     id: string,
     push: { fromCol: Column; toCol: Column } & (
-      { ok: true; state: WorkflowState } | { ok: false; copy: string }
+      | { ok: true; state: WorkflowState }
+      | { ok: false; copy: string }
     ),
   ): Promise<void> {
     return this.enqueue(() => {

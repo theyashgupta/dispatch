@@ -162,6 +162,11 @@ function check({ payload, deny, pointer }) {
   return errors;
 }
 
+const oxlintErrorLine =
+  "src/shared/__ox-shape.ts:1:1: error eslint(no-debugger): `debugger` statement is not allowed help: Remove the debugger statement";
+const oxlintParseErrorLine =
+  "src/shared/__ox-shape.ts:1:11: error: Unexpected token";
+
 const stopCases = [
   {
     name: "stop skip: DISPATCH_SKIP_STOP_CHECK=1",
@@ -215,6 +220,30 @@ const stopCases = [
     dirty: true,
     block: true,
   },
+  {
+    name: "stop block: an oxlint error line is reported in the error list",
+    env: {},
+    payload: { stop_hook_active: false },
+    dirty: true,
+    block: true,
+    report: oxlintErrorLine,
+    scripts: {
+      "format:check": "exit 0",
+      lint: `printf '%s\\n' '${oxlintErrorLine}'; exit 1`,
+    },
+  },
+  {
+    name: "stop block: an oxlint parse error line is reported in the error list",
+    env: {},
+    payload: { stop_hook_active: false },
+    dirty: true,
+    block: true,
+    report: oxlintParseErrorLine,
+    scripts: {
+      "format:check": "exit 0",
+      lint: `printf '%s\\n' '${oxlintParseErrorLine}'; exit 1`,
+    },
+  },
 ];
 
 /**
@@ -223,7 +252,7 @@ const stopCases = [
  * @remarks
  * The scratch repository has only the npm scripts that the case names, so a guard that does not skip makes the hook exit 2 on the first missing step.
  */
-function checkStop({ env, payload, dirty, block, scripts, notice }) {
+function checkStop({ env, payload, dirty, block, scripts, notice, report }) {
   const dir = mkdtempSync(join(tmpdir(), "dispatch-stop-"));
   try {
     spawnSync("git", ["init", "-q"], { cwd: dir });
@@ -238,6 +267,13 @@ function checkStop({ env, payload, dirty, block, scripts, notice }) {
       encoding: "utf8",
       env: { ...childEnv, ...env },
     });
+    if (report) {
+      return run.status === 2 && run.stderr.includes(`Error lines:\n${report}`)
+        ? []
+        : [
+            `expected exit 2 with "${report}" as an error line, got exit ${run.status}`,
+          ];
+    }
     if (block) {
       return run.status === 2 && run.stderr.includes("static checks failed")
         ? []
@@ -260,7 +296,7 @@ function checkStop({ env, payload, dirty, block, scripts, notice }) {
  * Run the formatter hook on a config file, a `.claude/` file and a control source file in a scratch project.
  *
  * @remarks
- * The scratch project links the repo `node_modules`, so the control file proves prettier ran and the skipped files prove the skip list.
+ * The scratch project links the repo `node_modules`, so the control file proves oxfmt ran and the skipped files prove the skip list.
  */
 function checkFormatter() {
   const dir = mkdtempSync(join(tmpdir(), "dispatch-format-"));
@@ -269,6 +305,7 @@ function checkFormatter() {
     mkdirSync(join(dir, ".claude"));
     const files = [
       ["package.yaml", "a:   1\n", false],
+      [".oxfmtrc.json", '{  "a":1}\n', false],
       [".claude/x.mjs", "const  a =  1\n", false],
       ["src.ts", "const  a =  1\n", true],
     ];

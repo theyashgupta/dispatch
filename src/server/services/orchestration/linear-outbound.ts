@@ -17,7 +17,8 @@ import { getOrchestrationConfig } from "../infra/config-holder.js";
 import { outboundErrorCopy } from "./outbound-error.js";
 
 export type OutboundOutcome =
-  { ok: true } | { ok: false; status: 400 | 404 | 409 | 502; error: string };
+  | { ok: true }
+  | { ok: false; status: 400 | 404 | 409 | 502; error: string };
 
 type PushResult = { ok: true } | { ok: false; error: string };
 

@@ -10,7 +10,11 @@ export const USAGE_REQUEST_LOG_PATH = path.join(
 const MAX_BYTES = 1_048_576;
 
 export type UsageCaller =
-  "poll" | "manual" | "limit-surface" | "fresh-read" | "login";
+  | "poll"
+  | "manual"
+  | "limit-surface"
+  | "fresh-read"
+  | "login";
 
 export interface UsageRequestLine {
   ts: string;

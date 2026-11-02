@@ -87,7 +87,8 @@ function refusalReason(body: unknown): string {
 }
 
 export type StartResult =
-  { ok: true } | { ok: false; error: string; variant?: string };
+  | { ok: true }
+  | { ok: false; error: string; variant?: string };
 
 /**
  * Starts a card's session: POST /api/cards/:id/start.

@@ -112,7 +112,7 @@ The rules are in `docs/standards/frontend-architecture.md`, in the sections "Lay
 
 ## Checks
 
-1. Format the new files with `env -u NODE_ENV npx prettier --write <each new file>`. A long name can make a line too long for the template layout.
+1. Format the new files with `env -u NODE_ENV npx oxfmt <each new file>`. A long name can make a line too long for the template layout.
 2. Run these commands. Each command must pass.
 
    ```

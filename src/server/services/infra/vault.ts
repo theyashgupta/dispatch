@@ -29,7 +29,8 @@ export type VaultWriteResult =
  * Result union for delete.
  */
 export type VaultDeleteResult =
-  { ok: true } | { ok: false; error: "not-found" };
+  | { ok: true }
+  | { ok: false; error: "not-found" };
 
 const SCHEMA_HEADER = `# =============================================================================
 # Dispatch vault schema, readable by Claude.
@@ -499,7 +500,8 @@ export async function deleteKey(name: string): Promise<VaultDeleteResult> {
  * Result union for the previous-value read, the one deliberate read path in the vault.
  */
 export type VaultPreviousResult =
-  { ok: true; value: string } | { ok: false; error: "not-found" };
+  | { ok: true; value: string }
+  | { ok: false; error: "not-found" };
 
 /**
  * Read one key's value out of a sealed env file, the only path that turns a stored line back

@@ -1,5 +1,8 @@
 export type DesktopPermission =
-  "granted" | "denied" | "default" | "unsupported";
+  | "granted"
+  | "denied"
+  | "default"
+  | "unsupported";
 
 export type PushRowState =
   | "ios-needs-install"
@@ -48,7 +51,8 @@ export function pushRowState(input: PushRowInput): PushRowState {
  */
 export function pushEnableError(
   result:
-    { ok: true } | { ok: false; error: "too-many-subscriptions" | "generic" },
+    | { ok: true }
+    | { ok: false; error: "too-many-subscriptions" | "generic" },
   livePermission: DesktopPermission,
 ): PushError | null {
   if (livePermission === "denied" || result.ok) return null;

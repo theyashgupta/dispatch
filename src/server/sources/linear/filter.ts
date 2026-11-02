@@ -13,7 +13,8 @@ export interface LinearIssueFilter {
   project?: { id: { in: string[] } };
   cycle?: { isActive: { eq: true } };
   state:
-    { type: { eq: "unstarted" } } | { type: { in: ["unstarted", "started"] } };
+    | { type: { eq: "unstarted" } }
+    | { type: { in: ["unstarted", "started"] } };
 }
 
 /**

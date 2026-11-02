@@ -101,7 +101,8 @@ export async function setVaultValue(
 }
 
 type VaultValueRead =
-  { ok: true; value: string } | { ok: false; error: string };
+  | { ok: true; value: string }
+  | { ok: false; error: string };
 
 async function readVaultValue(
   name: string,

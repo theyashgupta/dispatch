@@ -16,7 +16,8 @@ interface GroupInput {
   memberIds: string[];
   playbook?: string | undefined;
   workspace?:
-    { folder: string; repos: { path: string; base: string }[] } | undefined;
+    | { folder: string; repos: { path: string; base: string }[] }
+    | undefined;
 }
 
 type SessionStarter = typeof startSession;
