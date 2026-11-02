@@ -29,9 +29,14 @@ const idle = (board: BoardKey): Shown => ({
   total: 0,
 });
 
-export function SearchContainer() {
+export function SearchContainer({
+  boardKey: boardKeyProp,
+}: {
+  boardKey?: BoardKey;
+}) {
   const { appStore } = useRouteContext({ from: "__root__" });
-  const boardKey = useAppStore(appStore, (s) => s.board);
+  const storeBoard = useAppStore(appStore, (s) => s.board);
+  const boardKey = boardKeyProp ?? storeBoard;
   const board = useBoardSnapshot(
     boardKey,
     useAppStore(appStore, (s) => s.doneLimit),

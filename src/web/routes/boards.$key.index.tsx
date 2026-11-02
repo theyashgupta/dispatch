@@ -8,6 +8,8 @@ const searchSchema = z.looseObject({
     .enum(["terminal", "decisions", "policy", "orchestrators"])
     .optional()
     .catch(undefined),
+  split: z.string().optional().catch(undefined),
+  dir: z.enum(["row", "column"]).optional().catch(undefined),
 });
 
 export const Route = createFileRoute("/boards/$key/")({
