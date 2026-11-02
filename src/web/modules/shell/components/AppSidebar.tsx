@@ -28,6 +28,11 @@ import {
   type NavCounts,
   type NavItem,
 } from "../../../../shared/nav-items.js";
+import {
+  boardsRailDot,
+  boardsRailLabel,
+  orchestratorRailLabel,
+} from "@/modules/shell/domain/rail-label";
 import type { SyncSnapshot } from "@/modules/shell/domain/sync-status";
 
 export interface AppSidebarProps {
@@ -60,6 +65,11 @@ export function AppSidebar({
   const { state, isMobile } = useSidebar();
   const collapsed = state === "collapsed" && !isMobile;
   const canToggle = !isMobile && !carousel;
+  const selectedItem = boards.items?.find((i) => i.selected);
+  const selectedBoard = selectedItem
+    ? { key: selectedItem.key, loops: selectedItem.loops }
+    : null;
+  const needsYou = boards.orchestrator?.needsYou ?? 0;
   const brand = (
     <>
       <Glyph size={16} title={collapsed ? "Dispatch" : undefined} />
@@ -121,6 +131,8 @@ export function AppSidebar({
                     label="Boards"
                     active={current === "boards"}
                     collapsed
+                    spokenLabel={boardsRailLabel(selectedBoard, needsYou)}
+                    dot={boardsRailDot(selectedBoard?.loops ?? 0, needsYou)}
                     onNavigate={onNavigate}
                   />
                   {boards.orchestrator !== null ? (
@@ -129,6 +141,11 @@ export function AppSidebar({
                       label={boards.orchestrator.label}
                       active={current === "orchestrator"}
                       collapsed
+                      spokenLabel={orchestratorRailLabel(
+                        boards.orchestrator.label,
+                        boards.orchestrator.badge,
+                      )}
+                      dot={boards.orchestrator.badge === null ? null : "accent"}
                       onNavigate={onNavigate}
                     />
                   ) : null}

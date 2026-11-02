@@ -4,7 +4,7 @@ import type { BoardKey, OrchestratorRecord } from "../../../../shared/types.js";
 import {
   attentionLabel,
   dashboardItems,
-  loopsLabel,
+  liveText,
   switcherItems,
 } from "./board-switcher.js";
 
@@ -63,11 +63,6 @@ test("attentionLabel names the count", () => {
   assert.equal(attentionLabel(3), "3 items need attention");
   assert.equal(attentionLabel(1), "1 item needs attention");
   assert.equal(attentionLabel(1284), "1,284 items need attention");
-});
-
-test("loopsLabel names the count", () => {
-  assert.equal(loopsLabel(1), "1 running loop");
-  assert.equal(loopsLabel(2), "2 running loops");
 });
 
 const record = (role: OrchestratorRecord["role"]): OrchestratorRecord => ({
@@ -164,4 +159,10 @@ test("dashboardItems selects no row on the dashboard page of a board without a m
     }).some((item) => item.selected),
     false,
   );
+});
+
+test("liveText is null with no loops and names the formatted count otherwise", () => {
+  assert.equal(liveText(0), null);
+  assert.equal(liveText(1), "1 live");
+  assert.equal(liveText(1500), "1,500 live");
 });

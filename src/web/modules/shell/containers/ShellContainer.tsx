@@ -75,6 +75,7 @@ import {
 } from "@/modules/shell/domain/board-switcher";
 import { boardPageTitle } from "@/modules/shell/domain/board-title";
 import { BOARDS_GROUP, buildCommands } from "@/modules/shell/domain/commands";
+import { runningLoopKey } from "@/modules/shell/domain/running-loop-key";
 import { sidebarOrchestrator } from "@/modules/shell/domain/sidebar-orchestrator";
 import { NAV_ITEMS, visibleNavItems } from "../../../../shared/nav-items.js";
 import { sidebarOpen } from "@/modules/shell/domain/nav-open";
@@ -89,6 +90,7 @@ import { useCreateBoardMutation } from "@/queries/board-create-queries";
 import {
   useBoardCountsQuery,
   useBoardListQuery,
+  useRefreshCountsOnLoopChange,
 } from "@/queries/board-list-queries";
 import { actionApi } from "@/queries/action-services";
 import {
@@ -308,6 +310,10 @@ export function ShellContainer({
   const current = latestBoard(boardQuery.data, lastBoard, boardKey);
   if (current !== null && current !== lastBoard) setLastBoard(current);
   const board = current ?? lastBoard;
+  useRefreshCountsOnLoopChange(
+    board?.boardKey ?? DEFAULT_BOARD_KEY,
+    board === null ? null : runningLoopKey(board.cards),
+  );
 
   const { refetch: refetchBoard } = boardQuery;
   const boardLoadError =
