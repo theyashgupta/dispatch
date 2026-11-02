@@ -10,6 +10,8 @@ import {
   regionState,
   selectedRecord,
   showSwitcher,
+  showViewToggle,
+  shownView,
   switcherOptions,
   tileMeters,
   unknownOrchestrator,
@@ -189,4 +191,30 @@ test("the Orchestrators tab shows its count once the records loaded", () => {
   assert.equal(orchestratorsTabLabel(null), "Orchestrators");
   assert.equal(orchestratorsTabLabel(0), "Orchestrators (0)");
   assert.equal(orchestratorsTabLabel(2), "Orchestrators (2)");
+});
+
+test("the tree shows only when requested on a wide screen with two orchestrators", () => {
+  const one = [record("a", "main", "running")];
+  const two = [one[0], record("b", "extra", "running")];
+  assert.equal(shownView("tree", two, true), "tree");
+  assert.equal(shownView("tree", two, false), "bands");
+  assert.equal(shownView("tree", one, true), "bands");
+  assert.equal(shownView("tree", one, false), "bands");
+  assert.equal(shownView("bands", two, true), "bands");
+  assert.equal(shownView("bands", two, false), "bands");
+  assert.equal(shownView("bands", one, true), "bands");
+  assert.equal(shownView("bands", one, false), "bands");
+  assert.equal(shownView(undefined, two, true), "bands");
+  assert.equal(shownView(undefined, two, false), "bands");
+  assert.equal(shownView(undefined, one, true), "bands");
+  assert.equal(shownView(undefined, one, false), "bands");
+});
+
+test("the view toggle shows only on a wide screen with two or more orchestrators", () => {
+  const main = record("main", "main", "running");
+  const extra = record("extra-1", "extra", "stopped");
+  assert.equal(showViewToggle([main], false), false);
+  assert.equal(showViewToggle([main, extra], true), true);
+  assert.equal(showViewToggle([main, extra], false), false);
+  assert.equal(showViewToggle([], true), false);
 });
