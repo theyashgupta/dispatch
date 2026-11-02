@@ -10,7 +10,8 @@ import {
   type SupervisorState,
 } from "../../../../shared/types.js";
 import { spentOfBudget } from "../../../../shared/cost-text.js";
-import { accountFor, clock } from "./usage-meters.js";
+import { clock } from "../../../../shared/clock-text.js";
+import { accountFor } from "./usage-meters.js";
 
 export type AttentionBadge =
   { kind: "state"; state: SupervisorState } | { kind: "label"; label: string };

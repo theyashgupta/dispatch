@@ -1,6 +1,6 @@
-import { loopView } from "../../../../shared/loop-view.js";
-import type { LoopProgress, LoopUnit } from "../../../../shared/types.js";
-import { clock } from "./usage-meters.js";
+import { loopView } from "./loop-view.js";
+import type { LoopProgress, LoopUnit } from "./types.js";
+import { clock } from "./clock-text.js";
 
 export type NodeState =
   "done" | "current" | "blocked" | "failed" | "next" | "later";

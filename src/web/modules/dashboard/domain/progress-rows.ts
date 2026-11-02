@@ -11,7 +11,7 @@ import type {
 } from "../../../../shared/types.js";
 import { sessionTime } from "./session-time.js";
 import { timeLeft } from "./time-left.js";
-import { trackNodes, type TrackNode } from "./track-nodes.js";
+import { trackNodes, type TrackNode } from "../../../../shared/track-nodes.js";
 
 export interface ProgressRow {
   cardId: string;

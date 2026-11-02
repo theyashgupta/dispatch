@@ -2,20 +2,23 @@ import { Check, Pause, X, type LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
-import type {
-  NodeState,
-  TrackNode,
-} from "@/modules/dashboard/domain/track-nodes";
+import type { NodeState, TrackNode } from "../../shared/track-nodes.js";
 
 const PENDING = {
   circle: "border-dashed border-(--text-muted) bg-card text-muted-foreground",
-  segment:
-    "w-0 border-0 border-l-2 border-dotted border-(--text-muted) lg:h-0 lg:border-t-2 lg:border-l-0",
+  segment: "w-0 border-0 border-l-2 border-dotted border-(--text-muted)",
+  rowSegment: "lg:h-0 lg:border-t-2 lg:border-l-0",
 };
 
 const NODES: Record<
   NodeState,
-  { circle: string; line: string; segment: string; Glyph: LucideIcon | null }
+  {
+    circle: string;
+    line: string;
+    segment: string;
+    rowSegment?: string;
+    Glyph: LucideIcon | null;
+  }
 > = {
   done: {
     circle: "border-(--col-agent-done) bg-(--col-agent-done) text-card",
@@ -27,8 +30,8 @@ const NODES: Record<
     circle:
       "border-(--accent) bg-card shadow-glow-current motion-safe:animate-[node-breathe_var(--motion-node-breathe)_ease-in-out_infinite]",
     line: "text-(--accent-text)",
-    segment:
-      "bg-linear-to-b from-(--col-agent-done) to-(--accent) lg:bg-linear-to-r",
+    segment: "bg-linear-to-b from-(--col-agent-done) to-(--accent)",
+    rowSegment: "lg:bg-linear-to-r",
     Glyph: null,
   },
   blocked: {
@@ -57,33 +60,55 @@ const NODES: Record<
 
 interface GroupProgressBarProps {
   nodes: TrackNode[];
+  orientation?: "responsive" | "vertical";
 }
 
-export function GroupProgressBar({ nodes }: GroupProgressBarProps) {
+export function GroupProgressBar({
+  nodes,
+  orientation = "responsive",
+}: GroupProgressBarProps) {
+  const whenResponsive = (classes: string) =>
+    orientation === "responsive" ? classes : undefined;
   return (
-    <ol className="m-0 flex list-none flex-col p-0 lg:flex-row">
+    <ol
+      className={cn(
+        "m-0 flex list-none flex-col p-0",
+        whenResponsive("lg:flex-row"),
+      )}
+    >
       {nodes.map((node, index) => {
-        const { circle, line, segment, Glyph } = NODES[node.state];
+        const { circle, line, segment, rowSegment, Glyph } = NODES[node.state];
         return (
           <li
             key={node.unit}
             aria-label={node.accessibleName}
-            className="relative flex min-w-0 flex-1 gap-3 pb-4 last:pb-0 lg:flex-col lg:items-center lg:gap-1 lg:pb-0 lg:text-center"
+            className={cn(
+              "relative flex min-w-0 flex-1 gap-3 pb-4 last:pb-0",
+              whenResponsive(
+                "lg:flex-col lg:items-center lg:gap-1 lg:pb-0 lg:text-center",
+              ),
+            )}
           >
             {index > 0 && (
               <span
                 aria-hidden="true"
                 className={cn(
-                  "absolute -top-4 left-3.25 h-4 w-0.5 lg:top-9.5 lg:right-1/2 lg:left-auto lg:h-0.5 lg:w-full",
+                  "absolute -top-4 left-3.25 h-4 w-0.5",
+                  whenResponsive(
+                    "lg:top-9.5 lg:right-1/2 lg:left-auto lg:h-0.5 lg:w-full",
+                  ),
                   segment,
+                  rowSegment && whenResponsive(rowSegment),
                 )}
               />
             )}
-            <span aria-hidden="true" className="hidden h-5 items-end lg:flex">
-              {node.state === "current" && (
-                <Badge tone="accent">You are here</Badge>
-              )}
-            </span>
+            {orientation === "responsive" && (
+              <span aria-hidden="true" className="hidden h-5 items-end lg:flex">
+                {node.state === "current" && (
+                  <Badge tone="accent">You are here</Badge>
+                )}
+              </span>
+            )}
             <span
               aria-hidden="true"
               className={cn(
@@ -99,10 +124,13 @@ export function GroupProgressBar({ nodes }: GroupProgressBarProps) {
             </span>
             <span
               aria-hidden="true"
-              className="flex min-w-0 flex-col gap-0.5 lg:w-full lg:items-center lg:px-1"
+              className={cn(
+                "flex min-w-0 flex-col gap-0.5",
+                whenResponsive("lg:w-full lg:items-center lg:px-1"),
+              )}
             >
               {node.state === "current" && (
-                <Badge tone="accent" className="lg:hidden">
+                <Badge tone="accent" className={whenResponsive("lg:hidden")}>
                   You are here
                 </Badge>
               )}
