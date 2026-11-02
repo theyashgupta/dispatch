@@ -5,6 +5,8 @@ import {
   boardCountsQueryOptions,
   boardListKeys,
   boardListQueryOptions,
+  shouldRefreshCounts,
+  shouldRefreshOnLoopChange,
 } from "./board-list-queries.js";
 
 const realFetch = globalThis.fetch;
@@ -74,6 +76,40 @@ test("boardCountsQueryOptions shares the cache without a timer when poll is omit
   const options = boardCountsQueryOptions();
   assert.equal(options.enabled, true);
   assert.equal(options.refetchInterval, false);
+});
+
+test("shouldRefreshCounts is false on the first render and before a snapshot", () => {
+  assert.equal(shouldRefreshCounts(undefined, "a"), false);
+  assert.equal(shouldRefreshCounts(null, "a"), false);
+});
+
+test("shouldRefreshCounts is false when the key is unchanged or becomes null", () => {
+  assert.equal(shouldRefreshCounts("a", "a"), false);
+  assert.equal(shouldRefreshCounts("a", null), false);
+});
+
+test("shouldRefreshCounts is true when the running set changes", () => {
+  assert.equal(shouldRefreshCounts("a", "a,b"), true);
+  assert.equal(shouldRefreshCounts("a", ""), true);
+});
+
+test("shouldRefreshOnLoopChange refetches when the same board's key changed", () => {
+  assert.equal(
+    shouldRefreshOnLoopChange({ board: "A", key: "x" }, "A", "x,y"),
+    true,
+  );
+  assert.equal(
+    shouldRefreshOnLoopChange({ board: "A", key: "x" }, "A", "x"),
+    false,
+  );
+});
+
+test("shouldRefreshOnLoopChange does not refetch on a board change or the first render", () => {
+  assert.equal(
+    shouldRefreshOnLoopChange({ board: "A", key: "x" }, "B", "y"),
+    false,
+  );
+  assert.equal(shouldRefreshOnLoopChange(undefined, "A", "x"), false);
 });
 
 test("boardListQueryOptions rejects a non-2xx response", async () => {
