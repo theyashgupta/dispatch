@@ -2,6 +2,8 @@ import {
   activeSessionView,
   type ActiveSessionView,
 } from "../../../../shared/active-session.js";
+import { needsAttention } from "../../../../shared/card-attention.js";
+import { COLUMN_LABELS } from "../../../../shared/column-labels.js";
 import { isHiddenCard } from "../../../../shared/hidden-card.js";
 import { loopView } from "../../../../shared/loop-view.js";
 import {
@@ -14,6 +16,7 @@ import {
   SESSION_STATES,
   type SessionTone,
 } from "../../../../shared/session-states.js";
+import { trackNodes, type TrackNode } from "../../../../shared/track-nodes.js";
 import type {
   Card,
   DecisionItem,
@@ -30,6 +33,22 @@ export type BranchAction =
   "open" | "reply" | "open_terminal" | "resume" | "retry_resume";
 
 export type BandKey = "needs_you" | "running" | "planned" | "done";
+
+export type MemberState = Card["column"] | "attention";
+
+export interface MemberLine {
+  id: string;
+  identifier: string;
+  title: string;
+  state: MemberState;
+  label: string;
+  tone: BranchTone;
+}
+
+export interface GroupDetail {
+  units: TrackNode[] | null;
+  members: MemberLine[];
+}
 
 export interface CentreBranch {
   id: string;
@@ -51,6 +70,7 @@ export interface CentreBranch {
   stateSince: string | null;
   slot: number;
   budget?: number | null;
+  group?: GroupDetail;
 }
 
 export interface CentreNode {
@@ -324,10 +344,65 @@ function detailOf(
   return null;
 }
 
+const MEMBER_TONES: Record<Card["column"], BranchTone> = {
+  in_progress: "neutral",
+  needs_input: "attention",
+  agent_done: "success",
+  in_review: "success",
+  done: "success",
+  todo: "muted",
+  parked: "muted",
+  inbox: "muted",
+};
+
+function memberLine(member: Card): MemberLine {
+  const base = {
+    id: member.id,
+    identifier: member.identifier,
+    title: member.title,
+  };
+  if (
+    needsAttention(member) ||
+    member.loopProgress?.summary.lastGate?.result === "fail"
+  ) {
+    return {
+      ...base,
+      state: "attention",
+      label: "Needs attention",
+      tone: "error",
+    };
+  }
+  return {
+    ...base,
+    state: member.column,
+    label: COLUMN_LABELS[member.column],
+    tone: MEMBER_TONES[member.column],
+  };
+}
+
+function groupDetail(
+  card: Card,
+  byId: ReadonlyMap<string, Card>,
+  clock: Clock,
+): GroupDetail {
+  return {
+    units: hasLoopProgress(card)
+      ? trackNodes(card.loopProgress, { timeZone: clock.timeZone })
+      : null,
+    members: (card.memberIds ?? []).flatMap((id) => {
+      const member = byId.get(id);
+      return member === undefined || isHiddenCard(member)
+        ? []
+        : [memberLine(member)];
+    }),
+  };
+}
+
 function branchOf(
   card: Card,
   entry: PlanEntry | undefined,
   clock: Clock,
+  byId: ReadonlyMap<string, Card>,
 ): CentreBranch {
   const session = activeSessionView(card);
   const status = statusOf(card, session);
@@ -351,6 +426,7 @@ function branchOf(
     memberCount: card.source === "group" ? (card.memberIds?.length ?? 0) : null,
     stateSince: session?.stateSince ?? null,
     slot: 0,
+    ...(card.source === "group" && { group: groupDetail(card, byId, clock) }),
   };
 }
 
@@ -441,6 +517,7 @@ export function centreGraph(input: CentreGraphInput): CentreGraph {
   }
   const clock = { now: input.now, timeZone: input.timeZone };
   const entries = currentPlan(input.decisions, selected.id);
+  const byId = new Map(input.cards.map((c) => [c.id, c]));
   const matched = new Set<PlanEntry>();
   const all: CentreBranch[] = [];
   for (const card of input.cards) {
@@ -454,7 +531,7 @@ export function centreGraph(input: CentreGraphInput): CentreGraph {
     const entry = entryOf(entries, card);
     if (!isRunByOrchestrator(card, entry) || isShipped(card)) continue;
     if (entry !== undefined) matched.add(entry);
-    all.push(branchOf(card, entry, clock));
+    all.push(branchOf(card, entry, clock, byId));
   }
   for (const entry of entries) {
     const onBoard = input.cards.some((card) => entryOf([entry], card));
