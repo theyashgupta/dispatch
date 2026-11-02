@@ -2,7 +2,9 @@ import { DEFAULT_BOARD_KEY } from "../../../../shared/board-key.js";
 import type { Board } from "../../../../shared/types.js";
 
 export type ArchiveAction =
-  { kind: "none" } | { kind: "disabled"; reason: string } | { kind: "enabled" };
+  | { kind: "none" }
+  | { kind: "disabled"; reason: string }
+  | { kind: "enabled" };
 
 /** What the row menu shows for the Archive item: none for the default board, disabled while sessions run. */
 export function archiveAction(

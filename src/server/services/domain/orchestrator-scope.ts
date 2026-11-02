@@ -12,7 +12,8 @@ export interface ScopeTarget {
 }
 
 export type ScopeResult =
-  { ok: true } | { ok: false; reason: "other-board" | "other-owner" };
+  | { ok: true }
+  | { ok: false; reason: "other-board" | "other-owner" };
 
 /**
  * Decide whether an orchestrator may act on a target card, group or session.

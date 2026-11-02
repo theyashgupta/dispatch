@@ -57,7 +57,8 @@ function hexError(key: string): string {
 }
 
 type Validation =
-  { ok: true; value: TerminalAppearance } | { ok: false; error: string };
+  | { ok: true; value: TerminalAppearance }
+  | { ok: false; error: string };
 
 /**
  * Validate an untrusted terminal appearance object field by field.

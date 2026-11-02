@@ -77,10 +77,12 @@ type CheckFailure =
   | { error: "sso-required"; ssoUrl?: string };
 
 export type TokenFailure =
-  CheckFailure | { error: "no-credential" | "failed" | "superseded" };
+  | CheckFailure
+  | { error: "no-credential" | "failed" | "superseded" };
 
 type CheckOutcome =
-  { ok: true; account?: string } | { ok: false; failure: CheckFailure };
+  | { ok: true; account?: string }
+  | { ok: false; failure: CheckFailure };
 
 /**
  * Ask the provider who owns a token, turning every failure into one of the connection error kinds.

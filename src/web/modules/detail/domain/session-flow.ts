@@ -3,7 +3,12 @@ import type { Card } from "../../../../shared/types.js";
 
 export type SessionFlowStageId = "item" | "agent" | "terminal" | "result";
 export type SessionFlowState =
-  "idle" | "working" | "waiting" | "done" | "lost" | "failed";
+  | "idle"
+  | "working"
+  | "waiting"
+  | "done"
+  | "lost"
+  | "failed";
 
 type SessionFlowCard = Pick<
   Card,

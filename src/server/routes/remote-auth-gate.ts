@@ -97,7 +97,8 @@ function originMatchesHost(req: Request): boolean {
 }
 
 type CodeAttemptResult =
-  { ok: true } | { ok: false; reason: "csrf" | "rate-limited" | "invalid" };
+  | { ok: true }
+  | { ok: false; reason: "csrf" | "rate-limited" | "invalid" };
 
 /**
  * Shared submission path for both the verify POST and the `?code=` GET consume: CSRF-checked,

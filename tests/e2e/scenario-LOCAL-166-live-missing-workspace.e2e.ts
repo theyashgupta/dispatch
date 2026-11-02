@@ -105,8 +105,8 @@ async function startCard(
 /**
  * Move the workspace folder away under a live session, drop claude to the shell prompt and turn the supervisor on.
  *
- * @remarks The folder is renamed, not deleted, so the stored path is missing without a delete. `send-keys` is
- * not in the read-only helper of the sandbox, so the key goes through `tmux` on the sandbox label directly.
+ * @remarks The folder is renamed, not deleted, so the stored path is missing without a delete. The test sends
+ * SIGINT to the foreground process group of the pane, as Ctrl-C does, because the e2e files type no key into a pane.
  */
 async function runScenario(sb: Sandbox): Promise<void> {
   const { workspace, session } = await startCard(sb);
@@ -120,11 +120,16 @@ async function runScenario(sb: Sandbox): Promise<void> {
   note("workspace folder moved away");
 
   const before = launches();
-  spawnSync(
-    "tmux",
-    ["-L", sb.tmuxLabel, "send-keys", "-t", `=${session}:`, "C-c"],
-    { stdio: "ignore" },
+  const panePid = sb
+    .tmux(["display-message", "-p", "-t", `=${session}:`, "#{pane_pid}"])
+    .trim();
+  const foreground = Number(
+    spawnSync("ps", ["-o", "tpgid=", "-p", panePid], {
+      encoding: "utf8",
+    }).stdout.trim(),
   );
+  assert.ok(foreground > 0, `a foreground group on the pane of ${panePid}`);
+  process.kill(-foreground, "SIGINT");
   const on = await sb.api("PUT", `/api/boards/${BOARD}/policy`, policy("on"));
   assert.equal(on.status, 200);
 

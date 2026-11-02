@@ -17,7 +17,7 @@ export function Splash() {
       timers.push(setTimeout(() => setPhase("gone"), 400));
     } else {
       timers.push(setTimeout(() => setPhase("out"), 1000));
-      timers.push(setTimeout(() => setPhase("gone"), 1300));
+      timers.push(setTimeout(() => setPhase("gone"), 1200));
     }
     return () => {
       for (const timer of timers) clearTimeout(timer);

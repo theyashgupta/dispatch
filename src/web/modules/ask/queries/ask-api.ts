@@ -3,7 +3,8 @@ import { http } from "@/lib/http";
 import type { AskErrorKind } from "@/modules/ask/domain/ask-conversation";
 
 export type AskResult =
-  { ok: true; answer: string } | { ok: false; error: AskErrorKind };
+  | { ok: true; answer: string }
+  | { ok: false; error: AskErrorKind };
 
 /**
  * Ask Claude a question about the board; an abort rejects with the fetch AbortError.

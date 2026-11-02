@@ -29,7 +29,8 @@ import { readCurrent } from "../infra/vault.js";
 const CALENDAR_ICAL_KEY = "CALENDAR_ICAL_URL";
 
 type CalendarResult<T> =
-  ({ ok: true } & T) | { ok: false; error: CalendarErrorCode };
+  | ({ ok: true } & T)
+  | { ok: false; error: CalendarErrorCode };
 
 /**
  * Read the iCal URL from the Vault, or null when the key is missing or empty.

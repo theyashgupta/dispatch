@@ -1,7 +1,11 @@
 import type { SupervisorState } from "./types.js";
 
 export type SessionTone =
-  "neutral" | "muted" | "attention" | "success" | "error";
+  | "neutral"
+  | "muted"
+  | "attention"
+  | "success"
+  | "error";
 
 export const SESSION_STATES: Readonly<
   Record<SupervisorState, { label: string; tone: SessionTone }>

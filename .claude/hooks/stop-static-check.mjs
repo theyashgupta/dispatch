@@ -95,10 +95,10 @@ function failingStep(lines) {
 }
 
 /**
- * Collect the error lines of prettier, eslint, tsc and depcruise, up to the cap.
+ * Collect the error lines of oxfmt, oxlint, eslint, tsc and depcruise, up to the cap.
  *
  * @remarks
- * An eslint error line holds only the position and the rule, so the file header above it is joined to it.
+ * An eslint error line holds only the position and the rule, so the file header above it is joined to it. An oxlint error line is complete, so it is kept as printed.
  */
 function errorLines(lines) {
   const found = [];
@@ -108,7 +108,9 @@ function errorLines(lines) {
     if (/^\s+\d+:\d+\s+error\s/.test(line)) {
       found.push(`${eslintFile} ${line.trim()}`);
     } else if (
-      /^\[warn\] /.test(line) ||
+      /^\S+:\d+:\d+: error(?: \S+\(\S+\))?: /.test(line) ||
+      /^\S.* \(\d+ms\)$/.test(line) ||
+      /^Format issues found in above \d+ files?\./.test(line) ||
       /error TS\d+:/.test(line) ||
       /^\s*error\s+\S+:/.test(line) ||
       /dependency violations \([1-9]\d* errors?/.test(line) ||

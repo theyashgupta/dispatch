@@ -148,5 +148,5 @@ test("sendPushForCard caps a long reason at 500 characters", async () => {
     { id: "c", identifier: "L-1" } as Card,
     "x".repeat(900),
   );
-  assert.equal((sent[0]?.payload.body as string).length, 500);
+  assert.equal((sent[0].payload.body as string).length, 500);
 });

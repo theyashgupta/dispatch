@@ -61,6 +61,7 @@ A module is one folder `src/web/modules/<feature>/`. A module has six layer fold
 - **Shadcn primitives.** Files in `src/web/components/ui/`.
   - Use it when: a visual primitive or an app-wide hook is necessary. A primitive file comes from `npx shadcn@latest add`. An app-wide hook, such as a media query, shortcut or local storage hook, goes in `components/ui/hooks/`.
   - Never: add a primitive by hand. Change a primitive only with a `cva` variant in its own file, or with an edit that "Primitive conventions" names.
+- **Side panel shell.** `components/ui/side-panel.tsx` is the one hand-composed shell in `components/ui/`. It composes the Button primitive and draws every side panel (LOCAL-125).
 - **Shared components.** Files in `src/web/components/`, outside `ui/`.
   - Use it when: two or more modules show the same composition, or a route places views of two modules in one layout. The layout gets the views as children. The folders `icons/`, `markdown/` and `splash/` and the file `ThemeProvider.tsx` also live here.
   - Never: import a file of a module or TanStack Query in a shared component.
@@ -170,6 +171,7 @@ The only-shadcn rule does not apply to these families. All other visual code com
 3. The fenced terminal page: `terminal.html` and `terminal-main.ts` (invariant NEW-20).
 4. react-markdown output in `src/web/components/markdown/`, styled with Tailwind typography classes. Typography is not a shadcn registry item.
 5. The milestone track in `modules/dashboard/components/GroupProgressBar.tsx`: an ordered list of unit nodes. Each node has a circle with a glyph or number for its state and a connecting segment, and the current node has the "You are here" badge. The track is vertical below `lg` and horizontal at `lg`. It uses plain list elements with token classes, and no shadcn primitive draws it (LOCAL-84 U2-07, LOCAL-106).
+6. The side panel shell `components/ui/side-panel.tsx` with its width hook: a hand-composed shell built on the Button primitive that draws the ticket detail panel and the command centre terminal pane (LOCAL-125).
 
 ## Providers
 
@@ -188,7 +190,7 @@ These invariants stay unchanged:
 - NEW-24: the palette hex values are only in `tokens.css`. Each accent map has one source.
 - PANEL-03: the ttyd iframe is one always-rendered element. Never give it a `key`.
 
-These invariant checks retired on 2026-10-07 (LOCAL-77). A lint rule in `eslint.config.ts` replaces each one:
+These invariant checks retired on 2026-10-07 (LOCAL-77). A lint rule in `oxlint.config.ts` replaces each one:
 
 - NEW-15 (accent box-shadow focus): `components/ui/focus-outline.test.ts`, the style ban, the shadow class ban in `designLiteralBan` and the focus shadow value in `retiredLiteralBan`.
 - NEW-16 (raw float shadow): the shadow class ban in `designLiteralBan` and the float shadow value in `retiredLiteralBan`.
@@ -225,7 +227,7 @@ The design contract values stay: the density scale, source colors, contrast floo
 4. `.claude/settings.json` holds only hook entries. Put personal settings, for example `env` values, in `.claude/settings.local.json`.
 5. `.gitignore` also ignores a `.claude/` folder below the repo root, with the line `*/**/.claude/`.
 6. The `PreToolUse` hook `.claude/hooks/pretooluse-rules.mjs` denies an edit that breaks one of six rules: inline style, hex colour, Radix import, new `.tsx` file location, server data outside a query file, module folder shape. The deny reason names the fix and the section of this standard. `scripts/check-hooks.mjs` checks these decisions in `npm run check`.
-7. The `PostToolUse` hook `.claude/hooks/format-edited-file.mjs` runs prettier on each edited file. It skips config files and `.claude/`.
+7. The `PostToolUse` hook `.claude/hooks/format-edited-file.mjs` runs oxfmt on each edited file. It skips config files and `.claude/`.
 8. The `Stop` hook `.claude/hooks/stop-static-check.mjs` runs `format:check`, `lint`, `typecheck` and `depcruise` when the working tree has changes. If a step fails, the session cannot stop. Set `DISPATCH_SKIP_STOP_CHECK=1` in `.claude/settings.local.json` to turn off this check.
 
 ## Supersede records index

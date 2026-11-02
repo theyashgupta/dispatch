@@ -1,7 +1,11 @@
 import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 import { isolateEnv } from "../../test-support/fixtures.js";
-import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { DEFAULT_BOARD_KEY, parseBoardKey } from "../../../shared/board-key.js";
+import type { BoardKey } from "../../../shared/types.js";
 
 isolateEnv();
 const { store } = await import("../../store/board.store.js");
@@ -367,4 +371,159 @@ void test("main-session output after a text NEEDS_INPUT marker keeps the card wa
     tool_name: "Bash",
   });
   assert.equal(columnOf(cardId), "needs_input");
+});
+
+const LOOP_BOARD = parseBoardKey("HKL") as BoardKey;
+const SLUG = "hkl-174";
+const DONE_TEXT = `All phases are green.\nDISPATCH_STATUS: DONE - ${SLUG} built`;
+const PROMISE_DONE_TEXT = `All phases are green.\n<promise>RALPH COMPLETE ${SLUG}</promise>\nDISPATCH_STATUS: DONE - ${SLUG} built`;
+
+async function loopBoard(supervisor: "on" | "off"): Promise<void> {
+  await store.load();
+  if (!store.getBoard(LOOP_BOARD)) {
+    await store.createBoard({
+      key: LOOP_BOARD,
+      name: "Hook loop",
+      workspaceRoot: "/hkl/sessions",
+      repositories: [],
+      linearTeamKeys: [],
+    });
+  }
+  await store.setBoardPolicy(LOOP_BOARD, {
+    ...store.getBoard(LOOP_BOARD)!.policy,
+    supervisor,
+  });
+}
+
+/** Seed a started card whose session root holds an open engine file and, with `phases`, a two phase PRD with that many GREEN phases. */
+async function loopCardOn(
+  title: string,
+  opts: { supervisor?: "on" | "off"; phases: number | "none" },
+) {
+  await loopBoard(opts.supervisor ?? "on");
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `${title}-`));
+  const engine = path.join(root, ".claude", "ralph-loop.local.md");
+  const prd = path.join(root, "plan", ".planning", "prds", "demo.md");
+  fs.mkdirSync(path.dirname(engine), { recursive: true });
+  const head = `---\nactive: true\niteration: 1\nsession_id: sess-174\ncompletion_promise: "RALPH COMPLETE ${SLUG}"\n---\n`;
+  if (opts.phases === "none") {
+    fs.writeFileSync(engine, `${head}Keep going until the work is done.\n`);
+  } else {
+    const feature = path.join(root, "plan", ".planning", SLUG);
+    fs.mkdirSync(path.dirname(prd), { recursive: true });
+    fs.mkdirSync(feature, { recursive: true });
+    fs.writeFileSync(
+      engine,
+      `${head}Execute the PRD at ${prd} per the ralph-loop skill.\n`,
+    );
+    fs.writeFileSync(
+      prd,
+      "# HKL 174\n\n### Phase 1: One\n\n### Phase 2: Two\n",
+    );
+    fs.writeFileSync(
+      path.join(feature, "state.md"),
+      [
+        "phase 1 One GREEN 2026-10-16T04:00:00Z gate=pass",
+        "phase 2 Two GREEN 2026-10-16T05:00:00Z gate=pass",
+      ]
+        .slice(0, opts.phases)
+        .join("\n") + "\n",
+    );
+  }
+  const created = await store.createLocalCard(LOOP_BOARD, title, "");
+  await store.setOrchestratorFields(created.id, {
+    launch: { direction: "ship it" },
+  });
+  await store.completeStart(created.id, undefined, {
+    workspacePath: root,
+    tmuxSession: `dsp-${title}`,
+    branch: title,
+  });
+  const card = store.getCard(created.id)!;
+  return { cardId: card.id, sessionId: card.activeSessionId!, engine };
+}
+
+const closeRows = (cardId: string) =>
+  store
+    .listOrchestrationEvents(LOOP_BOARD, 0, 500)
+    .filter((e) => e.cardId === cardId && e.kind === "supervisor_action");
+
+const stop = (cardId: string, sessionId: string, message: string) =>
+  applyHookEvent(cardId, sessionId, {
+    hook_event_name: "Stop",
+    last_assistant_message: message,
+  });
+
+void test("a Stop DONE marker closes the engine file of a complete loop with done_marker", async () => {
+  const { cardId, sessionId, engine } = await loopCardOn("hook-close", {
+    phases: 2,
+  });
+  await stop(cardId, sessionId, DONE_TEXT);
+  assert.equal(fs.existsSync(engine), false);
+  assert.match(
+    fs.readFileSync(`${engine}.done`, "utf8"),
+    /^closed_reason: done_marker$/m,
+  );
+  assert.equal(closeRows(cardId).length, 1);
+  assert.equal(closeRows(cardId)[0].data.action, "close_loop");
+  assert.equal(closeRows(cardId)[0].data.result, "closed");
+  assert.equal(store.getCard(cardId)?.loopProgress?.engine?.closed, true);
+});
+
+void test("a Stop DONE marker with the promise line closes a single PRD loop that has no phase model", async () => {
+  const { cardId, sessionId, engine } = await loopCardOn("hook-no-phases", {
+    phases: "none",
+  });
+  await stop(cardId, sessionId, PROMISE_DONE_TEXT);
+  assert.equal(fs.existsSync(`${engine}.done`), true);
+  assert.equal(closeRows(cardId).length, 1);
+});
+
+void test("a bare Stop DONE marker closes nothing on a loop with no phase model", async () => {
+  const { cardId, sessionId, engine } = await loopCardOn(
+    "hook-no-phases-bare",
+    {
+      phases: "none",
+    },
+  );
+  await stop(cardId, sessionId, DONE_TEXT);
+  assert.equal(fs.existsSync(engine), true);
+  assert.equal(closeRows(cardId).length, 0);
+});
+
+void test("a Stop DONE marker closes nothing while phases are left", async () => {
+  const { cardId, sessionId, engine } = await loopCardOn("hook-running", {
+    phases: 1,
+  });
+  await stop(cardId, sessionId, DONE_TEXT);
+  assert.equal(fs.existsSync(engine), true);
+  assert.equal(closeRows(cardId).length, 0);
+});
+
+void test("a Stop DONE marker from a session that is not the active one closes nothing", async () => {
+  const { cardId, sessionId, engine } = await loopCardOn("hook-other", {
+    phases: 2,
+  });
+  await stop(cardId, `${sessionId}-other`, DONE_TEXT);
+  assert.equal(fs.existsSync(engine), true);
+  assert.equal(closeRows(cardId).length, 0);
+});
+
+void test("a Stop DONE marker on a board with the supervisor off closes nothing", async () => {
+  const { cardId, sessionId, engine } = await loopCardOn("hook-off", {
+    phases: 2,
+    supervisor: "off",
+  });
+  await stop(cardId, sessionId, DONE_TEXT);
+  assert.equal(fs.existsSync(engine), true);
+  assert.equal(closeRows(cardId).length, 0);
+});
+
+void test("a Stop NEEDS_INPUT marker closes nothing", async () => {
+  const { cardId, sessionId, engine } = await loopCardOn("hook-needs", {
+    phases: 2,
+  });
+  await stop(cardId, sessionId, "DISPATCH_STATUS: NEEDS_INPUT - pick a name");
+  assert.equal(fs.existsSync(engine), true);
+  assert.equal(closeRows(cardId).length, 0);
 });

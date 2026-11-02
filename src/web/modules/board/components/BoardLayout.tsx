@@ -1,7 +1,9 @@
 import { cn } from "@/lib/utils";
 
 interface BoardLayoutProps {
+  id: string;
   search?: React.ReactNode;
+  actions?: React.ReactNode;
   pills: React.ReactNode;
   rowRef: React.Ref<HTMLDivElement>;
   isCarousel: boolean;
@@ -11,7 +13,9 @@ interface BoardLayoutProps {
 }
 
 export function BoardLayout({
+  id,
   search,
+  actions,
   pills,
   rowRef,
   isCarousel,
@@ -20,10 +24,15 @@ export function BoardLayout({
   children,
 }: BoardLayoutProps) {
   return (
-    <div id="board-page" className="flex min-h-0 flex-auto flex-col">
+    <div id={id} className="flex min-h-0 flex-auto flex-col">
       {search != null && (
         <div className="flex flex-none items-center border-b border-border bg-background px-(--space-lg) py-(--space-sm)">
           {search}
+          {actions != null && (
+            <div className="ml-auto flex flex-none items-center pl-(--space-sm)">
+              {actions}
+            </div>
+          )}
         </div>
       )}
       {pills}

@@ -1,9 +1,4 @@
-import {
-  useEffect,
-  useMemo,
-  useSyncExternalStore,
-  type KeyboardEvent,
-} from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import { NARROW_QUERY } from "../../../../shared/media-queries.js";
 import { pinFromBoard } from "../../../../shared/pinned-card.js";
 import type { Card, OrchestrationSummary } from "../../../../shared/types.js";
@@ -20,7 +15,6 @@ import { centreGraph } from "@/modules/orchestrator/domain/centre-graph";
 import {
   CENTRE_FOCUS_ID,
   focusOrder,
-  isPlainEnter,
 } from "@/modules/orchestrator/domain/centre-focus";
 import {
   regionErrorText,
@@ -32,7 +26,6 @@ import { useCentrePane } from "@/modules/orchestrator/hooks/use-centre-pane";
 import { useEdgePaths } from "@/modules/orchestrator/hooks/use-edge-paths";
 import { useTileFocus } from "@/modules/orchestrator/hooks/use-tile-focus";
 import { CentreControlsContainer } from "./CentreControlsContainer";
-import { CentrePaneContainer } from "./CentrePaneContainer";
 import { useBranchActions } from "./use-branch-actions";
 import { useCentreControl } from "./use-centre-control";
 import { useCentreSelection } from "./use-centre-selection";
@@ -78,22 +71,11 @@ export function CentreContainer() {
   );
   const order = useMemo(() => focusOrder(graph), [graph]);
   const { register, onKeyDown } = useTileFocus(order);
-  const { page, setPage, requestCommentFocus, reset } = useCentrePane();
+  const { reset } = useCentrePane();
 
   useEffect(() => reset, [reset]);
 
-  const nodeKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (
-      isPlainEnter(event) &&
-      record !== null &&
-      event.target === event.currentTarget
-    ) {
-      event.preventDefault();
-      requestCommentFocus();
-      return;
-    }
-    onKeyDown(CENTRE_FOCUS_ID)(event);
-  };
+  const nodeKeyDown = onKeyDown(CENTRE_FOCUS_ID);
   const { container, paths } = useEdgePaths(
     wide ? graph.branches.map((b) => `${b.id}:${b.band}`) : [],
   );
@@ -189,9 +171,6 @@ export function CentreContainer() {
       branches={
         ready ? <BranchList bands={graph.bands} tile={tile} /> : notReady
       }
-      page={page}
-      onPageChange={setPage}
-      pane={<CentrePaneContainer inTab />}
     />
   );
 }

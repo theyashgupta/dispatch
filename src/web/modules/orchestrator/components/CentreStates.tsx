@@ -9,19 +9,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { CentreAlertBar } from "@/modules/orchestrator/components/CentreAlertBar";
 import {
   LOADING_TEXT,
-  NO_MESSAGES_TEXT,
   NO_ORCHESTRATOR_TEXT,
 } from "@/modules/orchestrator/domain/centre-page-state";
 
 const PLACEHOLDERS = [0, 1, 2];
-
-export function CentreNoMessages() {
-  return (
-    <p className="m-0 p-(--space-lg) text-sm text-muted-foreground">
-      {NO_MESSAGES_TEXT}
-    </p>
-  );
-}
 
 export function CentreLoading() {
   return (

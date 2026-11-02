@@ -159,7 +159,7 @@ The rules are in `docs/standards/backend-design.md`, in the sections "Layer defi
 
 ## Checks
 
-Format the new files with `env -u NODE_ENV npx prettier --write <each new file>`. A long name can make a line too long for the template layout.
+Format the new files with `env -u NODE_ENV npx oxfmt <each new file>`. A long name can make a line too long for the template layout.
 
 Then run these commands. Each command must pass.
 

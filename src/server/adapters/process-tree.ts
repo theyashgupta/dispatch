@@ -111,10 +111,45 @@ const DEFAULT_DEPS: SignalTreeDeps = {
  * A stop reads the table a second time and signals a process that forked during the first pass.
  * A pid whose signal fails (gone, or not ours) is skipped.
  */
-export async function signalTree(
+export function signalTree(
   roots: number[],
   signal: TreeSignal,
   deps: SignalTreeDeps = DEFAULT_DEPS,
+): Promise<number[] | null> {
+  return signalFrom(roots, 0, signal, deps);
+}
+
+/**
+ * Stop every process two levels or more below the roots: the processes under the pane job.
+ *
+ * @remarks
+ * The pane shell and its job (the pty shim, or claude in an unwrapped pane) keep running,
+ * so the shell never sees a stopped job, never takes the terminal and never leaves the pane tty
+ * cooked. Under the shim this stops claude and its tool processes.
+ */
+export function stopBelowJob(
+  roots: number[],
+  deps: SignalTreeDeps = DEFAULT_DEPS,
+): Promise<number[] | null> {
+  return signalFrom(roots, 2, "SIGSTOP", deps);
+}
+
+function levelAt(
+  childrenOf: Map<number, number[]>,
+  roots: number[],
+  depth: number,
+): number[] {
+  let level = roots;
+  for (let i = 0; i < depth; i++)
+    level = level.flatMap((pid) => childrenOf.get(pid) ?? []);
+  return level;
+}
+
+async function signalFrom(
+  roots: number[],
+  depth: number,
+  signal: TreeSignal,
+  deps: SignalTreeDeps,
 ): Promise<number[] | null> {
   const first = await deps.readTable();
   if (!first) return null;
@@ -132,10 +167,10 @@ export async function signalTree(
       }
     }
   };
-  send(treeOf(first, roots));
+  send(treeOf(first, levelAt(first, roots, depth)));
   if (signal === "SIGSTOP") {
     const second = await deps.readTable();
-    if (second) send(treeOf(second, roots));
+    if (second) send(treeOf(second, levelAt(second, roots, depth)));
   }
   return signalled;
 }

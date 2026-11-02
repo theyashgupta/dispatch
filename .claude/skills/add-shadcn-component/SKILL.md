@@ -21,7 +21,7 @@ The rules are in `docs/standards/frontend-architecture.md`, in the sections "The
 3. Format the new files. The CLI writes files without semicolons, so `format:check` fails on them before this step.
 
    ```
-   env -u NODE_ENV npx prettier --write <each new file>
+   env -u NODE_ENV npx oxfmt <each new file>
    ```
 
 4. Do not write a new primitive by hand. Do not change a generated file, except with the edits in steps 5 to 17 or with a `cva` variant.

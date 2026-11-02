@@ -5,10 +5,7 @@ import type {
   OrchestrationEvent,
   Session,
 } from "../../../shared/types.js";
-import {
-  MEMORY_RESUME_LINE,
-  isDispatchLine,
-} from "../../../shared/dispatch-lines.js";
+import { RESUME_PROBE_LINE } from "../../../shared/dispatch-lines.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { fakeBoardRepository } from "../../test-support/fake-board-repository.js";
@@ -162,7 +159,7 @@ afterEach(() => {
 void test("a probe that is confirmed records one confirmed event and changes nothing", async () => {
   loopCard();
   await probeResume("card-1");
-  assert.deepEqual(sentLines, [MEMORY_RESUME_LINE]);
+  assert.deepEqual(sentLines, [RESUME_PROBE_LINE]);
   assert.deepEqual(probeEvents(), [
     { action: "resume_probe", result: "confirmed" },
   ]);
@@ -485,8 +482,4 @@ void test("a second probe of the same card during the busy wait does nothing", a
   release();
   await first;
   assert.equal(sentLines.length, 1);
-});
-
-void test("the resume line counts as a Dispatch line", () => {
-  assert.equal(isDispatchLine(MEMORY_RESUME_LINE), true);
 });

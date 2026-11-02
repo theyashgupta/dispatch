@@ -445,7 +445,8 @@ export interface BoardRepository {
   recordLinearPush(
     id: string,
     push: { fromCol: Column; toCol: Column } & (
-      { ok: true; state: WorkflowState } | { ok: false; copy: string }
+      | { ok: true; state: WorkflowState }
+      | { ok: false; copy: string }
     ),
   ): Promise<void>;
   recordSyncError(id: string, message: string): Promise<void>;

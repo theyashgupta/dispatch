@@ -53,14 +53,14 @@ It runs, in order:
 
 | Step        | Command                                 | What it enforces                                                 |
 | ----------- | --------------------------------------- | ---------------------------------------------------------------- |
-| Format      | `prettier --check .`                    | Consistent formatting (`npm run format` to fix)                  |
-| Lint        | `eslint .` (no type information)        | Style and module-boundary rules (`npm run lint:fix`)             |
+| Format      | `oxfmt --check`                         | Consistent formatting (`npm run format` to fix)                  |
+| Lint        | `oxlint`, then `eslint src`             | Style and module-boundary rules (`npm run lint:fix`)             |
 | Types       | `tsgo --noEmit` (root and `src/web`)    | Strict TypeScript, no `any` escapes                              |
 | Dead code   | `knip`                                  | No unused exports, deps, or files                                |
 | Replay gate | `tsx scripts/replay-watcher.ts --check` | Watcher decisions still match the recorded golden, byte for byte |
 | Tests       | `npm test`                              | Unit suites under `src/**/*.test.ts` on `node:test` via `tsx`    |
 
-CI runs the same command on every PR. CI then also runs `npm run lint:typed` (the same ESLint rules plus
+CI runs the same command on every PR. CI then also runs `npm run lint:typed` (`oxlint --type-aware`, the oxlint rules plus
 the type-aware rules) and `npm run typecheck:tsc` (the `tsc` typecheck). These two steps build a full
 TypeScript program, so `npm run check` does not run them. Run `npm run lint:typed` before you push if
 you changed async code or `any` types.

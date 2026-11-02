@@ -144,7 +144,7 @@ export function armSteps(spec: LoopSpec): Step[] {
   ];
 }
 
-/** The steps that mark the unit built, then print the completion promise the supervisor looks for. */
+/** The steps that mark the unit built, then print the completion promise and the DONE line the supervisor closes on. */
 export function finishSteps(spec: LoopSpec): Step[] {
   return [
     writeFile("ROADMAP.md", roadmapText(spec, "built, awaiting /ship")),
@@ -153,5 +153,6 @@ export function finishSteps(spec: LoopSpec): Step[] {
       progressText(spec, "built, awaiting /ship (committed 1234567)"),
     ),
     print(`<promise>ROADMAP COMPLETE ${spec.slug}</promise>`),
+    print("DISPATCH_STATUS: DONE - built"),
   ];
 }

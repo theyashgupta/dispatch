@@ -90,7 +90,7 @@ const BACKGROUND_NAMES = [...LADDER_ORDER.dark, "--surface-inset"];
  * re-absorbed into a residual entry.
  */
 const RESIDUALS = [];
-const COLUMN_INK_NAMES = [
+const STATE_INK_NAMES = [
   "col-todo",
   "col-in-progress",
   "col-needs-input",
@@ -98,6 +98,11 @@ const COLUMN_INK_NAMES = [
   "col-in-review",
   "col-parked",
   "col-done",
+  "status-running",
+  "status-idle",
+  "status-waiting",
+  "status-stopped",
+  "status-errored",
 ];
 const DATA_INK_SHARE = 0.35;
 const SOFT_TINTS = [
@@ -468,7 +473,7 @@ function buildDerivedTextPairs(tokens, violations) {
     );
   }
   const text = need("text");
-  for (const name of COLUMN_INK_NAMES) {
+  for (const name of STATE_INK_NAMES) {
     const col = need(name);
     if (col == null || text == null) continue;
     for (const tier of BACKGROUND_NAMES) {

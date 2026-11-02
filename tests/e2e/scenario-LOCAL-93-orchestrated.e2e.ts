@@ -500,7 +500,7 @@ function assertScenarioCoverage(events: OrchestrationEventRow[]): void {
 
 void test("scenario-LOCAL-93-orchestrated: the harness and fixtures name no tmux verb that sends keys", () => {
   const here = path.dirname(import.meta.filename);
-  const fixtures = path.join(here, "fixtures", "local-93-orchestrated");
+  const fixtures = path.join(here, "fixtures/scenario-1");
   const files = [
     path.join(here, "harness", "sandbox.ts"),
     ...fs

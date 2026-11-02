@@ -633,11 +633,21 @@ export async function sessionEnvHas(
   name: string,
   key: string,
 ): Promise<boolean> {
+  return (await sessionEnvValue(name, key)) !== undefined;
+}
+
+/** The value of `key` in session `name`'s tmux environment, or undefined when it is absent or unreadable. */
+export async function sessionEnvValue(
+  name: string,
+  key: string,
+): Promise<string | undefined> {
   try {
     const { stdout } = await tmux(["show-environment", "-t", name, key]);
-    return stdout.startsWith(`${key}=`);
+    return stdout.startsWith(`${key}=`)
+      ? stdout.slice(key.length + 1).trimEnd()
+      : undefined;
   } catch {
-    return false;
+    return undefined;
   }
 }
 

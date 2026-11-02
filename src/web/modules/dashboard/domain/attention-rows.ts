@@ -13,7 +13,8 @@ import { spentOfBudget } from "../../../../shared/cost-text.js";
 import { accountFor, clock } from "./usage-meters.js";
 
 export type AttentionBadge =
-  { kind: "state"; state: SupervisorState } | { kind: "label"; label: string };
+  | { kind: "state"; state: SupervisorState }
+  | { kind: "label"; label: string };
 
 export type AttentionAction = "resume" | "retry_resume";
 

@@ -53,7 +53,7 @@ export function StatusPillSwitcher({
             >
               <span
                 className={cn(
-                  "inline-flex h-8 items-center gap-(--space-xs) rounded-md border bg-(--surface-column) px-(--space-sm) text-sm font-semibold tracking-[0.04em] whitespace-nowrap",
+                  "inline-flex h-8 items-center gap-(--space-xs) rounded-md border bg-(--surface-column) px-(--space-sm) text-sm font-semibold tracking-(--tracking-label) whitespace-nowrap",
                   isActive
                     ? "border-(--accent) text-(--accent-text)"
                     : "border-border text-muted-foreground",

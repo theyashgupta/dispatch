@@ -1,6 +1,6 @@
 # Comment Standard
 
-The comment-hygiene standard for `src/` TypeScript and TSX code in Dispatch. This document is the source of truth; the lint configuration (`comments-jsdoc-only` custom rule + stock ESLint rules + `eslint-plugin-jsdoc`) is written to enforce it verbatim. The comment rules (`comments-jsdoc-only`, `no-inline-comments`, `no-warning-comments`) are enforced at `error` severity and gate `npm run check`; only the `jsdoc/*` shape rules remain advisory (`warn`) because "non-obvious" is reviewer judgment.
+The comment-hygiene standard for `src/` TypeScript and TSX code in Dispatch. This document is the source of truth; the lint configuration (`comments-jsdoc-only` custom rule and `eslint-plugin-jsdoc` in the ESLint rest pass, plus the oxlint rules `no-inline-comments` and `no-warning-comments`) is written to enforce it verbatim. The comment rules (`comments-jsdoc-only`, `no-inline-comments`, `no-warning-comments`) are enforced at `error` severity and gate `npm run check`; only the `jsdoc/*` shape rules remain advisory (`warn`) because "non-obvious" is reviewer judgment.
 
 ## Principle
 
@@ -29,7 +29,7 @@ The code in this repo is comment-heavy with mostly genuine why/invariant rationa
    _Enforcement: custom `comments-jsdoc-only` rule — flag any comment whose range falls inside a function, arrow, or JSX body._
 
 4. **Zero inline (same-line-as-code) comments anywhere, including JSX `{/* */}`.**
-   _Enforcement: stock `no-inline-comments`. Its built-in JSX exception permits an own-line `{/* */}` inside JSX; the custom rule from rule 3 closes that gap so component bodies stay comment-free._
+   _Enforcement: oxlint `no-inline-comments`. Its built-in JSX exception permits an own-line `{/* */}` inside JSX; the custom rule from rule 3 closes that gap so component bodies stay comment-free._
 
 5. **No file-header banner comments.** A file's purpose is expressed by its path plus the JSDoc on its leading exported declaration, not a top-of-file essay. Existing header essays migrate to `docs/ARCHITECTURE.md` (module role) or the first exported symbol's JSDoc.
    _Enforcement: custom `comments-jsdoc-only` rule — flag `Line`/`Block` comments before the first import or declaration._
@@ -49,7 +49,7 @@ The code in this repo is comment-heavy with mostly genuine why/invariant rationa
    _Enforcement: `eslint-plugin-jsdoc` — `jsdoc/require-jsdoc` with `publicOnly` so only exported declarations are required to carry JSDoc; `jsdoc/require-description`; `jsdoc/check-param-names`; `jsdoc/no-blank-block-descriptions`; `jsdoc/no-bad-blocks`; `jsdoc/require-param` and `jsdoc/require-returns` off to avoid forcing redundant tags. Lint cannot decide "non-obvious" — that judgment stays with review._
 
 7. **TODOs do not live in code.** No `// TODO`, `// FIXME`, `// XXX`, or `// HACK` in committed source. Actionable work becomes a Linear ticket or a line in the "Known residuals" section of `docs/ARCHITECTURE.md`.
-   _Enforcement: stock `no-warning-comments` on `todo|fixme|xxx|hack` with `location: "anywhere"` at `error`, so markers inside JSDoc blocks are caught too._
+   _Enforcement: oxlint `no-warning-comments` on `todo|fixme|xxx|hack` with `location: "anywhere"` at `error`, so markers inside JSDoc blocks are caught too._
 
 8. **Style of the rare allowed JSDoc: sentence case, terminal period, present tense, imperative summary.**
    _Enforcement: `jsdoc/check-alignment` for block shape; wording style (sentence case, terminal period, tense) is review judgment. Stock `capitalized-comments` and `multiline-comment-style` are deliberately not wired — they would push line comments toward starred blocks instead of toward JSDoc-or-nothing._
@@ -65,18 +65,18 @@ The code in this repo is comment-heavy with mostly genuine why/invariant rationa
 
 ## Enforcement summary
 
-Stock ESLint cannot express "only JSDoc, nothing else" — comments are not AST nodes selectable by `no-restricted-syntax`. Rules 2, 3, and 5 therefore need a small custom flat-config rule (`Program:exit` + `sourceCode.getAllComments()`, ~20–30 lines). This is build configuration, not application code, so it lives alongside `eslint.config.ts` rather than in `src/`. Rules 4, 6, and 7 are covered by stock `no-inline-comments`, `no-warning-comments`, and `eslint-plugin-jsdoc`; rule 8's mechanical part is `jsdoc/check-alignment`, its wording is review. The comment-form rules (2–5, 7) are enforced at `error` and gate the build; the `jsdoc/*` shape rules stay `warn` (reviewer judgment).
+Stock ESLint cannot express "only JSDoc, nothing else": comments are not AST nodes selectable by `no-restricted-syntax`. Rules 2, 3, and 5 therefore need a small custom flat-config rule (`Program:exit` + `sourceCode.getAllComments()`, ~20–30 lines). This is build configuration, not application code, so it lives alongside `eslint.config.ts` rather than in `src/`. Rules 4, 6, and 7 are covered by oxlint `no-inline-comments` and `no-warning-comments`, and by `eslint-plugin-jsdoc` in the ESLint rest pass; rule 8's mechanical part is `jsdoc/check-alignment`, its wording is review. The comment-form rules (2–5, 7) are enforced at `error` and gate the build; the `jsdoc/*` shape rules stay `warn` (reviewer judgment).
 
-| Rule                                | Mechanism                                                                                                                                             |
-| ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1 — WHY not WHAT                    | Review (rules 2–5 make most violations impossible)                                                                                                    |
-| 2 — JSDoc-only form                 | Custom `comments-jsdoc-only` rule (attachment-checked)                                                                                                |
-| 3 — no body comments                | Custom `comments-jsdoc-only` rule                                                                                                                     |
-| 4 — no inline comments              | Stock `no-inline-comments` + custom rule (closes JSX gap)                                                                                             |
-| 5 — no header banners               | Custom `comments-jsdoc-only` rule                                                                                                                     |
-| 6 — minimal JSDoc, non-obvious only | `eslint-plugin-jsdoc` (`require-jsdoc` with `publicOnly`, `require-description`, `check-param-names`, `no-blank-block-descriptions`, `no-bad-blocks`) |
-| 7 — no TODOs                        | Stock `no-warning-comments` (warn on `todo`/`fixme`/`xxx`/`hack`, `location: "anywhere"` — including inside JSDoc)                                    |
-| 8 — JSDoc style                     | `jsdoc/check-alignment` + review (sentence case, terminal period, tense)                                                                              |
-| 9 — narrow exception                | Custom-rule / `no-inline-comments` `ignorePattern` (URL/issue token) + justified `eslint-disable-next-line` + review                                  |
+| Rule                               | Mechanism                                                                                                                                             |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1: WHY not WHAT                    | Review (rules 2–5 make most violations impossible)                                                                                                    |
+| 2: JSDoc-only form                 | Custom `comments-jsdoc-only` rule (attachment-checked)                                                                                                |
+| 3: no body comments                | Custom `comments-jsdoc-only` rule                                                                                                                     |
+| 4: no inline comments              | oxlint `no-inline-comments` + custom rule (closes JSX gap)                                                                                            |
+| 5: no header banners               | Custom `comments-jsdoc-only` rule                                                                                                                     |
+| 6: minimal JSDoc, non-obvious only | `eslint-plugin-jsdoc` (`require-jsdoc` with `publicOnly`, `require-description`, `check-param-names`, `no-blank-block-descriptions`, `no-bad-blocks`) |
+| 7: no TODOs                        | oxlint `no-warning-comments` (warn on `todo`/`fixme`/`xxx`/`hack`, `location: "anywhere"`, including inside JSDoc)                                    |
+| 8: JSDoc style                     | `jsdoc/check-alignment` + review (sentence case, terminal period, tense)                                                                              |
+| 9: narrow exception                | Custom-rule / `no-inline-comments` `ignorePattern` (URL/issue token) + justified `eslint-disable-next-line` + review                                  |
 
 This standard applies to `src/` code only. Markdown documents (including this one) are exempt.

@@ -8,27 +8,19 @@ interface ToneBadgeProps {
   glyph: LucideIcon;
 }
 
+const STATUS_COLOR: Record<SessionTone, string> = {
+  neutral: "var(--status-running)",
+  muted: "var(--status-idle)",
+  attention: "var(--status-waiting)",
+  success: "var(--status-stopped)",
+  error: "var(--status-errored)",
+};
+
 export function ToneBadge({ label, tone, glyph: Glyph }: ToneBadgeProps) {
-  const content = (
-    <>
+  return (
+    <Badge tone="state" stateColor={STATUS_COLOR[tone]}>
       <Glyph aria-hidden="true" />
       {label}
-    </>
+    </Badge>
   );
-  switch (tone) {
-    case "attention":
-      return (
-        <Badge tone="state" stateColor="var(--col-needs-input)">
-          {content}
-        </Badge>
-      );
-    case "error":
-      return <Badge tone="danger">{content}</Badge>;
-    case "success":
-      return <Badge tone="success">{content}</Badge>;
-    case "muted":
-      return <Badge tone="neutral">{content}</Badge>;
-    case "neutral":
-      return <Badge variant="outline">{content}</Badge>;
-  }
 }

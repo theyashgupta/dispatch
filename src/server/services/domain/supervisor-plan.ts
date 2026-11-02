@@ -33,6 +33,7 @@ export interface PlanInput {
   from: SupervisorState | null;
   to: SupervisorState;
   promptKind?: PromptKind;
+  doneLine?: true;
   loop: LoopFacts | null;
   usageLimit: "wait" | "stop";
   wokeAt: number | null;
@@ -109,7 +110,8 @@ function oncePerPhase(
  * Plan the actions for one state change; a repeated state never reaches the planner.
  *
  * @remarks Each continue duty prompts once per unit and phase; the next stop in the same phase
- * marks the session `needs_input` instead. The caller stores the returned memory.
+ * marks the session `needs_input` instead. `roadmap_complete` plans `close_loop` only with a DONE
+ * line, because a session can still work after it prints the completion promise.
  */
 export function planActions(input: PlanInput): {
   actions: SupervisorAction[];
@@ -146,7 +148,7 @@ export function planActions(input: PlanInput): {
           }
         : none;
     case "roadmap_complete":
-      return loop?.engineActive && loop.orchestrator !== true
+      return input.doneLine && loop?.engineActive && loop.orchestrator !== true
         ? { actions: [{ kind: "close_loop" }], memory }
         : none;
     case "lost":

@@ -10,7 +10,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { CENTRE_SETTINGS_BUTTON_ID } from "@/modules/orchestrator/domain/centre-page-state";
+import {
+  CENTRE_SETTINGS_BUTTON_ID,
+  CENTRE_TERMINAL_BUTTON_ID,
+} from "@/modules/orchestrator/domain/centre-page-state";
 import { CentreAlertBar } from "@/modules/orchestrator/components/CentreAlertBar";
 
 interface CentreToolbarProps {
@@ -23,6 +26,7 @@ interface CentreToolbarProps {
     onChange: (value: string) => void;
   } | null;
   controls: ReactNode;
+  onTerminal: (() => void) | null;
   onSettings: () => void;
   alert: {
     message: string;
@@ -37,6 +41,7 @@ export function CentreToolbar({
   staleBadge,
   switcher,
   controls,
+  onTerminal,
   onSettings,
   alert,
 }: CentreToolbarProps) {
@@ -75,6 +80,17 @@ export function CentreToolbar({
           </>
         )}
         {controls}
+        {onTerminal !== null && (
+          <Button
+            id={CENTRE_TERMINAL_BUTTON_ID}
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={onTerminal}
+          >
+            Terminal
+          </Button>
+        )}
         <Button
           id={CENTRE_SETTINGS_BUTTON_ID}
           type="button"
@@ -86,10 +102,9 @@ export function CentreToolbar({
         </Button>
       </div>
       {alertBar &&
-        (inline ? (
+        (inline || alertSlot === null ? (
           <div className="w-full">{alertBar}</div>
         ) : (
-          alertSlot !== null &&
           createPortal(
             <div className="px-(--space-lg) pb-(--space-sm)">{alertBar}</div>,
             alertSlot,

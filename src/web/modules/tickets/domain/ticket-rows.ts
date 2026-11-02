@@ -5,7 +5,12 @@ import {
 } from "../../../../shared/linear-state.js";
 
 export type TicketsGroupBy =
-  "none" | "status" | "priority" | "project" | "cycle" | "team";
+  | "none"
+  | "status"
+  | "priority"
+  | "project"
+  | "cycle"
+  | "team";
 
 export interface TicketGroup {
   key: string;

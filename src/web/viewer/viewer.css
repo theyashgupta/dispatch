@@ -21,32 +21,12 @@ html body #root {
   --font-label: 13px;
   --line-body: 1.6;
 
-  /* Syntax highlight theme: maps rehype-highlight's hljs-* classes to CSS variables
-     built from the app's existing signal-palette hues, never a bundled hljs theme. */
-  --hl-keyword: #a371f7;
-  --hl-string: #3fb950;
-  --hl-number: #d9b23c;
-  --hl-comment: #8a8f98;
-  --hl-title: #6ea8fe;
-  --hl-attr: #ef8e3b;
-
   display: flex;
   gap: var(--space-2xl);
   align-items: flex-start;
   max-width: calc(720px + var(--space-2xl) + 220px);
   margin: 0 auto;
   padding: var(--space-xl) var(--space-lg);
-}
-
-/* Light highlight colours, the same hue families, each 4.5:1 or more on every
-   light surface tier. */
-:root[data-theme="light"] .viewer-root {
-  --hl-keyword: #7551b2;
-  --hl-string: #287633;
-  --hl-number: #7a6422;
-  --hl-comment: #63676d;
-  --hl-title: #44689d;
-  --hl-attr: #945825;
 }
 
 .viewer-content {

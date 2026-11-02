@@ -171,11 +171,16 @@ export async function listeningPortsBySession(
       [...byPort.entries()]
         .sort(([a], [b]) => a - b)
         .map(([port, hosts]) => {
-          const { pid, bindAddress } = attrib?.get(port) as {
+          const entry = attrib?.get(port) as {
             pid: number;
             bindAddress: string;
           };
-          return { port, probeHosts: [...hosts], pid, bindAddress };
+          return {
+            port,
+            probeHosts: [...hosts],
+            pid: entry.pid,
+            bindAddress: entry.bindAddress,
+          };
         }),
     );
   }

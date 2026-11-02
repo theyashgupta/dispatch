@@ -4,7 +4,9 @@ import { isHiddenCard } from "../../../shared/hidden-card.js";
 import type { BoardKey, Card } from "../../../shared/types.js";
 
 export type BlockedByCode =
-  "invalid-blocked-card" | "invalid-blocker" | "blocked-by-cycle";
+  | "invalid-blocked-card"
+  | "invalid-blocker"
+  | "blocked-by-cycle";
 
 export type BlockedByResult =
   | { ok: true; ids: string[] }

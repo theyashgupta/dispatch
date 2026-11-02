@@ -26,7 +26,6 @@ import type { ControlKind } from "@/modules/orchestrator/domain/centre-model";
 import {
   addExtraOrchestrator,
   ensureOrchestratorTerminal,
-  getOrchestratorConversation,
   getOrchestrators,
   patchScopes,
   runLifecycle,
@@ -42,8 +41,6 @@ export const orchestratorKeys = {
   centre: (board: BoardKey) => ["orchestrators", "centre", board] as const,
   answered: (board: BoardKey) =>
     [...attentionActionsKeys.decisions(board), "answered"] as const,
-  conversation: (board: BoardKey, id: string) =>
-    ["orchestrators", "conversation", board, id] as const,
 };
 
 /**
@@ -168,26 +165,6 @@ export function answeredDecisionsQueryOptions(board: BoardKey) {
 /** Read the answered decision items of the board of the command centre. */
 export function useAnsweredDecisionsQuery(board: BoardKey) {
   return useQuery(answeredDecisionsQueryOptions(board));
-}
-
-/**
- * Build the conversation query options of one orchestrator, refetched every 3 s.
- *
- * @remarks
- * The transcript grows with no stream event, so the poll is the live feed. The server default limit applies.
- */
-export function conversationQueryOptions(board: BoardKey, id: string) {
-  return queryOptions({
-    queryKey: orchestratorKeys.conversation(board, id),
-    queryFn: () => getOrchestratorConversation(board, id),
-    staleTime: 0,
-    refetchInterval: CENTRE_POLL_MS,
-  });
-}
-
-/** Read the conversation of one orchestrator of the command centre. */
-export function useConversationQuery(board: BoardKey, id: string) {
-  return useQuery(conversationQueryOptions(board, id));
 }
 
 /**

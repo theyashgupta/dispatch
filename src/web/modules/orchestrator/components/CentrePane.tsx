@@ -1,53 +1,56 @@
 import type { ReactNode } from "react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { SidePanelExpandToggle } from "@/components/ui/side-panel";
+import { CENTRE_TERMINAL_CLOSE_ID } from "@/modules/orchestrator/domain/centre-page-state";
 
 interface CentrePaneProps {
-  value: string;
-  onValueChange: (value: string) => void;
-  conversation: ReactNode;
   terminal: ReactNode;
   alertSlot: (element: HTMLElement | null) => void;
+  expanded: boolean;
+  onToggleExpand: () => void;
+  onClose: () => void;
+  sheet: boolean;
+  terminalReady: boolean;
 }
 
 export function CentrePane({
-  value,
-  onValueChange,
-  conversation,
   terminal,
   alertSlot,
+  expanded,
+  onToggleExpand,
+  onClose,
+  sheet,
+  terminalReady,
 }: CentrePaneProps) {
   return (
-    <Tabs
-      value={value}
-      onValueChange={onValueChange}
-      className="min-h-0 flex-1 gap-0"
-    >
-      <TabsList
-        variant="line"
-        className="h-auto w-full justify-start px-(--space-lg) pb-(--space-sm)"
-      >
-        <TabsTrigger value="conversation" className="flex-none">
-          Conversation
-        </TabsTrigger>
-        <TabsTrigger value="terminal" className="flex-none">
-          Terminal
-        </TabsTrigger>
-      </TabsList>
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex items-center justify-between border-b border-border px-(--space-lg) py-(--space-xs)">
+        <span className="text-xs text-muted-foreground">Terminal</span>
+        <div className="flex items-center gap-(--space-xs)">
+          {!sheet && terminalReady && (
+            <SidePanelExpandToggle
+              expanded={expanded}
+              onToggleExpand={onToggleExpand}
+              expandLabel="Expand terminal"
+              collapseLabel="Collapse terminal"
+            />
+          )}
+          <Button
+            variant="ghost"
+            size="icon-md"
+            id={CENTRE_TERMINAL_CLOSE_ID}
+            onClick={onClose}
+            aria-label="Close terminal"
+          >
+            <X className="size-4" aria-hidden="true" />
+          </Button>
+        </div>
+      </div>
       <div ref={alertSlot} />
-      <TabsContent
-        value="conversation"
-        forceMount
-        className="flex min-h-0 flex-1 flex-col data-[state=inactive]:hidden"
-      >
-        {conversation}
-      </TabsContent>
-      <TabsContent
-        value="terminal"
-        forceMount
-        className="flex min-h-0 flex-1 flex-col p-(--space-lg) data-[state=inactive]:hidden"
-      >
+      <div className="flex min-h-0 flex-1 flex-col p-(--space-lg)">
         {terminal}
-      </TabsContent>
-    </Tabs>
+      </div>
+    </div>
   );
 }
