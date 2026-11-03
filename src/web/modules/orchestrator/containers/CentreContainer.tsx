@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { NARROW_QUERY } from "../../../../shared/media-queries.js";
 import { pinFromBoard } from "../../../../shared/pinned-card.js";
 import type { Card, OrchestrationSummary } from "../../../../shared/types.js";
@@ -53,6 +53,9 @@ export function CentreContainer() {
   const cards = snapshot.data?.cards ?? NO_CARDS;
   const actions = useBranchActions(boardKey, cards);
   const start = useCentreControl(boardKey, null, stale);
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
 
   const summary = useOrchestrationSummaryQuery(boardKey);
   const graph = useMemo(
@@ -74,6 +77,14 @@ export function CentreContainer() {
   const { reset } = useCentrePane();
 
   useEffect(() => reset, [reset]);
+  const branchIds = graph.branches.map((b) => b.id).join("\n");
+  const [seenIds, setSeenIds] = useState(branchIds);
+  if (branchIds !== seenIds && graph.centre !== null) {
+    setSeenIds(branchIds);
+    const live = new Set(graph.branches.map((b) => b.id));
+    const kept = [...expanded].filter((id) => live.has(id));
+    if (kept.length !== expanded.size) setExpanded(new Set(kept));
+  }
 
   const nodeKeyDown = onKeyDown(CENTRE_FOCUS_ID);
   const { container, paths } = useEdgePaths(
@@ -106,6 +117,14 @@ export function CentreContainer() {
     onRetry: actions.onRetry,
     draftOf: actions.draftOf,
     setDraft: actions.setDraft,
+    expanded: (branch) => expanded.has(branch.id),
+    onToggle: (branch) =>
+      setExpanded((prev) => {
+        const next = new Set(prev);
+        if (next.has(branch.id)) next.delete(branch.id);
+        else next.add(branch.id);
+        return next;
+      }),
   };
 
   const startReason = start.control?.reason ?? null;

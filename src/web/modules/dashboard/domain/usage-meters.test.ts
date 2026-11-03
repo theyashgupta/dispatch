@@ -5,7 +5,8 @@ import type {
   ClaudeAccountSummary,
   Session,
 } from "../../../../shared/types.js";
-import { accountFor, clock, usageMeters } from "./usage-meters.js";
+import { clock } from "../../../../shared/clock-text.js";
+import { accountFor, usageMeters } from "./usage-meters.js";
 
 const UTC = { timeZone: "UTC" };
 
@@ -209,14 +210,6 @@ test("a Done card, a lost session and a lost card feed no meter", () => {
     ).length,
     1,
   );
-});
-
-test("clock keeps a formatter per time zone", () => {
-  const iso = "2026-10-08T12:00:00Z";
-  assert.equal(clock(iso, "UTC", false), "12:00");
-  assert.equal(clock(iso, "Asia/Kolkata", false), "17:30");
-  assert.equal(clock(iso, "UTC", false), "12:00");
-  assert.equal(clock(iso, "UTC", true), "Thu 12:00");
 });
 
 test("an unparseable reset time reads reset time unknown and does not throw", () => {

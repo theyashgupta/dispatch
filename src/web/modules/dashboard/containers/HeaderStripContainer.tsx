@@ -12,7 +12,7 @@ import {
 } from "@/modules/dashboard/domain/header-strip";
 import { orchestratorScopeText } from "@/modules/dashboard/domain/orchestrator-scope-text";
 import { loopsRunningText } from "@/modules/dashboard/domain/progress-rows";
-import { clock } from "@/modules/dashboard/domain/usage-meters";
+import { clock } from "../../../../shared/clock-text.js";
 import { useAttentionRows } from "./use-attention-rows";
 import { useDashboardData } from "./use-dashboard-data";
 

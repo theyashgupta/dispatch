@@ -3,7 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { cardVariants } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { ProgressRow } from "@/modules/dashboard/domain/progress-rows";
-import { GroupProgressBar } from "./GroupProgressBar";
+import { GroupProgressBar } from "@/components/GroupProgressBar";
 
 interface ProgressRowViewProps {
   row: ProgressRow;

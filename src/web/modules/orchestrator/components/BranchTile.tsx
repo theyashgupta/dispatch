@@ -13,6 +13,7 @@ import { ToneBadge } from "@/components/badges/ToneBadge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CentreAlertBar } from "@/modules/orchestrator/components/CentreAlertBar";
+import { GroupTileDetail } from "@/modules/orchestrator/components/GroupTileDetail";
 import type {
   BranchAction,
   BranchState,
@@ -51,6 +52,8 @@ export interface TileBehaviour {
   onAction: (branch: CentreBranch, kind: "resume" | "retry_resume") => void;
   onOpenTerminal: () => void;
   onRetry: (branch: CentreBranch) => void;
+  expanded: (branch: CentreBranch) => boolean;
+  onToggle: (branch: CentreBranch) => void;
 }
 
 interface BranchTileProps {
@@ -198,6 +201,13 @@ export function BranchTile({ branch, tile }: BranchTileProps) {
               />
             )}
           </div>
+        )}
+        {branch.group !== undefined && (
+          <GroupTileDetail
+            group={branch.group}
+            open={tile.expanded(branch)}
+            onToggle={() => tile.onToggle(branch)}
+          />
         )}
       </div>
     </li>

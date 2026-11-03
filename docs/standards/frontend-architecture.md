@@ -170,7 +170,7 @@ The only-shadcn rule does not apply to these families. All other visual code com
 2. The dnd-kit board mechanics in `modules/<feature>/components/dnd/`: droppable columns, draggable card wrappers and the drag overlay. The drag context is in a container, because its handlers start mutations.
 3. The fenced terminal page: `terminal.html` and `terminal-main.ts` (invariant NEW-20).
 4. react-markdown output in `src/web/components/markdown/`, styled with Tailwind typography classes. Typography is not a shadcn registry item.
-5. The milestone track in `modules/dashboard/components/GroupProgressBar.tsx`: an ordered list of unit nodes. Each node has a circle with a glyph or number for its state and a connecting segment, and the current node has the "You are here" badge. The track is vertical below `lg` and horizontal at `lg`. It uses plain list elements with token classes, and no shadcn primitive draws it (LOCAL-84 U2-07, LOCAL-106).
+5. The milestone track in `src/web/components/GroupProgressBar.tsx`: an ordered list of unit nodes. Each node has a circle with a glyph or number for its state and a connecting segment, and the current node has the "You are here" badge. The dashboard track is vertical below `lg` and horizontal at `lg`. The command centre group tile uses the `vertical` orientation, which stays vertical at every width (LOCAL-142). It uses plain list elements with token classes, and no shadcn primitive draws it (LOCAL-84 U2-07, LOCAL-106).
 6. The side panel shell `components/ui/side-panel.tsx` with its width hook: a hand-composed shell built on the Button primitive that draws the ticket detail panel and the command centre terminal pane (LOCAL-125).
 
 ## Providers

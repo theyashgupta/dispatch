@@ -5,7 +5,7 @@ import type {
   LoopProgress,
   LoopSummary,
   LoopUnit,
-} from "../../../../shared/types.js";
+} from "./types.js";
 import { trackNodes } from "./track-nodes.js";
 
 const UTC = { timeZone: "UTC" };

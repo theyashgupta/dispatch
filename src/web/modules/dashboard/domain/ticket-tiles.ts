@@ -6,7 +6,7 @@ import { COLUMN_LABELS } from "../../../../shared/column-labels.js";
 import { loopView } from "../../../../shared/loop-view.js";
 import type { Card } from "../../../../shared/types.js";
 import { hasLoopProgress } from "../../../../shared/running-group.js";
-import { clock } from "./usage-meters.js";
+import { clock } from "../../../../shared/clock-text.js";
 
 export type TileState =
   | "stuck"

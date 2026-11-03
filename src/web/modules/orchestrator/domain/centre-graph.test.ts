@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { trackNodes } from "../../../../shared/track-nodes.js";
 import type {
   BoardKey,
   Card,
@@ -1165,4 +1166,163 @@ test("the centre node reads the record state before the session state", () => {
     ],
     ["Stopping", "Stopped", "Starting", "Working"],
   );
+});
+
+function loopOf(
+  unitCount: number,
+  lastGate: LoopProgress["summary"]["lastGate"] = null,
+) {
+  return {
+    slug: "auth",
+    roadmapFile: "roadmap.md",
+    units: [...Array(unitCount).keys()].map((i) => ({
+      number: i + 1,
+      ticket: null,
+      title: `Unit ${i + 1}`,
+      status: i === 0 ? "shipped" : "in progress",
+      statusText: "",
+      branch: null,
+      commit: null,
+      prdPath: null,
+      phaseTotal: 4,
+      phases: [],
+    })),
+    engine: null,
+    completion: "running",
+    summary: {
+      unitsDone: 1,
+      unitsTotal: unitCount,
+      currentUnit: 2,
+      currentPhase: { number: 1, name: "Build" },
+      lastGate,
+    },
+    warnings: [],
+    readAt: iso(0),
+  } as LoopProgress;
+}
+
+test("a group with loop units carries the shared track nodes", () => {
+  const loop = loopOf(3);
+  const [branch] = graph({
+    cards: [live("GRP-1", { source: "group", loopProgress: loop })],
+  }).branches;
+  assert.deepEqual(branch.group?.units, trackNodes(loop, { timeZone: "UTC" }));
+  assert.deepEqual(
+    branch.group?.units?.slice(0, 2).map((u) => [u.unit, u.name, u.state]),
+    [
+      [1, "Unit 1", "done"],
+      [2, "Unit 2", "current"],
+    ],
+  );
+  assert.equal(branch.group?.units?.length, 3);
+});
+
+test("a group with no loop progress has null units and its member lines", () => {
+  const [branch] = graph({
+    cards: [
+      group("GRP-1", { memberIds: ["CEN-1"] }),
+      card("CEN-1", { column: "todo" }),
+    ],
+  }).branches;
+  assert.equal(branch.group?.units, null);
+  assert.deepEqual(branch.group?.members, [
+    {
+      id: "CEN-1",
+      identifier: "CEN-1",
+      title: "Title CEN-1",
+      state: "todo",
+      label: "To Do",
+      tone: "muted",
+    },
+  ]);
+});
+
+test("member lines follow the member id order", () => {
+  const [branch] = graph({
+    cards: [
+      group("GRP-1", { memberIds: ["CEN-9", "CEN-2", "CEN-5"] }),
+      card("CEN-2"),
+      card("CEN-5"),
+      card("CEN-9"),
+    ],
+  }).branches;
+  assert.deepEqual(
+    branch.group?.members.map((m) => m.id),
+    ["CEN-9", "CEN-2", "CEN-5"],
+  );
+});
+
+test("a member reads its column, and a failed last gate or a lost session reads Needs attention", () => {
+  const failed = loopOf(2, { unit: 1, phase: 1, result: "fail", at: iso(1) });
+  const [branch] = graph({
+    cards: [
+      group("GRP-1", { memberIds: ["CEN-1", "CEN-2", "CEN-3"] }),
+      card("CEN-1"),
+      card("CEN-2", { loopProgress: failed }),
+      card("CEN-3", { sessionLost: true }),
+    ],
+  }).branches;
+  assert.deepEqual(
+    branch.group?.members.map((m) => [m.state, m.label, m.tone]),
+    [
+      ["in_progress", "In Progress", "neutral"],
+      ["attention", "Needs attention", "error"],
+      ["attention", "Needs attention", "error"],
+    ],
+  );
+});
+
+test("every member column maps to its board label and tone", () => {
+  const columns = [
+    "todo",
+    "in_progress",
+    "needs_input",
+    "agent_done",
+    "in_review",
+    "parked",
+    "done",
+    "inbox",
+  ] as const;
+  const [branch] = graph({
+    cards: [
+      group("GRP-1", { memberIds: columns.map((c) => `M-${c}`) }),
+      ...columns.map((column) => card(`M-${column}`, { column })),
+    ],
+  }).branches;
+  assert.deepEqual(
+    branch.group?.members.map((m) => [m.state, m.label, m.tone]),
+    [
+      ["todo", "To Do", "muted"],
+      ["in_progress", "In Progress", "neutral"],
+      ["needs_input", "Needs Input", "attention"],
+      ["agent_done", "Agent Done", "success"],
+      ["in_review", "In Review", "success"],
+      ["parked", "Parked", "muted"],
+      ["done", "Done", "success"],
+      ["inbox", "Inbox", "muted"],
+    ],
+  );
+});
+
+test("a member id with no card and a hidden member card make no line", () => {
+  const [branch] = graph({
+    cards: [
+      group("GRP-1", { memberIds: ["CEN-1", "gone", "ORC-1"] }),
+      card("CEN-1"),
+      card("ORC-1", { source: "orchestrator" }),
+    ],
+  }).branches;
+  assert.deepEqual(
+    branch.group?.members.map((m) => m.id),
+    ["CEN-1"],
+  );
+});
+
+test("a ticket branch and a plan-only branch have no group property", () => {
+  const [ticket, planned] = graph({
+    cards: [live("CEN-1")],
+    decisions: [plan("p", iso(1), [entry("Later", 9)])],
+  }).branches;
+  assert.equal("group" in ticket, false);
+  assert.equal("group" in planned, false);
 });
