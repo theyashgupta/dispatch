@@ -1,5 +1,7 @@
+import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { NARROW_QUERY } from "../../../../shared/media-queries.js";
+import type { CentreView } from "../../../../shared/orchestrator-settings.js";
 import { pinFromBoard } from "../../../../shared/pinned-card.js";
 import type { Card, OrchestrationSummary } from "../../../../shared/types.js";
 import { useMediaQuery } from "@/components/ui/hooks/use-media-query";
@@ -8,10 +10,15 @@ import { useOrchestrationSummaryQuery } from "@/queries/orchestration-summary-qu
 import { BranchList } from "@/modules/orchestrator/components/BranchList";
 import type { TileBehaviour } from "@/modules/orchestrator/components/BranchTile";
 import { CentreCanvas } from "@/modules/orchestrator/components/CentreCanvas";
+import { CentreTree } from "@/modules/orchestrator/components/CentreTree";
 import { CentreNarrow } from "@/modules/orchestrator/components/CentreNarrow";
 import { CentreNotReady } from "@/modules/orchestrator/components/CentreNotReady";
 import { StaleReason } from "@/modules/orchestrator/components/StaleReason";
 import { centreGraph } from "@/modules/orchestrator/domain/centre-graph";
+import {
+  centreTree,
+  treeFocusOrder,
+} from "@/modules/orchestrator/domain/centre-tree";
 import {
   CENTRE_FOCUS_ID,
   focusOrder,
@@ -19,6 +26,7 @@ import {
 import {
   regionErrorText,
   regionState,
+  shownView,
 } from "@/modules/orchestrator/domain/centre-page-state";
 import { STALE_REASON } from "@/modules/orchestrator/domain/centre-model";
 import { withGroupCosts } from "@/modules/orchestrator/domain/group-costs";
@@ -29,6 +37,7 @@ import { CentreControlsContainer } from "./CentreControlsContainer";
 import { useBranchActions } from "./use-branch-actions";
 import { useCentreControl } from "./use-centre-control";
 import { useCentreSelection } from "./use-centre-selection";
+import { useCentreView } from "./use-centre-view";
 import { useOrchestratorDecisions } from "./use-orchestrator-decisions";
 
 const NO_CARDS: Card[] = [];
@@ -48,7 +57,9 @@ export function CentreContainer() {
     unknown,
   } = useCentreSelection();
   const decisions = useOrchestratorDecisions(boardKey);
+  const navigate = useNavigate();
   const wide = !useMediaQuery(NARROW_QUERY);
+  const requested = useCentreView();
   const now = useSyncExternalStore(subscribeClock, readClock);
   const cards = snapshot.data?.cards ?? NO_CARDS;
   const actions = useBranchActions(boardKey, cards);
@@ -72,7 +83,12 @@ export function CentreContainer() {
       ),
     [cards, records, record, decisions.decisions, now, summary.data],
   );
-  const order = useMemo(() => focusOrder(graph), [graph]);
+  const view = shownView(requested, records, wide);
+  const tree = useMemo(() => centreTree({ cards, records }), [cards, records]);
+  const order = useMemo(
+    () => (view === "tree" ? treeFocusOrder(tree) : focusOrder(graph)),
+    [view, tree, graph],
+  );
   const { register, onKeyDown } = useTileFocus(order);
   const { reset } = useCentrePane();
 
@@ -87,9 +103,12 @@ export function CentreContainer() {
   }
 
   const nodeKeyDown = onKeyDown(CENTRE_FOCUS_ID);
-  const { container, paths } = useEdgePaths(
-    wide ? graph.branches.map((b) => `${b.id}:${b.band}`) : [],
-  );
+  const idsByView: Record<CentreView, string[]> = {
+    tree: tree.edges.map((e) => `${e.from}:${e.to}`),
+    bands: graph.branches.map((b) => `${b.id}:${b.band}`),
+  };
+  const edgeIds = wide ? idsByView[view] : [];
+  const { container, paths } = useEdgePaths(edgeIds);
 
   const queries = [list, snapshot];
   const failed = queries.find((q) => q.data === undefined && q.error !== null);
@@ -166,14 +185,34 @@ export function CentreContainer() {
     return ready ? (
       <>
         {stale && <StaleReason id={REASON_ID} padded />}
-        <CentreCanvas
-          graph={graph}
-          paths={paths}
-          containerRef={container}
-          nodeRef={register(CENTRE_FOCUS_ID)}
-          onNodeKeyDown={nodeKeyDown}
-          tile={tile}
-        />
+        {view === "tree" ? (
+          <CentreTree
+            tree={tree}
+            paths={paths}
+            containerRef={container}
+            register={register}
+            onKeyDown={onKeyDown}
+            onOpenGroup={(cardId) =>
+              appStore.selectCard(cardId, pinFromBoard(cardId, cards))
+            }
+            onSelectOrchestrator={(orchestratorId) =>
+              void navigate({
+                to: "/boards/$key/orchestrator/{-$id}",
+                params: { key: boardKey, id: orchestratorId },
+                search: (prev) => ({ ...prev, view: undefined }),
+              })
+            }
+          />
+        ) : (
+          <CentreCanvas
+            graph={graph}
+            paths={paths}
+            containerRef={container}
+            nodeRef={register(CENTRE_FOCUS_ID)}
+            onNodeKeyDown={nodeKeyDown}
+            tile={tile}
+          />
+        )}
       </>
     ) : (
       notReady

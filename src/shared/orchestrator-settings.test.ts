@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { legacyPanelRedirect, settingsHash } from "./orchestrator-settings.js";
+import {
+  CENTRE_VIEWS,
+  isCentreView,
+  legacyPanelRedirect,
+  settingsHash,
+} from "./orchestrator-settings.js";
 
 test("an old panel link maps to the settings tab it named, or to the sheet alone", () => {
   assert.deepEqual(
@@ -31,4 +36,14 @@ test("the settings hash opens the centre of the board on the tab", () => {
     settingsHash("CEN", "policy"),
     "#/boards/CEN/orchestrator?settings=policy",
   );
+});
+
+test("the centre views are bands and tree", () => {
+  assert.deepEqual([...CENTRE_VIEWS], ["bands", "tree"]);
+});
+
+test("only a known centre view is a centre view", () => {
+  assert.equal(isCentreView("tree"), true);
+  assert.equal(isCentreView("bogus"), false);
+  assert.equal(isCentreView(undefined), false);
 });

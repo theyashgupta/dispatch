@@ -2,7 +2,7 @@ import type { CentreEdge } from "@/modules/orchestrator/domain/centre-graph";
 import type { EdgePath } from "@/modules/orchestrator/hooks/use-edge-paths";
 
 interface CentreEdgesProps {
-  edges: readonly CentreEdge[];
+  edges: readonly Pick<CentreEdge, "to" | "dashed">[];
   paths: readonly EdgePath[];
 }
 

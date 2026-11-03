@@ -1,4 +1,5 @@
 import { mainOrchestrator } from "../../../../shared/orchestrator-owner.js";
+import type { CentreView } from "../../../../shared/orchestrator-settings.js";
 import { dollars, spentOfBudget } from "../../../../shared/cost-text.js";
 import type { CentreBranch } from "./centre-graph.js";
 import {
@@ -95,6 +96,25 @@ export function regionErrorText(region: string, message: string): string {
 /** Tell whether the switcher shows, which takes two or more orchestrators. */
 export function showSwitcher(records: readonly OrchestratorView[]): boolean {
   return records.length > 1;
+}
+
+/** Tell whether the Bands and Tree toggle shows, which takes a wide screen and two or more orchestrators. */
+export function showViewToggle(
+  records: readonly OrchestratorView[],
+  wide: boolean,
+): boolean {
+  return wide && showSwitcher(records);
+}
+
+/** Pick the centre view to show, which is the tree only on a wide screen with two or more orchestrators. */
+export function shownView(
+  requested: CentreView | undefined,
+  records: readonly OrchestratorView[],
+  wide: boolean,
+): CentreView {
+  return requested === "tree" && wide && showSwitcher(records)
+    ? "tree"
+    : "bands";
 }
 
 /** Build the switcher options, one per orchestrator. */

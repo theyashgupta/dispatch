@@ -1,8 +1,13 @@
 import type { ReactNode } from "react";
 import { createPortal } from "react-dom";
+import {
+  isCentreView,
+  type CentreView,
+} from "../../../../shared/orchestrator-settings.js";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   Select,
   SelectContent,
@@ -20,6 +25,10 @@ interface CentreToolbarProps {
   inline: boolean;
   alertSlot: HTMLElement | null;
   staleBadge: string | null;
+  view: {
+    value: CentreView;
+    onChange: (value: CentreView) => void;
+  } | null;
   switcher: {
     options: readonly { value: string; label: string }[];
     value: string;
@@ -39,6 +48,7 @@ export function CentreToolbar({
   inline,
   alertSlot,
   staleBadge,
+  view,
   switcher,
   controls,
   onTerminal,
@@ -60,6 +70,21 @@ export function CentreToolbar({
         </Badge>
       )}
       <div className="ml-auto flex flex-wrap items-center justify-end gap-(--space-sm)">
+        {view !== null && (
+          <ToggleGroup
+            type="single"
+            variant="outline"
+            size="sm"
+            aria-label="Centre view"
+            value={view.value}
+            onValueChange={(next) => {
+              if (isCentreView(next)) view.onChange(next);
+            }}
+          >
+            <ToggleGroupItem value="bands">Bands</ToggleGroupItem>
+            <ToggleGroupItem value="tree">Tree</ToggleGroupItem>
+          </ToggleGroup>
+        )}
         {switcher !== null && (
           <>
             <Label htmlFor="centre-switcher" className="sr-only">

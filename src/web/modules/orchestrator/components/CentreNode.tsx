@@ -12,7 +12,7 @@ import {
   countsText,
 } from "@/modules/orchestrator/domain/centre-page-state";
 
-const GLYPHS = {
+export const TONE_GLYPHS = {
   neutral: Play,
   muted: Pause,
   attention: TriangleAlert,
@@ -50,7 +50,7 @@ export function CentreNode({
         <ToneBadge
           label={node.label}
           tone={node.tone}
-          glyph={GLYPHS[node.tone]}
+          glyph={TONE_GLYPHS[node.tone]}
         />
       </div>
       <p className="m-0 flex flex-wrap gap-x-(--space-md) text-sm text-muted-foreground">

@@ -3,6 +3,14 @@ interface Point {
   y: number;
 }
 
+/** Pick the source node of an edge: an unnamed tile uses the unnamed node. */
+export function pickSource<T>(
+  from: string | null,
+  sources: ReadonlyMap<string, T>,
+): T | null {
+  return sources.get(from ?? "") ?? null;
+}
+
 /**
  * Build the SVG path of one elbow edge: a run right from the node, a vertical run at the middle, a run right into the tile.
  *
