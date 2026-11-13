@@ -121,16 +121,27 @@ first publish claims the public scope for the name.
    `.planning/`, or `docs/`. Optionally clean-room smoke it: `npm i <tgz> --omit=dev` in a temp dir and run
    `dispatch --version`.
 2. Bump `version` in `package.json`, commit.
-3. `git tag vX.Y.Z`, then `git push --tags` (maintainer does this — YubiKey).
+3. Publish the release through the release-notes skill (see below). Publishing the draft release creates
+   the `vX.Y.Z` tag. Do not tag by hand.
 4. The [`publish.yml`](.github/workflows/publish.yml) workflow fires on the `v*` tag, runs `npm ci`,
    `npm run build`, and `npm publish --access public` with `NODE_AUTH_TOKEN` from `NPM_TOKEN`. Pushing to
    `main` or creating the tag file alone does not publish — only a pushed tag does.
 
-The milestone number equals the public release tag. Release notes and the demo recording happen at
-publish time as part of the maintainer's release-notes ritual — out of scope for a normal PR.
+The milestone number equals the public release tag.
 
 npm provenance (`--provenance` with `id-token: write`) is available as an opt-in for extra supply-chain
 trust; it's kept off by default to stay on the locked publish steps.
+
+### Release notes and the changelog
+
+- Publish every release through the release-notes skill at `.claude/skills/release-notes/SKILL.md`,
+  never by hand. Any Claude agent in this repository loads it as a project skill.
+- The skill writes the notes, records the demo, and writes the changelog entry that the Dispatch site
+  shows.
+- When the release is published, `.github/workflows/changelog-sync.yml` sends the `release-published`
+  event to `theyashgupta/dispatch-site`, and the site redeploys.
+- The workflow needs the repository secret `SITE_DEPLOY_TOKEN`: a fine-grained token with Contents write
+  on `dispatch-site`. Without the secret, the job prints one line and skips.
 
 ## Commit messages
 

@@ -403,7 +403,7 @@ export default {
     { files: ["**/*.{ts,tsx}"], rules: typedRules },
 
     {
-      files: [".claude/**/*.mjs", "tests/**/*.mjs", "scripts/**/*.mjs"],
+      files: [".claude/**/*.{js,mjs}", "tests/**/*.mjs", "scripts/**/*.mjs"],
       env: { node: true },
     },
     {

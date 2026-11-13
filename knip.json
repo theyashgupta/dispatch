@@ -23,7 +23,8 @@
     "launchctl",
     "lsof",
     "tmux",
-    "swiftc"
+    "swiftc",
+    "jq"
   ],
   "ignoreDependencies": ["tailwindcss"]
 }
