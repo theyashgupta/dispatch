@@ -332,6 +332,25 @@ function isGroupLoop(
 }
 
 /**
+ * True for a single ticket card whose not started loop record has no engine and whose launch playbook is a named playbook that is not a loop playbook.
+ *
+ * @remarks The reader can keep a record from an earlier loop run while no engine file exists, so a
+ * restart under a non-loop playbook can carry it. A record with gate evidence, or a playbook name
+ * that is missing, empty or holds "loop" or "ralph", counts as a real loop.
+ */
+function isStaleLoopRecord(card: Card): boolean {
+  const playbook = card.launch?.playbook;
+  return (
+    card.source !== "group" &&
+    card.loopProgress?.engine === null &&
+    card.loopProgress.completion === "not_started" &&
+    playbook !== undefined &&
+    playbook.trim() !== "" &&
+    !/loop|ralph/i.test(playbook)
+  );
+}
+
+/**
  * True for a card in Agent done, or in Needs input with a closed and complete loop.
  *
  * @remarks A lost or frozen session moves a finished card to Needs input after its DONE.
@@ -402,6 +421,7 @@ function assertShippable(
   }
   if (
     hasLoopProgress(card) &&
+    !isStaleLoopRecord(card) &&
     card.loopProgress.units.some((u) => !FINISHED_STATUSES.has(u.status))
   ) {
     throw new ConflictError("loop-not-finished");

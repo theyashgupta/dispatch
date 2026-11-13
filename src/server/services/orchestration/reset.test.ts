@@ -7,6 +7,7 @@ import { isolateEnv } from "../../test-support/fixtures.js";
 import { run } from "../../adapters/exec.js";
 import { branchExists, worktreeAddNewBranch } from "../../adapters/git.js";
 import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
+import type { LoopProgress } from "../../../shared/types.js";
 
 isolateEnv();
 const { store } = await import("../../store/board.store.js");
@@ -32,6 +33,37 @@ async function tempRepo(): Promise<{ root: string; repo: string }> {
   return { root, repo };
 }
 
+const staleLoop: LoopProgress = {
+  slug: "dispatch-landing",
+  roadmapFile: "",
+  units: [
+    {
+      number: 1,
+      ticket: null,
+      title: "dispatch landing",
+      status: "not started",
+      statusText: "not started",
+      branch: null,
+      commit: null,
+      prdPath: null,
+      phaseTotal: null,
+      phases: [],
+    },
+  ],
+  engine: null,
+  completion: "not_started",
+  summary: {
+    unitsDone: 0,
+    unitsTotal: 1,
+    currentUnit: null,
+    currentPhase: null,
+    lastGate: null,
+  },
+  warnings: [],
+  readAt: "2026-11-13T00:00:00.000Z",
+  prdFile: "prds/dispatch-landing.md",
+};
+
 void test("resetCard removes the workspace and branch, detaches the session, and lands in Inbox", async () => {
   await store.load();
   const { root, repo } = await tempRepo();
@@ -54,6 +86,7 @@ void test("resetCard removes the workspace and branch, detaches the session, and
       branch: card.identifier,
     });
     await store.setExtraDirection(card.id, "extra");
+    await store.setLoopProgress(card.id, staleLoop);
     assert.equal(store.getCard(card.id)?.column, "in_progress");
 
     assert.deepEqual(await resetCard(card.id), { ok: true });
@@ -67,6 +100,7 @@ void test("resetCard removes the workspace and branch, detaches the session, and
     assert.equal(after?.activeSessionId, undefined);
     assert.equal(after?.extraDirection, undefined);
     assert.equal(after?.sessionLost, undefined);
+    assert.equal(after?.loopProgress, undefined);
     assert.equal(fs.existsSync(ws), false, "workspace folder gone");
     assert.equal(await branchExists(repo, card.identifier), false);
 
