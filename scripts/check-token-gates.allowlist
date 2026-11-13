@@ -115,7 +115,7 @@ src/web/components/ui/tooltip.tsx	translate-y-[calc(-50%_-_2px)]	viewport or con
 src/web/modules/accounts/components/AccountPopover.tsx	max-h-[40vh]	viewport or container relative size
 src/web/modules/accounts/components/AddAccountDialog.tsx	max-h-[80vh]	viewport or container relative size
 src/web/modules/accounts/components/UsageChip.tsx	flex-[0_1_auto]	flex shorthand
-src/web/modules/accounts/components/UsageWindowRow.tsx	grid-cols-[minmax(72px,auto)_1fr_auto_auto]	grid track template
+src/web/modules/accounts/components/UsageWindowRow.tsx	grid-cols-[minmax(72px,auto)_1fr_auto]	grid track template
 src/web/modules/ask/components/AskMessage.tsx	max-w-[85%]	viewport or container relative size
 src/web/modules/ask/views/AskView.tsx	[word-break:break-word]	CSS property with no Tailwind utility
 src/web/modules/board/components/CardView.tsx	grid-cols-[--spacing(3)_1fr]	grid track template
