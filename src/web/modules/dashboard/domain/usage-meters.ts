@@ -9,12 +9,18 @@ import {
   type Card,
   type ClaudeAccountSummary,
 } from "../../../../shared/types.js";
+import {
+  toneForPercent,
+  type UsageThresholds,
+  type UsageTone,
+} from "../../../../shared/usage-thresholds.js";
 
 export interface UsageMeter {
   kind: "window" | "week";
   percent: number;
   text: string;
   near: boolean;
+  tone: UsageTone;
 }
 
 export interface AccountMeters {
@@ -22,8 +28,6 @@ export interface AccountMeters {
   name: string | null;
   meters: UsageMeter[];
 }
-
-const NEAR_PERCENT = 80;
 
 /** Finds the account with an id; the default id also matches the home or managed Default row. */
 export function accountFor(
@@ -38,15 +42,23 @@ export function accountFor(
   );
 }
 
+const TONE_NOTE: Record<UsageTone, string> = {
+  ok: "",
+  stale: "high use, ",
+  down: "near limit, ",
+};
+
 function meter(
   kind: UsageMeter["kind"],
   rawPercent: number | null | undefined,
   account: ClaudeAccountSummary | undefined,
   timeZone: string | undefined,
+  thresholds: UsageThresholds,
 ): UsageMeter | null {
   if (rawPercent == null) return null;
   const percent = Math.round(rawPercent);
-  const near = percent >= NEAR_PERCENT;
+  const tone = toneForPercent(percent, thresholds);
+  const near = tone !== "ok";
   const resetsAt = account?.buckets.find(
     (bucket) => bucket.kind === (kind === "window" ? "five_hour" : "seven_day"),
   )?.resetsAt;
@@ -58,7 +70,8 @@ function meter(
     kind,
     percent,
     near,
-    text: `${lead}, ${near ? "near limit, " : ""}${reset}`,
+    tone,
+    text: `${lead}, ${TONE_NOTE[tone]}${reset}`,
   };
 }
 
@@ -67,12 +80,13 @@ function meter(
  *
  * @remarks A card in Done or with a lost session feeds no meter. Percents come from the session with the newest meter read of an account, since the
  * status line measures the account and every session of it reports the same figure. The account
- * name shows only when more than one account appears.
+ * name shows only when more than one account appears. A meter reads "high use" from the warning
+ * percent and "near limit" from the critical percent.
  */
 export function usageMeters(
   cards: readonly Card[],
   accounts: readonly ClaudeAccountSummary[],
-  opts: { timeZone?: string },
+  opts: { timeZone?: string; thresholds: UsageThresholds },
 ): AccountMeters[] {
   const newest = new Map<string, ActiveSessionView>();
   for (const card of cards) {
@@ -104,8 +118,15 @@ export function usageMeters(
             session.usage?.fiveHourPercent,
             account,
             opts.timeZone,
+            opts.thresholds,
           ),
-          meter("week", session.usage?.sevenDayPercent, account, opts.timeZone),
+          meter(
+            "week",
+            session.usage?.sevenDayPercent,
+            account,
+            opts.timeZone,
+            opts.thresholds,
+          ),
         ].filter((m): m is UsageMeter => m !== null),
       };
     })

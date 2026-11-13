@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ClaudeAccountSummary } from "../../../../shared/types.js";
+import { DEFAULT_USAGE_THRESHOLDS } from "../../../../shared/usage-thresholds.js";
 import { AccountsList } from "./AccountsList.js";
 
 const NOW = 1_700_000_000_000;
@@ -38,6 +39,7 @@ function render(
       accounts: [account()],
       activeId: "acct-1",
       now: NOW,
+      thresholds: DEFAULT_USAGE_THRESHOLDS,
       loaded: true,
       failed: false,
       removeError: null,

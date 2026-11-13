@@ -6,7 +6,7 @@ interface CostMeterRowProps {
   label: string;
   percent: number | null;
   text: string;
-  near: boolean;
+  tone: "default" | "stale" | "down";
   groupLabel?: boolean;
 }
 
@@ -14,7 +14,7 @@ export function CostMeterRow({
   label,
   percent,
   text,
-  near,
+  tone,
   groupLabel = false,
 }: CostMeterRowProps) {
   return (
@@ -29,10 +29,15 @@ export function CostMeterRow({
           {label}
         </span>
         <span className="flex items-center gap-1 text-sm text-foreground tabular-nums">
-          {near && (
+          {tone !== "default" && (
             <TriangleAlert
               aria-hidden="true"
-              className="size-3.5 shrink-0 text-(--status-stale)"
+              className={cn(
+                "size-3.5 shrink-0",
+                tone === "down"
+                  ? "text-(--status-down)"
+                  : "text-(--status-stale)",
+              )}
             />
           )}
           {text}
@@ -41,7 +46,7 @@ export function CostMeterRow({
       {percent !== null && (
         <Progress
           value={Math.min(percent, 100)}
-          tone={near ? "stale" : "default"}
+          tone={tone}
           aria-label={text}
           className="h-1.25 rounded-sm bg-border"
         />

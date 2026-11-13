@@ -1,4 +1,5 @@
 import type { ClaudeUsageWindow } from "../../../../shared/types.js";
+import type { UsageThresholds } from "../../../../shared/usage-thresholds.js";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import {
@@ -18,11 +19,13 @@ const PACE_TONE: Record<UsageTone, "success" | "warning" | "danger"> = {
 interface UsageWindowRowProps {
   usageWindow: ClaudeUsageWindow;
   pacedAt: number | null;
+  thresholds: UsageThresholds;
 }
 
 export function UsageWindowRow({
   usageWindow: w,
   pacedAt,
+  thresholds,
 }: UsageWindowRowProps) {
   const reset = formatReset(w.resetsAt);
   const pacing = pacedAt === null ? null : pacingFor(w, pacedAt);
@@ -35,7 +38,7 @@ export function UsageWindowRow({
         <div className="relative">
           <Progress
             value={percent}
-            tone={toneFor(w.percent)}
+            tone={toneFor(w.percent, thresholds)}
             aria-label={`${w.label} usage`}
             aria-valuenow={percent}
             aria-valuetext={`${w.percent}%`}

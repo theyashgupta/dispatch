@@ -18,7 +18,7 @@ fs.writeFileSync(
 );
 const tmux = await import("../../adapters/tmux.js");
 const { store } = await import("../../store/board.store.js");
-const { launchClaude, steps } = await import("./steps.js");
+const { launchClaude, setLaunchAccountOf, steps } = await import("./steps.js");
 const { projectsDirOf } = await import("../../adapters/transcript.js");
 const { setHooksRuntime, setOrchestrationConfig } =
   await import("../infra/config-holder.js");
@@ -316,6 +316,40 @@ void test("starting claude resolves the account the start asked for, not the act
     new RegExp(`${missing} is no longer registered`),
   );
   assert.equal(await tmux.hasSession(`=${tmuxSession}`), false);
+});
+
+void test("starting claude launches on the account the chain gives for a limited one", async () => {
+  await store.load();
+  const card = await store.createLocalCard(
+    DEFAULT_BOARD_KEY,
+    "headroom account",
+    "",
+  );
+  const limited = "77777777-7777-4777-8777-777777777777";
+  const headroom = "66666666-6666-4666-8666-666666666666";
+  const asked: string[] = [];
+  setLaunchAccountOf((id) => {
+    asked.push(id);
+    return Promise.resolve(id === limited ? headroom : id);
+  });
+  const ctx = {
+    card,
+    identifier: card.identifier,
+    sessionName: `headroom-account-${process.pid}`,
+    sessionId: undefined,
+    workspacePath: env.root,
+    requestedAccountId: limited,
+    warnings: [],
+  } as unknown as SagaContext;
+  try {
+    await assert.rejects(
+      stepNamed("starting claude").run(ctx),
+      new RegExp(`${headroom} is no longer registered`),
+    );
+    assert.deepEqual(asked, [limited]);
+  } finally {
+    setLaunchAccountOf((id) => Promise.resolve(id));
+  }
 });
 
 void test("starting claude with no requested account resolves the active account", async () => {

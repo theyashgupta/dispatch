@@ -754,6 +754,25 @@ Running sessions keep running. New starts, resumes and moves use the Dispatch lo
 
 To undo the move, remove the account with the meta **Default (Dispatch login)**. **Default** is then your home login again, and the panel shows again.
 
+### Usage thresholds
+
+The usage thresholds set the colours of the usage displays. They also set the percent at which Dispatch makes an account limited. To change them:
+
+1. Open **Settings**.
+2. Open **Accounts and usage**.
+3. In **Usage thresholds**, type the values. Each value is a whole number from 1 to 100.
+4. Choose **Save thresholds**.
+
+The fields are:
+
+- **Warning (%)**: usage shows the warning colour at this percent or more. The default is 70.
+- **Critical (%)**: usage shows the critical colour at this percent or more. The default is 90.
+- **Session limit (%)**, **Weekly limit (%)** and **Weekly scoped limit (%)**: the account is limited when that usage window gets to this percent. The weekly scoped window is the weekly window of one model. The default is 100. The value 100 is the limit of Claude.
+
+The warning value must be less than the critical value. The critical value must be equal to or less than each limit value. When a value is not correct, the block shows the problem and **Save thresholds** is off.
+
+Choose **Reset to defaults** to set all the values to the defaults and save them.
+
 ## Resume a lost session
 
 When the tmux session of a card ends, for example after a shutdown, the card shows **Resume**. Resume starts Claude again in the card workspace and opens the newest conversation of the card.

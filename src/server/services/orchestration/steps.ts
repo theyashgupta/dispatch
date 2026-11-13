@@ -901,10 +901,25 @@ export async function typeAccountEnvLine(
   await sendKeys(paneTarget, ["Enter"]);
 }
 
+let launchAccountOf = (id: string): Promise<string> => Promise.resolve(id);
+
+/**
+ * Set how the start step swaps a limited launch account for another one.
+ *
+ * @remarks An import of the account chain here would close a cycle through the session moves, so
+ * the chain registers its resolver when it starts.
+ */
+export function setLaunchAccountOf(
+  resolver: (id: string) => Promise<string>,
+): void {
+  launchAccountOf = resolver;
+}
+
 /**
  * Saga Step 3: resolve the launch account, then delegate to {@link launchClaude}.
  *
- * @remarks `undo` kills with the session-level exact-match target (`=<name>`, no colon); the
+ * @remarks A limited launch account gives way to the account the chain picks with the most headroom.
+ * `undo` kills with the session-level exact-match target (`=<name>`, no colon); the
  * pane-level targets inside `launchClaude` carry the trailing colon (`NEW-13`).
  */
 const startClaude: SagaStep = {
@@ -912,7 +927,7 @@ const startClaude: SagaStep = {
   statusText: "Starting Claude…",
   async run(ctx) {
     const account = await resolveLaunchAccount(
-      ctx.requestedAccountId ?? getActiveAccountId(),
+      await launchAccountOf(ctx.requestedAccountId ?? getActiveAccountId()),
     );
     ctx.claudeAccountId = account.id;
     await launchClaude({

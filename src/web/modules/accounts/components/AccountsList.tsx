@@ -1,4 +1,5 @@
 import type { ClaudeAccountSummary } from "../../../../shared/types.js";
+import type { UsageThresholds } from "../../../../shared/usage-thresholds.js";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { Button } from "@/components/ui/button";
 import { AccountRow } from "./AccountRow";
@@ -8,6 +9,7 @@ interface AccountsListProps {
   accounts: ClaudeAccountSummary[];
   activeId: string;
   now: number;
+  thresholds: UsageThresholds;
   loaded: boolean;
   failed: boolean;
   removeError: string | null;
@@ -26,6 +28,7 @@ export function AccountsList({
   accounts,
   activeId,
   now,
+  thresholds,
   loaded,
   failed,
   removeError,
@@ -88,6 +91,7 @@ export function AccountsList({
               account={account}
               active={account.id === activeId}
               now={now}
+              thresholds={thresholds}
               reloginDisabled={reloginDisabled}
               onSwitch={() => onSwitch(account)}
               onRelogin={() => onRelogin(account)}

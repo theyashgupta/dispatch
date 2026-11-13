@@ -4,8 +4,14 @@ import type {
   ClaudeUsageSnapshot,
   ClaudeUsageWindow,
 } from "../../../../shared/types.js";
+import {
+  DEFAULT_USAGE_THRESHOLDS,
+  toneForPercent,
+  type UsageThresholds,
+  type UsageTone,
+} from "../../../../shared/usage-thresholds.js";
 
-export type UsageTone = "ok" | "stale" | "down";
+export type { UsageTone };
 
 const KIND_ORDER: Record<string, number> = {
   session: 0,
@@ -35,12 +41,13 @@ export function tightestWindow(
 }
 
 /**
- * Map a percent to a colour tone: under 70 calm, 70 to 89 warning, 90 and above critical.
+ * Map a percent to a colour tone: calm below the warning percent, warning below critical, critical from there.
  */
-export function toneFor(percent: number): UsageTone {
-  if (percent >= 90) return "down";
-  if (percent >= 70) return "stale";
-  return "ok";
+export function toneFor(
+  percent: number,
+  thresholds: UsageThresholds = DEFAULT_USAGE_THRESHOLDS,
+): UsageTone {
+  return toneForPercent(percent, thresholds);
 }
 
 /**
@@ -198,6 +205,7 @@ export interface ChipState {
  */
 export function chipState(
   usage: ClaudeUsageSnapshot,
+  thresholds: UsageThresholds = DEFAULT_USAGE_THRESHOLDS,
   now: number = Date.now(),
 ): ChipState {
   const tightest = usage.status === "ok" ? tightestWindow(usage.windows) : null;
@@ -211,7 +219,7 @@ export function chipState(
   }
   const reset = formatReset(tightest.resetsAt, now);
   return {
-    tone: toneFor(tightest.percent),
+    tone: toneFor(tightest.percent, thresholds),
     summary: `${tightest.percent}% used${reset ? `, resets ${reset}` : ""}`,
     label: `${tightest.percent}%`,
   };
@@ -231,6 +239,8 @@ const CLOCK_FORMAT: Intl.DateTimeFormatOptions = {
 /**
  * Pick the one status line under the popover bars: login, limit, usage status, then worst pace.
  *
+ * @remarks A limit set by the user's threshold says so, because Claude itself would still accept work.
+ *
  * @returns Null when there is nothing to say.
  */
 export function accountStateLine(
@@ -247,8 +257,12 @@ export function accountStateLine(
     return { text: "Login expired, sign in again", tone: "down" };
   }
   if (account.state === "limited") {
+    const limited =
+      account.limitSource === "threshold"
+        ? "Limited by your threshold"
+        : "Limited";
     const at = account.limitedUntil ? Date.parse(account.limitedUntil) : NaN;
-    if (Number.isNaN(at) || at <= now) return { text: "Limited", tone: "down" };
+    if (Number.isNaN(at) || at <= now) return { text: limited, tone: "down" };
     const clock =
       new Date(at).toDateString() !== new Date(now).toDateString()
         ? new Date(at).toLocaleString(undefined, {
@@ -256,7 +270,7 @@ export function accountStateLine(
             ...CLOCK_FORMAT,
           })
         : new Date(at).toLocaleTimeString(undefined, CLOCK_FORMAT);
-    return { text: `Limited until ${clock}`, tone: "down" };
+    return { text: `${limited} until ${clock}`, tone: "down" };
   }
   const copy = statusCopy(usage);
   if (copy !== null) {

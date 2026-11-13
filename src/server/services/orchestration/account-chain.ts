@@ -6,6 +6,7 @@ import {
   type ClaudeAccountsSettings,
   type ClaudeUsageSnapshot,
   type DecisionItem,
+  type SessionRef,
 } from "../../../shared/types.js";
 import { SWITCH_NOW_REASON } from "../../../shared/account-chain.js";
 import { ALL_BOARDS } from "../../../shared/board-key.js";
@@ -15,12 +16,14 @@ import { boardRepository as store } from "../../store/board-repository.js";
 import {
   filterByHysteresis,
   passesHysteresis,
+  pickHeadroomAccount,
   selectAccount,
   type BucketedCandidate,
 } from "../domain/account-selection.js";
 import {
   chainStateOf,
   deriveAccountState,
+  expireLimit,
   isShadowOfHome,
   isStaleSurface,
   isTokenReadFailed,
@@ -62,6 +65,7 @@ import {
   onUsageRefreshed,
   refreshUsage,
   usageBuckets,
+  usageLimitOf,
 } from "./claude-usage.js";
 import { onDecisionAnswered } from "./decision-items.js";
 import {
@@ -70,6 +74,8 @@ import {
 } from "./session-account-apply.js";
 import { continueAtLimit, sessionOf } from "./session-account-move.js";
 import { liveTurnState, onLimitSignal } from "./session-turn.js";
+import { setLaunchAccountOf } from "./steps.js";
+import { ownerPolicy, record } from "./supervisor-record.js";
 
 const RESET_GRACE_MS = 2 * 60 * 1000;
 const RECHECK_MS = 15 * 60 * 1000;
@@ -422,11 +428,11 @@ async function ingest(
     !limit && !isShadow && isTokenReadFailed(usage)
       ? await deps.loggedIn(id)
       : null;
-  const { thresholdPercent } = getClaudeAccountsSettings();
+  const limitOf = usageLimitOf();
   const derived = deriveAccountState(
     usage,
     { loggedIn, ...(limit ? { limit } : {}) },
-    thresholdPercent,
+    limitOf,
     new Date(now),
   );
   const prior = chain.accounts[id];
@@ -444,13 +450,14 @@ async function ingest(
     derived.state !== "login-expired" &&
     prior.limitedUntil !== null &&
     Date.parse(prior.limitedUntil) > now &&
-    !showsNewPeriod(usage, prior, thresholdPercent);
+    !showsNewPeriod(usage, prior, limitOf);
   const entry: ChainAccountEntry = {
     ...chainStateOf({
       shadowed: isShadow,
       needsLogin,
       held,
       heldUntil: prior?.limitedUntil ?? null,
+      heldSource: prior?.limitSource,
       derived,
     }),
     buckets: usageBuckets(usage),
@@ -581,10 +588,10 @@ async function failover(reason: string, hysteresis = false): Promise<void> {
   const from = getActiveAccountId();
   const now = new Date(deps.now());
   const all = await limitMoveCandidates();
-  const { thresholdPercent, hysteresisPercent } = getClaudeAccountsSettings();
+  const { hysteresisPercent } = getClaudeAccountsSettings();
   const selection = selectAccount(
     hysteresis
-      ? filterByHysteresis(all, thresholdPercent, hysteresisPercent)
+      ? filterByHysteresis(all, usageLimitOf(), hysteresisPercent)
       : all,
     now,
   );
@@ -612,8 +619,82 @@ async function onLimited(
 }
 
 /**
- * Store one usage read and fail over when the account in use is at the threshold.
- * With a managed default the home login is not a chain account, so a `default` read is ignored.
+ * Tell whether a session is a live loop whose board runs the supervisor with the usage limit policy `wait`.
+ */
+function isWaitingLoop(ref: SessionRef): boolean {
+  const card = store.getCard(ref.cardId);
+  const session = sessionOf(ref.cardId, ref.sessionId);
+  const policy = card && ownerPolicy(card);
+  return (
+    session?.stateReason === undefined &&
+    policy?.supervisor === "on" &&
+    policy.usageLimit === "wait"
+  );
+}
+
+/**
+ * Move the waiting loops of an account that just reached a user threshold to the account with the most headroom.
+ *
+ * @remarks With no account above the hysteresis the loops stay, and Claude's own limit and the
+ * `usageLimit` rule act later. Each moved, queued or skipped loop gets a `limit_move` row.
+ */
+async function moveThresholdLoops(id: string): Promise<void> {
+  const to = pickHeadroomAccount(
+    await limitMoveCandidates(),
+    id,
+    usageLimitOf(),
+    getClaudeAccountsSettings().hysteresisPercent,
+  );
+  if (to === null) return;
+  const result = await applyAutomaticMove(id, to, isWaitingLoop);
+  const rows: [SessionRef, string][] = [
+    ...result.moved.map((ref): [SessionRef, string] => [ref, "moved"]),
+    ...result.queued.map((ref): [SessionRef, string] => [ref, "queued"]),
+    ...result.skipped.map((ref): [SessionRef, string] => [ref, ref.reason]),
+  ];
+  for (const [ref, outcome] of rows) {
+    const card = store.getCard(ref.cardId);
+    const session = sessionOf(ref.cardId, ref.sessionId);
+    if (!card || !session) continue;
+    record(card, session, {
+      action: "limit_move",
+      from: id,
+      to,
+      result: outcome,
+      reason: "threshold",
+    });
+  }
+}
+
+/**
+ * Return the account a new session launches on: `id`, or the account with the most headroom when a user threshold limits `id`.
+ *
+ * @remarks With no account above the hysteresis, or with the controller stopped, it returns `id`.
+ */
+export async function launchAccountFor(id: string): Promise<string> {
+  const entry = chain.accounts[canonicalAccountId(id)];
+  if (
+    !running ||
+    entry?.limitSource !== "threshold" ||
+    expireLimit(entry, new Date(deps.now())).state !== "limited"
+  ) {
+    return id;
+  }
+  return (
+    pickHeadroomAccount(
+      await limitMoveCandidates(),
+      canonicalAccountId(id),
+      usageLimitOf(),
+      getClaudeAccountsSettings().hysteresisPercent,
+    ) ?? id
+  );
+}
+
+/**
+ * Store one usage read and fail over when the account in use is at its limit.
+ *
+ * @remarks With a managed default the home login is not a chain account, so a `default` read is
+ * ignored. An account that turns limited by a user threshold first moves its waiting loops.
  */
 export function handleUsageRead(
   id: string,
@@ -626,6 +707,10 @@ export function handleUsageRead(
     ) {
       return;
     }
+    const prior = chain.accounts[id];
+    const wasLimited =
+      prior !== undefined &&
+      expireLimit(prior, new Date(deps.now())).state === "limited";
     const entry = await ingest(id, usage);
     const expiresAt = usage.loginExpiresAt;
     if (
@@ -644,6 +729,9 @@ export function handleUsageRead(
       deps.emit({ kind: "login-expiring", account: id, expiresAt });
     }
     if (entry.state === "limited") {
+      if (!wasLimited && entry.limitSource === "threshold") {
+        await moveThresholdLoops(id).catch(warnChain);
+      }
       await onLimited(id, false, "usage at the threshold");
     }
   });
@@ -679,16 +767,16 @@ export function handleLimitSignal(
       : undefined;
   return enqueue(async () => {
     if (id === undefined || id !== getActiveAccountId()) return;
-    const { thresholdPercent } = getClaudeAccountsSettings();
+    const limitOf = usageLimitOf();
     let usage = deps.cachedUsage(id);
     if (pane !== null) {
-      if (isStaleSurface(pane, usage, thresholdPercent, new Date(deps.now()))) {
+      if (isStaleSurface(pane, usage, limitOf, new Date(deps.now()))) {
         return;
       }
       usage = await deps.refreshUsage(id, "limit-surface");
       if (
         usage.status === "ok" &&
-        usage.windows.every((w) => w.percent < thresholdPercent)
+        usage.windows.every((w) => w.percent < limitOf(w.kind))
       ) {
         return;
       }
@@ -742,12 +830,12 @@ async function checkReturn(id: string): Promise<void> {
   const order = await readChainOrder();
   const rank = order.indexOf(id);
   if (id === inUse || rank < 0 || rank > order.indexOf(inUse)) return;
-  const { thresholdPercent, hysteresisPercent } = getClaudeAccountsSettings();
+  const { hysteresisPercent } = getClaudeAccountsSettings();
   if (
     !passesHysteresis(
       entry.buckets,
       entry.state,
-      thresholdPercent,
+      usageLimitOf(),
       hysteresisPercent,
     )
   ) {
@@ -899,6 +987,7 @@ export async function startAccountChain(
 ): Promise<() => void> {
   for (const key of [...timers.keys()]) cancel(key);
   deps = { ...realDeps, ...overrides };
+  setLaunchAccountOf(launchAccountFor);
   chain = await readChainState();
   lastOffer = null;
   home = await readDefaultIdentity().catch(() => undefined);

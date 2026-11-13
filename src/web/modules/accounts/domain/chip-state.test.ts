@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { ClaudeUsageSnapshot } from "../../../../shared/types.js";
+import { DEFAULT_USAGE_THRESHOLDS } from "../../../../shared/usage-thresholds.js";
 import { chipState } from "./usage-format.js";
 
 const snapshot = (
@@ -27,10 +28,39 @@ void test("chipState shows the status copy in the stale tone for error, rate-lim
     ["rate-limited", "Usage rate limited, try again later"],
     ["stale", "Usage stale, refreshes on the next session"],
   ] as const) {
-    assert.deepEqual(chipState(snapshot(status)), {
+    assert.deepEqual(chipState(snapshot(status), DEFAULT_USAGE_THRESHOLDS), {
       tone: "stale",
       summary: copy,
       label: copy,
     });
   }
+});
+
+void test("chipState colours the tightest window by custom warning 60 and critical 80", () => {
+  const custom = {
+    ...DEFAULT_USAGE_THRESHOLDS,
+    warningPercent: 60,
+    criticalPercent: 80,
+  };
+  const toneAt = (percent: number) =>
+    chipState(
+      {
+        ...snapshot("ok"),
+        windows: [{ ...snapshot("ok").windows[0], percent }],
+      },
+      custom,
+    ).tone;
+  assert.deepEqual([59, 60, 79, 80].map(toneAt), [
+    "ok",
+    "stale",
+    "stale",
+    "down",
+  ]);
+  assert.equal(
+    chipState({
+      ...snapshot("ok"),
+      windows: [{ ...snapshot("ok").windows[0], percent: 79 }],
+    }).tone,
+    "stale",
+  );
 });

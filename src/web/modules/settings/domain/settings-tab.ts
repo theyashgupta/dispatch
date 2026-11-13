@@ -1,6 +1,7 @@
 export const SETTINGS_TABS = [
   "connections",
   "board",
+  "accounts",
   "appearance",
   "notifications",
   "remote",
@@ -16,7 +17,6 @@ const LEGACY_TAB_ALIASES: Readonly<Record<string, SettingsTab>> = {
   filters: "connections",
   playbooks: "connections",
   vault: "connections",
-  accounts: "connections",
   models: "board",
   cleanup: "board",
   terminal: "appearance",

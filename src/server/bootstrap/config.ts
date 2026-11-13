@@ -34,6 +34,10 @@ import {
   DEFAULT_TERMINAL_APPEARANCE,
   validateTerminalAppearance,
 } from "../../shared/terminal-appearance.js";
+import {
+  validateUsageThresholds,
+  type UsageThresholds,
+} from "../../shared/usage-thresholds.js";
 import { parseProfile } from "../../shared/profile.js";
 import { parseStateMap } from "../../shared/linear-state-map.js";
 import { StartupError } from "./binary-check.js";
@@ -120,6 +124,23 @@ function readCrossSessionInbound(
     `[config] crossSessionInbound in ${CONFIG_PATH} must be one of ${choices}; using "${DEFAULT_CROSS_SESSION_INBOUND}".`,
   );
   return DEFAULT_CROSS_SESSION_INBOUND;
+}
+
+/**
+ * Read the `usageThresholds` block: absent or invalid resolves to `undefined`, so the defaults apply at read time.
+ *
+ * @remarks An invalid block prints one warning instead of a `StartupError`, so a hand edit never blocks boot.
+ */
+function readUsageThresholds(
+  parsed: Record<string, unknown>,
+): UsageThresholds | undefined {
+  if (parsed.usageThresholds === undefined) return undefined;
+  const result = validateUsageThresholds(parsed.usageThresholds);
+  if (result.ok) return result.value;
+  console.warn(
+    `[config] usageThresholds in ${CONFIG_PATH} is invalid (${result.error}); using the defaults.`,
+  );
+  return undefined;
 }
 
 /**
@@ -555,6 +576,7 @@ export function loadConfig(): Config {
 
   const activeClaudeAccountId = readActiveClaudeAccountId(parsed);
   const claudeAccounts = readClaudeAccounts(parsed);
+  const usageThresholds = readUsageThresholds(parsed);
   const stateMap = readNestedStateMap(parsed);
   const config: Config = {
     linearApiKey: rawKey,
@@ -599,6 +621,7 @@ export function loadConfig(): Config {
     claudeArgs: readClaudeArgs(parsed),
     ...(activeClaudeAccountId !== undefined ? { activeClaudeAccountId } : {}),
     ...(claudeAccounts ? { claudeAccounts } : {}),
+    ...(usageThresholds ? { usageThresholds } : {}),
     terminal: readTerminal(parsed),
   };
   const profile = readProfile(parsed);

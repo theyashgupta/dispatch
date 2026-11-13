@@ -59,9 +59,10 @@ export function cacheHomeIdentity(identity: ClaudeIdentity): void {
 /**
  * List every account in chain order with its usage snapshot and chain fields for `GET /accounts`.
  *
- * @remarks `state`, `buckets` and `limitedUntil` come from the chain state file; an account the
- * controller has not read yet is `unknown` with the buckets of its usage snapshot. A stored
- * `limited` state whose `limitedUntil` passed reads `unknown` with no `limitedUntil`.
+ * @remarks `state`, `buckets`, `limitedUntil` and a limited state's `limitSource` come from the
+ * chain state file; an account the controller has not read yet is `unknown` with the buckets of its
+ * usage snapshot. A stored `limited` state whose `limitedUntil` passed reads `unknown` with no
+ * `limitedUntil` and no `limitSource`.
  */
 export async function listAccountSummaries(): Promise<ClaudeAccountSummary[]> {
   const [accounts, order, chain] = await Promise.all([
@@ -78,6 +79,9 @@ export async function listAccountSummaries(): Promise<ClaudeAccountSummary[]> {
         {
           state: entry?.state ?? "unknown",
           limitedUntil: entry?.limitedUntil ?? null,
+          ...(entry?.state === "limited" && entry.limitSource
+            ? { limitSource: entry.limitSource }
+            : {}),
         },
         new Date(),
       );

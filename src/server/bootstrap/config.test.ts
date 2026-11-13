@@ -370,3 +370,38 @@ test("claudeAccounts hysteresisPercent is clamped at load and a missing key reso
   writeConfig({ claudeAccounts: { thresholdPercent: 90 } });
   assert.equal(loadConfig().claudeAccounts?.hysteresisPercent, undefined);
 });
+
+test("an absent usageThresholds block is left out", () => {
+  writeConfig({});
+  assert.equal("usageThresholds" in loadConfig(), false);
+});
+
+test("a valid usageThresholds block is kept", () => {
+  const usageThresholds = {
+    warningPercent: 60,
+    criticalPercent: 80,
+    limitPercent: { session: 100, weekly_all: 85, weekly_scoped: 90 },
+  };
+  writeConfig({ usageThresholds });
+  assert.deepEqual(loadConfig().usageThresholds, usageThresholds);
+});
+
+test("an invalid usageThresholds block is left out with one warning", () => {
+  writeConfig({
+    usageThresholds: {
+      warningPercent: 90,
+      criticalPercent: 80,
+      limitPercent: { session: 100, weekly_all: 100, weekly_scoped: 100 },
+    },
+  });
+  const warn = mock.method(console, "warn", () => undefined);
+  try {
+    assert.equal("usageThresholds" in loadConfig(), false);
+    const calls = warn.mock.calls.filter((c) =>
+      String(c.arguments[0]).includes("usageThresholds"),
+    );
+    assert.equal(calls.length, 1);
+  } finally {
+    warn.mock.restore();
+  }
+});

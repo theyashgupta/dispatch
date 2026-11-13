@@ -1,5 +1,6 @@
 import { RefreshCw } from "lucide-react";
 import type { ClaudeAccountSummary } from "../../../../shared/types.js";
+import type { UsageThresholds } from "../../../../shared/usage-thresholds.js";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PopoverContent } from "@/components/ui/popover";
@@ -15,6 +16,7 @@ interface AccountPopoverProps {
   activeId: string;
   side: "top" | "right";
   now: number;
+  thresholds: UsageThresholds;
   refreshingId: string | null;
   notice: string | null;
   onRefresh: (id: string) => void;
@@ -28,6 +30,7 @@ export function AccountPopover({
   activeId,
   side,
   now,
+  thresholds,
   refreshingId,
   notice,
   onRefresh,
@@ -99,6 +102,7 @@ export function AccountPopover({
                 key={`${w.kind}:${w.label}`}
                 usageWindow={w}
                 pacedAt={pacedAt}
+                thresholds={thresholds}
               />
             ))}
             {lineText && (

@@ -12,12 +12,14 @@ import { useNow } from "@/modules/accounts/hooks/use-now";
 import { useRemoveAccountMutation } from "@/modules/accounts/queries/accounts-queries";
 import { useSingleFlight } from "@/queries/single-flight";
 import { useAccountsQuery } from "@/queries/accounts-queries";
+import { useUsageThresholds } from "@/queries/usage-thresholds-queries";
 
 const EXPIRY_TICK_MS = 60_000;
 
 export function AccountsContainer() {
   const now = useNow(EXPIRY_TICK_MS);
   const accounts = useAccountsQuery();
+  const thresholds = useUsageThresholds();
   const { refetch } = accounts;
   const { id: routeId } = useParams({ from: "/accounts/{-$id}" });
   const navigate = useNavigate();
@@ -65,6 +67,7 @@ export function AccountsContainer() {
         accounts={accounts.data?.accounts ?? []}
         activeId={accounts.data?.activeId ?? ""}
         now={now}
+        thresholds={thresholds}
         loaded={!accounts.isPending}
         failed={accounts.isError}
         removeError={removeError}

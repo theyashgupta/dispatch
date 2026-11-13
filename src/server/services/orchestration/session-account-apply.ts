@@ -132,12 +132,14 @@ async function continueAfterMove(
 async function retargetPendingMoves(
   fromId: string,
   targetId: string,
+  include: (ref: SessionRef) => boolean,
 ): Promise<SessionRef[]> {
   const retargeted: SessionRef[] = [];
   for (const { card, session } of store.sessionsWithTmux(ALL_BOARDS)) {
     if (
       session.pendingClaudeAccountId !== fromId ||
-      session.accountPinned === true
+      session.accountPinned === true ||
+      !include({ cardId: card.id, sessionId: session.id })
     ) {
       continue;
     }
@@ -152,18 +154,22 @@ async function retargetPendingMoves(
  *
  * @remarks A queued move to `fromId` is re-targeted and any other queued move is left alone, so a
  * second failover inside one busy turn never strands a session. A session whose step throws lands
- * in `skipped` as `error`, so it never strands the rest.
+ * in `skipped` as `error`, so it never strands the rest. `include` limits the move to the sessions
+ * it accepts.
  * @see docs/ARCHITECTURE.md#account-chain
  */
 export async function applyAutomaticMove(
   fromId: string,
   targetId: string,
+  include: (ref: SessionRef) => boolean = () => true,
 ): Promise<AccountApplyResult> {
   const result: AccountApplyResult = { moved: [], queued: [], skipped: [] };
-  result.queued.push(...(await retargetPendingMoves(fromId, targetId)));
+  result.queued.push(
+    ...(await retargetPendingMoves(fromId, targetId, include)),
+  );
   const sessions: PlanSession[] = [];
   for (const s of await planSessions()) {
-    if (s.accountId !== fromId) continue;
+    if (s.accountId !== fromId || !include(s)) continue;
     const pending = pendingOf(s.cardId, s.sessionId);
     if (pending !== undefined && pending !== targetId) continue;
     if (sessionOf(s.cardId, s.sessionId)?.accountPinned === true) {

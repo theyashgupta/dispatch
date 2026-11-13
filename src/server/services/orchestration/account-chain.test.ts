@@ -18,7 +18,11 @@ import {
   NO_STOP_LIMIT_PANE,
   installFakeTmux,
 } from "../../test-support/fake-tmux.js";
-import { DEFAULT_BOARD_KEY } from "../../../shared/board-key.js";
+import {
+  DEFAULT_BOARD_KEY,
+  defaultBoardPolicy,
+} from "../../../shared/board-key.js";
+import { DEFAULT_USAGE_THRESHOLDS } from "../../../shared/usage-thresholds.js";
 
 process.env.DISPATCH_USAGE_URL = "http://127.0.0.1:1/usage";
 process.env.DISPATCH_LIMIT_CLEAR_MS = "600";
@@ -42,6 +46,7 @@ const {
   forgetChainAccount,
   handleLimitSignal,
   handleUsageRead,
+  launchAccountFor,
   noteHomeIdentity,
   requestFailover,
   startAccountChain,
@@ -61,6 +66,7 @@ const {
   setHooksRuntime,
   setOrchestrationConfig,
   updateClaudeAccountsSettings,
+  updateUsageThresholds,
 } = await import("../infra/config-holder.js");
 setOrchestrationConfig({ linearApiKey: "", port: 4700 });
 setHooksRuntime({ capable: true, port: 1, statusChannel: "auto" });
@@ -2413,4 +2419,134 @@ void test("a home identity noted while the chain is stopped resolves and changes
   const saved = await readChainState();
   assert.equal(saved.accounts[ACCOUNT_A]?.state, "shadowed-by-home");
   assert.equal(saved.accounts[ACCOUNT_B], undefined);
+});
+
+/** A good usage read with a session bucket at 10 and a weekly_all bucket at `percent`. */
+function weeklyUsage(percent: number): ClaudeUsageSnapshot {
+  const base = usage(10);
+  return {
+    ...base,
+    windows: [
+      ...base.windows,
+      { ...base.windows[0], kind: "weekly_all", label: "Weekly", percent },
+    ],
+  };
+}
+
+/** Run `body` with weekly_all limited at 85 and the default board on the given loop policy. */
+async function withWeeklyLimit85(
+  body: () => Promise<void>,
+  usageLimit: "wait" | "stop" = "wait",
+): Promise<void> {
+  const policy = defaultBoardPolicy(DEFAULT_BOARD_KEY);
+  updateUsageThresholds({
+    ...DEFAULT_USAGE_THRESHOLDS,
+    limitPercent: { ...DEFAULT_USAGE_THRESHOLDS.limitPercent, weekly_all: 85 },
+  });
+  await store.setBoardPolicy(DEFAULT_BOARD_KEY, {
+    ...policy,
+    supervisor: "on",
+    usageLimit,
+  });
+  try {
+    await body();
+  } finally {
+    updateUsageThresholds(DEFAULT_USAGE_THRESHOLDS);
+    await store.setBoardPolicy(DEFAULT_BOARD_KEY, policy);
+  }
+}
+
+const thresholdMoves = () =>
+  store
+    .listLatestOrchestrationEvents(DEFAULT_BOARD_KEY, 500)
+    .filter(
+      (e) => e.data.action === "limit_move" && e.data.reason === "threshold",
+    );
+
+void test("threshold move: a loop on an account that reaches its weekly limit of 85 moves to the account with the most headroom, and a pinned loop stays", async () => {
+  await withWeeklyLimit85(async () => {
+    await begin({ hysteresisPercent: 10 });
+    await handleUsageRead("default", weeklyUsage(60));
+    await handleUsageRead(ACCOUNT_A, weeklyUsage(20));
+    const loop = await sessionCard("tm-loop", undefined, ACCOUNT_B);
+    const pinned = await sessionCard("tm-pinned", undefined, ACCOUNT_B);
+    await store.setAccountPinned(pinned.cardId, pinned.sessionId, true);
+    await handleUsageRead(ACCOUNT_B, weeklyUsage(85));
+    const saved = await readChainState();
+    assert.equal(saved.accounts[ACCOUNT_B]?.state, "limited");
+    assert.equal(saved.accounts[ACCOUNT_B]?.limitSource, "threshold");
+    assert.equal(sessionOf(loop)?.claudeAccountId, ACCOUNT_A);
+    assert.equal(sessionOf(pinned)?.claudeAccountId, ACCOUNT_B);
+    const row = (cardId: string) =>
+      thresholdMoves()
+        .filter((e) => e.cardId === cardId)
+        .map((e) => [e.data.from, e.data.to, e.data.result]);
+    assert.deepEqual(row(loop.cardId), [[ACCOUNT_B, ACCOUNT_A, "moved"]]);
+    assert.deepEqual(row(pinned.cardId), [[ACCOUNT_B, ACCOUNT_A, "pinned"]]);
+    assert.equal(getActiveAccountId(), "default");
+  });
+});
+
+void test("threshold move: with no account above the hysteresis the loop stays and nothing is recorded", async () => {
+  await withWeeklyLimit85(async () => {
+    await begin({ hysteresisPercent: 10 });
+    await handleUsageRead("default", weeklyUsage(80));
+    await handleUsageRead(ACCOUNT_A, weeklyUsage(75));
+    const loop = await sessionCard("tm-stay", undefined, ACCOUNT_B);
+    await handleUsageRead(ACCOUNT_B, weeklyUsage(90));
+    assert.equal(sessionOf(loop)?.claudeAccountId, ACCOUNT_B);
+    assert.equal(
+      thresholdMoves().some((e) => e.cardId === loop.cardId),
+      false,
+    );
+  });
+});
+
+void test("threshold move: a board with usageLimit stop, or a limit Claude set, leaves the loop alone", async () => {
+  await withWeeklyLimit85(async () => {
+    await begin({ hysteresisPercent: 10 });
+    await handleUsageRead(ACCOUNT_A, weeklyUsage(20));
+    const loop = await sessionCard("tm-stop", undefined, ACCOUNT_B);
+    await handleUsageRead(ACCOUNT_B, weeklyUsage(85));
+    assert.equal(sessionOf(loop)?.claudeAccountId, ACCOUNT_B);
+  }, "stop");
+  await withWeeklyLimit85(async () => {
+    await begin({ hysteresisPercent: 10 });
+    await handleUsageRead(ACCOUNT_A, weeklyUsage(20));
+    const loop = await sessionCard("tm-claude", undefined, ACCOUNT_B);
+    await handleUsageRead(ACCOUNT_B, weeklyUsage(100));
+    assert.equal(
+      (await readChainState()).accounts[ACCOUNT_B]?.limitSource,
+      "claude",
+    );
+    assert.equal(sessionOf(loop)?.claudeAccountId, ACCOUNT_B);
+  });
+});
+
+void test("launchAccountFor swaps a limited account for the one with the most headroom, and keeps it when none has headroom", async () => {
+  await withWeeklyLimit85(async () => {
+    await begin({ hysteresisPercent: 10 });
+    await handleUsageRead("default", weeklyUsage(60));
+    await handleUsageRead(ACCOUNT_A, weeklyUsage(20));
+    assert.equal(await launchAccountFor(ACCOUNT_B), ACCOUNT_B);
+    await handleUsageRead(ACCOUNT_B, weeklyUsage(85));
+    assert.equal(await launchAccountFor(ACCOUNT_B), ACCOUNT_A);
+    assert.equal(await launchAccountFor("default"), "default");
+    await handleUsageRead(ACCOUNT_A, weeklyUsage(80));
+    await handleUsageRead("default", weeklyUsage(90));
+    assert.equal(await launchAccountFor(ACCOUNT_B), ACCOUNT_B);
+  });
+});
+
+void test("launchAccountFor keeps an account that Claude limits, as on main", async () => {
+  await withWeeklyLimit85(async () => {
+    await begin({ hysteresisPercent: 10 });
+    await handleUsageRead(ACCOUNT_A, weeklyUsage(20));
+    await handleUsageRead(ACCOUNT_B, weeklyUsage(100));
+    assert.equal(
+      (await readChainState()).accounts[ACCOUNT_B]?.limitSource,
+      "claude",
+    );
+    assert.equal(await launchAccountFor(ACCOUNT_B), ACCOUNT_B);
+  });
 });

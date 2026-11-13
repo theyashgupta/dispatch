@@ -1,4 +1,4 @@
-import { bindingPercent } from "./usage-poll-plan.js";
+import { leastHeadroom, type LimitOf } from "./usage-poll-plan.js";
 import type {
   ChainAccountEntry,
   ChainAccountState,
@@ -52,52 +52,52 @@ export function selectAccount(
 }
 
 /**
- * Tell whether an account sits far enough below the threshold to take work on a usage trigger.
+ * Tell whether an account sits far enough below its limits to take work on a usage trigger.
  *
  * @remarks Hysteresis 0 passes every account. Otherwise the binding bucket is the one with the
- * highest percent, and an account with no buckets or an `unknown` state never passes.
+ * least headroom below its own limit percent, and an account with no buckets or an `unknown` state
+ * never passes.
  */
 export function passesHysteresis(
-  buckets: readonly { percent: number }[],
+  buckets: readonly { kind: string; percent: number }[],
   state: ChainAccountState,
-  thresholdPercent: number,
+  limitOf: LimitOf,
   hysteresisPercent: number,
 ): boolean {
   if (hysteresisPercent === 0) return true;
-  const binding = bindingPercent(buckets);
-  if (state === "unknown" || binding === null) return false;
-  return binding < thresholdPercent - hysteresisPercent;
+  const headroom = leastHeadroom(buckets, limitOf);
+  if (state === "unknown" || headroom === null) return false;
+  return headroom > hysteresisPercent;
 }
 
 /**
- * Keep the usage-trigger candidates whose binding bucket is below the hysteresis line.
+ * Keep the usage-trigger candidates whose binding bucket has more headroom than the hysteresis.
  */
 export function filterByHysteresis<
-  T extends ChainCandidate & { buckets: readonly { percent: number }[] },
->(
-  chain: readonly T[],
-  thresholdPercent: number,
-  hysteresisPercent: number,
-): T[] {
+  T extends ChainCandidate & {
+    buckets: readonly { kind: string; percent: number }[];
+  },
+>(chain: readonly T[], limitOf: LimitOf, hysteresisPercent: number): T[] {
   return chain.filter((a) =>
-    passesHysteresis(a.buckets, a.state, thresholdPercent, hysteresisPercent),
+    passesHysteresis(a.buckets, a.state, limitOf, hysteresisPercent),
   );
 }
 
 /**
- * Pick the account with the most weekly headroom to take a session that stopped on the usage limit.
+ * Pick the account with the most weekly headroom below its own limits to take a session off a limited account.
  *
  * @remarks Only `available` and `near-limit` accounts count, so `limited`, `login-expired` and
- * `unknown` never win. The weekly percent is the highest bucket whose kind starts with `weekly`,
- * and it must sit below the hysteresis line. The lowest percent wins and a tie keeps chain order.
+ * `unknown` never win. The weekly headroom is the least headroom among the buckets whose kind starts
+ * with `weekly`, and it must be greater than the hysteresis. The most headroom wins and a tie keeps
+ * chain order.
  */
 export function pickHeadroomAccount(
   chain: readonly BucketedCandidate[],
   fromId: string,
-  thresholdPercent: number,
+  limitOf: LimitOf,
   hysteresisPercent: number,
 ): string | null {
-  let best: { id: string; percent: number } | null = null;
+  let best: { id: string; headroom: number } | null = null;
   for (const a of chain) {
     if (
       a.id === fromId ||
@@ -105,10 +105,10 @@ export function pickHeadroomAccount(
     )
       continue;
     const weekly = a.buckets.filter((b) => b.kind.startsWith("weekly"));
-    const percent = bindingPercent(weekly);
-    if (percent === null) continue;
-    if (percent >= thresholdPercent - hysteresisPercent) continue;
-    if (best === null || percent < best.percent) best = { id: a.id, percent };
+    const headroom = leastHeadroom(weekly, limitOf);
+    if (headroom === null || headroom <= hysteresisPercent) continue;
+    if (best === null || headroom > best.headroom)
+      best = { id: a.id, headroom };
   }
   return best?.id ?? null;
 }

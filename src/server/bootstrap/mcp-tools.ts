@@ -449,7 +449,7 @@ export const MCP_TOOLS: readonly McpTool[] = [
   {
     name: "list_accounts",
     description:
-      "List the Claude accounts with the active id: for each account the id, the default flag, the plan, the chain state, the in use flag, the chain position, the limit end and the usage windows with their percent and reset time. Choose the account with the most weekly headroom for a long loop and pass it to start_card. This tool changes nothing.",
+      "List the Claude accounts with the active id: for each account the id, the default flag, the plan, the chain state, the in use flag, the chain position, the limit end, the limit source (claude or threshold) and the usage windows with their percent and reset time. Choose the account with the most weekly headroom for a long loop and pass it to start_card. This tool changes nothing.",
     input: {},
     method: "GET",
     path: "/accounts",

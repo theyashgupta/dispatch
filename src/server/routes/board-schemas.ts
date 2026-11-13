@@ -7,6 +7,7 @@ import {
 import { parseDoneLimit } from "../../shared/done-limit.js";
 import { SEARCH_QUERY_MAX, SEARCH_QUERY_MIN } from "../../shared/search.js";
 import { validateTerminalAppearance } from "../../shared/terminal-appearance.js";
+import { validateUsageThresholds } from "../../shared/usage-thresholds.js";
 import { hasControlByte } from "../services/domain/claude-launch.js";
 import { fromResult } from "./schema-primitives.js";
 
@@ -138,6 +139,8 @@ export const archiveRetentionBodySchema = z.object(
 
 /** The `PUT /config/terminal` body, normalized by `validateTerminalAppearance` with its own message. */
 export const terminalBodySchema = fromResult(validateTerminalAppearance);
+
+export const usageThresholdsBodySchema = fromResult(validateUsageThresholds);
 
 /**
  * The `PUT /config/claude-args` body (Settings ▸ Models).

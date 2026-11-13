@@ -2,10 +2,11 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { SETTINGS_TABS, settingsTabFrom } from "./settings-tab.js";
 
-test("the tab list is the nine tabs in rail order", () => {
+test("the tab list is the ten tabs in rail order", () => {
   assert.deepEqual(SETTINGS_TABS, [
     "connections",
     "board",
+    "accounts",
     "appearance",
     "notifications",
     "remote",
@@ -27,13 +28,13 @@ test("legacy ids resolve to the tab that now holds their controls", () => {
     ["filters", "connections"],
     ["playbooks", "connections"],
     ["vault", "connections"],
-    ["accounts", "connections"],
     ["models", "board"],
     ["cleanup", "board"],
     ["terminal", "appearance"],
     ["remote", "remote"],
     ["notifications", "notifications"],
     ["workspaces", "workspaces"],
+    ["accounts", "accounts"],
   ];
   for (const [id, expected] of cases) {
     assert.equal(settingsTabFrom(id), expected, id);
