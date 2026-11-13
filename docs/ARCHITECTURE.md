@@ -4467,7 +4467,8 @@ branches and open PRs are never touched. The store is written only after every s
 a failed step returns 500 naming the step and the card stays resettable; every step is idempotent,
 so a second Reset simply resumes. `board.store.ts#resetCard` then clears every record through the
 `finishCleanup` order (`setActiveSession`, `clearHookToken`, `removeSessionRecord`), clears every
-start, cleanup, marker and artifact field, and moves the card to `inbox` in one mutation. A later
+start, cleanup, marker and artifact field and the loop record `loopProgress`, and moves the card to
+`inbox` in one mutation (LOCAL-227). A later
 Start is therefore a first start: the workspace is picked again and the branch is cut fresh.
 
 ### Hooks Status Channel
@@ -6700,6 +6701,12 @@ reads the identity or writes, `assertAheadAndClean` resolves the base once. The 
 these two checks answers 409 `no-workspace`. A group with loop progress keeps the D-8 rules. A card
 that is not a group loop also passes the column check in Needs input when its loop engine is closed
 and its loop completion is complete. The ahead and clean checks still run for that card.
+A single ticket card with a stale loop record skips the `loop-not-finished` check (LOCAL-227). The
+record is stale when `loopProgress.engine` is null, `loopProgress.completion` is `not_started` and
+`launch.playbook` is a name that is not empty and does not hold "loop" or "ralph". The reader can
+keep a record from an earlier run while no engine file exists, so a restart without Reset under a
+playbook such as "Build with subagents" can keep an old record. A card with an engine, gate evidence, a loop
+playbook or no named playbook still gets `loop-not-finished`.
 
 **MCP server.** `dispatch mcp` serves the 37 tools over stdio. `bootstrap/cli.ts` reads and checks
 `DISPATCH_ORCHESTRATOR_TOKEN` and `DISPATCH_PORT`, and `bootstrap/mcp-server.ts` forwards each call to its route, and

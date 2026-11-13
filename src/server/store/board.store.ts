@@ -4134,6 +4134,7 @@ class BoardStore extends EventEmitter {
       card.prsUnknown = undefined;
       card.previews = undefined;
       card.previewsUnknown = undefined;
+      card.loopProgress = undefined;
       card.column = "inbox";
       card.updatedAt = new Date().toISOString();
       return [

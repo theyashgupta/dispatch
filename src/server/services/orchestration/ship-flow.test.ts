@@ -2742,6 +2742,86 @@ void test("startShip keeps the worktree check for a ticket card in Needs input w
   }
 });
 
+function staleLoopTicket(
+  stack: Stack,
+  playbook: string | undefined,
+  engine: LoopProgress["engine"] = null,
+  status: LoopUnitStatus = "not started",
+): Card {
+  const base = { ...store.getCard(stack.card.id)! };
+  return {
+    ...base,
+    source: "local",
+    launch: { direction: "", ...(playbook ? { playbook } : {}) },
+    branch: "unit-1",
+    column: "agent_done",
+    loopProgress: progress(
+      [status],
+      engine,
+      status === "not started" ? "not_started" : "running",
+    ),
+  };
+}
+
+void test("startShip ships a ticket card in Agent done whose stale loop record has no engine and whose playbook is not a loop playbook", async () => {
+  const stack = await newStack();
+  const card = staleLoopTicket(stack, "Build with subagents");
+  const started = await startShipFlow(CALLER, card, {
+    repository: stack.repo,
+    branches: [branchInput("unit-1")],
+  });
+  assert.equal(started.state, "running");
+  const flow = await finished(stack.card);
+  assert.equal(flow.state, "done", flow.reason ?? "");
+});
+
+void test("startShip still refuses loop-not-finished for an unfinished loop with an engine, gate evidence, a loop playbook or no playbook name", async () => {
+  const stack = await newStack();
+  await refusedCard(
+    staleLoopTicket(stack, "Build with subagents", closedEngine),
+    stack,
+    "unit-1",
+    409,
+    "loop-not-finished",
+  );
+  await refusedCard(
+    staleLoopTicket(stack, "Build with subagents", null, "in progress"),
+    stack,
+    "unit-1",
+    409,
+    "loop-not-finished",
+  );
+  await refusedCard(
+    staleLoopTicket(stack, "PRD + Ralph Loop"),
+    stack,
+    "unit-1",
+    409,
+    "loop-not-finished",
+  );
+  await refusedCard(
+    staleLoopTicket(stack, "PRD + Ralph"),
+    stack,
+    "unit-1",
+    409,
+    "loop-not-finished",
+  );
+  await refusedCard(
+    staleLoopTicket(stack, " "),
+    stack,
+    "unit-1",
+    409,
+    "loop-not-finished",
+  );
+  await refusedCard(
+    staleLoopTicket(stack, undefined),
+    stack,
+    "unit-1",
+    409,
+    "loop-not-finished",
+  );
+  assert.deepEqual(calls, []);
+});
+
 type RunOptions = Parameters<typeof shipTools.run>[2];
 
 /**

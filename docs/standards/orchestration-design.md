@@ -310,6 +310,8 @@ The checks 1 to 3 use no git call. The check 4 reads one file and runs before an
 
 Amendment, 2026-10-14 (LOCAL-109 part B): a ticket card that `start_card` started, which carries `launch`, ships through the same checks. The card must be in Agent done, and the only branch it may name is its session branch. The call also answers `loop-not-finished` when the card carries loop progress. A ticket card with no `launch` answers 400 `not-group-card`.
 
+Amendment, 2026-11-13 (LOCAL-227): a ticket card whose `loopProgress.engine` is null, whose `loopProgress.completion` is `not_started` and whose `launch.playbook` is a named playbook with no "loop" or "ralph" in its name does not get `loop-not-finished`. Reset clears `loopProgress`.
+
 **Reason:** in the G19 Unit 2 real run, group RUN-4 built and tested its code on Sonnet 5.5 for 0.25 USD and left commit 948b54c. `start_ship` refused the group twice with `loop-not-finished`, because no seeded playbook runs a roadmap loop and the group had no loop progress. The gate had no rule for a group of this kind. A review of the first version found a loop in planning with zero units and an active engine, a stale local base and a base that reached the git option parser. The engine rule, check 4 and check 6 close these cases.
 
 **Rejected:**
