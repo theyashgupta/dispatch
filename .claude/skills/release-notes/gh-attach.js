@@ -8,9 +8,9 @@
  * this script drives a headless Chromium with a persistent profile that the user signs in once.
  *
  * Usage (run from the repository root, no cd needed; playwright loads from ~/.cache/record-flow):
- *   node .claude/skills/release-notes/gh-attach.js login                       opens a window; sign in to GitHub, then close it
- *   node .claude/skills/release-notes/gh-attach.js upload <release edit url> <file> [--save]
- * The upload mode prints ATTACHMENT_URL=<url> on success. With --save it also clicks the editor's
+ *   `node .claude/skills/release-notes/gh-attach.js login` opens a window; sign in to GitHub, then close it
+ *   `node .claude/skills/release-notes/gh-attach.js upload <release edit url> <file> [--save]`
+ * The upload mode prints ATTACHMENT_URL=<url> on success. With `--save` it also clicks the editor's
  * save button so the asset is referenced at least once before `gh release edit` rewrites the body.
  */
 import { createRequire } from "node:module";
