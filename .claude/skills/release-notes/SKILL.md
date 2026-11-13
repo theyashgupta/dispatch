@@ -46,7 +46,7 @@ The Dispatch site shows every published release in its changelog feed. Every rel
 5. The site shows this sentence in its feed. It states the user benefit of the release.
 6. The summary has no link, no image and no markdown heading.
 7. After the summary, write the narrative opener from the style contract, then the other `##` sections.
-8. The title format stays `vX.Y.Z - <short name>`. Use a single hyphen with spaces.
+8. The title format stays `vX.Y.Z - <short name>`. Use a single hyphen with spaces. Do not put a parenthesis in the short name, because it breaks the hidden title line.
 9. Publishing the release (draft to published) starts the `Changelog sync` workflow (`.github/workflows/changelog-sync.yml`). The workflow sends the `release-published` event to `theyashgupta/dispatch-site`. The site then redeploys.
 10. After the publish, verify: `gh run list --workflow "Changelog sync" --limit 1`.
 11. If the repository secret `SITE_DEPLOY_TOKEN` is empty, the job prints one line and skips. Tell the user to add the secret.

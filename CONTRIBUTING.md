@@ -121,7 +121,8 @@ first publish claims the public scope for the name.
    `.planning/`, or `docs/`. Optionally clean-room smoke it: `npm i <tgz> --omit=dev` in a temp dir and run
    `dispatch --version`.
 2. Bump `version` in `package.json`, commit.
-3. `git tag vX.Y.Z`, then `git push --tags` (maintainer does this — YubiKey).
+3. Publish the release through the release-notes skill (see below). Publishing the draft release creates
+   the `vX.Y.Z` tag. Do not tag by hand.
 4. The [`publish.yml`](.github/workflows/publish.yml) workflow fires on the `v*` tag, runs `npm ci`,
    `npm run build`, and `npm publish --access public` with `NODE_AUTH_TOKEN` from `NPM_TOKEN`. Pushing to
    `main` or creating the tag file alone does not publish — only a pushed tag does.
