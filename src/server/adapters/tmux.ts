@@ -270,22 +270,63 @@ const WINDOW_ROWS = "50";
 const MIN_WINDOW_WIDTH = 120;
 
 /**
- * Pin tmux `window-size manual` for session `name`, idempotently.
+ * The tmux command list that resizes `target` to 200x50 and gives the size back to the clients.
  *
- * @remarks LOCAL-162: tmux's default `latest` sizes the window to the most recent client and keeps
- * that size after the client detaches, so one phone attach left a pane 44 columns wide, Claude Code
- * truncated its status row, and the context meter froze. Manual keeps the `-x 200 -y 50` geometry
- * the pane parsers need; a smaller ttyd client renders a clipped view of the same window.
+ * @remarks `resize-window` also sets `window-size manual` on the window, so the second command
+ * sets `latest` again; otherwise the next client to attach would see a clipped 200x50 view.
  */
-export async function pinWindowSizeManual(name: string): Promise<void> {
-  await tmux(["set-option", "-t", name, "window-size", "manual"]);
+function restoreWindowCommands(target: string): string[] {
+  return [
+    "resize-window",
+    "-t",
+    target,
+    "-x",
+    WINDOW_COLUMNS,
+    "-y",
+    WINDOW_ROWS,
+    ";",
+    "set-option",
+    "-w",
+    "-t",
+    target,
+    "window-size",
+    "latest",
+  ];
 }
 
 /**
- * Resize session `name`'s window to 200x50 when it is narrower than 120 columns, and log it.
+ * Size session `name`'s window to its latest client, and back to 200x50 when the last client
+ * detaches, idempotently.
  *
- * @remarks LOCAL-162: heals a window that a client shrank before {@link pinWindowSizeManual} held it.
- * `resize-window` also sets `window-size manual`, so the heal runs once and the next probe passes.
+ * @remarks LOCAL-223: the ttyd client must show exactly the pane, so the window follows the client,
+ * and a phone may shrink it while attached. The `client-detached` hook restores 200x50 when no
+ * client is left, because `latest` keeps the last client's size and the pane parsers need at
+ * least 120 columns (LOCAL-162).
+ */
+export async function pinWindowSizeToClient(name: string): Promise<void> {
+  const window = `=${name}:`;
+  const restore = restoreWindowCommands(window).join(" ");
+  await tmux([
+    "set-option",
+    "-t",
+    name,
+    "window-size",
+    "latest",
+    ";",
+    "set-hook",
+    "-t",
+    name,
+    "client-detached",
+    `if -F -t ${window} '#{==:#{session_attached},0}' { ${restore} }`,
+  ]);
+}
+
+/**
+ * Resize session `name`'s window to 200x50 when it is narrower than 120 columns and no client is
+ * attached, and log it.
+ *
+ * @remarks Heals a window that a client shrank before {@link pinWindowSizeToClient} installed the
+ * detach hook. An attached client keeps its size, so a phone is not resized under its user.
  * Never throws: a failed probe leaves the window as it is for the next caller to try.
  */
 export async function widenNarrowWindow(name: string): Promise<void> {
@@ -296,19 +337,16 @@ export async function widenNarrowWindow(name: string): Promise<void> {
       "-p",
       "-t",
       target,
-      "#{window_width}",
+      "#{window_width} #{session_attached}",
     ]);
-    const width = Number.parseInt(stdout.trim(), 10);
-    if (Number.isNaN(width) || width >= MIN_WINDOW_WIDTH) return;
-    await tmux([
-      "resize-window",
-      "-t",
-      target,
-      "-x",
-      WINDOW_COLUMNS,
-      "-y",
-      WINDOW_ROWS,
-    ]);
+    const [width, attached] = stdout
+      .trim()
+      .split(" ")
+      .map((part) => Number.parseInt(part, 10));
+    if (Number.isNaN(width) || width >= MIN_WINDOW_WIDTH || attached !== 0) {
+      return;
+    }
+    await tmux(restoreWindowCommands(target));
     console.warn(
       `[tmux] widened ${name} from ${width} to ${WINDOW_COLUMNS} columns`,
     );
@@ -477,7 +515,7 @@ export async function newSession(
   await pinMouseOff(name);
   await pinStatusOff(name);
   await pinPaneBorderOff(name);
-  await pinWindowSizeManual(name);
+  await pinWindowSizeToClient(name);
   await ensureHyperlinksTerminalFeature();
   await ensureNoAltScreenOverride();
 }

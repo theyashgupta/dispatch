@@ -15,22 +15,29 @@ const calls = (): string[] =>
     .trim()
     .split("\n");
 
-void test("newSession pins window-size manual on the session it creates", async () => {
+const PIN = (name: string): string =>
+  [
+    "set-option",
+    "-t",
+    name,
+    "window-size",
+    "latest",
+    ";",
+    "set-hook",
+    "-t",
+    name,
+    "client-detached",
+    `if -F -t =${name}: '#{==:#{session_attached},0}' { resize-window -t =${name}: -x 200 -y 50 ; set-option -w -t =${name}: window-size latest }`,
+  ].join("\t");
+
+void test("newSession sizes the window to its client on the session it creates", async () => {
   fake.reset();
   await tmux.newSession("dsp-winsize-args", env.root, []);
-  assert.ok(
-    calls().includes(
-      ["set-option", "-t", "dsp-winsize-args", "window-size", "manual"].join(
-        "\t",
-      ),
-    ),
-  );
+  assert.ok(calls().includes(PIN("dsp-winsize-args")));
 });
 
-void test("pinWindowSizeManual sends the session-scoped window-size option", async () => {
+void test("pinWindowSizeToClient sends window-size latest and the detach restore hook", async () => {
   fake.reset();
-  await tmux.pinWindowSizeManual("dsp-winsize-pin");
-  assert.deepEqual(calls(), [
-    ["set-option", "-t", "dsp-winsize-pin", "window-size", "manual"].join("\t"),
-  ]);
+  await tmux.pinWindowSizeToClient("dsp-winsize-pin");
+  assert.deepEqual(calls(), [PIN("dsp-winsize-pin")]);
 });

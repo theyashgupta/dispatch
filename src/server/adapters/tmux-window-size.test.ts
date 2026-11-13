@@ -30,6 +30,29 @@ const clientCount = async (name: string) =>
     .trim()
     .split("\n")
     .filter(Boolean).length;
+const attachClient = (name: string, columns: string, rows: string) =>
+  run("tmux", [
+    ...CLIENT_SERVER,
+    "new-session",
+    "-d",
+    "-x",
+    columns,
+    "-y",
+    rows,
+    "env",
+    "-u",
+    "TMUX",
+    "tmux",
+    ...tmux.TMUX_SERVER_ARGS,
+    "attach",
+    "-t",
+    `=${name}`,
+    ";",
+    "set",
+    "-g",
+    "status",
+    "off",
+  ]);
 const until = async (probe: () => Promise<boolean>) => {
   for (let i = 0; i < 50 && !(await probe()); i++) {
     await new Promise((r) => setTimeout(r, 100));
@@ -92,9 +115,38 @@ void test(
         (
           await raw(["show-options", "-wv", "-t", `=${name}:`, "window-size"])
         ).stdout.trim(),
-        "manual",
+        "latest",
       );
     } finally {
+      await tmux.killSession(`=${name}`);
+      await raw(["kill-server"]).catch(() => undefined);
+    }
+  },
+);
+
+void test(
+  "the window follows a 100x30 client while attached and widens to 200x50 after it detaches",
+  { skip: !hasTmux },
+  async () => {
+    const name = `dsp-winsize-follow-${process.pid}`;
+    await tmux.newSession(name, env.root, ["sh", "-c", "sleep 30"]);
+    try {
+      await attachClient(name, "100", "30");
+      await until(async () => (await windowSize(name)) === "100x30");
+      assert.equal(await windowSize(name), "100x30");
+
+      await tmux.widenNarrowWindow(name);
+      assert.equal(await windowSize(name), "100x30");
+
+      await raw(["detach-client", "-s", `=${name}`]);
+      await until(async () => (await clientCount(name)) === 0);
+      await until(async () => (await windowSize(name)) === "200x50");
+
+      assert.equal(await windowSize(name), "200x50");
+    } finally {
+      await run("tmux", [...CLIENT_SERVER, "kill-server"]).catch(
+        () => undefined,
+      );
       await tmux.killSession(`=${name}`);
       await raw(["kill-server"]).catch(() => undefined);
     }

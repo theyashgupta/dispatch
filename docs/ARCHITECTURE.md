@@ -2798,15 +2798,17 @@ detached pane has a tiny default size, the claude TUI paints into that cramped g
 readiness detection and `DISPATCH_STATUS` marker parsing become unreliable. It is load-bearing, not
 cosmetic.
 
-**A client does not change the window size (`LOCAL-162`).** The tmux default `window-size latest`
-sizes the window to the last client that attached, and the window keeps that size after the client
-detaches. A narrow phone client can then leave the pane at 44 columns. At that width Claude Code
-truncates its status row, `parseStatusLine` does not match, and `contextPercent` stops changing.
-`newSession` and `ensureTerminal` run `set-option -t <name> window-size manual`, so the window stays
-at 200x50 and a smaller ttyd client shows a clipped view of it. `reconnectTerminal` and the
-supervisor pane sample run `widenNarrowWindow`: when `#{window_width}` is below 120, it runs
-`resize-window -x 200 -y 50` once and logs a warning. `resize-window` also sets `window-size
-manual`, so the next probe finds 200 columns.
+**The window follows the attached client (`LOCAL-223`).** `newSession` and `ensureTerminal` run
+`set-option -t <name> window-size latest`, so the window has the size of the latest ttyd client and
+the browser shows exactly the pane. A client narrower than 120 columns (a phone) can make the
+window narrower while it is attached. `latest` keeps the size of the last client after that client
+detaches. At 44 columns Claude Code truncates its status row, `parseStatusLine` does not match, and
+`contextPercent` stops changing (`LOCAL-162`). Thus the same call sets a session `client-detached`
+hook. When `#{session_attached}` is 0, the hook runs `resize-window -x 200 -y 50` and then
+`set-option -w window-size latest` again, because `resize-window` sets `window-size manual`.
+`reconnectTerminal` and the supervisor pane sample run `widenNarrowWindow`. When no client is
+attached and `#{window_width}` is below 120, it runs the same two commands once and logs a warning.
+It does not resize a window that has an attached client.
 
 **The leading `set -g history-limit` rides in the SAME invocation, and the order is load-bearing
 (`TERM-05`).** tmux allocates a pane's history buffer at pane creation, so raising the limit after
