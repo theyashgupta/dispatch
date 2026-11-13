@@ -149,7 +149,9 @@ void test("an empty chain is exhausted with no reset", () => {
 });
 
 const buckets = (...percents: number[]) =>
-  percents.map((percent) => ({ percent }));
+  percents.map((percent) => ({ kind: "session", percent }));
+
+const flat = (limit: number) => () => limit;
 
 void test("passesHysteresis with threshold 90 and hysteresis 10 gates on the highest bucket", () => {
   const cases: [number[], ChainAccountState, boolean][] = [
@@ -162,7 +164,7 @@ void test("passesHysteresis with threshold 90 and hysteresis 10 gates on the hig
   ];
   for (const [percents, state, expected] of cases) {
     assert.equal(
-      passesHysteresis(buckets(...percents), state, 90, 10),
+      passesHysteresis(buckets(...percents), state, flat(90), 10),
       expected,
       `${percents.join(",")} ${state}`,
     );
@@ -170,8 +172,8 @@ void test("passesHysteresis with threshold 90 and hysteresis 10 gates on the hig
 });
 
 void test("passesHysteresis with hysteresis 0 passes every account, even one never read", () => {
-  assert.equal(passesHysteresis([], "unknown", 90, 0), true);
-  assert.equal(passesHysteresis(buckets(95), "available", 90, 0), true);
+  assert.equal(passesHysteresis([], "unknown", flat(90), 0), true);
+  assert.equal(passesHysteresis(buckets(95), "available", flat(90), 0), true);
 });
 
 void test("filterByHysteresis keeps passing accounts, and with hysteresis 0 returns every input", () => {
@@ -190,12 +192,14 @@ void test("filterByHysteresis keeps passing accounts, and with hysteresis 0 retu
       limitedUntil: null,
       buckets: buckets(89),
     },
-  ] satisfies (ChainCandidate & { buckets: { percent: number }[] })[];
+  ] satisfies (ChainCandidate & {
+    buckets: { kind: string; percent: number }[];
+  })[];
   assert.deepEqual(
-    filterByHysteresis(chain, 90, 10).map((a) => a.id),
+    filterByHysteresis(chain, flat(90), 10).map((a) => a.id),
     ["low"],
   );
-  assert.deepEqual(filterByHysteresis(chain, 90, 0), chain);
+  assert.deepEqual(filterByHysteresis(chain, flat(90), 0), chain);
 });
 
 type Bucket = BucketedCandidate["buckets"][number];
@@ -219,8 +223,8 @@ const weekly = (percent: number): Bucket => ({
 
 void test("pickHeadroomAccount excludes the session's own account", () => {
   const chain = [entry("a", "available", [weekly(5)])];
-  assert.equal(pickHeadroomAccount(chain, "a", 100, 10), null);
-  assert.equal(pickHeadroomAccount(chain, "b", 100, 10), "a");
+  assert.equal(pickHeadroomAccount(chain, "a", flat(100), 10), null);
+  assert.equal(pickHeadroomAccount(chain, "b", flat(100), 10), "a");
 });
 
 void test("pickHeadroomAccount keeps only available and near-limit accounts", () => {
@@ -228,7 +232,7 @@ void test("pickHeadroomAccount keeps only available and near-limit accounts", ()
     const pick = pickHeadroomAccount(
       [entry("t", state, [weekly(13)])],
       "from",
-      100,
+      flat(100),
       10,
     );
     assert.equal(
@@ -246,7 +250,7 @@ void test("pickHeadroomAccount drops an account with no weekly bucket", () => {
       { kind: "session", percent: 1, resetsAt: null },
     ]),
   ];
-  assert.equal(pickHeadroomAccount(chain, "from", 100, 10), null);
+  assert.equal(pickHeadroomAccount(chain, "from", flat(100), 10), null);
 });
 
 void test("pickHeadroomAccount keeps 89 and drops 90 at the default threshold and hysteresis", () => {
@@ -254,7 +258,7 @@ void test("pickHeadroomAccount keeps 89 and drops 90 at the default threshold an
     pickHeadroomAccount(
       [entry("t", "available", [weekly(percent)])],
       "from",
-      100,
+      flat(100),
       10,
     );
   assert.equal(at(89), "t");
@@ -264,7 +268,7 @@ void test("pickHeadroomAccount keeps 89 and drops 90 at the default threshold an
     pickHeadroomAccount(
       [entry("t", "available", [weekly(70)])],
       "from",
-      80,
+      flat(80),
       10,
     ),
     null,
@@ -282,7 +286,7 @@ void test("pickHeadroomAccount binds on the highest weekly bucket and ignores ot
       weekly(40),
     ]),
   ];
-  assert.equal(pickHeadroomAccount(chain, "from", 100, 10), "other");
+  assert.equal(pickHeadroomAccount(chain, "from", flat(100), 10), "other");
 });
 
 void test("pickHeadroomAccount picks the lowest weekly percent and keeps chain order on a tie", () => {
@@ -291,12 +295,15 @@ void test("pickHeadroomAccount picks the lowest weekly percent and keeps chain o
     entry("c", "near-limit", [weekly(13)]),
     entry("d", "available", [weekly(13)]),
   ];
-  assert.equal(pickHeadroomAccount(chain, "from", 100, 10), "c");
-  assert.equal(pickHeadroomAccount([...chain].reverse(), "from", 100, 10), "d");
+  assert.equal(pickHeadroomAccount(chain, "from", flat(100), 10), "c");
+  assert.equal(
+    pickHeadroomAccount([...chain].reverse(), "from", flat(100), 10),
+    "d",
+  );
 });
 
 void test("pickHeadroomAccount returns null for an empty chain", () => {
-  assert.equal(pickHeadroomAccount([], "from", 100, 10), null);
+  assert.equal(pickHeadroomAccount([], "from", flat(100), 10), null);
 });
 
 void test("selectAccount never picks needs-login, and earliestReset ignores it", () => {
@@ -330,7 +337,7 @@ void test("selectAccount never picks needs-login, and earliestReset ignores it",
 
 void test("pickHeadroomAccount refuses a needs-login account", () => {
   const chain = [entry("t", "needs-login", [weekly(5)])];
-  assert.equal(pickHeadroomAccount(chain, "from", 100, 10), null);
+  assert.equal(pickHeadroomAccount(chain, "from", flat(100), 10), null);
 });
 
 void test("selectAccount and pickHeadroomAccount refuse shadowed-by-home, and earliestReset ignores it", () => {
@@ -358,9 +365,50 @@ void test("selectAccount and pickHeadroomAccount refuse shadowed-by-home, and ea
     pickHeadroomAccount(
       [entry("s", "shadowed-by-home", [weekly(5)])],
       "from",
-      100,
+      flat(100),
       10,
     ),
     null,
   );
+});
+
+const weeklyAt85 = (kind: string) => (kind === "weekly_all" ? 85 : 100);
+
+void test("pickHeadroomAccount measures headroom below each account's own kind limits and keeps the most", () => {
+  const chain = [
+    entry("all", "available", [weekly(70)]),
+    entry("scoped", "available", [
+      { kind: "weekly_scoped", percent: 80, resetsAt: null },
+    ]),
+  ];
+  assert.equal(pickHeadroomAccount(chain, "from", flat(100), 10), "all");
+  assert.equal(pickHeadroomAccount(chain, "from", weeklyAt85, 10), "scoped");
+  assert.equal(
+    pickHeadroomAccount(
+      [entry("all", "available", [weekly(75)])],
+      "from",
+      weeklyAt85,
+      10,
+    ),
+    null,
+  );
+  assert.equal(
+    pickHeadroomAccount(
+      [entry("all", "available", [weekly(74)])],
+      "from",
+      weeklyAt85,
+      10,
+    ),
+    "all",
+  );
+});
+
+void test("passesHysteresis binds on the bucket with the least headroom below its own limit", () => {
+  const mixed = [
+    { kind: "session", percent: 80 },
+    { kind: "weekly_all", percent: 78 },
+  ];
+  assert.equal(passesHysteresis(mixed, "available", flat(100), 10), true);
+  assert.equal(passesHysteresis(mixed, "available", weeklyAt85, 10), false);
+  assert.equal(passesHysteresis(mixed, "available", weeklyAt85, 0), true);
 });

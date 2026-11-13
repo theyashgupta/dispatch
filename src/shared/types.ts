@@ -1,3 +1,5 @@
+import type { LimitSource, UsageThresholds } from "./usage-thresholds.js";
+
 /**
  * Board columns in display order, plus the inbox landing zone for newly synced Linear tickets.
  * Inbox is deliberately excluded from `COLUMNS` (the board render list) so widening this union
@@ -1414,6 +1416,7 @@ export interface Config {
    */
   activeClaudeAccountId?: string;
   claudeAccounts?: Partial<ClaudeAccountsSettings>;
+  usageThresholds?: UsageThresholds;
   /** Terminal appearance chosen in Settings; absent or invalid resolves to the shipped default. */
   terminal?: TerminalAppearance;
   profile?: UserProfile;
@@ -1478,6 +1481,7 @@ export interface ClaudeAccountSummary {
   state: ChainAccountState;
   buckets: ChainBucket[];
   limitedUntil: string | null;
+  limitSource?: LimitSource;
   inUse: boolean;
 }
 
@@ -1559,6 +1563,7 @@ export interface ChainAccountEntry {
   state: ChainAccountState;
   buckets: ChainBucket[];
   limitedUntil: string | null;
+  limitSource?: LimitSource;
   fetchedAt?: string | null;
   rejectedReads?: number;
 }

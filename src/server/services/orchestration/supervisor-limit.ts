@@ -16,7 +16,7 @@ import { limitSurfaceOf, paneReady } from "../domain/supervisor-state.js";
 import { getClaudeAccountsSettings } from "../infra/config-holder.js";
 import { limitMoveCandidates } from "./account-chain.js";
 import { canonicalAccountId } from "./claude-accounts.js";
-import { getUsage } from "./claude-usage.js";
+import { getUsage, usageLimitOf } from "./claude-usage.js";
 import {
   moveSessionAccount,
   sessionOf,
@@ -281,7 +281,7 @@ async function tryMove(
 }
 
 /**
- * Move a session that stopped on the usage limit to the account with the most weekly headroom, else wait for the reset.
+ * Move a session that stopped on the usage limit to the account with the most weekly headroom below its own limits, else wait for the reset.
  *
  * @remarks A move that settles must also get the continue prompt confirmed, else the session goes
  * to `needs_input`, because the old account's reset no longer applies. A pinned session, a second
@@ -314,12 +314,11 @@ export async function moveOrWait(
   if (last !== undefined && deps.now() - last < MOVE_GUARD_MS)
     return wait("recent_move");
   const from = accountOf(current);
-  const { thresholdPercent, hysteresisPercent } = getClaudeAccountsSettings();
   const to = pickHeadroomAccount(
     await io.candidates(),
     from,
-    thresholdPercent,
-    hysteresisPercent,
+    usageLimitOf(),
+    getClaudeAccountsSettings().hysteresisPercent,
   );
   if (to === null) return wait("no_headroom");
   const recordMove = (result: string, extra: Record<string, unknown> = {}) =>

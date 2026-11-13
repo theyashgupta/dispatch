@@ -18,6 +18,11 @@ const SETUP_STATUS = {
   node: { ok: true, version: "22.22.0", floor: "22.22" },
   storage: { ok: true, path: "/home/visual/.dispatch/board.db" },
 };
+const USAGE_THRESHOLDS = {
+  warningPercent: 70,
+  criticalPercent: 90,
+  limitPercent: { session: 100, weekly_all: 95, weekly_scoped: 100 },
+};
 const SEEDED_DECISION_PREFIX = "dec-";
 const centreRoutes = async (page: Page) => {
   await page.route(
@@ -140,6 +145,22 @@ const screens: {
         page.getByRole("heading", { name: "Settings", level: 1 }),
       ).toBeVisible();
       await expect(page.getByText("Checking", { exact: true })).toHaveCount(0);
+    },
+  },
+  {
+    name: "settings-accounts",
+    url: `${seeded}/#/settings/accounts`,
+    routes: (page) =>
+      page.route("**/api/config/usage-thresholds", (route) =>
+        route.request().method() === "GET"
+          ? route.fulfill({ json: USAGE_THRESHOLDS })
+          : route.fallback(),
+      ),
+    ready: async (page) => {
+      await expect(
+        page.getByRole("heading", { name: "Accounts and usage", level: 1 }),
+      ).toBeVisible();
+      await expect(page.getByLabel("Weekly limit (%)")).toHaveValue("95");
     },
   },
   {

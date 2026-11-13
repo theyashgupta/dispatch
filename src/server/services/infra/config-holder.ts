@@ -18,6 +18,10 @@ import {
   type UserProfile,
 } from "../../../shared/types.js";
 import { resolveSlackMode } from "../../../shared/slack-mode.js";
+import {
+  DEFAULT_USAGE_THRESHOLDS,
+  type UsageThresholds,
+} from "../../../shared/usage-thresholds.js";
 import { writeHookSettings } from "./hook-settings.js";
 import { CONFIG_PATH } from "./paths.js";
 import { resolveSlackToken } from "./slack-token.js";
@@ -399,6 +403,22 @@ export function getClaudeAccountsSettings(): ClaudeAccountsSettings {
     ...DEFAULT_CLAUDE_ACCOUNTS_SETTINGS,
     ...orchestrationConfig?.claudeAccounts,
   };
+}
+
+/**
+ * Read the live usage thresholds, or the defaults when the config holds none.
+ */
+export function getUsageThresholds(): UsageThresholds {
+  return orchestrationConfig?.usageThresholds ?? DEFAULT_USAGE_THRESHOLDS;
+}
+
+/**
+ * Persist the usage thresholds under the `usageThresholds` key and make them live immediately.
+ *
+ * @remarks The caller validates the numbers with `validateUsageThresholds`.
+ */
+export function updateUsageThresholds(thresholds: UsageThresholds): void {
+  patchConfig({ usageThresholds: thresholds });
 }
 
 /**

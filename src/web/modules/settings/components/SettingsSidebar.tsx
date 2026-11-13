@@ -7,6 +7,7 @@ import {
   Columns3,
   Download,
   FolderGit2,
+  Gauge,
   Globe,
   HardDrive,
   Info,
@@ -31,6 +32,7 @@ export const SETTINGS_SECTIONS: {
 }[] = [
   { id: "connections", label: "Connections", icon: Plug },
   { id: "board", label: "Board", icon: Columns3 },
+  { id: "accounts", label: "Accounts and usage", icon: Gauge },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "remote", label: "Remote access", icon: Globe },

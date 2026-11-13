@@ -3,6 +3,10 @@ import { test } from "node:test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { ClaudeAccountSummary } from "../../../../shared/types.js";
+import {
+  DEFAULT_USAGE_THRESHOLDS,
+  type UsageThresholds,
+} from "../../../../shared/usage-thresholds.js";
 import { AccountRow } from "./AccountRow.js";
 
 const NOW = 1_700_000_000_000;
@@ -40,12 +44,14 @@ function account(
 function render(
   extra: Partial<ClaudeAccountSummary> = {},
   active = false,
+  thresholds: UsageThresholds = DEFAULT_USAGE_THRESHOLDS,
 ): string {
   return renderToStaticMarkup(
     createElement(AccountRow, {
       account: account(extra),
       active,
       now: NOW,
+      thresholds,
       reloginDisabled: false,
       onSwitch: () => {},
       onRelogin: () => {},
@@ -89,4 +95,29 @@ void test("an active row shows Active and no Switch button", () => {
   assert.match(text, /Active/);
   assert.doesNotMatch(text, /Switch/);
   assert.doesNotMatch(html, /aria-label="Switch to/);
+});
+
+void test("the usage dot takes its tone from the thresholds", () => {
+  const usage: ClaudeAccountSummary["usage"] = {
+    status: "ok",
+    fetchedAt: null,
+    windows: [
+      {
+        kind: "session",
+        label: "Session",
+        percent: 65,
+        resetsAt: null,
+        isActive: true,
+        periodStart: null,
+        periodEnd: null,
+      },
+    ],
+  };
+  const custom = {
+    ...DEFAULT_USAGE_THRESHOLDS,
+    warningPercent: 60,
+    criticalPercent: 80,
+  };
+  assert.match(render({ usage }), /data-tone="ok"/);
+  assert.match(render({ usage }, false, custom), /data-tone="stale"/);
 });

@@ -17,12 +17,14 @@ import {
 import {
   getCrossSessionInbound,
   getOrchestrationConfig,
+  getUsageThresholds,
   updateClaudeArgs,
   updateCrossSessionInbound,
   updateCleanupDelayDays,
   updateArchiveRetentionDays,
   updateTerminalAppearance,
   updateSourceFilters,
+  updateUsageThresholds,
 } from "../services/infra/config-holder.js";
 import {
   getSourceCapabilities,
@@ -49,6 +51,7 @@ import {
   optionsQuerySchema,
   searchQuerySchema,
   terminalBodySchema,
+  usageThresholdsBodySchema,
   workspacePathSchema,
 } from "./board-schemas.js";
 import { httpErrorHandler } from "./error-handler.js";
@@ -280,6 +283,16 @@ boardRouter.put("/config/cross-session-inbound", async (req, res) => {
   );
   await updateCrossSessionInbound(crossSessionInbound);
   res.status(200).json({ crossSessionInbound });
+});
+
+boardRouter.get("/config/usage-thresholds", (_req, res) => {
+  res.status(200).json(getUsageThresholds());
+});
+
+boardRouter.put("/config/usage-thresholds", (req, res) => {
+  const thresholds = parseOrThrow(usageThresholdsBodySchema, req.body);
+  updateUsageThresholds(thresholds);
+  res.status(200).json(thresholds);
 });
 
 boardRouter.use(httpErrorHandler);

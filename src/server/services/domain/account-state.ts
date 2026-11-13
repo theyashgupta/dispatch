@@ -3,6 +3,11 @@ import type {
   ClaudeUsageSnapshot,
   ClaudeUsageWindow,
 } from "../../../shared/types.js";
+import {
+  limitSourceOf,
+  type LimitSource,
+} from "../../../shared/usage-thresholds.js";
+import type { LimitOf } from "./usage-poll-plan.js";
 
 export interface AccountSignals {
   limit?: { resetAt: string | null };
@@ -11,7 +16,7 @@ export interface AccountSignals {
 
 export type DerivedAccountState = Pick<
   ChainAccountEntry,
-  "state" | "limitedUntil"
+  "state" | "limitedUntil" | "limitSource"
 >;
 
 export const NEEDS_LOGIN_READS = 2;
@@ -49,18 +54,25 @@ export function isShadowOfHome(
  * Pick the stored chain state of one account from the signals of a read.
  *
  * @remarks A home login shadow wins over every other state, then `needs-login`, then a limited
- * hold, and the derived state is the last resort.
+ * hold with its prior limit source, and the derived state is the last resort.
  */
 export function chainStateOf(input: {
   shadowed: boolean;
   needsLogin: boolean;
   held: boolean;
   heldUntil: string | null;
+  heldSource?: LimitSource;
   derived: DerivedAccountState;
 }): DerivedAccountState {
   if (input.shadowed) return { state: "shadowed-by-home", limitedUntil: null };
   if (input.needsLogin) return { state: "needs-login", limitedUntil: null };
-  if (input.held) return { state: "limited", limitedUntil: input.heldUntil };
+  if (input.held) {
+    return {
+      state: "limited",
+      limitedUntil: input.heldUntil,
+      ...(input.heldSource ? { limitSource: input.heldSource } : {}),
+    };
+  }
   return input.derived;
 }
 
@@ -105,12 +117,12 @@ export function parseSurfaceResetAt(pane: string, now: Date): string | null {
  *
  * @remarks The CLI leaves the surface on screen after its reset, and its clock time then parses as
  * tomorrow. The surface is stale when that time passed within the last 5 hours and a good read
- * taken after it shows every bucket below the threshold.
+ * taken after it shows every bucket below its limit percent.
  */
 export function isStaleSurface(
   pane: string,
   usage: ClaudeUsageSnapshot,
-  thresholdPercent: number,
+  limitOf: LimitOf,
   now: Date,
 ): boolean {
   const next = parseSurfaceResetAt(pane, now);
@@ -120,7 +132,7 @@ export function isStaleSurface(
   if (Date.parse(usage.fetchedAt) <= passed) return false;
   const windows = usableWindows(usage);
   return (
-    windows.length > 0 && windows.every((w) => w.percent < thresholdPercent)
+    windows.length > 0 && windows.every((w) => w.percent < limitOf(w.kind))
   );
 }
 
@@ -142,9 +154,9 @@ function latest(times: (string | null)[]): string | null {
 }
 
 /**
- * Derive the chain state of one account and its `limitedUntil`.
+ * Derive the chain state of one account, its `limitedUntil` and, when limited, its `limitSource`.
  *
- * @remarks `limitedUntil` is the latest reset of the buckets at or above the threshold, so a 7 day
+ * @remarks `limitedUntil` is the latest reset of the buckets at or above their limit percent, so a 7 day
  * bucket at the limit holds the account until the 7 day reset even when a shorter bucket is also
  * full, and a bucket whose reset has passed is not full. A logged out folder with a rejected or
  * missing token is `login-expired` before any other signal, so the selection never launches on it.
@@ -152,7 +164,7 @@ function latest(times: (string | null)[]): string | null {
 export function deriveAccountState(
   usage: ClaudeUsageSnapshot,
   signals: AccountSignals,
-  thresholdPercent: number,
+  limitOf: LimitOf,
   now: Date,
 ): DerivedAccountState {
   if (signals.loggedIn === false && isTokenReadFailed(usage)) {
@@ -161,7 +173,7 @@ export function deriveAccountState(
   const windows = usableWindows(usage);
   const full = windows.filter(
     (w) =>
-      w.percent >= thresholdPercent &&
+      w.percent >= limitOf(w.kind) &&
       (w.resetsAt === null || Date.parse(w.resetsAt) > now.getTime()),
   );
   if (full.length > 0 || signals.limit) {
@@ -170,7 +182,11 @@ export function deriveAccountState(
       signals.limit?.resetAt ??
       windows.find((w) => w.kind === "session")?.resetsAt ??
       new Date(now.getTime() + FIVE_HOURS_MS).toISOString();
-    return { state: "limited", limitedUntil };
+    return {
+      state: "limited",
+      limitedUntil,
+      limitSource: limitSourceOf(full, signals.limit !== undefined),
+    };
   }
   if (windows.length === 0) return { state: "unknown", limitedUntil: null };
   const near = windows.some((w) => w.percent >= NEAR_LIMIT_PERCENT);
@@ -181,13 +197,13 @@ export function deriveAccountState(
  * Tell whether a snapshot shows a new usage period for an account held as limited.
  *
  * @remarks A not ok read keeps the last good windows and `fetchedAt`, so only a `fetchedAt` newer than
- * the stored one counts as fresh. The windows must all be below the threshold, and either a period
+ * the stored one counts as fresh. The windows must all be below their limit percent, and either a period
  * started after the stored read or no reset still equals `limitedUntil`.
  */
 export function showsNewPeriod(
   usage: ClaudeUsageSnapshot,
   prior: { fetchedAt?: string | null; limitedUntil: string | null },
-  thresholdPercent: number,
+  limitOf: LimitOf,
 ): boolean {
   if (
     usage.status === "stale" ||
@@ -201,7 +217,7 @@ export function showsNewPeriod(
   if (priorFetched !== null && !(Date.parse(usage.fetchedAt) > priorFetched)) {
     return false;
   }
-  if (usage.windows.some((w) => w.percent >= thresholdPercent)) return false;
+  if (usage.windows.some((w) => w.percent >= limitOf(w.kind))) return false;
   const limitedUntil =
     prior.limitedUntil === null ? NaN : Date.parse(prior.limitedUntil);
   const startedAfterRead =

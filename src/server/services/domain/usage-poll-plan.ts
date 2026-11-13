@@ -1,3 +1,7 @@
+import { CLAUDE_LIMIT_PERCENT } from "../../../shared/usage-thresholds.js";
+
+export type LimitOf = (kind: string) => number;
+
 export interface PollState {
   intervalMs: number | null;
   lastPercent: number | null;
@@ -52,13 +56,28 @@ const RETRY_AFTER_CAP = 86400;
 const REJECTED = 600;
 
 /**
- * Return the binding bucket percent: the highest percent among the windows, or null with none.
+ * Return the least headroom of the windows: each window's limit percent minus its percent, or null with none.
  */
-export function bindingPercent(
-  windows: readonly { percent: number }[],
+export function leastHeadroom(
+  windows: readonly { kind: string; percent: number }[],
+  limitOf: LimitOf,
 ): number | null {
   if (windows.length === 0) return null;
-  return Math.max(...windows.map((w) => w.percent));
+  return Math.min(...windows.map((w) => limitOf(w.kind) - w.percent));
+}
+
+/**
+ * Return the binding bucket percent on Claude's 100 scale: 100 minus the least headroom, or null with none.
+ *
+ * @remarks With every limit at 100 this is the highest percent. Shifting by the binding window's
+ * limit lets `planNextPoll` compare it with 100 whatever limit each window kind has.
+ */
+export function bindingPercent(
+  windows: readonly { kind: string; percent: number }[],
+  limitOf: LimitOf,
+): number | null {
+  const headroom = leastHeadroom(windows, limitOf);
+  return headroom === null ? null : CLAUDE_LIMIT_PERCENT - headroom;
 }
 
 /**

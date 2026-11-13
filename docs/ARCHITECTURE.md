@@ -213,6 +213,8 @@ Mount prefix: `/api`.
 | PUT    | `/api/config/terminal`            | User | Save the terminal appearance.                                      |
 | GET    | `/api/config/claude-args`         | User | Read the Claude arguments of new sessions.                         |
 | PUT    | `/api/config/claude-args`         | User | Save the Claude arguments of new sessions.                         |
+| GET    | `/api/config/usage-thresholds`    | User | Read the usage thresholds. No stored value gives the defaults.     |
+| PUT    | `/api/config/usage-thresholds`    | User | Save the usage thresholds. A refused value gives 400.              |
 
 ### `routes/boards.route.ts`
 
@@ -3084,7 +3086,17 @@ exhausted record, the last 50 moves and `loginExpiryNotified`. An account entry 
 each open account decision by cause (see Account decisions). A corrupt file reads as empty and does
 not stop the boot. The settings are in `config.json` under `claudeAccounts`: `autoMove` (default
 false), `thresholdPercent` (default 100, range 50 to 100), `minDwellMinutes` (default 15, range 0 to 240) and `hysteresisPercent` (default 10, range 0 to 50). The config reader clamps a stored value to
-its range.
+its range. The usage thresholds are in `config.json` under `usageThresholds`: `warningPercent`
+(default 70), `criticalPercent` (default 90) and `limitPercent` with `session`, `weekly_all` and
+`weekly_scoped` (default 100 each). Each value is a whole number from 1 to 100. Warning must be
+below critical. Critical must be at or below each limit. The config reader ignores a block that
+fails these rules, prints one warning and uses the defaults.
+
+**Limit percent.** The limit percent of a window is the lower of its kind's `limitPercent` and
+`thresholdPercent` (`usage-thresholds.ts#limitPercentFor`). A kind outside the three uses
+`thresholdPercent`. "The threshold" below means the limit percent of each window. The headroom of a
+bucket is its limit percent minus its percent. With every value at 100 the rules are the same as
+before the per kind limits.
 
 **States.** `account-state.ts#deriveAccountState` gives each account one state. The first
 rule that applies sets the state:
@@ -3094,7 +3106,10 @@ rule that applies sets the state:
 - `needs-login`: 2 consecutive reads were `token-rejected` (see Needs login). The state wins over
   `limited`, `login-expired` and `unknown`. The entry has no `limitedUntil`.
 - `login-expired`: the token read failed (401, 403 or no token) and the folder is logged out.
-- `limited`: a bucket is at or above the threshold, or a limit signal arrived. `limitedUntil` is the
+- `limited`: a bucket is at or above its limit percent, or a limit signal arrived. The entry also
+  holds `limitSource`: `claude` when a limit signal arrived or a full bucket is at 100, else
+  `threshold` (`usage-thresholds.ts#limitSourceOf`). A held `limited` state keeps its prior source.
+  `GET /accounts` and `list_accounts` show `limitSource` only for a `limited` state. `limitedUntil` is the
   latest reset of the full buckets, so a full 7 day bucket holds the account until the 7 day reset.
   A bucket whose reset passed is not full. A stored `limited` state stays until `limitedUntil` only
   while the reads are not good (rate limited, failed, stale or unavailable). A good read that gives
@@ -3113,8 +3128,8 @@ selects the first account whose state is `available`, `near-limit` or `unknown` 
 result is the earliest `limitedUntil`. The selection never takes a `login-expired`, `needs-login` or `shadowed-by-home` account.
 
 **Hysteresis.** `account-selection.ts#filterByHysteresis` limits the candidates of a usage trigger.
-The binding bucket of an account is its bucket with the highest percent. A candidate passes only
-when its binding bucket is below `thresholdPercent` minus `hysteresisPercent`. An `unknown` account
+The binding bucket of an account is its bucket with the least headroom. A candidate passes only
+when that headroom is greater than `hysteresisPercent`. An `unknown` account
 or an account with no buckets does not pass. When `hysteresisPercent` is 0, the filter keeps every
 candidate. The filter applies to trigger 1 and to the return check only. A limit surface, a
 `StopFailure`, Switch now and the exhausted check do not use it. When no candidate passes on a usage
@@ -3223,14 +3238,30 @@ it. When a supervised session stops on the usage limit message, the supervisor r
 
 - The target is not the account of the session, and its state is `available` or `near-limit`. A
   `needs-login` or `shadowed-by-home` account is never a target.
-- Its weekly percent is the highest bucket of a `weekly` kind (`weekly_all`, `weekly_scoped`). An
-  account with no weekly bucket is not a target.
-- The weekly percent is below `thresholdPercent` minus `hysteresisPercent` (90 with the defaults).
-- The account with the lowest weekly percent wins. A tie keeps chain order.
+- Its weekly headroom is the least headroom of its buckets of a `weekly` kind (`weekly_all`,
+  `weekly_scoped`). An account with no weekly bucket is not a target.
+- The weekly headroom is greater than `hysteresisPercent` (a weekly percent below 90 with the
+  defaults).
+- The account with the most weekly headroom wins. A tie keeps chain order.
 
 The move uses `session-account-move.ts#moveSessionAccount` with the cause `usage limit`: `/exit` at
 the ready prompt, the account environment, then `--resume` on the same conversation. It does not
 read `autoMove`. A pinned session does not move.
+
+**Threshold move (LOCAL-228).** When a usage read turns an account `limited` with the source
+`threshold`, the controller first moves each loop on that account to the `pickHeadroomAccount`
+target. A loop qualifies when its board policy has `supervisor` `on` and `usageLimit` `wait`, it has
+no stop reason and it is not pinned. The move uses `session-account-apply.ts#applyAutomaticMove`, so
+a busy loop is queued. Each loop gets a `limit_move` row with the reason `threshold`. With no target
+the loops stay, and Claude's own limit and the `usageLimit` rule act later. Like the usage limit
+move, it does not read `autoMove`. An error in the move does not stop the failover of the account in
+use, which runs after the move.
+
+**Start on a limited account (LOCAL-228).** The `starting claude` saga step of `start_card` and
+`start_group` asks `account-chain.ts#launchAccountFor` for the launch account. When the chain holds
+the asked account as `limited` with the source `threshold`, the session starts on the
+`pickHeadroomAccount` target. An account that Claude limits keeps the start as before. With no
+target, or with the controller stopped, it starts on the asked account.
 
 **Timers.** A timer task that fails runs again 15 minutes later. The 30 s scan also runs each timer
 whose time is past, because a timer does not count the time while the computer sleeps. A delay is

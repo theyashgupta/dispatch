@@ -1,7 +1,7 @@
 import test, { after } from "node:test";
 import assert from "node:assert/strict";
 import { parseBoardKey } from "../../../shared/board-key.js";
-import type { BoardKey } from "../../../shared/types.js";
+import type { BoardKey, ClaudeAccountSummary } from "../../../shared/types.js";
 import { isolateEnv } from "../../test-support/fixtures.js";
 import { startedGroup } from "../../test-support/group-fixtures.js";
 import { ConflictError, ValidationError } from "../domain/errors.js";
@@ -18,6 +18,7 @@ const {
   paneReader,
   paneTail,
   policySummary,
+  safeAccount,
 } = await import("./orchestrator-read.js");
 const { runningLoops } = await import("./boards.js");
 
@@ -195,4 +196,26 @@ void test("policySummary reports runningLoops without a finished card in Needs i
   const summary = await policySummary({ boardKey: RLP, orchestratorId: "orc" });
   assert.equal(summary.runningLoops, runningLoops(RLP));
   assert.equal(summary.runningLoops, 2);
+});
+
+void test("safeAccount reports the limit source only when the summary carries one", () => {
+  const summary: ClaudeAccountSummary = {
+    id: "a",
+    email: "secret@example.com",
+    orgName: "Org",
+    subscriptionType: "max",
+    isDefault: false,
+    usage: { status: "ok", windows: [], fetchedAt: null },
+    position: 0,
+    state: "limited",
+    buckets: [],
+    limitedUntil: "2026-10-09T08:00:00.000Z",
+    inUse: false,
+  };
+  assert.equal(
+    safeAccount({ ...summary, limitSource: "threshold" }).limitSource,
+    "threshold",
+  );
+  assert.equal("limitSource" in safeAccount(summary), false);
+  assert.equal("email" in safeAccount(summary), false);
 });

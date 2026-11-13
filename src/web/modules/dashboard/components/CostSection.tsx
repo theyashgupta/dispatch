@@ -38,7 +38,7 @@ export function CostSection({
                 label={row.groupId}
                 percent={row.percent}
                 text={row.text}
-                near={row.near}
+                tone={row.near ? "stale" : "default"}
                 groupLabel
               />
             ))}
@@ -60,7 +60,7 @@ export function CostSection({
                 label={METER_LABELS[meter.kind]}
                 percent={meter.percent}
                 text={meter.text}
-                near={meter.near}
+                tone={meter.tone === "ok" ? "default" : meter.tone}
               />
             ))}
           </div>

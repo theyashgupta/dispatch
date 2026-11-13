@@ -206,6 +206,7 @@ export function safeAccount(summary: ClaudeAccountSummary) {
     inUse: summary.inUse,
     position: summary.position,
     limitedUntil: summary.limitedUntil,
+    ...(summary.limitSource ? { limitSource: summary.limitSource } : {}),
     windows: summary.usage.windows.map((w) => ({
       kind: w.kind,
       label: w.label,

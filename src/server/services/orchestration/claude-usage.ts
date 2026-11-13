@@ -4,6 +4,10 @@ import {
   type ClaudeUsageSnapshot,
 } from "../../../shared/types.js";
 import {
+  CLAUDE_LIMIT_PERCENT,
+  limitPercentFor,
+} from "../../../shared/usage-thresholds.js";
+import {
   fetchUsage,
   mapUsageResponse,
   readCredential,
@@ -19,10 +23,14 @@ import {
   IN_USE_CEILING,
   POST_429_WINDOW,
   planNextPoll,
+  type LimitOf,
   type PollResult,
   type PollState,
 } from "../domain/usage-poll-plan.js";
-import { getClaudeAccountsSettings } from "../infra/config-holder.js";
+import {
+  getClaudeAccountsSettings,
+  getUsageThresholds,
+} from "../infra/config-holder.js";
 import { CLAUDE_HOME_DIR } from "../infra/paths.js";
 import {
   accountDir,
@@ -139,11 +147,20 @@ function earliestFutureReset(
   return times.length > 0 ? Math.min(...times) : null;
 }
 
+/**
+ * Return the current limit percent of each window kind: the lower of the user's kind limit and the chain threshold.
+ */
+export function usageLimitOf(): LimitOf {
+  const thresholds = getUsageThresholds();
+  const { thresholdPercent } = getClaudeAccountsSettings();
+  return (kind) => limitPercentFor(kind, thresholds, thresholdPercent);
+}
+
 function replan(id: string, result: PollResult, now: number): number {
   const plan = planNextPoll(pollState.get(id) ?? INITIAL_POLL_STATE, {
     now,
     inUse: id === getActiveAccountId(),
-    thresholdPercent: getClaudeAccountsSettings().thresholdPercent,
+    thresholdPercent: CLAUDE_LIMIT_PERCENT,
     result,
     random: Math.random,
     scale: timeScale(),
@@ -258,7 +275,7 @@ async function fetchAccountUsage(
     }
     replanAndLog(id, caller, 200, {
       kind: "ok",
-      bindingPercent: bindingPercent(windows),
+      bindingPercent: bindingPercent(windows, usageLimitOf()),
       nextResetAt: earliestFutureReset(windows, Date.now()),
     });
     return mergeSnapshot(id, {

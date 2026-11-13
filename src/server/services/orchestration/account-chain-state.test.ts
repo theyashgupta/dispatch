@@ -197,3 +197,31 @@ void test("a file without decisions reads an empty record, and a non-string deci
   );
   assert.deepEqual((await chain.readChainState()).decisions, { a: "x" });
 });
+
+void test("an entry keeps a limitSource of claude or threshold and drops any other value", async () => {
+  const limited = {
+    state: "limited",
+    buckets: [],
+    limitedUntil: "2026-10-02T00:00:00.000Z",
+  };
+  fs.mkdirSync(path.dirname(chain.CHAIN_STATE_PATH), { recursive: true });
+  fs.writeFileSync(
+    chain.CHAIN_STATE_PATH,
+    JSON.stringify({
+      ...chain.emptyChainState(),
+      accounts: {
+        a: { ...limited, limitSource: "claude" },
+        b: { ...limited, limitSource: "threshold" },
+        c: { ...limited, limitSource: "user" },
+        d: { ...limited, limitSource: 1 },
+        e: limited,
+      },
+    }),
+  );
+  const { accounts } = await chain.readChainState();
+  assert.equal(accounts.a?.limitSource, "claude");
+  assert.equal(accounts.b?.limitSource, "threshold");
+  for (const id of ["c", "d", "e"]) {
+    assert.deepEqual(accounts[id], limited, id);
+  }
+});

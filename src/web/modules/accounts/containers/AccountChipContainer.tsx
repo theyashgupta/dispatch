@@ -13,6 +13,7 @@ import { chipState } from "@/modules/accounts/domain/usage-format";
 import { useNow } from "@/modules/accounts/hooks/use-now";
 import { useRefreshAccountUsageMutation } from "@/modules/accounts/queries/accounts-queries";
 import { useAccountsQuery } from "@/queries/accounts-queries";
+import { useUsageThresholds } from "@/queries/usage-thresholds-queries";
 
 const STATE_TICK_MS = 30_000;
 
@@ -23,6 +24,7 @@ export function AccountChipContainer() {
   const { isMobile, state } = useSidebar();
   const collapsed = state === "collapsed" && !isMobile;
   const { data } = useAccountsQuery();
+  const thresholds = useUsageThresholds();
   const refreshUsage = useRefreshAccountUsageMutation();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
@@ -35,7 +37,7 @@ export function AccountChipContainer() {
   const active =
     data?.accounts.find((a) => a.id === data.activeId) ?? data?.accounts[0];
   if (data === undefined || active === undefined) return null;
-  const chip = chipState(active.usage);
+  const chip = chipState(active.usage, thresholds);
 
   const handleOpenChange = (next: boolean) => {
     if (next) setNotice(null);
@@ -61,6 +63,7 @@ export function AccountChipContainer() {
           activeId={active.id}
           side={collapsed ? "right" : "top"}
           now={now}
+          thresholds={thresholds}
           refreshingId={
             refreshUsage.isPending ? (refreshUsage.variables ?? null) : null
           }

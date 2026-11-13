@@ -48,6 +48,8 @@ const isTimeOrNull = (raw: unknown): boolean =>
 
 /**
  * Keep the account entries with a known state, a bucket list and a string or null `limitedUntil`.
+ *
+ * @remarks A `limitSource` other than `claude` or `threshold` is dropped from the entry.
  */
 function validAccounts(
   raw: Record<string, unknown>,
@@ -61,7 +63,10 @@ function validAccounts(
       Array.isArray(entry.buckets) &&
       isTimeOrNull(entry.limitedUntil)
     ) {
-      accounts[id] = entry as unknown as ChainAccountEntry;
+      const { limitSource, ...rest } = entry;
+      accounts[id] = (limitSource === "claude" || limitSource === "threshold"
+        ? { ...rest, limitSource }
+        : rest) as unknown as ChainAccountEntry;
     }
   }
   return accounts;

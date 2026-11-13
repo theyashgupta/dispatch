@@ -1,4 +1,5 @@
 import type { ClaudeAccountSummary } from "../../../../shared/types.js";
+import type { UsageThresholds } from "../../../../shared/usage-thresholds.js";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Item, ItemContent } from "@/components/ui/item";
@@ -16,6 +17,7 @@ interface AccountRowProps {
   account: ClaudeAccountSummary;
   active: boolean;
   now: number;
+  thresholds: UsageThresholds;
   reloginDisabled: boolean;
   onSwitch: () => void;
   onRelogin: () => void;
@@ -27,6 +29,7 @@ export function AccountRow({
   account,
   active,
   now,
+  thresholds,
   reloginDisabled,
   onSwitch,
   onRelogin,
@@ -62,7 +65,7 @@ export function AccountRow({
         <span className="text-xs text-muted-foreground">{meta}</span>
         <span className="text-xs text-muted-foreground">
           <UsageDot
-            tone={tightest ? toneFor(tightest.percent) : "muted"}
+            tone={tightest ? toneFor(tightest.percent, thresholds) : "muted"}
             className="mr-1 inline-block"
           />
           {usageLine(account.usage)}

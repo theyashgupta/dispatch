@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   INITIAL_POLL_STATE,
   bindingPercent,
+  leastHeadroom,
   planNextPoll,
   type PollInput,
   type PollPlan,
@@ -270,12 +271,49 @@ void test("a scale of 60 divides every duration", () => {
   assert.equal(p.holdUntil, NOW + 16_000);
 });
 
-void test("bindingPercent returns the highest percent or null", () => {
-  assert.equal(bindingPercent([]), null);
+void test("bindingPercent returns the highest percent or null at limits of 100", () => {
+  const at100 = () => 100;
+  assert.equal(bindingPercent([], at100), null);
   assert.equal(
-    bindingPercent([{ percent: 3 }, { percent: 86 }, { percent: 35 }]),
+    bindingPercent(
+      [
+        { kind: "session", percent: 3 },
+        { kind: "weekly_all", percent: 86 },
+        { kind: "weekly_scoped", percent: 35 },
+      ],
+      at100,
+    ),
     86,
   );
+});
+
+void test("bindingPercent shifts the window with the least headroom onto the 100 scale", () => {
+  const weeklyAt85 = (kind: string) => (kind === "weekly_all" ? 85 : 100);
+  const windows = [
+    { kind: "session", percent: 90 },
+    { kind: "weekly_all", percent: 80 },
+  ];
+  assert.equal(leastHeadroom(windows, weeklyAt85), 5);
+  assert.equal(bindingPercent(windows, weeklyAt85), 95);
+  assert.equal(
+    bindingPercent([{ kind: "weekly_all", percent: 85 }], weeklyAt85),
+    100,
+  );
+});
+
+void test("a chain threshold of 90 shifted onto the 100 scale plans the same as the old comparison", () => {
+  const chain90 = () => 90;
+  for (const percent of [70, 75, 80, 89, 90, 95]) {
+    const shifted = bindingPercent([{ kind: "session", percent }], chain90);
+    const now = plan(state(300, (shifted ?? 0) - 1), ok(shifted), {
+      inUse: true,
+    });
+    const old = plan(state(300, percent - 1), ok(percent), {
+      inUse: true,
+      thresholdPercent: 90,
+    });
+    assert.deepEqual(now.nextDueAt, old.nextDueAt, String(percent));
+  }
 });
 
 void test("random cases never break the floor, the post-429 cap or the hold cap", () => {

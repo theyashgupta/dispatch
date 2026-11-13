@@ -597,7 +597,7 @@ When `handoffReady` is `true`, the supervisor reads the handoff as pending, as i
 
 - Route: `GET /accounts`. It answers 200 with `{ activeId, accounts }`. Each account is `{ id, isDefault, subscriptionType, state, inUse, position, limitedUntil, windows }`, and each window is `{ kind, label, percent, resetsAt }`.
 - Input: none.
-- Description: "List the Claude accounts with the active id: for each account the id, the default flag, the plan, the chain state, the in use flag, the chain position, the limit end and the usage windows with their percent and reset time. Choose the account with the most weekly headroom for a long loop and pass it to start_card. This tool changes nothing."
+- Description: "List the Claude accounts with the active id: for each account the id, the default flag, the plan, the chain state, the in use flag, the chain position, the limit end, the limit source (claude or threshold) and the usage windows with their percent and reset time. Choose the account with the most weekly headroom for a long loop and pass it to start_card. This tool changes nothing."
 - Refusals: none beyond the rules above.
 - The answer holds no email, no organization, no login time and no token. The tool reads the cached meter only and starts no usage fetch. The home login identity may be read once in 5 minutes.
 

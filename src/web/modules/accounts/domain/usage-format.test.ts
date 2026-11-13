@@ -4,6 +4,7 @@ import type {
   ClaudeAccountSummary,
   ClaudeUsageSnapshot,
 } from "../../../../shared/types.js";
+import { DEFAULT_USAGE_THRESHOLDS } from "../../../../shared/usage-thresholds.js";
 import {
   accountStateLine,
   chipState,
@@ -55,6 +56,18 @@ void test("toneFor thresholds at 70 and 90", () => {
   assert.equal(toneFor(89), "stale");
   assert.equal(toneFor(90), "down");
   assert.equal(toneFor(100), "down");
+});
+
+void test("toneFor follows custom warning 60 and critical 80 at each edge", () => {
+  const custom = {
+    ...DEFAULT_USAGE_THRESHOLDS,
+    warningPercent: 60,
+    criticalPercent: 80,
+  };
+  assert.deepEqual(
+    [0, 59, 60, 79, 80, 100].map((p) => toneFor(p, custom)),
+    ["ok", "ok", "stale", "stale", "down", "down"],
+  );
 });
 
 void test("formatReset renders days, hours, minutes, soon, and null", () => {
@@ -288,26 +301,43 @@ void test("chipState names the tightest window, its tone and reset, or the statu
     ],
     fetchedAt: "2026-10-02T09:00:00Z",
   };
-  assert.deepEqual(chipState(usage, now), {
+  assert.deepEqual(chipState(usage, DEFAULT_USAGE_THRESHOLDS, now), {
     tone: "down",
     summary: "95% used, resets 1d 1h",
     label: "95%",
   });
-  assert.deepEqual(chipState({ ...usage, windows: [w("session", 70)] }, now), {
-    tone: "stale",
-    summary: "70% used",
-    label: "70%",
-  });
-  assert.deepEqual(chipState({ ...usage, status: "unavailable" }, now), {
-    tone: "muted",
-    summary: "Usage unavailable, sign in to see it",
-    label: "Usage unavailable, sign in to see it",
-  });
-  assert.deepEqual(chipState({ ...usage, windows: [] }, now), {
-    tone: "stale",
-    summary: "usage stale",
-    label: "usage stale",
-  });
+  assert.deepEqual(
+    chipState(
+      { ...usage, windows: [w("session", 70)] },
+      DEFAULT_USAGE_THRESHOLDS,
+      now,
+    ),
+    {
+      tone: "stale",
+      summary: "70% used",
+      label: "70%",
+    },
+  );
+  assert.deepEqual(
+    chipState(
+      { ...usage, status: "unavailable" },
+      DEFAULT_USAGE_THRESHOLDS,
+      now,
+    ),
+    {
+      tone: "muted",
+      summary: "Usage unavailable, sign in to see it",
+      label: "Usage unavailable, sign in to see it",
+    },
+  );
+  assert.deepEqual(
+    chipState({ ...usage, windows: [] }, DEFAULT_USAGE_THRESHOLDS, now),
+    {
+      tone: "stale",
+      summary: "usage stale",
+      label: "usage stale",
+    },
+  );
 });
 
 void test("loginExpiryView warns within 3 days or past, stays neutral later, null when absent", () => {
@@ -439,6 +469,38 @@ void test("accountStateLine: limited names the reset time, or just Limited witho
     ),
     { text: "Limited", tone: "down" },
   );
+});
+
+void test("accountStateLine: a threshold limit says so, a Claude or unnamed limit keeps Limited", () => {
+  const now = T0 + HOUR;
+  const line = (
+    limitSource: ClaudeAccountSummary["limitSource"],
+    limitedUntil: string | null,
+  ) =>
+    accountStateLine(
+      account({ state: "limited", limitedUntil, limitSource }),
+      now,
+    )!;
+  const until = "2026-09-01T10:30:00Z";
+  const own = line("threshold", until);
+  assert.ok(own.text.startsWith("Limited by your threshold until "));
+  assert.equal(own.tone, "down");
+  const claude = line("claude", until);
+  assert.ok(claude.text.startsWith("Limited until "));
+  assert.equal(
+    own.text.slice("Limited by your threshold until ".length),
+    claude.text.slice("Limited until ".length),
+  );
+  assert.ok(line(undefined, until).text.startsWith("Limited until "));
+  assert.deepEqual(line("threshold", null), {
+    text: "Limited by your threshold",
+    tone: "down",
+  });
+  assert.deepEqual(line("threshold", "2026-09-01T00:30:00Z"), {
+    text: "Limited by your threshold",
+    tone: "down",
+  });
+  assert.deepEqual(line("claude", null), { text: "Limited", tone: "down" });
 });
 
 void test("accountStateLine: each non-ok status gives its copy, muted for unavailable and stale otherwise", () => {

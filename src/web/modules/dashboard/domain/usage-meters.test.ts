@@ -6,9 +6,10 @@ import type {
   Session,
 } from "../../../../shared/types.js";
 import { clock } from "../../../../shared/clock-text.js";
+import { DEFAULT_USAGE_THRESHOLDS } from "../../../../shared/usage-thresholds.js";
 import { accountFor, usageMeters } from "./usage-meters.js";
 
-const UTC = { timeZone: "UTC" };
+const UTC = { timeZone: "UTC", thresholds: DEFAULT_USAGE_THRESHOLDS };
 
 function card(
   id: string,
@@ -76,23 +77,58 @@ test("one account shows window and week with reset times and no name", () => {
   );
 });
 
-test("80 percent and above reads near limit", () => {
-  const [entry] = usageMeters(
-    [
-      card("c1", "2026-10-07T10:00:00Z", {
-        fiveHourPercent: 23,
-        sevenDayPercent: 85,
-      }),
-    ],
+function metersAt(
+  fiveHourPercent: number,
+  sevenDayPercent: number,
+  opts: typeof UTC = UTC,
+) {
+  return usageMeters(
+    [card("c1", "2026-10-07T10:00:00Z", { fiveHourPercent, sevenDayPercent })],
     [account("default", "a@x.com", BUCKETS, true)],
-    UTC,
+    opts,
+  )[0]?.meters;
+}
+
+test("default thresholds read high use from 70 and near limit from 90", () => {
+  const [low, high] = metersAt(69, 70) ?? [];
+  assert.deepEqual(
+    [low?.tone, low?.near, low?.text],
+    ["ok", false, "Window 69%, resets 18:00"],
   );
+  assert.deepEqual(
+    [high?.tone, high?.near, high?.text],
+    ["stale", true, "Week 70%, high use, resets Mon 05:30"],
+  );
+  const [, critical] = metersAt(89, 90) ?? [];
   assert.equal(
-    entry?.meters[1]?.text,
-    "Week 85%, near limit, resets Mon 05:30",
+    metersAt(89, 90)?.[0]?.text,
+    "Window 89%, high use, resets 18:00",
   );
-  assert.equal(entry?.meters[1]?.near, true);
-  assert.equal(entry?.meters[0]?.near, false);
+  assert.deepEqual(
+    [critical?.tone, critical?.near, critical?.text],
+    ["down", true, "Week 90%, near limit, resets Mon 05:30"],
+  );
+});
+
+test("custom warning 60 and critical 80 move the tone and label at each edge", () => {
+  const custom = {
+    timeZone: "UTC",
+    thresholds: {
+      ...DEFAULT_USAGE_THRESHOLDS,
+      warningPercent: 60,
+      criticalPercent: 80,
+    },
+  };
+  const at = (percent: number) => metersAt(percent, 0, custom)?.[0];
+  assert.deepEqual(
+    [59, 60, 79, 80].map((p) => [at(p)?.tone, at(p)?.near, at(p)?.text]),
+    [
+      ["ok", false, "Window 59%, resets 18:00"],
+      ["stale", true, "Window 60%, high use, resets 18:00"],
+      ["stale", true, "Window 79%, high use, resets 18:00"],
+      ["down", true, "Window 80%, near limit, resets 18:00"],
+    ],
+  );
 });
 
 test("a missing bucket reads reset time unknown and a null percent is skipped", () => {

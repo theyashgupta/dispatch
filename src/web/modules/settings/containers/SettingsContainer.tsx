@@ -4,6 +4,7 @@ import { pageLocation, type Page } from "../../../../shared/route.js";
 import { useThemeState } from "@/components/ThemeProvider";
 import { useAppStore } from "@/components/ui/hooks/use-app-store";
 import { playChime } from "@/components/ui/hooks/chime";
+import { SettingsPanelLayout } from "@/components/SettingsPanelLayout";
 import { SettingsFrame } from "@/modules/settings/components/SettingsFrame";
 import { SettingsPanel } from "@/modules/settings/components/SettingsPanel";
 import { AboutContainer } from "@/modules/settings/containers/AboutContainer";
@@ -12,6 +13,7 @@ import { AppearanceContainer } from "@/modules/settings/containers/AppearanceCon
 import { BoardContainer } from "@/modules/settings/containers/BoardContainer";
 import { NotificationsContainer } from "@/modules/settings/containers/NotificationsContainer";
 import { RemoteContainer } from "@/modules/settings/containers/RemoteContainer";
+import { UsageThresholdsContainer } from "@/modules/settings/containers/UsageThresholdsContainer";
 import { UpdatesContainer } from "@/modules/settings/containers/UpdatesContainer";
 import { WorkspacesContainer } from "@/modules/settings/containers/WorkspacesContainer";
 
@@ -46,6 +48,11 @@ export function SettingsContainer({
       <SettingsPanel tab="connections">{connections}</SettingsPanel>
       <SettingsPanel tab="board">
         <BoardContainer onSaved={onSaved} />
+      </SettingsPanel>
+      <SettingsPanel tab="accounts">
+        <SettingsPanelLayout>
+          <UsageThresholdsContainer onSaved={onSaved} />
+        </SettingsPanelLayout>
       </SettingsPanel>
       <SettingsPanel tab="appearance">
         <AppearanceContainer

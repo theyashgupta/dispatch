@@ -181,6 +181,44 @@ void test("PUT /accounts/active refuses default when its chain state is needs-lo
   }
 });
 
+void test("GET /accounts shows the limit source of a limited account only", async () => {
+  await withGuardedAccount("available", async () => {
+    const limitSourceOf = async () =>
+      (
+        (await call("GET", "/accounts")).body.accounts as {
+          id: string;
+          limitSource?: string;
+        }[]
+      ).find((a) => a.id === ID_GUARDED)?.limitSource;
+    const chain = emptyChainState();
+    const future = new Date(Date.now() + 60 * 60_000).toISOString();
+    chain.accounts[ID_GUARDED] = {
+      state: "limited",
+      buckets: [],
+      limitedUntil: future,
+      limitSource: "threshold",
+    };
+    await writeChainState(chain);
+    assert.equal(await limitSourceOf(), "threshold");
+    chain.accounts[ID_GUARDED] = {
+      state: "limited",
+      buckets: [],
+      limitedUntil: new Date(Date.now() - 60_000).toISOString(),
+      limitSource: "claude",
+    };
+    await writeChainState(chain);
+    assert.equal(await limitSourceOf(), undefined);
+    chain.accounts[ID_GUARDED] = {
+      state: "available",
+      buckets: [],
+      limitedUntil: null,
+      limitSource: "claude",
+    };
+    await writeChainState(chain);
+    assert.equal(await limitSourceOf(), undefined);
+  });
+});
+
 void test("PUT /accounts/active accepts an available account", async () => {
   await withGuardedAccount("available", async () => {
     const activated = await call("PUT", "/accounts/active", {

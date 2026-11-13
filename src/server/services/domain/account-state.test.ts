@@ -5,6 +5,10 @@ import type {
   ClaudeUsageStatus,
   ClaudeUsageWindow,
 } from "../../../shared/types.js";
+import {
+  DEFAULT_USAGE_THRESHOLDS,
+  limitPercentFor,
+} from "../../../shared/usage-thresholds.js";
 import { selectAccount } from "./account-selection.js";
 import {
   deriveAccountState,
@@ -23,6 +27,8 @@ const HOUR = 60 * 60 * 1000;
 const SESSION_RESET = "2026-10-06T14:00:00.000Z";
 const WEEKLY_RESET = "2026-10-09T08:00:00.000Z";
 const PLUS_FIVE_HOURS = new Date(NOW.getTime() + 5 * HOUR).toISOString();
+
+const flat = (limit: number) => () => limit;
 
 /** A usage window of `kind` at `percent`. */
 function win(
@@ -69,7 +75,7 @@ void test("each bucket band around the default threshold of 100", () => {
         win("weekly_all", 10, WEEKLY_RESET),
       ]),
       {},
-      100,
+      flat(100),
       NOW,
     );
     assert.equal(derived.state, state, `${percent}%`);
@@ -93,7 +99,7 @@ void test("each bucket band around a lower threshold of 90", () => {
     const derived = deriveAccountState(
       usage([win("weekly_all", percent, WEEKLY_RESET)]),
       {},
-      90,
+      flat(90),
       NOW,
     );
     assert.equal(derived.state, state, `${percent}%`);
@@ -105,7 +111,7 @@ void test("a threshold below 80 has no near-limit band", () => {
     deriveAccountState(
       usage([win("session", percent, SESSION_RESET)]),
       {},
-      60,
+      flat(60),
       NOW,
     ).state;
   assert.equal(at(59), "available");
@@ -119,29 +125,34 @@ void test("the 7 day limit holds the account until the 7 day reset", () => {
       win("weekly_all", 100, WEEKLY_RESET),
     ]),
     {},
-    100,
+    flat(100),
     NOW,
   );
-  assert.deepEqual(derived, { state: "limited", limitedUntil: WEEKLY_RESET });
+  assert.deepEqual(derived, {
+    state: "limited",
+    limitedUntil: WEEKLY_RESET,
+    limitSource: "claude",
+  });
   const weeklyOnly = deriveAccountState(
     usage([
       win("session", 5, SESSION_RESET),
       win("weekly_all", 100, WEEKLY_RESET),
     ]),
     { limit: { resetAt: "2026-10-06T13:00:00.000Z" } },
-    100,
+    flat(100),
     NOW,
   );
   assert.deepEqual(weeklyOnly, {
     state: "limited",
     limitedUntil: WEEKLY_RESET,
+    limitSource: "claude",
   });
 });
 
 void test("a full bucket whose reset passed is not full", () => {
   const passed = "2026-10-06T11:00:00.000Z";
   const derive = (windows: ClaudeUsageWindow[]) =>
-    deriveAccountState(usage(windows), {}, 100, NOW);
+    deriveAccountState(usage(windows), {}, flat(100), NOW);
   assert.deepEqual(derive([win("weekly_all", 100, passed)]), {
     state: "near-limit",
     limitedUntil: null,
@@ -160,7 +171,7 @@ void test("a full bucket whose reset passed is not full", () => {
       win("weekly_all", 100, passed),
       win("session", 100, SESSION_RESET),
     ]),
-    { state: "limited", limitedUntil: SESSION_RESET },
+    { state: "limited", limitedUntil: SESSION_RESET, limitSource: "claude" },
   );
   assert.equal(derive([win("weekly_all", 100, null)]).state, "limited");
 });
@@ -221,7 +232,7 @@ void test("a 7 day limited account stays out of the selection until the 7 day re
       win("weekly_all", 100, WEEKLY_RESET),
     ]),
     {},
-    100,
+    flat(100),
     NOW,
   );
   const chain = [
@@ -236,7 +247,7 @@ void test("a 7 day limited account stays out of the selection until the 7 day re
   const reread = deriveAccountState(
     usage([win("session", 0, null), win("weekly_all", 0, null)]),
     {},
-    100,
+    flat(100),
     new Date(WEEKLY_RESET),
   );
   assert.deepEqual(
@@ -252,7 +263,7 @@ void test("a full bucket with no reset falls back to the surface time, then the 
     deriveAccountState(
       usage([full, win("session", 40, SESSION_RESET)]),
       { limit: { resetAt: surface } },
-      100,
+      flat(100),
       NOW,
     ).limitedUntil,
     surface,
@@ -261,14 +272,18 @@ void test("a full bucket with no reset falls back to the surface time, then the 
     deriveAccountState(
       usage([full, win("session", 40, SESSION_RESET)]),
       {},
-      100,
+      flat(100),
       NOW,
     ).limitedUntil,
     SESSION_RESET,
   );
   assert.equal(
-    deriveAccountState(usage([full, win("session", 40, null)]), {}, 100, NOW)
-      .limitedUntil,
+    deriveAccountState(
+      usage([full, win("session", 40, null)]),
+      {},
+      flat(100),
+      NOW,
+    ).limitedUntil,
     PLUS_FIVE_HOURS,
   );
 });
@@ -277,21 +292,31 @@ void test("a limit signal limits the account under the threshold and uses the sa
   const surface = "2026-10-06T13:40:00.000Z";
   const below = [win("session", 30, SESSION_RESET)];
   assert.deepEqual(
-    deriveAccountState(usage(below), { limit: { resetAt: surface } }, 100, NOW),
-    { state: "limited", limitedUntil: surface },
+    deriveAccountState(
+      usage(below),
+      { limit: { resetAt: surface } },
+      flat(100),
+      NOW,
+    ),
+    { state: "limited", limitedUntil: surface, limitSource: "claude" },
   );
   assert.deepEqual(
-    deriveAccountState(usage(below), { limit: { resetAt: null } }, 100, NOW),
-    { state: "limited", limitedUntil: SESSION_RESET },
+    deriveAccountState(
+      usage(below),
+      { limit: { resetAt: null } },
+      flat(100),
+      NOW,
+    ),
+    { state: "limited", limitedUntil: SESSION_RESET, limitSource: "claude" },
   );
   assert.deepEqual(
     deriveAccountState(
       usage([], "unavailable"),
       { limit: { resetAt: null } },
-      100,
+      flat(100),
       NOW,
     ),
-    { state: "limited", limitedUntil: PLUS_FIVE_HOURS },
+    { state: "limited", limitedUntil: PLUS_FIVE_HOURS, limitSource: "claude" },
   );
 });
 
@@ -304,7 +329,7 @@ void test("the latest reset of several full buckets wins", () => {
         win("weekly_scoped", 100, SESSION_RESET),
       ]),
       {},
-      100,
+      flat(100),
       NOW,
     ).limitedUntil,
     later,
@@ -313,22 +338,29 @@ void test("the latest reset of several full buckets wins", () => {
 
 void test("a 401 or 403 with a logged out folder is login-expired", () => {
   const stale = usage([win("session", 10, SESSION_RESET)], "stale");
-  assert.deepEqual(deriveAccountState(stale, { loggedIn: false }, 100, NOW), {
-    state: "login-expired",
-    limitedUntil: null,
-  });
+  assert.deepEqual(
+    deriveAccountState(stale, { loggedIn: false }, flat(100), NOW),
+    {
+      state: "login-expired",
+      limitedUntil: null,
+    },
+  );
   assert.deepEqual(
     deriveAccountState(
       stale,
       { loggedIn: false, limit: { resetAt: null } },
-      100,
+      flat(100),
       NOW,
     ),
     { state: "login-expired", limitedUntil: null },
   );
   assert.equal(
-    deriveAccountState(usage([], "unavailable"), { loggedIn: false }, 100, NOW)
-      .state,
+    deriveAccountState(
+      usage([], "unavailable"),
+      { loggedIn: false },
+      flat(100),
+      NOW,
+    ).state,
     "login-expired",
   );
 });
@@ -337,7 +369,7 @@ void test("a stale read with a logged in folder is unknown, whatever its old win
   const stale = usage([win("session", 100, SESSION_RESET)], "stale");
   for (const loggedIn of [true, null, undefined]) {
     assert.deepEqual(
-      deriveAccountState(stale, { loggedIn }, 100, NOW),
+      deriveAccountState(stale, { loggedIn }, flat(100), NOW),
       { state: "unknown", limitedUntil: null },
       String(loggedIn),
     );
@@ -345,16 +377,22 @@ void test("a stale read with a logged in folder is unknown, whatever its old win
 });
 
 void test("no usable read yet is unknown", () => {
-  assert.deepEqual(deriveAccountState(usage([], "unavailable"), {}, 100, NOW), {
-    state: "unknown",
-    limitedUntil: null,
-  });
-  assert.equal(deriveAccountState(usage([]), {}, 100, NOW).state, "unknown");
+  assert.deepEqual(
+    deriveAccountState(usage([], "unavailable"), {}, flat(100), NOW),
+    {
+      state: "unknown",
+      limitedUntil: null,
+    },
+  );
+  assert.equal(
+    deriveAccountState(usage([]), {}, flat(100), NOW).state,
+    "unknown",
+  );
   assert.equal(
     deriveAccountState(
       { status: "error", windows: [], fetchedAt: null, error: "unreachable" },
       { loggedIn: true },
-      100,
+      flat(100),
       NOW,
     ).state,
     "unknown",
@@ -367,7 +405,7 @@ void test("a 429 or network error keeps the state of the last good read", () => 
       deriveAccountState(
         usage([win("session", 85, SESSION_RESET)], status),
         {},
-        100,
+        flat(100),
         NOW,
       ).state,
       "near-limit",
@@ -424,22 +462,22 @@ void test("a surface past its reset is stale only after a newer read below the t
     fetchedAt: at.toISOString(),
   });
   const after = read(5, local(9, 10));
-  assert.equal(isStaleSurface(pane("9am"), after, 100, now), true);
+  assert.equal(isStaleSurface(pane("9am"), after, flat(100), now), true);
   assert.equal(
-    isStaleSurface(pane("9am"), read(5, local(8, 50)), 100, now),
+    isStaleSurface(pane("9am"), read(5, local(8, 50)), flat(100), now),
     false,
   );
   assert.equal(
-    isStaleSurface(pane("9am"), read(100, local(9, 10)), 100, now),
+    isStaleSurface(pane("9am"), read(100, local(9, 10)), flat(100), now),
     false,
   );
   assert.equal(
-    isStaleSurface(pane("9am"), read(5, local(9, 10), "stale"), 100, now),
+    isStaleSurface(pane("9am"), read(5, local(9, 10), "stale"), flat(100), now),
     false,
   );
-  assert.equal(isStaleSurface(pane("10:40am"), after, 100, now), false);
-  assert.equal(isStaleSurface(pane("3am"), after, 100, now), false);
-  assert.equal(isStaleSurface("no limit here", after, 100, now), false);
+  assert.equal(isStaleSurface(pane("10:40am"), after, flat(100), now), false);
+  assert.equal(isStaleSurface(pane("3am"), after, flat(100), now), false);
+  assert.equal(isStaleSurface("no limit here", after, flat(100), now), false);
 });
 
 const PRIOR_FETCHED = "2026-10-06T10:00:00.000Z";
@@ -459,24 +497,24 @@ void test("showsNewPeriod is true when a period started after the stored read", 
   const snapshot = usage([
     weekly(1, PRIOR_LIMITED_UNTIL, "2026-10-06T11:00:00.000Z"),
   ]);
-  assert.equal(showsNewPeriod(snapshot, PRIOR, 100), true);
+  assert.equal(showsNewPeriod(snapshot, PRIOR, flat(100)), true);
 });
 
 void test("showsNewPeriod is true when no reset equals limitedUntil any more", () => {
   const snapshot = usage([weekly(1, "2026-10-13T07:00:00.000Z", null)]);
-  assert.equal(showsNewPeriod(snapshot, PRIOR, 100), true);
+  assert.equal(showsNewPeriod(snapshot, PRIOR, flat(100)), true);
 });
 
 void test("showsNewPeriod is false when a reset still equals limitedUntil and no period started", () => {
   const snapshot = usage([
     weekly(1, PRIOR_LIMITED_UNTIL, "2026-10-01T07:00:00.000Z"),
   ]);
-  assert.equal(showsNewPeriod(snapshot, PRIOR, 100), false);
+  assert.equal(showsNewPeriod(snapshot, PRIOR, flat(100)), false);
 });
 
 void test("showsNewPeriod compares reset times by value, not by string", () => {
   const snapshot = usage([weekly(1, "2026-10-08T07:00:00Z", null)]);
-  assert.equal(showsNewPeriod(snapshot, PRIOR, 100), false);
+  assert.equal(showsNewPeriod(snapshot, PRIOR, flat(100)), false);
 });
 
 void test("showsNewPeriod is false when one window is at the threshold", () => {
@@ -484,7 +522,7 @@ void test("showsNewPeriod is false when one window is at the threshold", () => {
     weekly(1, "2026-10-13T07:00:00.000Z", null),
     win("session", 100, "2026-10-06T15:00:00.000Z"),
   ]);
-  assert.equal(showsNewPeriod(snapshot, PRIOR, 100), false);
+  assert.equal(showsNewPeriod(snapshot, PRIOR, flat(100)), false);
 });
 
 void test("showsNewPeriod is false for a stale snapshot", () => {
@@ -492,14 +530,14 @@ void test("showsNewPeriod is false for a stale snapshot", () => {
     [weekly(1, "2026-10-13T07:00:00.000Z", null)],
     "stale",
   );
-  assert.equal(showsNewPeriod(snapshot, PRIOR, 100), false);
+  assert.equal(showsNewPeriod(snapshot, PRIOR, flat(100)), false);
 });
 
 void test("showsNewPeriod is false with no windows or no fetchedAt", () => {
-  assert.equal(showsNewPeriod(usage([]), PRIOR, 100), false);
+  assert.equal(showsNewPeriod(usage([]), PRIOR, flat(100)), false);
   const noFetch = usage([weekly(1, "2026-10-13T07:00:00.000Z", null)]);
   assert.equal(
-    showsNewPeriod({ ...noFetch, fetchedAt: null }, PRIOR, 100),
+    showsNewPeriod({ ...noFetch, fetchedAt: null }, PRIOR, flat(100)),
     false,
   );
 });
@@ -509,7 +547,7 @@ void test("showsNewPeriod is false when fetchedAt is not newer than the stored o
     ...usage([weekly(1, "2026-10-13T07:00:00.000Z", null)]),
     fetchedAt: PRIOR_FETCHED,
   };
-  assert.equal(showsNewPeriod(snapshot, PRIOR, 100), false);
+  assert.equal(showsNewPeriod(snapshot, PRIOR, flat(100)), false);
 });
 
 void test("showsNewPeriod without a stored fetchedAt relies on the reset alone", () => {
@@ -518,10 +556,10 @@ void test("showsNewPeriod without a stored fetchedAt relies on the reset alone",
     weekly(1, PRIOR_LIMITED_UNTIL, "2026-10-06T11:00:00.000Z"),
   ]);
   const moved = usage([weekly(1, "2026-10-13T07:00:00.000Z", null)]);
-  assert.equal(showsNewPeriod(same, unknownPrior, 100), false);
-  assert.equal(showsNewPeriod(moved, unknownPrior, 100), true);
+  assert.equal(showsNewPeriod(same, unknownPrior, flat(100)), false);
+  assert.equal(showsNewPeriod(moved, unknownPrior, flat(100)), true);
   assert.equal(
-    showsNewPeriod(moved, { ...unknownPrior, fetchedAt: null }, 100),
+    showsNewPeriod(moved, { ...unknownPrior, fetchedAt: null }, flat(100)),
     true,
   );
 });
@@ -620,4 +658,89 @@ void test("chainStateOf picks shadowed, then needs-login, then the hold, then th
     limitedUntil: until,
   });
   assert.deepEqual(chainStateOf(base), derived);
+});
+
+void test("chainStateOf keeps the prior limit source on a hold", () => {
+  assert.deepEqual(
+    chainStateOf({
+      shadowed: false,
+      needsLogin: false,
+      held: true,
+      heldUntil: WEEKLY_RESET,
+      heldSource: "threshold",
+      derived: { state: "available", limitedUntil: null },
+    }),
+    { state: "limited", limitedUntil: WEEKLY_RESET, limitSource: "threshold" },
+  );
+});
+
+const weeklyAt85 = (kind: string) =>
+  limitPercentFor(kind, {
+    ...DEFAULT_USAGE_THRESHOLDS,
+    limitPercent: { session: 100, weekly_all: 85, weekly_scoped: 100 },
+  });
+
+void test("a weekly_all limit of 85 limits at 85 by the threshold, at a full session or a limit signal by Claude, and not at 84", () => {
+  const derive = (windows: ClaudeUsageWindow[], limit?: { resetAt: null }) =>
+    deriveAccountState(usage(windows), limit ? { limit } : {}, weeklyAt85, NOW);
+  assert.deepEqual(derive([win("weekly_all", 85, WEEKLY_RESET)]), {
+    state: "limited",
+    limitedUntil: WEEKLY_RESET,
+    limitSource: "threshold",
+  });
+  assert.deepEqual(
+    derive([
+      win("session", 100, SESSION_RESET),
+      win("weekly_all", 50, WEEKLY_RESET),
+    ]),
+    { state: "limited", limitedUntil: SESSION_RESET, limitSource: "claude" },
+  );
+  assert.deepEqual(
+    derive([win("session", 30, SESSION_RESET)], { resetAt: null }),
+    { state: "limited", limitedUntil: SESSION_RESET, limitSource: "claude" },
+  );
+  assert.equal(
+    derive([win("weekly_all", 84, WEEKLY_RESET)]).state,
+    "near-limit",
+  );
+  assert.equal(
+    derive([win("weekly_scoped", 85, WEEKLY_RESET)]).state,
+    "near-limit",
+  );
+});
+
+void test("the default limits give the old state at every percent", () => {
+  const defaults = (kind: string) =>
+    limitPercentFor(kind, DEFAULT_USAGE_THRESHOLDS);
+  for (const kind of ["session", "weekly_all", "weekly_scoped", "other"]) {
+    for (let percent = 0; percent <= 110; percent++) {
+      const windows = [win(kind, percent, WEEKLY_RESET)];
+      const derived = deriveAccountState(usage(windows), {}, defaults, NOW);
+      const old = deriveAccountState(usage(windows), {}, flat(100), NOW);
+      assert.deepEqual(derived, old, `${kind} ${percent}`);
+      if (derived.state === "limited") {
+        assert.equal(derived.limitSource, "claude");
+      }
+    }
+  }
+});
+
+void test("showsNewPeriod reads each window against its own limit", () => {
+  const snapshot = usage([win("weekly_all", 85, WEEKLY_RESET)]);
+  assert.equal(
+    showsNewPeriod(
+      snapshot,
+      { fetchedAt: null, limitedUntil: SESSION_RESET },
+      flat(100),
+    ),
+    true,
+  );
+  assert.equal(
+    showsNewPeriod(
+      snapshot,
+      { fetchedAt: null, limitedUntil: SESSION_RESET },
+      weeklyAt85,
+    ),
+    false,
+  );
 });
