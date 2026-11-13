@@ -8,7 +8,7 @@ import {
   pinMouseOff,
   pinPaneBorderOff,
   pinStatusOff,
-  pinWindowSizeManual,
+  pinWindowSizeToClient,
 } from "../../adapters/tmux.js";
 import { ALL_BOARDS } from "../../../shared/board-key.js";
 
@@ -44,7 +44,7 @@ export async function ensureTerminal(
     await pinMouseOff(session);
     await pinStatusOff(session);
     await pinPaneBorderOff(session);
-    await pinWindowSizeManual(session);
+    await pinWindowSizeToClient(session);
     const port = await ensureTtyd(session, sessionId);
     const recorded = await store.setTtydPortIfSession(cardId, session, port);
     if (!recorded) killTtyd(session);
