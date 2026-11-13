@@ -27,7 +27,6 @@ export function AccountChipContainer() {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [switchOpen, setSwitchOpen] = useState(false);
   const now = useNow(STATE_TICK_MS);
   const [switchTarget, setSwitchTarget] = useState<ClaudeAccountSummary | null>(
     null,
@@ -39,10 +38,7 @@ export function AccountChipContainer() {
   const chip = chipState(active.usage);
 
   const handleOpenChange = (next: boolean) => {
-    if (next) {
-      setNotice(null);
-      setSwitchOpen(false);
-    }
+    if (next) setNotice(null);
     setOpen(next);
   };
 
@@ -58,20 +54,23 @@ export function AccountChipContainer() {
         onOpenChange={handleOpenChange}
       >
         <AccountPopover
-          account={active}
-          others={data.accounts.filter((a) => a.id !== active.id)}
+          accounts={[
+            active,
+            ...data.accounts.filter((a) => a.id !== active.id),
+          ]}
+          activeId={active.id}
           side={collapsed ? "right" : "top"}
           now={now}
-          refreshing={refreshUsage.isPending}
+          refreshingId={
+            refreshUsage.isPending ? (refreshUsage.variables ?? null) : null
+          }
           notice={notice}
-          switchOpen={switchOpen}
-          onToggleSwitch={() => setSwitchOpen((v) => !v)}
           onSwitch={(target) => {
             setOpen(false);
             setSwitchTarget(target);
           }}
-          onRefresh={() =>
-            refreshUsage.mutate(active.id, {
+          onRefresh={(id) =>
+            refreshUsage.mutate(id, {
               onSuccess: (r) => setNotice(r.ok ? null : r.error),
               onError: () => setNotice("Couldn't refresh usage."),
             })
