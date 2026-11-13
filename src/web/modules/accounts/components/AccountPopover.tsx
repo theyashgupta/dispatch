@@ -1,47 +1,40 @@
-import { ChevronRight, RefreshCw } from "lucide-react";
+import { RefreshCw } from "lucide-react";
 import type { ClaudeAccountSummary } from "../../../../shared/types.js";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { PopoverContent } from "@/components/ui/popover";
 import { UsageDot } from "./UsageDot";
 import { UsageWindowRow } from "./UsageWindowRow";
-import { cn } from "@/lib/utils";
 import {
   accountStateLine,
-  findWindow,
-  popoverWindows,
+  pacedAtFor,
 } from "@/modules/accounts/domain/usage-format";
 
 interface AccountPopoverProps {
-  account: ClaudeAccountSummary;
-  others: ClaudeAccountSummary[];
+  accounts: ClaudeAccountSummary[];
+  activeId: string;
   side: "top" | "right";
   now: number;
-  refreshing: boolean;
+  refreshingId: string | null;
   notice: string | null;
-  switchOpen: boolean;
-  onToggleSwitch: () => void;
-  onRefresh: () => void;
+  onRefresh: (id: string) => void;
   onSwitch: (account: ClaudeAccountSummary) => void;
   onOpenAccounts: () => void;
   onCloseAutoFocus: (event: Event) => void;
 }
 
 export function AccountPopover({
-  account,
-  others,
+  accounts,
+  activeId,
   side,
   now,
-  refreshing,
+  refreshingId,
   notice,
-  switchOpen,
-  onToggleSwitch,
   onRefresh,
   onSwitch,
   onOpenAccounts,
   onCloseAutoFocus,
 }: AccountPopoverProps) {
-  const bars = popoverWindows(account.usage);
-  const line = accountStateLine(account, now);
   return (
     <PopoverContent
       id="account-popover"
@@ -53,97 +46,73 @@ export function AccountPopover({
       onCloseAutoFocus={onCloseAutoFocus}
       className="flex max-h-[40vh] w-80 max-w-(--radix-popover-content-available-width) flex-col gap-2 overflow-y-auto bg-card p-2 text-sm text-foreground"
     >
-      <div className="flex min-w-0 items-center gap-1">
-        <span
-          className="min-w-0 flex-auto truncate font-semibold"
-          title={account.email}
-        >
-          {account.email}
-        </span>
-        <Button
-          variant="ghost"
-          size="icon-md"
-          aria-label="Refresh usage"
-          title="Refresh usage"
-          disabled={refreshing}
-          onClick={onRefresh}
-        >
-          <RefreshCw className="size-3.5" aria-hidden="true" />
-        </Button>
-      </div>
       {notice && (
         <div role="alert" className="text-destructive-text">
           {notice}
         </div>
       )}
-      {bars.length > 0 && (
-        <div className="flex flex-col gap-1">
-          {bars.map((w) => (
-            <UsageWindowRow key={w.kind} usageWindow={w} />
-          ))}
-        </div>
-      )}
-      {line && (
-        <div
-          data-testid="account-state-line"
-          className="flex items-center gap-1 text-xs text-muted-foreground"
-        >
-          <UsageDot tone={line.tone} />
-          <span>{line.text}</span>
-        </div>
-      )}
-      {others.length > 0 && (
-        <div className="flex flex-col">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="justify-between"
-            aria-expanded={switchOpen}
-            aria-controls="account-switch-list"
-            onClick={onToggleSwitch}
+      {accounts.map((account) => {
+        const isActive = account.id === activeId;
+        const line = accountStateLine(account, now);
+        const pacedAt = pacedAtFor(account.usage);
+        const lineText = [line?.text, account.subscriptionType]
+          .filter(Boolean)
+          .join(" · ");
+        return (
+          <section
+            key={account.id}
+            aria-label={account.email}
+            data-account-id={account.id}
+            className="flex shrink-0 flex-col gap-1 rounded-md border border-border px-2 py-1"
           >
-            Switch account
-            <ChevronRight
-              className={cn("size-3.5", switchOpen && "rotate-90")}
-              aria-hidden="true"
-            />
-          </Button>
-          {switchOpen && (
-            <ul
-              id="account-switch-list"
-              role="list"
-              aria-label="Other accounts"
-              className="flex list-none flex-col p-0"
-            >
-              {others.map((a) => {
-                const weekly = findWindow(a.usage, "weekly_all");
-                const label = `Switch to ${a.email}, weekly ${weekly ? `${weekly.percent}%` : "n/a"}`;
-                return (
-                  <li key={a.id}>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="w-full justify-between"
-                      aria-label={label}
-                      onClick={() => onSwitch(a)}
-                    >
-                      <span
-                        className="min-w-0 flex-auto truncate text-left"
-                        title={a.email}
-                      >
-                        {a.email}
-                      </span>
-                      <span className="text-muted-foreground">
-                        {weekly ? `${weekly.percent}%` : "n/a"}
-                      </span>
-                    </Button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </div>
-      )}
+            <div className="flex min-w-0 items-center gap-1">
+              <span
+                className="min-w-0 flex-auto truncate font-semibold"
+                title={account.email}
+              >
+                {account.email}
+              </span>
+              {isActive && <Badge tone="accent">Active</Badge>}
+              <Button
+                variant="ghost"
+                size="icon-md"
+                aria-label={`Refresh usage for ${account.email}`}
+                title="Refresh usage"
+                disabled={refreshingId === account.id}
+                onClick={() => onRefresh(account.id)}
+              >
+                <RefreshCw className="size-3.5" aria-hidden="true" />
+              </Button>
+              {!isActive && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  aria-label={`Switch to ${account.email}`}
+                  onClick={() => onSwitch(account)}
+                >
+                  Switch
+                </Button>
+              )}
+            </div>
+            {account.usage.windows.map((w) => (
+              <UsageWindowRow
+                key={`${w.kind}:${w.label}`}
+                usageWindow={w}
+                pacedAt={pacedAt}
+              />
+            ))}
+            {lineText && (
+              <div
+                data-testid="account-state-line"
+                className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground"
+              >
+                {line && <UsageDot tone={line.tone} />}
+                <span className="truncate">{lineText}</span>
+              </div>
+            )}
+          </section>
+        );
+      })}
       <div className="border-t border-border pt-2">
         <Button
           variant="link"

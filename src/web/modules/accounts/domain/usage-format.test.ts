@@ -7,13 +7,11 @@ import type {
 import {
   accountStateLine,
   chipState,
-  findWindow,
   formatReset,
   loginExpiryView,
   PACE_BADGE,
   pacedAtFor,
   pacingFor,
-  popoverWindows,
   statusCopy,
   tightestWindow,
   toneFor,
@@ -328,44 +326,6 @@ void test("loginExpiryView warns within 3 days or past, stays neutral later, nul
   assert.equal(loginExpiryView("not-a-date", now), null);
 });
 
-void test("findWindow returns the first window of a kind, null when absent", () => {
-  const usage: ClaudeUsageSnapshot = {
-    status: "ok",
-    windows: [w("weekly_all", 40), w("session", 55), w("session", 80)],
-    fetchedAt: null,
-  };
-  assert.equal(findWindow(usage, "session")?.percent, 55);
-  assert.equal(findWindow(usage, "weekly_all")?.percent, 40);
-  assert.equal(findWindow(usage, "weekly_scoped"), null);
-  assert.equal(findWindow({ ...usage, windows: [] }, "session"), null);
-});
-
-void test("popoverWindows returns session then weekly_all, only those present", () => {
-  const snap = (...windows: ReturnType<typeof w>[]): ClaudeUsageSnapshot => ({
-    status: "ok",
-    windows,
-    fetchedAt: null,
-  });
-  assert.deepEqual(
-    popoverWindows(
-      snap(w("weekly_all", 40), w("weekly_scoped", 12), w("session", 55)),
-    ).map((x) => x.kind),
-    ["session", "weekly_all"],
-  );
-  assert.deepEqual(
-    popoverWindows(snap(w("weekly_scoped", 12), w("session", 55))).map(
-      (x) => x.kind,
-    ),
-    ["session"],
-  );
-  assert.deepEqual(
-    popoverWindows(snap(w("weekly_all", 40))).map((x) => x.kind),
-    ["weekly_all"],
-  );
-  assert.deepEqual(popoverWindows(snap(w("weekly_scoped", 12))), []);
-  assert.deepEqual(popoverWindows(snap()), []);
-});
-
 const account = (
   overrides: Partial<ClaudeAccountSummary> = {},
   usage: Partial<ClaudeUsageSnapshot> = {},
@@ -503,7 +463,7 @@ void test("accountStateLine: each non-ok status gives its copy, muted for unavai
   });
 });
 
-void test("accountStateLine: ok status reports the worst pace of session and weekly", () => {
+void test("accountStateLine: ok status reports the worst pace of every window", () => {
   const now = T0 + HOUR;
   const fetchedAt = new Date(T0 + HOUR).toISOString();
   const line = (session: number, weekly: number) =>
@@ -524,6 +484,22 @@ void test("accountStateLine: ok status reports the worst pace of session and wee
   assert.deepEqual(line(10, 5), { text: "On track", tone: "ok" });
   assert.deepEqual(line(24, 5), { text: "Ahead of budget", tone: "stale" });
   assert.deepEqual(line(10, 60), { text: "Will run out", tone: "down" });
+  assert.deepEqual(
+    accountStateLine(
+      account(
+        {},
+        {
+          fetchedAt,
+          windows: [
+            win("session", 10, 5 * HOUR),
+            win("weekly_scoped", 60, 7 * DAY, T0 - DAY),
+          ],
+        },
+      ),
+      now,
+    ),
+    { text: "Will run out", tone: "down" },
+  );
 });
 
 void test("accountStateLine: ok without period data falls back to Checked, then to null", () => {

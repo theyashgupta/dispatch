@@ -217,21 +217,6 @@ export function chipState(
   };
 }
 
-export function findWindow(
-  usage: ClaudeUsageSnapshot,
-  kind: string,
-): ClaudeUsageWindow | null {
-  return usage.windows.find((w) => w.kind === kind) ?? null;
-}
-
-export function popoverWindows(
-  usage: ClaudeUsageSnapshot,
-): ClaudeUsageWindow[] {
-  return [findWindow(usage, "session"), findWindow(usage, "weekly_all")].filter(
-    (w): w is ClaudeUsageWindow => w !== null,
-  );
-}
-
 const PACE_SEVERITY: Record<PaceState, number> = {
   "on-track": 0,
   ahead: 1,
@@ -246,7 +231,6 @@ const CLOCK_FORMAT: Intl.DateTimeFormatOptions = {
 /**
  * Pick the one status line under the popover bars: login, limit, usage status, then worst pace.
  *
- * @remarks Pace comes from the session and weekly windows only, because those are the two bars the popover shows.
  * @returns Null when there is nothing to say.
  */
 export function accountStateLine(
@@ -284,7 +268,7 @@ export function accountStateLine(
   const pacedAt = pacedAtFor(usage);
   if (pacedAt !== null) {
     let worst: PaceState | null = null;
-    for (const w of popoverWindows(usage)) {
+    for (const w of usage.windows) {
       const state = pacingFor(w, pacedAt)?.state;
       if (
         state !== undefined &&

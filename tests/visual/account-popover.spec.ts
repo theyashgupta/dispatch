@@ -59,39 +59,76 @@ test("the popover height is capped and fits a short viewport", async ({
   await page.setViewportSize({ width: 1440, height: 400 });
   await boot(page);
   await openPopover(page);
-  await page
-    .locator("#account-popover")
-    .getByRole("button", { name: "Switch account" })
-    .click();
-  await expect(
-    page.getByRole("button", {
-      name: /^Switch to limited\.person@example\.com/,
-    }),
-  ).toBeVisible();
+  const scroller = page.locator("#account-popover");
   const popover = await box(page, "#account-popover");
   expect(popover.height).toBeLessThanOrEqual(400 * 0.4 + 0.5);
+  expect(
+    await scroller.evaluate((el) => el.scrollHeight > el.clientHeight),
+  ).toBe(true);
   expect(popover.y).toBeGreaterThanOrEqual(0);
   expect(popover.y + popover.height).toBeLessThanOrEqual(400);
 });
 
-test("the popover shows the active account usage", async ({ page }) => {
+test("the popover shows every account, active first", async ({ page }) => {
   await boot(page);
   await openPopover(page);
   const popover = page.locator("#account-popover");
-  await expect(popover.getByText("active.person@example.com")).toBeVisible();
+  const blocks = popover.locator("[data-account-id]");
+  await expect(blocks).toHaveCount(3);
+  expect(
+    await blocks.evaluateAll((els) =>
+      els.map((el) => el.getAttribute("data-account-id")),
+    ),
+  ).toEqual(["a1", "a2", "a3"]);
+
+  const active = popover.getByRole("region", {
+    name: "active.person@example.com",
+  });
+  await expect(active.getByText("Active", { exact: true })).toBeVisible();
+  await expect(active.getByRole("progressbar")).toHaveCount(3);
   await expect(
-    popover.getByRole("progressbar", { name: "Session usage" }),
+    active.getByRole("progressbar", { name: "Weekly Opus usage" }),
   ).toBeVisible();
+  await expect(active.getByTestId("pace-badge")).toHaveCount(3);
+  await expect(active.getByText(/^resets /)).toHaveCount(3);
+  await expect(active.getByRole("button", { name: /^Switch to/ })).toHaveCount(
+    0,
+  );
+
+  const limited = popover.getByRole("region", {
+    name: "limited.person@example.com",
+  });
+  await expect(limited.getByText("Active", { exact: true })).toHaveCount(0);
+  await expect(limited.getByRole("progressbar")).toHaveCount(2);
+  await expect(limited.getByTestId("account-state-line")).toContainText(
+    "Limited until",
+  );
   await expect(
-    popover.getByRole("progressbar", { name: "Weekly usage" }),
+    limited.getByRole("button", {
+      name: "Switch to limited.person@example.com",
+    }),
   ).toBeVisible();
-  await expect(popover.getByRole("progressbar")).toHaveCount(2);
+
+  const expired = popover.getByRole("region", {
+    name: "expired.person@example.com",
+  });
+  await expect(expired.getByRole("progressbar")).toHaveCount(0);
+  await expect(expired.getByTestId("account-state-line")).toHaveText(
+    "Login expired, sign in again",
+  );
+
+  for (const email of [
+    "active.person@example.com",
+    "limited.person@example.com",
+    "expired.person@example.com",
+  ]) {
+    await expect(
+      popover.getByRole("button", { name: `Refresh usage for ${email}` }),
+    ).toBeVisible();
+  }
   await expect(
-    popover.getByRole("progressbar", { name: "Weekly Opus usage" }),
+    popover.getByRole("button", { name: "Switch account" }),
   ).toHaveCount(0);
-  const line = popover.locator('[data-testid="account-state-line"]');
-  await expect(line).toBeVisible();
-  await expect(line).not.toHaveText("");
 });
 
 test("Escape closes the popover and focuses the counter", async ({ page }) => {
@@ -126,14 +163,12 @@ test("the counter does not navigate", async ({ page }) => {
   expect(page.url()).toBe(before);
 });
 
-test("Switch account is hidden with one account", async ({ page }) => {
+test("Switch is hidden with one account", async ({ page }) => {
   await boot(page, 1);
   await openPopover(page);
-  await expect(
-    page
-      .locator("#account-popover")
-      .getByRole("button", { name: "Switch account" }),
-  ).toHaveCount(0);
+  const popover = page.locator("#account-popover");
+  await expect(popover.locator("[data-account-id]")).toHaveCount(1);
+  await expect(popover.getByRole("button", { name: /^Switch/ })).toHaveCount(0);
 });
 
 test("switching opens the confirmation for the chosen account", async ({
@@ -149,18 +184,8 @@ test("switching opens the confirmation for the chosen account", async ({
   );
   await openPopover(page);
   await page
-    .locator("#account-popover")
-    .getByRole("button", { name: "Switch account" })
+    .getByRole("button", { name: "Switch to limited.person@example.com" })
     .click();
-  const limited = page.getByRole("button", {
-    name: /^Switch to limited\.person@example\.com/,
-  });
-  await expect(limited).toContainText("72%");
-  expect(await limited.getAttribute("aria-label")).toContain("weekly 72%");
-  await expect(
-    page.getByRole("button", { name: "Switch to expired.person@example.com" }),
-  ).toContainText("n/a");
-  await limited.click();
   await expect(page.locator("#account-popover")).toBeHidden();
   const dialog = page.getByTestId("account-switch-dialog");
   await expect(dialog).toBeVisible();
@@ -193,13 +218,7 @@ for (const [code, message] of [
     );
     await openPopover(page);
     await page
-      .locator("#account-popover")
-      .getByRole("button", { name: "Switch account" })
-      .click();
-    await page
-      .getByRole("button", {
-        name: /^Switch to limited\.person@example\.com/,
-      })
+      .getByRole("button", { name: "Switch to limited.person@example.com" })
       .click();
     const dialog = page.getByTestId("account-switch-dialog");
     await expect(dialog).toBeVisible();
@@ -210,49 +229,32 @@ for (const [code, message] of [
   });
 }
 
-test("the Switch account list starts closed on every open", async ({
-  page,
-}) => {
-  await boot(page);
-  await openPopover(page);
-  const popover = page.locator("#account-popover");
-  const toggle = popover.getByRole("button", { name: "Switch account" });
-  await toggle.click();
-  await expect(
-    popover.getByRole("list", { name: "Other accounts" }),
-  ).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(popover).toBeHidden();
-  await openPopover(page);
-  await expect(toggle).toHaveAttribute("aria-expanded", "false");
-  await expect(
-    popover.getByRole("list", { name: "Other accounts" }),
-  ).toHaveCount(0);
-});
-
 test("refresh disables the button while one request runs", async ({ page }) => {
   await boot(page);
-  const usage = accountsBody(now).accounts[0].usage;
+  const usage = accountsBody(now).accounts[1].usage;
   const refreshes: string[] = [];
   page.on("request", (r) => {
     if (r.url().includes("/usage/refresh")) refreshes.push(r.url());
   });
-  await page.route("**/api/accounts/a1/usage/refresh", async (route) => {
+  await page.route("**/api/accounts/a2/usage/refresh", async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 1000));
     await route.fulfill({ json: { usage } });
   });
   await openPopover(page);
-  const refresh = page
-    .locator("#account-popover")
-    .getByRole("button", { name: "Refresh usage" });
+  const popover = page.locator("#account-popover");
+  const refresh = popover.getByRole("button", {
+    name: "Refresh usage for limited.person@example.com",
+  });
   await refresh.click();
   await expect(refresh).toBeDisabled();
+  await expect(
+    popover.getByRole("button", {
+      name: "Refresh usage for active.person@example.com",
+    }),
+  ).toBeEnabled();
   await expect(refresh).toBeEnabled();
   expect(refreshes).toHaveLength(1);
-  expect(refreshes[0]).toMatch(/\/api\/accounts\/a1\/usage\/refresh$/);
-  await expect(
-    page.getByRole("button", { name: /Refresh usage for/ }),
-  ).toHaveCount(0);
+  expect(refreshes[0]).toMatch(/\/api\/accounts\/a2\/usage\/refresh$/);
 });
 
 test("a refused refresh shows one alert line", async ({ page }) => {
@@ -262,7 +264,11 @@ test("a refused refresh shows one alert line", async ({ page }) => {
   );
   await openPopover(page);
   const popover = page.locator("#account-popover");
-  await popover.getByRole("button", { name: "Refresh usage" }).click();
+  await popover
+    .getByRole("button", {
+      name: "Refresh usage for active.person@example.com",
+    })
+    .click();
   const alert = page.locator("#account-popover [role=alert]");
   await expect(alert).toHaveCount(1);
   await expect(alert).toHaveText("Wait 30 seconds between refreshes.");

@@ -126,7 +126,7 @@ Dispatch updates a seeded playbook at startup only when you did not edit it.
 Dispatch can use more than one Claude account. Each account keeps its own Claude configuration folder. Dispatch never copies or changes a credential.
 
 - The usage counter at the bottom of the sidebar shows the highest usage percent. Select it to open the usage popover.
-- The popover shows the session window and the weekly window of the account. Use **Switch account** in the popover to start new sessions on a different account.
+- The popover shows all accounts. The active account is first. Each account shows each usage window with its percent, its reset time and its pace. Select **Switch** on an account to start new sessions on that account.
 - The **Accounts and Usage** page lists each account and its state. Choose **Add account** to log in to one more Claude account.
 - On the same page, the **Account chain** can move sessions to an account with headroom at a usage limit. **Automatic moves** is off by default.
 
