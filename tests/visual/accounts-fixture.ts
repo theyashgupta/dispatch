@@ -28,7 +28,10 @@ const usageWindow = (
   periodEnd: iso(end),
 });
 
-const okUsage = (
+/**
+ * Build an ok usage snapshot with a session and a weekly window at the given percents.
+ */
+export const okUsage = (
   now: number,
   session: number,
   weekly: number,

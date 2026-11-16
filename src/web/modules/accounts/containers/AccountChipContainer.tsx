@@ -50,6 +50,8 @@ export function AccountChipContainer() {
         email={active.email}
         summary={chip.summary}
         label={chip.label}
+        compactLabel={chip.compactLabel}
+        compact={collapsed}
         tone={chip.tone}
         open={open}
         triggerRef={triggerRef}
