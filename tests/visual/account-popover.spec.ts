@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
-import { accountsBody, mockAccounts } from "./accounts-fixture.js";
+import type { ClaudeAccountSummary } from "../../src/shared/types.js";
+import { accountsBody, mockAccounts, okUsage } from "./accounts-fixture.js";
 
 const url = `http://127.0.0.1:${process.env.DISPATCH_VISUAL_PORT}/#/boards/LOCAL`;
 const now = Date.parse(process.env.DISPATCH_VISUAL_NOW ?? "");
@@ -289,4 +290,118 @@ test("the footer link opens the Accounts and Usage page", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Accounts and Usage", level: 1 }),
   ).toBeVisible();
+});
+
+const RAIL_THRESHOLDS = {
+  warningPercent: 60,
+  criticalPercent: 80,
+  limitPercent: { session: 95, weekly_all: 100, weekly_scoped: 100 },
+};
+
+const RAIL_STATES: {
+  name: string;
+  percent: number;
+  limitSource?: ClaudeAccountSummary["limitSource"];
+  label: string;
+  tone: string;
+}[] = [
+  { name: "calm", percent: 31, label: "31", tone: "ok" },
+  { name: "warning", percent: 72, label: "72", tone: "stale" },
+  { name: "critical", percent: 88, label: "88", tone: "down" },
+  {
+    name: "claude-limit",
+    percent: 100,
+    limitSource: "claude",
+    label: "99+",
+    tone: "down",
+  },
+  {
+    name: "threshold-limit",
+    percent: 95,
+    limitSource: "threshold",
+    label: "95",
+    tone: "down",
+  },
+];
+
+const bootRail = async (page: Page, rail: (typeof RAIL_STATES)[number]) => {
+  await page.clock.install({ time: now });
+  await page.route("**/api/config/usage-thresholds", (route) =>
+    route.request().method() === "GET"
+      ? route.fulfill({ json: RAIL_THRESHOLDS })
+      : route.fallback(),
+  );
+  await page.route("**/api/accounts", (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    const body = accountsBody(now);
+    body.accounts[0] = {
+      ...body.accounts[0],
+      usage: okUsage(now, rail.percent, 20),
+      ...(rail.limitSource
+        ? {
+            state: "limited",
+            limitSource: rail.limitSource,
+            limitedUntil: new Date(now + 60 * 60_000).toISOString(),
+          }
+        : {}),
+    };
+    return route.fulfill({ json: body });
+  });
+  await page.goto(url);
+  await page.getByRole("button", { name: "Collapse sidebar" }).click();
+  await expect(page.locator("#usage-chip")).toHaveText(rail.label);
+};
+
+for (const rail of RAIL_STATES) {
+  test(`the collapsed counter at ${rail.name} fits inside the rail`, async ({
+    page,
+  }) => {
+    await bootRail(page, rail);
+    const chip = page.locator("#usage-chip");
+    const chipBox = await box(page, "#usage-chip");
+    const railBox = await box(page, "[data-slot=sidebar-container]");
+    expect(chipBox.width).toBe(36);
+    expect(chipBox.height).toBe(36);
+    expect(chipBox.x).toBeGreaterThanOrEqual(railBox.x);
+    expect(chipBox.x + chipBox.width).toBeLessThanOrEqual(
+      railBox.x + railBox.width - 1,
+    );
+    await expect(chip.locator("[data-tone]")).toHaveAttribute(
+      "data-tone",
+      rail.tone,
+    );
+    await expect(chip).toHaveAccessibleName(
+      new RegExp(
+        `^Claude account active\\.person@example\\.com, ${rail.percent}% used`,
+      ),
+    );
+    await expect(chip).toHaveAttribute(
+      "title",
+      new RegExp(`^active\\.person@example\\.com: ${rail.percent}% used`),
+    );
+    await expect(page.locator("[data-slot=sidebar-footer]")).toHaveScreenshot(
+      `collapsed-rail-${rail.name}.png`,
+    );
+  });
+}
+
+test("the expanded sidebar keeps the full counter pill", async ({ page }) => {
+  await boot(page);
+  const chip = page.locator("#usage-chip");
+  await expect(chip).toHaveText("48%");
+  expect((await box(page, "#usage-chip")).height).toBe(28);
+});
+
+test("Escape in the collapsed rail returns focus to the counter with the focus outline", async ({
+  page,
+}) => {
+  await bootRail(page, RAIL_STATES[0]);
+  await openPopover(page);
+  await page.keyboard.press("Escape");
+  await expect(page.locator("#account-popover")).toBeHidden();
+  const chip = page.locator("#usage-chip");
+  await expect(chip).toBeFocused();
+  expect(await chip.evaluate((el) => getComputedStyle(el).outlineStyle)).toBe(
+    "solid",
+  );
 });

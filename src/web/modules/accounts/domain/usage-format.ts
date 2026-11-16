@@ -198,10 +198,23 @@ export interface ChipState {
   tone: UsageTone | "muted";
   summary: string;
   label: string;
+  compactLabel: string;
+}
+
+const COMPACT_PERCENT_MAX = 99;
+
+/**
+ * Shorten a percent for the collapsed rail chip: the whole number up to 99, then "99+".
+ */
+export function compactPercent(percent: number): string {
+  const whole = Math.round(percent);
+  return whole > COMPACT_PERCENT_MAX ? `${COMPACT_PERCENT_MAX}+` : `${whole}`;
 }
 
 /**
  * Compute what the header chip shows for the active account: the tightest window's percent, or the status copy.
+ *
+ * @remarks A status state has no compact label, so the collapsed rail chip shows only the dot.
  */
 export function chipState(
   usage: ClaudeUsageSnapshot,
@@ -215,6 +228,7 @@ export function chipState(
       tone: usage.status === "unavailable" ? "muted" : "stale",
       summary,
       label: summary,
+      compactLabel: "",
     };
   }
   const reset = formatReset(tightest.resetsAt, now);
@@ -222,6 +236,7 @@ export function chipState(
     tone: toneFor(tightest.percent, thresholds),
     summary: `${tightest.percent}% used${reset ? `, resets ${reset}` : ""}`,
     label: `${tightest.percent}%`,
+    compactLabel: compactPercent(tightest.percent),
   };
 }
 

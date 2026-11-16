@@ -305,6 +305,7 @@ void test("chipState names the tightest window, its tone and reset, or the statu
     tone: "down",
     summary: "95% used, resets 1d 1h",
     label: "95%",
+    compactLabel: "95",
   });
   assert.deepEqual(
     chipState(
@@ -316,6 +317,7 @@ void test("chipState names the tightest window, its tone and reset, or the statu
       tone: "stale",
       summary: "70% used",
       label: "70%",
+      compactLabel: "70",
     },
   );
   assert.deepEqual(
@@ -328,6 +330,7 @@ void test("chipState names the tightest window, its tone and reset, or the statu
       tone: "muted",
       summary: "Usage unavailable, sign in to see it",
       label: "Usage unavailable, sign in to see it",
+      compactLabel: "",
     },
   );
   assert.deepEqual(
@@ -336,6 +339,7 @@ void test("chipState names the tightest window, its tone and reset, or the statu
       tone: "stale",
       summary: "usage stale",
       label: "usage stale",
+      compactLabel: "",
     },
   );
 });
